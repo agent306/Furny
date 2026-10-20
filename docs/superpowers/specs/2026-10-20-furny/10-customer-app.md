@@ -96,7 +96,7 @@ Unless stated, actions redirect back (Inertia) with a translated `flash.success`
 | `account.phone.verify` [13] | POST | `/account/phone/verify` | `code` | set + verify phone | back |
 | `account.sessions.destroy` / `account.sessions.destroy-others` [13] | DELETE | `/account/sessions/{sessionKey}`, `/account/sessions` | — | revoke sessions | back |
 | `customer.onboarding.store` | POST | `/onboarding` | §5.3 | profile + project (+ plan), sets `onboarded_at` | per choice |
-| `customer.onboarding.skip` | POST | `/onboarding/skip` | — | sets `onboarded_at` | dashboard |
+| `customer.onboarding.skip` | POST | `/onboarding/skip` | `terms?` | sets `onboarded_at` (and `terms_accepted_at` when required) | dashboard |
 | `customer.projects.store` | POST | `/projects` | `name`, `propertyType`, `notes?`, `siteAddressId?`, `siteAddress?` | `CreateProject` | `customer.projects.show` |
 | `customer.projects.update` | PUT | `/projects/{project}` | same | update | `customer.projects.show` |
 | `customer.projects.archive` | POST | `/projects/{project}/archive` | — | `ArchiveProject` | back |
@@ -324,23 +324,23 @@ Middleware `EnsureCustomerOnboarded` (alias `onboarded`) on all `customer.*` rou
 Props:
 ```ts
 interface OnboardingProps {
-  user: { name: string; email: string | null; phoneE164: string | null; phoneVerified: boolean };
+  user: { name: string; email: string | null; phoneE164: string | null; phoneVerified: boolean; termsAccepted: boolean };   // termsAccepted = users.terms_accepted_at !== null (13 A.1)
   defaults: { unitSystem: 'metric' | 'imperial'; lengthUnit: string; timezone: string };   // business settings
   propertyTypes: PropertyType[];
   starters: PlanStarterData[];                 // §8.3
   credits: CreditSummaryData;                  // 18
 }
 ```
-AuthLayout `wide` (card `max-w-2xl`). Header "Step {n} of 4" + `Progress`. Footer: **Back** (hidden on step 1), **Continue**, link **Skip for now** (ConfirmDialog "You can set this up later from your dashboard." → `customer.onboarding.skip`).
+AuthLayout `wide` (card `max-w-2xl`). Header "Step {n} of 4" + `Progress`. Footer: **Back** (hidden on step 1), **Continue**, link **Skip for now** (ConfirmDialog "You can set this up later from your dashboard." → `customer.onboarding.skip`; when terms are still required the dialog contains the required terms checkbox).
 
 Steps (client-side; one final POST):
-1. **About you** — Name* (prefilled, 2–120). Phone is **not** collected here (phone changes require OTP verification, `13` §5.7); instead, when no verified phone: card "Add a phone number for our confirmation calls" with **Verify phone** (opens `PhoneVerifyDialog`, §13.2.3) and "Later".
+1. **About you** — Name* (prefilled, 2–120). When `user.termsAccepted` is false (account created by staff, `11` B15): required checkbox `terms` "I accept the [Terms] and [Privacy Policy]" (`onboarding.errors.terms_required` "Please accept the terms to continue."). Phone is **not** collected here (phone changes require OTP verification, `13` §5.7); instead, when no verified phone: card "Add a phone number for our confirmation calls" with **Verify phone** (opens `PhoneVerifyDialog`, §13.2.3) and "Later".
 2. **Units** — radio cards **Metric** (example "2400 mm") / **Imperial** (example `7' 10 1/2"`); length unit `Select` (metric: mm/cm/m; imperial: ft-in/in); time zone `Combobox` (default browser `Intl.DateTimeFormat().resolvedOptions().timeZone` if in `Intl.supportedValuesOf('timeZone')`, else business default).
 3. **Your first project** — name (default `onboarding.default_project_name` "My home", ≤ 120), property type (radio cards: apartment `building`, independent_house `house`, villa `building-2`, office `briefcase`, other `shapes`).
 4. **How do you want to start?** — `StartPlanChooser` (§8.1, mode `select`): **Upload a blueprint** ("Photo, scan, PDF or DXF — we'll turn it into an editable plan." + "Uses {cost} credit · you have {balance}" when `creditsPerRecognition > 0`), **Draw from scratch**, **Start from a template room** (opens starter gallery). On phones Draw/Template are disabled ("Drawing needs a tablet or computer."); Upload works (camera).
 
 ### 5.3 Submit — `customer.onboarding.store` (POST)
-Body `{ name, unitSystem, lengthUnit, timezone, project: { name, propertyType }, start: 'upload' | 'draw' | 'starter' | 'none', starterKey? }`.
+Body `{ name, terms?, unitSystem, lengthUnit, timezone, project: { name, propertyType }, start: 'upload' | 'draw' | 'starter' | 'none', starterKey? }` (`terms` required and accepted when `terms_accepted_at` is null; sets it).
 Server: update user, set `onboarded_at`, create project; `draw` → plan "Ground floor" blank → `customer.plans.edit`; `starter` → plan from starter → `customer.plans.edit`; `upload` → `customer.projects.imports.create`; `none` → `customer.projects.show`.
 Messages: `onboarding.errors.name_required` "Please enter your name."; `account.errors.length_unit` "Choose a unit that matches your measurement system."; timezone "Choose a valid time zone."; `projects.errors.name_required` "Give your project a name."; `starterKey` required for `starter` and must exist.
 Acceptance: first login lands in the wizard; finishing with Draw opens the plan editor of the new project; Skip never shows it again; staff never see it.

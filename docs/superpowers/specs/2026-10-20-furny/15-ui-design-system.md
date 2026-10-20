@@ -537,11 +537,11 @@ Regions:
 
 | Region | Desktop ≥ 1024 | Tablet 768–1023 | Phone < 768 |
 |---|---|---|---|
-| Header (sticky, h-16, `z-30`, `bg-background/90 backdrop-blur border-b`) | Logo + app name (→ `customer.dashboard`); primary nav links: Dashboard, Projects, Designs, Orders, Help; right: `CreditBadge`, `NotificationBell`, `UserMenu` | Logo; hamburger opens `Sheet` (side left, w-72) with the same nav; right: `NotificationBell`, `UserMenu` | Logo only (left), `NotificationBell` (right). |
+| Header (sticky, h-16, `z-30`, `bg-background/90 backdrop-blur border-b`) | Logo + app name (→ `customer.dashboard`); primary nav links: Dashboard (`customer.dashboard`), Projects (`customer.projects.index`), Designs (`customer.furniture.index`), Orders (`customer.orders.index`), Help (`customer.help`); right: `CreditBadge`, `NotificationBell`, `UserMenu` | Logo; hamburger opens `Sheet` (side left, w-72) with the same nav; right: `NotificationBell`, `UserMenu` | Logo only (left), `NotificationBell` (right). |
 | Breadcrumb bar (optional slot `#breadcrumbs`) | Under header, `text-sm` | same | hidden; `PageHeader` shows a back button instead |
 | Main `#main` | `max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8` | same `py-6` | `px-4 py-4 pb-24` (room for tab bar) |
-| Mobile tab bar (`MobileTabBar`, fixed bottom, h-16 + safe-area inset, `z-30`) | — | — | 5 items with icon + label: Home (`house`, → `customer.dashboard`), Projects (`folder`, → `customer.projects.index`), Orders (`package`, → `customer.orders.index`), Notifications (`bell`, unread dot, → `customer.notifications.index`), Account (`user`, → `customer.settings.profile`). Designs and Help are reached from Projects and Account. |
-| Footer | `text-sm text-muted-foreground`: © year business name · Help · Privacy (link to `customer.help#privacy`) | same | hidden (Help reachable via Account) |
+| Mobile tab bar (`MobileTabBar`, fixed bottom, h-16 + safe-area inset, `z-30`) | — | — | 5 items with icon + label: Home (`house`, → `customer.dashboard`), Projects (`folder`, → `customer.projects.index`), Orders (`package`, → `customer.orders.index`), Notifications (`bell`, unread dot, → `customer.notifications.index`), Account (`user`, → `customer.account.profile`). Designs and Help are reached from Projects and Account. |
+| Footer | `text-sm text-muted-foreground`: © year business name · Help · Terms (`legal.terms`) · Privacy (`legal.privacy`) | same | hidden (Help reachable via Account) |
 
 Active nav item: `aria-current="page"`, text `foreground`, 2 px bottom border `primary` (desktop) / filled icon + `primary` label (tab bar). Nav item set is fixed (not permission-based for customers).
 
@@ -557,11 +557,11 @@ Uses shadcn-vue `SidebarProvider` + `Sidebar` (`collapsible="icon"`).
 | Top bar (h-14, sticky, `z-30`) | Sidebar trigger, breadcrumbs, global order search (`SearchInput` → `admin.orders.index?search=`), `NotificationBell`, `ThemeToggle`, `UserMenu` | same | Trigger, page title (truncated), `NotificationBell` |
 | Main `#main` | `px-4 lg:px-6 py-6`, `max-w-[1600px]` | same | `px-4 py-4` |
 
-Sidebar groups & items (each item hidden unless the user has **any** listed permission; a group whose items are all hidden is hidden):
+Sidebar groups & items (each item hidden unless the user has **any** listed permission or owner gate (`auth.user.abilities`); a group whose items are all hidden is hidden):
 
 | Group | Item (label key) | Route | Icon | Permission |
 |---|---|---|---|---|
-| — | Dashboard | `admin.dashboard` | `layout-dashboard` | `orders.view` |
+| — | Dashboard | `admin.dashboard` | `layout-dashboard` | any staff |
 | Orders | Order board | `admin.orders.index` | `kanban-square` | `orders.view` |
 | | To call | `admin.orders.index?view=list&queue=to_call` | `phone` | `orders.confirm` |
 | Customers | Customers | `admin.customers.index` | `users` | `customers.view` |
@@ -574,14 +574,15 @@ Sidebar groups & items (each item hidden unless the user has **any** listed perm
 | | Tax rates | `admin.catalog.tax-rates.index` | `percent` | `catalog.manage` |
 | Furniture | Presets | `admin.presets.index` | `armchair` | `presets.manage` |
 | | Templates | `admin.templates.index` | `blocks` | `templates.manage` |
-| Insights | AI usage | `admin.ai.usage` | `sparkles` | `ai.manage`, `reports.view` |
+| Insights | AI usage | `admin.ai.usage` | `sparkles` | `ai.manage` |
+| | AI credit ledger | `admin.ai.ledger` | `coins` | `ai.manage` |
 | | Notifications log | `admin.notifications-log.index` | `send` | `customers.view` |
 | | Audit log | `admin.audit.index` | `scroll-text` | `audit.view` |
 | Administration | Staff | `admin.staff.index` | `user-cog` | `staff.manage` |
-| | Settings | `admin.settings.edit` (group `business`) | `settings` | `settings.manage`, `ai.manage` |
+| | Settings | `admin.settings.business` (or `admin.settings.ai` when the user only passes gate `settings.manage_restricted`) | `settings` | `settings.manage`, gate `settings.manage_restricted` |
 | | System health | `admin.system.index` | `activity` | `settings.manage` |
 
-Sidebar footer: user name + role badge; link "My account" (`admin.account.profile`). Counters (`SidebarMenuBadge`) on "Order board" = submitted awaiting review count, on "To call" = accepted count — from shared prop `staffCounters` (lazy/optional prop, §10 of 11).
+Sidebar footer: user name + role badge; link "My account" (`admin.account.profile`). Counters (`SidebarMenuBadge`) on "Order board" = submitted awaiting review count, on "To call" = accepted count — from shared prop `staffCounters` (lazy/optional prop, `11` §4). A dismissible health banner (`healthBanners` shared prop, `11` §4) renders above `#main` for users with `settings.manage`.
 
 ### 7.3 `EditorLayout` (`layouts/EditorLayout.vue`)
 
@@ -610,7 +611,7 @@ Props: `title: string`, `backHref: string`, `readOnly: boolean`, `saveStatus?: '
 
 - Prop `variant: 'default' | 'wide'` (default `default`). Pages needing `wide` (welcome, onboarding) declare `defineOptions({ layout: (h, page) => h(AuthLayout, { variant: 'wide' }, () => page) })`. `wide` = card `max-w-2xl`.
 - Centered card `max-w-md w-full` (`default`) on `bg-background`, with the wood-grain motif (§13) as a subtle full-bleed background at ≥ 1024 px (`bg-brand-wood-subtle` + SVG pattern at 6 % opacity). Card: logo (business logo or app name in `text-xl font-semibold`), `title` (H1, `text-2xl`), optional `description`, default slot (form), `#footer` slot (links).
-- Bottom page footer: business name, working hours, "Help" link (public `customer.help` is auth-only → instead show business phone/email from shared `business`).
+- Bottom page footer: business name, working hours, phone/email from shared `business`, links Terms (`legal.terms`) and Privacy (`legal.privacy`).
 - Phone: card becomes full-width without border/shadow, `px-4 pt-10`.
 
 ---
@@ -621,14 +622,15 @@ Defined in `01` §6, typed here (generated types live in `types/generated.d.ts`;
 
 ```ts
 interface SharedPageProps {
-  app: { name: string; logo_url: string | null; version: string };
+  app: { name: string; logoUrl: string | null; version: string };
   auth: { user: AuthUserData | null };
-  features: { payments: boolean; whatsapp: boolean; sms: boolean; web_push: boolean; google_login: boolean; dxf_import: boolean; walkthrough_camera: boolean };
+  features: { payments: boolean; whatsapp: boolean; sms: boolean; web_push: boolean; google_login: boolean; dxf_import: boolean; walkthrough_camera: boolean; captcha: boolean };  // keys = master §6.7 flag names (+ 13's captcha)
   business: BusinessPublicData;
   flash: { success?: string | null; error?: string | null; info?: string | null; warning?: string | null }; // already-translated strings
   unreadNotifications: number;
   i18n: { locale: string; hash: string };
-  staffCounters?: { submitted: number; to_call: number } | null;   // staff only, lazy (see 11 §2)
+  staffCounters?: { submitted: number; toCall: number } | null;          // staff only, lazy (11 §4)
+  healthBanners?: { key: string; messageKey: string }[];                // staff with settings.manage (11 §4)
 }
 
 interface AuthUserData {
@@ -636,19 +638,20 @@ interface AuthUserData {
   type: 'customer' | 'staff';
   name: string;
   email: string | null;
-  email_verified: boolean;
-  phone_e164: string | null;
-  phone_verified: boolean;
-  avatar_url: string | null;
+  emailVerified: boolean;
+  phoneE164: string | null;
+  phoneVerified: boolean;
+  avatarUrl: string | null;
   roles: string[];                 // staff role names; [] for customers
-  permissions: string[];           // flattened permission names; [] for customers
-  unit_system: 'metric' | 'imperial';
-  length_unit: 'mm' | 'cm' | 'm' | 'ftin' | 'in';
+  permissions: string[];           // flattened permission names (13 §7.4); [] for customers
+  abilities: string[];             // owner gates the user passes (13 §7.3/§7.4)
+  unitSystem: 'metric' | 'imperial';
+  lengthUnit: 'mm' | 'cm' | 'm' | 'ftin' | 'in';
   timezone: string;
   locale: string;
   onboarded: boolean;              // users.onboarded_at !== null (customers); always true for staff
-  has_password: boolean;
-  two_factor_enabled: boolean;
+  hasPassword: boolean;
+  twoFactorEnabled: boolean;
 }
 
 interface BusinessPublicData {
@@ -656,15 +659,17 @@ interface BusinessPublicData {
   currency: string;                // ISO-4217
   locale: string;                  // e.g. 'en-IN'
   timezone: string;
-  phone_e164: string | null;
+  phoneE164: string | null;
   email: string;
-  working_hours: string;
-  units: { default_system: 'metric' | 'imperial'; default_length_unit: string };
-  default_country_code: string;    // business.address.country_code ?? 'IN'
+  workingHours: string;
+  units: { defaultSystem: 'metric' | 'imperial'; defaultLengthUnit: string };
+  defaultCountryCode: string;      // business.address.country_code ?? 'IN'
 }
 ```
 
-`usePermissions()` → `{ can(permission: string): boolean; canAny(...p: string[]): boolean; isStaff: boolean; hasRole(role: string): boolean }`. Permission checks in the UI are **visibility only**; every action is authorised server-side.
+Wire-format rule (`10` §1): props and JSON are camelCase; `features` keeps the master's flag names; `Paginated<T>.meta` keeps Laravel's paginator keys (§9.29).
+
+`usePermissions()` → `{ can(nameOrGate: string): boolean /* permissions ∪ abilities */; canAny(...p: string[]): boolean; isStaff: boolean; hasRole(role: string): boolean }`. Permission checks in the UI are **visibility only**; every action is authorised server-side.
 
 ---
 
@@ -736,7 +741,7 @@ Container for "what happens next" on order pages. Props: `tone: Tone`, `icon: st
 Props: `minor: number | null`, `currency?: string` (default `business.currency`), `size?: 'sm' | 'md' | 'lg' | 'xl'`, `signDisplay?: 'auto' | 'always' | 'exceptZero'`, `muted?: boolean`, `strike?: boolean`, `approx?: boolean` (prefix "≈" + `aria-label` "approximately"). `null` renders `—`. Uses `formatMoney` (§15.6), `tabular-nums`. Never does float maths on minor units except the final division for formatting.
 
 ### 9.7 `LengthInput` (`components/inputs/LengthInput.vue`)
-Props: `modelValue: number | null` (integer mm), `unit?: LengthUnit` (default `auth.user.length_unit`; `ftin`/`in` when `unit_system = imperial`), `min?: number` (mm), `max?: number` (mm), `step?: number` (mm; default 10 for mm/cm/m, 25.4 → rounded per press for `in`/`ftin` = 1 inch), `required?: boolean`, `disabled?`, `id?`, `ariaLabel?`, `invalid?: boolean`, `placeholder?`.
+Props: `modelValue: number | null` (integer mm), `unit?: LengthUnit` (default `auth.user.lengthUnit`; `ftin`/`in` when `unitSystem = imperial`), `min?: number` (mm), `max?: number` (mm), `step?: number` (mm; default 10 for mm/cm/m, 25.4 → rounded per press for `in`/`ftin` = 1 inch), `required?: boolean`, `disabled?`, `id?`, `ariaLabel?`, `invalid?: boolean`, `placeholder?`.
 Emits: `update:modelValue(mm: number | null)`, `commit(mm: number)` (Enter/blur with a valid value).
 Behaviour:
 - Displays `formatLength(mm, { system, unit })` (engine, `04` §1) when not focused; on focus selects all text.
@@ -753,23 +758,25 @@ Props: `mm2: number`, `system?: 'metric' | 'imperial'` (default user). Metric `m
 Props: `mm?: number`, `dims?: { width: number; height: number; depth?: number }`, `order?: 'WHD' | 'WDH'` (default `WHD`), `unit?: LengthUnit`, `labels?: boolean` (prefix W/H/D). Renders `font-mono tabular-nums`, e.g. `1800 × 2100 × 600 mm` (metric mm: single unit suffix at end; imperial: each value formatted `5' 10 7/8"`). `title` attribute shows the alternate system.
 
 ### 9.10 `FileDropzone` (`components/media/FileDropzone.vue`)
-Generic presigned-upload dropzone (all non-import uploads; imports use the same `lib/upload.ts` but their own endpoints, see `10` §8).
-Props: `purpose: UploadPurpose`, `accept: string[]` (MIME list), `maxSizeBytes: number`, `maxFiles: number`, `multiple?: boolean`, `modelValue: UploadedFileRef[]`, `disabled?`, `capture?: 'environment' | 'user'` (adds a "Take photo" button on touch devices using `<input type="file" accept="image/*" capture>`), `compressImages?: boolean` (pipes images through `useImageCompression`, §9.12), `label?: string`, `hint?: string`.
+Generic upload dropzone for every non-import upload, implementing the **upload-intent flow of `13` §11** (imports use `06`'s endpoints with the same `lib/upload.ts` XHR helper).
+Props: `purpose: UploadPurpose`, `target?: { type: string; id: string } | null` (authorisation target, e.g. the order for `message_attachment`), `accept: string[]` (MIME list), `maxSizeBytes: number`, `maxFiles: number`, `multiple?: boolean`, `modelValue: UploadedFileRef[]`, `disabled?`, `capture?: 'environment' | 'user'` (adds "Take photo" on touch devices via `<input type="file" accept="image/*" capture>`), `compressImages?: boolean` (§9.12), `label?: string`, `hint?: string`.
 Emits: `update:modelValue(files: UploadedFileRef[])`, `uploading(boolean)`.
 
 ```ts
-type UploadPurpose = 'message_attachment' | 'production_photo' | 'issue_photo' | 'delivery_photo'
-  | 'catalog_texture' | 'hardware_image' | 'preset_thumbnail' | 'business_logo' | 'avatar';
-interface UploadedFileRef { upload_token: string; name: string; size: number; mime: string; preview_url: string | null /* object URL for images */ }
+type UploadPurpose = 'message_attachment' | 'production_photo' | 'issue_photo' | 'delivery_photo' | 'avatar' | 'business_logo'
+  | 'material_texture' | 'finish_texture' | 'hardware_image' | 'plan_thumbnail' | 'design_thumbnail' | 'preset_thumbnail' | 'project_cover';   // 13 §11.1 (blueprint_source is used only by 06)
+interface UploadedFileRef { uploadId: string; name: string; size: number; mime: string; previewUrl: string | null /* object URL or server previewUrl */ }
 ```
 
-Flow per file (implemented in `lib/upload.ts::presignedUpload(file, purpose, onProgress, signal)`):
-1. Client checks MIME (by `file.type`, fallback extension) and size → inline error `uploads.errors.type` "{name}: this file type isn't allowed." / `uploads.errors.size` "{name} is larger than {max}." / `uploads.errors.count` "You can attach up to {max} files.".
-2. `POST /api/uploads/presign` (`api.uploads.presign`) `{ purpose, filename, mime, size }` → `200 { upload_token, url, method: 'PUT', headers: Record<string,string>, expires_at }` or `422` (server-side same checks) or `429`.
-3. `XMLHttpRequest` PUT to `url` with `headers` (progress events → per-file progress bar). Abort button per file (AbortController). Retry button on failure (re-presigns).
-4. On success the `UploadedFileRef` is emitted. The **parent form** sends `upload_tokens: string[]`; the server verifies each token (encrypted, user-bound, purpose-bound, ≤ 60 min old), HEADs the object for size/type, attaches it to the media collection and validates magic bytes in a job (`01` §9).
+Flow per file (`lib/upload.ts::uploadWithIntent(file, purpose, target, onProgress, signal)`):
+1. Optional client compression (§9.12) **before** step 2 (the declared size must equal the uploaded bytes).
+2. Client checks type (by `file.type`, fallback extension) and size against the purpose limits of `13` §11.1 → inline errors `uploads.errors.type` "{name}: this file type isn't allowed.", `uploads.errors.size` "{name} is larger than {max}.", `uploads.errors.count` "You can attach up to {max} files."
+3. `POST api.uploads.presign` `{ purpose, filename, size, contentType, target }` → `{ uploadId, url, headers }` (422 / 429 shown inline).
+4. `XMLHttpRequest` PUT to `url` sending **exactly** the returned `headers` (progress → per-file bar; Abort via AbortController; **Retry** restarts from step 3).
+5. `POST api.uploads.confirm` → `202 { uploadId, status: 'processing' }`; poll `api.uploads.show` every 1 s (max 60 s) until `ready` (use `previewUrl` when given) or `rejected` (show `t('uploads.errors.' + reasonCode)`, e.g. `upload_type_not_allowed`, `upload_image_too_large`, `upload_size_mismatch`).
+6. Emit the `UploadedFileRef`; the parent form submits `uploadIds: string[]`; the consuming Action attaches the media (`13` §11.3 step 7).
 
-UI: dashed `border-2 border-dashed rounded-xl` area (min-h 160 px desktop, 120 px phone) with `upload-cloud` icon, text `uploads.drop_here` "Drag files here or **browse**", hint (types + max size). Drag-over state: `border-primary bg-primary/5`. File list below: thumbnail (images) / file icon, name (truncate), size, progress bar, status icon, remove button (`aria-label` "Remove {name}"). Keyboard: the area is a `button`; Enter/Space opens the picker. Paste (`Ctrl+V`) of images supported when focused.
+UI: dashed `border-2 border-dashed rounded-xl` area (min-h 160 px desktop, 120 px phone), `upload-cloud` icon, `uploads.drop_here` "Drag files here or **browse**", hint (types + max size). Drag-over `border-primary bg-primary/5`. File list: thumbnail / file icon, name (truncate), size, progress, status ("Preparing…", "Uploading 45 %", "Checking…", "Ready", error), remove (`aria-label` "Remove {name}"). The area is a `button` (Enter/Space opens the picker); `Ctrl+V` pastes images when focused. Submit buttons of the parent form stay disabled while `uploading` is true.
 
 ### 9.11 `ImageUploader` (`components/media/ImageUploader.vue`)
 Specialisation of `FileDropzone` for photos (production, completion, issue, delivery, message images). Props: same as FileDropzone minus `accept` (fixed `image/jpeg, image/png, image/webp, image/heic, image/heif`) plus `showCamera?: boolean` (default true on touch devices), `layout?: 'grid' | 'list'` (default grid: 3 columns phone, 5 desktop, square thumbnails with progress overlay). Always `compressImages = true`.
@@ -785,31 +792,31 @@ Specialisation of `FileDropzone` for photos (production, completion, issue, deli
 Runs sequentially (one image at a time) to bound memory on phones; shows "Preparing…" status per file.
 
 ### 9.13 `PhotoGallery` + `Lightbox` (`components/media/`)
-`PhotoGallery` props: `photos: MediaData[]`, `columns?: { base: number; md: number; lg: number }` (default 2/3/4), `aspect?: 'square' | '4/3' | 'auto'` (default square, `object-cover`), `max?: number` (shows "+N" tile), `captionKey?` none. Thumbnails use `thumb_url` (lazy `loading="lazy"`, `decoding="async"`, `alt` = media name or `common.photo_n` "Photo {n}"). Click/Enter opens `Lightbox` at index.
-`Lightbox` props: `photos: MediaData[]`, `open: boolean`, `index: number`; emits `update:open`, `update:index`. Full-screen dialog `z-[60]` black/90 backdrop; image `large_url` (fallback `url`) `object-contain`; prev/next buttons (44 px), counter "3 / 12", download link (`url`), close. Keyboard: ←/→, Home/End, Esc. Touch: horizontal swipe (pointer events, threshold 50 px), pinch-zoom not implemented (double-tap toggles 2× zoom with pan). Preloads neighbours. Focus returns to the originating thumbnail on close. `aria-roledescription="carousel"`, live region announcing "Photo 3 of 12".
+`PhotoGallery` props: `photos: MediaData[]`, `columns?: { base: number; md: number; lg: number }` (default 2/3/4), `aspect?: 'square' | '4/3' | 'auto'` (default square, `object-cover`), `max?: number` (shows "+N" tile), `captionKey?` none. Thumbnails use `thumbUrl` (lazy `loading="lazy"`, `decoding="async"`, `alt` = media name or `common.photo_n` "Photo {n}"). Click/Enter opens `Lightbox` at index.
+`Lightbox` props: `photos: MediaData[]`, `open: boolean`, `index: number`; emits `update:open`, `update:index`. Full-screen dialog `z-[60]` black/90 backdrop; image `largeUrl` (fallback `url`) `object-contain`; prev/next buttons (44 px), counter "3 / 12", download link (`url`), close. Keyboard: ←/→, Home/End, Esc. Touch: horizontal swipe (pointer events, threshold 50 px), pinch-zoom not implemented (double-tap toggles 2× zoom with pan). Preloads neighbours. Focus returns to the originating thumbnail on close. `aria-roledescription="carousel"`, live region announcing "Photo 3 of 12".
 
 ### 9.14 `Thumbnail3D` (`components/media/Thumbnail3D.vue`)
-Static furniture/plan thumbnail with optional interactive 3D. Props: `src: string | null`, `alt: string`, `aspect?: '1/1' | '4/3'`, `designId?: string`, `revisionId?: string`, `interactive?: boolean`, `badge?: string`. Renders `<img>` (or placeholder: `brand-wood-subtle` bg + `armchair` icon when `src` null, e.g. thumbnail not generated yet). When `interactive` and `designId` given, shows a "View in 3D" (`rotate-3d` icon) overlay button that opens a `Dialog` (desktop/tablet) or full-screen `Drawer` (phone) lazily importing `@/editor/furniture/FurnitureViewer.vue` (07; read-only orbit viewer loading the revision document via `GET /api/furniture-revisions/{revision}` or the design working copy). three.js is never loaded until the button is pressed.
+Static furniture/plan thumbnail with optional interactive 3D. Props: `src: string | null`, `alt: string`, `aspect?: '1/1' | '4/3'`, `designId?: string`, `revisionId?: string`, `interactive?: boolean`, `badge?: string`. Renders `<img>` (or placeholder: `brand-wood-subtle` bg + `armchair` icon when `src` null, e.g. thumbnail not generated yet). When `interactive` and `designId` given, shows a "View in 3D" (`rotate-3d` icon) overlay button that opens a `Dialog` (desktop/tablet) or full-screen `Drawer` (phone) lazily importing `@/editor/furniture/FurnitureViewer.vue` (07; read-only orbit viewer loading the revision document via `api.furniture-revisions.show` or the design working copy). three.js is never loaded until the button is pressed.
 
 ### 9.15 `Timeline` (`components/orders/Timeline.vue`)
-Props: `entries: TimelineEntryData[]` (shape in `10` §3), `audience: 'customer' | 'staff'`, `loading?: boolean` (3 skeleton rows), `emptyText?: string`. Vertical list, newest first, grouped by day headings (`DateText` "Today", "Yesterday", or date). Each entry: tone dot/icon from `kind` (state changes use `ORDER_STATE_ICON`), title `t(entry.title_key, entry.params)`, actor + `RelativeTime` (absolute in `title`), optional body (sanitised HTML `body_html`), photos (`PhotoGallery` max 4), links (buttons). Internal entries (`visibility = 'internal'`, staff only) have a dashed left border and `lock` icon with "Internal" label.
+Props: `entries: TimelineEntryData[]` (shape in `10` §3), `audience: 'customer' | 'staff'`, `loading?: boolean` (3 skeleton rows), `emptyText?: string`. Vertical list, newest first, grouped by day headings (`DateText` "Today", "Yesterday", or date). Each entry: tone dot/icon from `kind` (state changes use `ORDER_STATE_ICON`), title `t(entry.titleKey, entry.params)`, actor + `RelativeTime` (absolute in `title`), optional body (`bodyHtml` rendered through `MessageBody`), photos (`PhotoGallery` max 4), links (buttons). Internal entries (`visibility = 'internal'`, staff only) have a dashed left border and `lock` icon with "Internal" label.
 
 ### 9.16 `MessageThread` + `MessageComposer` (`components/orders/`)
 `MessageThread` props: `orderId: string`, `messages: MessageData[]` (oldest → newest), `hasMore: boolean`, `currentUserId: string`, `audience: 'customer' | 'staff'`, `canPost: boolean`, `postUrl: string`, `readUrl: string`, `showInternalToggle?: boolean` (staff). Emits `load-older`.
-- Layout: scrollable column (desktop fixed height `h-[min(70dvh,720px)]`; phone fills viewport under the order header). Own messages right-aligned `bg-primary text-primary-foreground`; others left `bg-muted`; staff messages show name + "Team" badge to customers; **system** messages centred, `text-sm text-muted-foreground`, rendered `t('messages.system.' + system_event, system_payload)`; **internal notes** (staff only) full-width `bg-warning-subtle` with `lock` icon "Internal note — not visible to the customer".
-- Date separators; "New messages" divider at the first unread (from `last_read_message_id`).
+- Layout: scrollable column (desktop fixed height `h-[min(70dvh,720px)]`; phone fills viewport under the order header). Own messages right-aligned `bg-primary text-primary-foreground`; others left `bg-muted`; staff messages show name + "Team" badge to customers; **system** messages centred, `text-sm text-muted-foreground`, rendered `t('messages.system.' + systemEvent, systemPayload)`; text/internal bodies render `bodyHtml` through `MessageBody` (the only component allowed to use `v-html`, `13` §12.6); **internal notes** (staff only) full-width `bg-warning-subtle` with `lock` icon "Internal note — not visible to the customer".
+- Date separators; "New messages" divider at the first unread (from `lastReadMessageId`).
 - Attachments: images as 120 px thumbnails (open Lightbox), PDFs as file chips (download via `url`).
 - Loading older: top sentinel (IntersectionObserver) emits `load-older` (page uses Inertia infinite scroll, see `10` §11.9); keeps scroll position.
 - Real-time: parent passes new messages via `useOrderChannel` (`MessagePosted`); auto-scroll to bottom only if the user is within 120 px of the bottom, else show "New message ↓" pill.
-- Read receipts: when the bottom is visible and the window focused, POST `readUrl` `{ last_message_id }` (debounced 1 s).
-- Edit own text message within 10 min (`can_edit`): menu → inline edit → PATCH; shows "(edited)".
+- Read receipts: when the bottom is visible and the window focused, POST `readUrl` `{ lastMessageId }` (debounced 1 s).
+- Edit own text message within 10 min (`canEdit`): menu → inline edit → PATCH; shows "(edited)".
 `MessageComposer` props: `canPost`, `disabledReason?: string`, `allowInternal?: boolean`, `maxLength = 5000`. Textarea autosize (1–8 rows), attach button (`FileDropzone` purpose `message_attachment`, ≤ 5 files, images/PDF ≤ 15 MB, images compressed), send button (icon `send-horizontal`, `aria-label` "Send"). **Ctrl/Cmd+Enter** sends; Enter inserts newline (all devices). Staff: segmented toggle "Reply to customer" / "Internal note" (internal mode tints composer `bg-warning-subtle`). Draft persisted per order in `localStorage['fs:msgdraft:{orderId}']` (try/catch). Optimistic append with "Sending…" state; on failure the bubble shows "Not sent — Retry". Validation: body required unless attachments present (`messages.errors.empty` "Write a message or attach a file."), ≤ 5000 chars.
 
 ### 9.17 `NotificationBell` (`components/app/NotificationBell.vue`)
-Props: none (reads `unreadNotifications`, subscribes via `useUserChannel`). Icon button `bell` with count badge (`99+` cap; `aria-label` "Notifications, {count} unread"). Desktop/tablet: `Popover` (w-96, max-h 480 px scroll) loading `GET /api/notifications?limit=10` (`api.notifications.index`) on open (skeleton 4 rows; error → retry link). Each row: icon (by event group), title, body (2 lines clamp), `RelativeTime`, unread dot; click → POST read (`notifications.read`, optimistic) then `router.visit(action_url)`. Header: "Notifications" + "Mark all as read" (`notifications.read-all`). Footer link "View all" → `customer.notifications.index` / `admin.notifications.index`. Phone: the bell navigates directly to the notifications page (no popover). New `NotificationCreated` event: increment count, prepend to loaded list, show toast (title + "View" action) unless the user is already on the target URL.
+Behaviour per `12` §8.4 (normative). Props: none (reads `unreadNotifications`; `useNotifications()` subscribes to `NotificationCreated` on `users.{id}`). Icon button `bell` with count badge (`99+`; `aria-label` "Notifications, {count} unread"). Desktop/tablet: reka `DropdownMenu`/`Popover` (w-96, max-h 480 px) lazily loading `api.notifications.index?limit=10` (skeleton 4 rows; error → retry). Rows (`NotificationPayloadData`): icon, `t(titleKey, params)` (bold if unread), `t(bodyKey, params)` (2-line clamp), `RelativeTime`, unread dot; click → `api.notifications.read` (fire-and-forget) then `router.visit(url)`. Header: **Mark all as read** (`api.notifications.read-all`, optimistic) and **Preferences** (→ `customer.account.notifications` / `admin.account.notifications`). Footer **See all** → `customer.notifications.index` / `admin.notifications.index`. Empty `notifications.empty`. Phone: the bell navigates to the notification center. On `NotificationCreated`: increment count, prepend if loaded, toast (title + "View") unless already on that URL.
 
 ### 9.18 `CreditBadge` (`components/app/CreditBadge.vue`)
-Props: `balance: number` (from page prop or `AiCreditsChanged` broadcast), `size?: 'sm' | 'md'`, `href?: string` (default `customer.settings.credits`). Pill with `sparkles` icon + `"{balance} AI credits"` (ICU plural). Tone: `neutral` when > 1, `warning` when 1, `danger` when 0. Tooltip: "Used to recognise uploaded blueprints. {monthly} free credits every month." Hidden for staff.
+Props: `credits: CreditSummaryData` (`18`; from page props; refreshed from `api.ai.credits` on `AiCreditsChanged`), `size?: 'sm' | 'md'`, `href?: string` (default `customer.account.ai-credits`). Pill with `sparkles` icon + "{balance, plural, one {# AI credit} other {# AI credits}}" ("Unlimited" when `unlimited`). Tone: `neutral` > 1, `warning` = 1, `danger` = 0. Tooltip: "Used to recognise uploaded blueprints. {monthlyCredits} free credits every month." Hidden for staff. The header instance loads `api.ai.credits` once per session when the page does not provide `credits`.
 
 ### 9.19 `EmptyState` (`components/common/EmptyState.vue`)
 Props: `icon: string` (lucide name), `title: string`, `description?: string`, `size?: 'sm' | 'md' | 'lg'`, `illustration?: 'grain' | 'none'` (default `grain` for `lg`). Slot `#actions`. Visual §13.
@@ -828,13 +835,13 @@ Props: `modelValue: number` (basis points), `min?`, `max?` (bps), `decimals?: 0 
 
 ### 9.24 `DateInput` / `DateRangeInput` (`components/inputs/`)
 `DateInput` props: `modelValue: string | null` (`YYYY-MM-DD`), `min?: string`, `max?: string`, `disabledDates?: (d: string) => boolean`, `placeholder?`. Text input (locale short format, typed entry parsed) + calendar button opening `Popover` with shadcn `Calendar` (`@internationalized/date` `CalendarDate`). Dates are **date-only**, interpreted in business TZ (master §6.5): never convert through `Date` with local TZ; "today" = `today(business.timezone)`. `DateRangeInput` uses `RangeCalendar`, value `{ from: string|null; to: string|null }`, presets (Today, Last 7 days, Last 30 days, This month, Last month, This year).
-`DateTimeInput` (for `called_at`, `scheduled_for`, `callback_at`): date + time (`<input type="time">` step 300) in the **user's** timezone; emits ISO UTC string.
+`DateTimeInput` (for `calledAt`, `scheduledFor`, `callbackAt`, `deliveredAt`): date + time (`<input type="time">` step 300) in the **user's** timezone; emits ISO UTC string.
 
 ### 9.25 `PhoneInput` (`components/inputs/PhoneInput.vue`)
-Props: `modelValue: string | null` (E.164), `defaultCountry?: string` (default `business.default_country_code`), `disabled?`, `invalid?`. Country `Combobox` (flag emoji + name + `+code`, searchable, priority list: business country first, then IN, AE, SG, GB, US) + national number input (`inputmode="tel"`, `autocomplete="tel-national"`). Parses with `libphonenumber-js/min` `parsePhoneNumberFromString(text, country)`; pasting a full `+…` number switches country. Emits E.164 when valid, `null` otherwise; displays national format when not focused. Error `phone.errors.invalid` "Enter a valid phone number.".
+Props: `modelValue: string | null` (E.164), `defaultCountry?: string` (default `business.defaultCountryCode`), `disabled?`, `invalid?`. Country `Combobox` (flag emoji + name + `+code`, searchable, priority list: business country first, then IN, AE, SG, GB, US) + national number input (`inputmode="tel"`, `autocomplete="tel-national"`). Parses with `libphonenumber-js/min` `parsePhoneNumberFromString(text, country)`; pasting a full `+…` number switches country. Emits E.164 when valid, `null` otherwise; displays national format when not focused. Error `phone.errors.invalid` "Enter a valid phone number.".
 
 ### 9.26 `AddressFields` (`components/inputs/AddressFields.vue`)
-Props: `modelValue: AddressFormData`, `errors?: Record<string,string>` (keys `line1`, … prefixed by `errorPrefix?: string` e.g. `site_address.`). Fields: label (optional, placeholder "Home"), line1*, line2, city*, region, postal_code, country_code* (`Select`, default business country). Max lengths per `02` §1.2.
+Props: `modelValue: AddressFormData`, `errors?: Record<string,string>` (keys `line1`, … prefixed by `errorPrefix?: string` e.g. `siteAddress.`). Fields: label (optional, placeholder "Home"), line1*, line2, city*, region, postalCode, countryCode* (`Select`, default business country). Max lengths per `02` §1.2.
 
 ### 9.27 `DiffList` (`components/orders/DiffList.vue`)
 Props: `changes: ChangeItem[]` (03 §3.4), `highlightEntity?: string | null`, `showMinor?: boolean` (default false: minor changes collapsed under "Show {n} smaller changes"). Groups: major first. Each row: icon by kind (`*_added` → `plus-circle` `diff-added`; `*_removed` → `minus-circle` `diff-removed`; `*_changed`, `dims_changed`, `hardware_qty_changed` → `pencil` `diff-changed`; `price_changed` → `indian-rupee`/`banknote` neutral), text `t(change.messageKey, change.params)`, optional before → after chips (`DimensionText`/`MoneyDisplay` when params contain `beforeMm`/`afterMm` or `beforeMinor`/`afterMinor`). Hover/focus emits `hover(entityId)` so the 3D viewer can highlight the part. Empty → "No changes".
@@ -842,7 +849,7 @@ Props: `changes: ChangeItem[]` (03 §3.4), `highlightEntity?: string | null`, `s
 ### 9.28 `RelativeTime`, `DateText`, `UserAvatar`, `KeyValueList`
 - `RelativeTime` props `at: string` (ISO); renders `<time datetime>` with `Intl.RelativeTimeFormat` ("3 h ago"), refreshes every 60 s, `title` = absolute in user TZ.
 - `DateText` props `value: string`, `kind: 'date' | 'datetime' | 'time'`, `style?: 'short' | 'medium' | 'long'`; date-only strings formatted without TZ shift.
-- `UserAvatar` props `user: { name: string; avatar_url: string | null }`, `size?: 'xs'|'sm'|'md'|'lg'`; initials fallback on `brand-wood-subtle`.
+- `UserAvatar` props `user: { name: string; avatarUrl: string | null }`, `size?: 'xs'|'sm'|'md'|'lg'`; initials fallback on `brand-wood-subtle`.
 - `KeyValueList` props `items: { label: string; value?: string; slot?: string }[]`, `columns?: 1 | 2`; renders `<dl>`.
 
 ### 9.29 Data display: `DataTable`, `FilterBar`, `SearchInput`, `Pagination`
@@ -850,6 +857,8 @@ Props: `changes: ChangeItem[]` (03 §3.4), `highlightEntity?: string | null`, `s
 - `FilterBar`: props `filters: FilterDef[]` (`{ key; label; type: 'select'|'multiselect'|'date_range'|'boolean'|'user'; options? }`), `modelValue: Record<string, unknown>`; emits `update:modelValue`. Changes trigger `router.get(currentUrl, query, { preserveState: true, preserveScroll: true, replace: true, only: [...] })` debounced 300 ms (search) / immediate (selects). "Clear filters" button when any filter active. Phone: filters collapse into a "Filters (n)" button opening a bottom `Drawer`.
 - `SearchInput`: `search` icon, clear button, `type="search"`, debounced emit 300 ms, `/` keyboard shortcut focuses the page's primary search (admin only).
 - `Pagination`: wraps shadcn `pagination` for `Paginated<T>.meta`; shows "Showing {from}–{to} of {total}"; per-page select (10/25/50/100) for admin tables. Links preserve filters.
+
+Exception to the camelCase rule: `meta` keeps Laravel's paginator keys.
 
 ```ts
 interface Paginated<T> {
@@ -879,10 +888,13 @@ Hand-written inline SVG components; small, accessible, themeable. All render a v
 | `QuoteSummary` | `quote: QuoteData`, `audience` | Totals block: subtotal, discount, tax breakdown rows, total (xl), validity |
 | `QuoteLinesTable` | `lines: QuoteLineData[]`, `items: OrderItemData[]`, `audience`, `editable?: false` | Read-only grouped lines (per item, then order-level) |
 | `AttachmentList` | `files: MediaData[]` | File chips with icon, name, size, download |
-| `VerifyContactBanner` | — | Shows when customer has neither verified email nor phone (blocks T2): "Verify your email or phone to submit orders." + buttons |
+| `VerifyContactBanner` | — | Customer with neither verified email nor phone (`10` §1.1): "Verify your email or phone to send orders and messages." + **Resend email link** + **Verify phone** (`PhoneVerifyDialog`) |
+| `MessageBody` | `html: string` | The **only** component allowed to use `v-html` (ESLint `vue/no-v-html` exception, `13` §12.6); renders server-sanitised Markdown HTML (messages, production update bodies, timeline bodies) with `prose`-like styles and `break-words` |
+| `PhoneVerifyDialog` | `open`, `initialPhone?` | Phone add/verify flow (`10` §13.2.3) |
+| `PushOptIn` | `vapidPublicKey: string \| null`, `dismissible?: boolean` | Owned by `12` §8.3 (feature detection, iOS Add-to-Home-Screen instructions, enable/disable) |
 | `OfflineBanner` | — | `navigator.onLine` false → `warning-subtle` bar "You're offline. Changes will be sent when you reconnect." |
 | `ThemeToggle` | — | DropdownMenu: Light / Dark / System (§11) |
-| `UserMenu` | — | Avatar button → name/email, Settings, Help (customer), My account (staff), Theme submenu, Log out (POST `logout`) |
+| `UserMenu` | — | Avatar button → name/email, Account (customer: `customer.account.profile`), Help (customer), My account (staff: `admin.account.profile`), Theme submenu, Log out (POST `logout`) |
 | `ScreenTooSmall` | `backHref?` | See §6 |
 | `CopyButton` | `value: string`, `label?` | Copies to clipboard, toast "Copied" |
 | `JsonViewer` | `value: unknown`, `collapsedDepth?: number` | Admin only (audit, imports): collapsible pretty JSON, `font-mono text-xs` |
@@ -897,7 +909,7 @@ Hand-written inline SVG components; small, accessible, themeable. All render a v
 ### 10.1 Mechanics
 - **Simple forms** (one submit, no client-side derived state): Inertia v3 `<Form>` component (`action`, `method`, `#default="{ errors, processing, isDirty, wasSuccessful }"`), with Wayfinder-generated action objects: `<Form v-bind="ProjectController.store.form()">`.
 - **Complex forms** (dynamic arrays, live totals, multi-step): `useForm<T>()` with explicit TS type, `form.transform()` for payload shaping, `form.submit(route)`.
-- Field names in payloads are **snake_case**, identical to DB columns/`FormRequest` rules. Array fields use dot paths in errors (`items.2.quantity`).
+- Field names in payloads are **camelCase** (FormRequests validate camelCase keys and map to snake_case columns in the Action/Data layer), except Fortify/`13` auth forms, which use the names given in `13`. Array fields use dot paths in errors (`items.2.quantity`).
 - Every field: `<Label for>` + control with `id`, `aria-invalid` when error, `aria-describedby` → hint and `InputError`. Required fields marked with `*` (visually) + `aria-required`; optional fields are not marked "(optional)" except in customer forms where most fields are required (then mark optional ones).
 - Server is the source of truth for validation. Client-side checks are limited to: required, length limits, number ranges, file type/size, `LengthInput`/`CurrencyInput`/`PhoneInput` parsing. Client messages use the same translation keys as server messages where possible.
 - **Error display:** inline under field; plus, when the response has errors on fields not shown on the current step/tab, a top-of-form `Alert` (destructive) listing them with anchor links; focus moves to the first invalid field after submit (`nextTick` → `document.querySelector('[aria-invalid=true]')?.focus()`).
@@ -936,7 +948,7 @@ Mark notification read / all read; mark message thread read; append own message 
 
 ## 12. Real-time UI conventions
 
-- `lib/echo.ts` configures Echo with Reverb (`01` §8). Composables: `useUserChannel()` (`users.{id}`: `NotificationCreated`, `AiCreditsChanged`), `useOrderChannel(orderId, handlers)`, `useImportChannel(importId, handlers)`, `useStaffChannel(handlers)` (`staff`), `useDesignChannel(designId, handlers)`.
+- `lib/echo.ts` configures Echo with Reverb (`01` §8). Composables: `useUserChannel()` (`users.{id}`: `NotificationCreated`, `AiCreditsChanged`), `useOrderChannel(orderId, handlers, { internal?: boolean })` (staff pages pass `internal: true` to also join `orders.{id}.internal`, `13` §8.10), `useImportChannel(importId, handlers)`, `useStaffChannel(handlers)` (`staff`), `useDesignChannel(designId, handlers)`.
 - Each composable returns `{ connected: Ref<boolean> }` and leaves the channel on unmount. When `connected` is false for > 5 s, pages that depend on live state start `usePoll(30_000, { only: [...] })` (Inertia) and stop it on reconnect (`01` §8).
 - On events that change page data, prefer **partial reloads** (`router.reload({ only: ['order', 'timeline'] })`) over patching local state, except messages and notifications which are appended locally. Reloads are throttled to 1 per 2 s per page.
 - A small connection indicator is **not** shown to customers; staff order pages show a grey dot "Live updates paused" in the header when disconnected.
@@ -949,7 +961,7 @@ Mark notification read / all read; mark message thread read; append own message 
 - Components that take an icon **name** (`EmptyState`, `ActionPanel`, `KpiTile`) resolve via a typed registry `lib/icons.ts` (`const ICONS = { 'package': Package, … } as const; type IconName = keyof typeof ICONS`) so tree-shaking works and names are type-checked.
 - **Empty-state style:** no stock illustrations. A 64 px (`lg`: 96 px) circle `bg-brand-wood-subtle` containing the lucide icon (`text-brand-wood`, 28/40 px), optionally over the **grain motif**: an inline SVG (`components/common/GrainMotif.vue`) of 5–7 gently curved, concentric "wood grain" strokes (`stroke: var(--brand-wood)`, opacity 0.18, 1 px) behind the circle, 240 × 120 px. Title `text-lg font-semibold`, description `text-muted-foreground max-w-sm text-center`, actions below.
 - **Photos:** always `object-cover` in grids with neutral `bg-muted` placeholder; never stretch.
-- **Logo:** business logo (`app.logo_url`) max-h 32 px in headers; fallback app name text.
+- **Logo:** business logo (`app.logoUrl`) max-h 32 px in headers; fallback app name text.
 
 ---
 
@@ -997,9 +1009,9 @@ If a pair fails, the implementer adjusts **only the lightness (L)** of the foreg
 ### 15.2 Source of truth: PHP lang files
 - Strings live in `resources/lang/en/{namespace}.php` returning nested arrays; **values are ICU messages** (`{name}`, `{count, plural, one {# item} other {# items}}`, `{reason, select, quote_declined {…} other {…}}`).
 - Exception — Laravel-format namespaces (consumed only by Laravel itself with `:attribute` placeholders): `validation`, `passwords`, `pagination`, `auth`. These are **not** exported to the frontend. Validation messages reach the browser already rendered (Inertia errors).
-- Namespaces (one file each): `common, a11y, auth_ui, onboarding, dashboard, projects, plans, imports, designs, orders, quotes, proposals, production, messages, notifications, settings, credits, help, uploads, units, money, phone, errors, states, changes, parts, hardware, editor, builder, admin, catalog, presets, templates, reports, audit, system, staff, customers, emails, pdf`. (05/07/12 own the content of `editor`, `builder`, `parts`, `hardware`, `changes`, `emails`.)
+- Namespaces (one file each): `common, a11y, auth_ui, legal, onboarding, account, dashboard, projects, plans, imports, designs, orders, quotes, proposals, production, messages, notifications, settings, credits, help, uploads, units, money, phone, errors, states, changes, parts, hardware, editor, builder, admin, catalog, presets, templates, reports, audit, system, staff, customers, emails, pdf`. (05/07/12 own the content of `editor`, `builder`, `parts`, `hardware`, `changes`, `emails`.)
 - Key naming: `{namespace}.{area}.{item}` with `snake_case` segments, max depth 4. Common areas: `actions.*` (button labels, imperative: "Save changes"), `fields.*` (labels), `hints.*`, `errors.*`, `empty.*` (`empty.title`, `empty.body`), `titles.*` (page titles), `toasts.*`, `confirm.*`. Example: `orders.actions.accept_quote` = "Accept quote".
-- **Dynamic keys** (enum labels) follow fixed patterns so the checker can enumerate them: `orders.states.{state}`, `orders.states_customer.{state}`, `orders.states_customer_short.{state}`, `orders.steps.{key}`, `orders.cancel_reasons.{reason}`, `orders.call_outcomes.{outcome}`, `imports.statuses.{status}`, `imports.errors.{error_code}`, `quotes.statuses.{status}`, `quotes.line_kinds.{kind}`, `production.stages.{key}`, `projects.property_types.{type}`, `plans.room_types.{type}`, `catalog.board_types.{type}`, `catalog.hardware_categories.{category}`, `notifications.events.{event_key}.{title|body|label|description}`, `messages.system.{event_key}`.
+- **Dynamic keys** (enum labels) follow fixed patterns so the checker can enumerate them: `orders.states.{state}`, `orders.states_customer.{state}`, `orders.states_customer_short.{state}`, `orders.steps.{key}`, `orders.cancel_reasons.{reason}`, `orders.call_outcomes.{outcome}`, `imports.statuses.{status}`, `imports.stages.{stage}`, `imports.error.{code}` (06 §14), `quotes.statuses.{status}`, `quotes.line_kinds.{kind}`, `production.stages.{key}`, `projects.property_types.{type}`, `plans.room_types.{type}`, `catalog.board_types.{type}`, `catalog.hardware_categories.{category}`, `notifications.events.{event_key}.{title|body|label|description}`, `messages.system.{event_key}`.
 
 ### 15.3 Export to the frontend
 - Artisan command `php artisan i18n:export` (class `App\Console\Commands\ExportTranslations`): loads every ICU namespace for every locale in `config('app.supported_locales')` (`['en']`), flattens to dot keys, validates each message parses as ICU (via PHP `MessageFormatter::create`; fails with the offending key), writes `resources/js/lang/generated/{locale}.json` (sorted keys) and `resources/js/lang/generated/manifest.json` `{ "en": "<sha1 of file>" }`. Generated files are committed; CI runs the command and fails if `git diff` is non-empty (same policy as TS types, `01` §6).
@@ -1011,7 +1023,7 @@ If a pair fails, the implementer adjusts **only the lightness (L)** of the foreg
 - Vue plugin `i18n` installs global `$t` and provides `useI18n()` → `{ t(key: string, params?: Record<string, unknown>): string; has(key): boolean; locale: Ref<string> }`.
 - `t` caches compiled `IntlMessageFormat` instances per key; date/number arguments inside messages use the **business locale** for formatting and the **user timezone** (`formats` option with `timeZone`).
 - Missing key: returns the key, `console.warn` in dev; a Vitest test (`i18n-keys.test.ts`) scans `resources/js/**/*.{vue,ts}` for literal `t('…')`/`$t('…')`/`labelKey: '…'` calls and asserts each key exists in `en.json`; it also checks every enum-pattern key in §15.2 for every enum value exported in `types/generated.d.ts`.
-- ESLint: `vue/no-bare-strings-in-template` enabled (error) with allowlist of punctuation/symbols (`×`, `—`, `·`, `/`, `:`, `%`, `+`).
+- ESLint: `vue/no-bare-strings-in-template` enabled (error) with allowlist of punctuation/symbols (`×`, `—`, `·`, `/`, `:`, `%`, `+`); `vue/no-v-html` enabled with the single exception `MessageBody.vue` (`13` §12.6).
 
 ### 15.5 Pluralisation & gender
 ICU plural categories per CLDR for the locale (`en`: `one`, `other`; always include `other`). Use `#` for the formatted number. Never build sentences by concatenation; pass params.
@@ -1085,8 +1097,7 @@ Rules in `app.css`:
 
 1. **01 §1.2 (npm):** add `@fontsource-variable/inter ^5.2`, `@fontsource-variable/jetbrains-mono ^5.2`, `tw-animate-css ^1.3`, `intl-messageformat ^10.7`, `libphonenumber-js ^1.12`; dev `culori ^4.0`.
 2. **Master §6.6 / 01:** i18n library decision = custom layer on `intl-messageformat`; PHP helper `trans_icu()` in `app/Support/I18n/helpers.php` (composer `autoload.files`); artisan command `i18n:export`; generated `resources/js/lang/generated/{locale}.json` + `manifest.json` committed and CI-checked; config key `app.supported_locales` = `['en']`.
-3. **14 (routes/API):** `POST /api/uploads/presign` (`api.uploads.presign`) — request `{ purpose: UploadPurpose, filename: string(≤255), mime: string, size: int }`; response `{ upload_token: string, url: string, method: 'PUT', headers: object, expires_at: string }`; per-purpose rules: `message_attachment` jpg/png/webp/pdf ≤ 15 MB; `production_photo`/`issue_photo`/`delivery_photo` jpg/png/webp/heic/heif ≤ 15 MB; `catalog_texture` jpg/webp ≤ 4 MB; `hardware_image` jpg/png/webp ≤ 4 MB; `preset_thumbnail` png ≤ 5 MB; `business_logo` png/jpg/webp/svg ≤ 2 MB; `avatar` jpg/png/webp ≤ 5 MB. `upload_token` = `Crypt::encryptString(json {user_id, purpose, disk, key, mime, size, exp})`, object key `tmp/uploads/{user_id}/{ulid}/{sanitised filename}`; consumed by FormRequests via rule `ValidUploadToken(purpose)`; unconsumed `tmp/uploads/*` objects deleted by `media:cleanup-orphans` after 24 h. Rate limit 60/min/user.
-4. **Shared Inertia prop** `staffCounters` (`{ submitted: int, to_call: int }`, staff only, lazy via `Inertia::optional` on full page loads of admin pages, cached 30 s) — add to 01 §6 shared props list.
-5. **Shared prop fields:** `auth.user` additionally carries `email`, `email_verified`, `phone_e164`, `phone_verified`, `avatar_url`, `onboarded`, `has_password`, `two_factor_enabled`; `business` carries `name`, `phone_e164`, `email`, `working_hours`, `timezone`, `default_country_code` (exact shape §8).
-6. **Convention (01 §6 / 14):** Data object (spatie/laravel-data) properties and Inertia props are **snake_case** matching DB columns; JSONB document/summary contents (03 documents, `plans.summary`, `furniture_designs.estimate`, `result_meta`) pass through unchanged (camelCase). Top-level shared prop keys stay as listed in 01 (`unreadNotifications`, `staffCounters`).
-7. **Appearance cookie** `appearance` (`light|dark|system`) read by `app.blade.php` — add to 13 cookie inventory (non-essential-free, functional).
+3. **Uploads:** this file implements `13` §11 (upload intents, `api.uploads.presign|confirm|show`, `uploadIds`); no separate proposal.
+4. **Shared props (01 §6):** add `staffCounters` (`{ submitted: int, toCall: int }`, staff only, lazy via `Inertia::optional`, cached 30 s) and `healthBanners` (`11` B12); `features.captcha` (`13` B).
+5. **Shared prop fields (camelCase, `10` A7):** `auth.user` = `{ id, type, name, email, emailVerified, phoneE164, phoneVerified, avatarUrl, roles, permissions, abilities, unitSystem, lengthUnit, timezone, locale, onboarded, hasPassword, twoFactorEnabled }`; `business` = `{ name, currency, locale, timezone, phoneE164, email, workingHours, units: { defaultSystem, defaultLengthUnit }, defaultCountryCode }`; `app.logoUrl`.
+6. **Appearance cookie** `appearance` (`light|dark|system`) read by `app.blade.php` — add to `13`'s cookie inventory (functional, not HttpOnly, 1 year, `SameSite=Lax`).
