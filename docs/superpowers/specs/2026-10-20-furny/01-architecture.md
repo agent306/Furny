@@ -36,7 +36,7 @@ Pin **exact** versions for pre-1.0 packages; use caret ranges for stable ones. I
 | symfony/http-client | `^7.3` | HTTP client required by the Symfony mailer transports |
 | resend/resend-php | latest stable at install time (pin the resolved version in `composer.lock`) | Optional mail transport `resend` (env-only switch, `12 §8.2`) |
 | sentry/sentry-laravel | `^4` (**optional**) | Error tracking, active only when `SENTRY_LARAVEL_DSN` is set (`17 §13.5`) |
-| **dev:** pestphp/pest `^5.3`, pestphp/pest-plugin-laravel, larastan/larastan `^3.13`, laravel/pint `^1.32`, laravel/telescope `^5.26` (local/staging only; `composer.json` `extra.laravel.dont-discover: ["laravel/telescope"]`, registered conditionally when `TELESCOPE_ENABLED=true`, `17 §5.11`), laravel/boost `^2.10` |
+| **dev:** pestphp/pest `^5.3`, pestphp/pest-plugin-laravel, pestphp/pest-plugin-browser (same major as Pest; browser tests, `16 §8`), larastan/larastan `^3.13`, laravel/pint `^1.32`, laravel/telescope `^5.26` (local/staging only; `composer.json` `extra.laravel.dont-discover: ["laravel/telescope"]`, registered conditionally when `TELESCOPE_ENABLED=true`, `17 §5.11`), laravel/boost `^2.10` |
 
 Not used (decided): Prism, `laravel/ai`, `anthropic-ai/sdk` in PHP. **All LLM calls happen in the Python vision service**; Laravel never calls an LLM directly. (Rationale: the LLM step needs the image-processing toolchain for crop/zoom tool loops, and keeping all provider keys in one service keeps secrets in one place.)
 
@@ -78,7 +78,7 @@ Package manager: **yarn 4** through corepack (owner decision, master D34). `pack
 | intl-messageformat | `^10.7` | ICU MessageFormat runtime (i18n, `15 §15`) |
 | libphonenumber-js | `^1.12` | Client-side phone parsing (`PhoneInput`) |
 | @sentry/vue | `^10` (**optional**) | Browser error tracking, active only when `VITE_SENTRY_DSN` is set |
-| **dev:** vitest `^3`, @vue/test-utils, eslint, prettier, @playwright/test (via Pest browser plugin), culori `^4.0` (token contrast test, `15 §14.6`), concurrently (`composer dev`, `17 §3.3`) |
+| **dev:** vitest `^3` + @vitest/coverage-v8 (same version as vitest), happy-dom (Vitest DOM environment), @vue/test-utils, eslint, prettier, playwright + @playwright/test (same version; used by the Pest browser plugin and by the Playwright smoke/a11y suite, `16 §8`), @axe-core/playwright `^4.10` (accessibility scans, `16 §11`), culori `^4.0` (token contrast test, `15 §14.6`), concurrently (`composer dev`, `17 §3.3`) |
 
 ### 1.3 Vision service (Python)
 
@@ -103,7 +103,7 @@ Package manager: **yarn 4** through corepack (owner decision, master D34). `pack
 | pydantic-settings | service configuration (`18 §4`) | MIT |
 | anyio | worker-thread offloading (via FastAPI) | MIT |
 | sentry-sdk[fastapi] `^2` (**optional**) | error tracking when `SENTRY_DSN` is set | MIT |
-| pytest, ruff, mypy; `uv` (dependency locking: `pyproject.toml` + `uv.lock`, `requirements.txt` exported for Nixpacks) | dev | — |
+| pytest, pytest-cov, ruff, mypy; `uv` (dependency locking: `pyproject.toml` + `uv.lock`, `requirements.txt` exported for Nixpacks) | dev | — |
 
 **Do not use**: PyMuPDF (AGPL), Ultralytics YOLO (AGPL), CubiCasa5k weights (non-commercial), Raster-to-Graph (GPL + data licence).
 
@@ -178,7 +178,7 @@ Plus Coolify services: PostgreSQL, Redis, Gotenberg (Dockerfile resource based o
 │  ├─ css/app.css               Tailwind v4 entry + @theme tokens
 │  ├─ lang/en/                  PHP translation files (ICU; `15 §15.2`)
 │  ├─ views/app.blade.php       Inertia root
-│  ├─ views/pdf/                Blade templates rendered by Gotenberg (quote, cut list, plan sheet)
+│  ├─ views/pdf/                Blade templates rendered by Gotenberg (quote, cut list; plan PDFs are client-side, `05 §14.3`)
 │  └─ js/
 │     ├─ app.ts  ssr.ts(not used v1)
 │     ├─ engine/                ★ Framework-free TS engine (NO Vue/DOM imports; see §5)
@@ -203,8 +203,9 @@ Plus Coolify services: PostgreSQL, Redis, Gotenberg (Dockerfile resource based o
 ├─ nixpacks.toml                owner-baseline Nixpacks plan incl. `[staticAssets]` nginx.conf (`17 §5.2`)
 ├─ docker/                      start.sh, check-runtime.sh, backup-objects.sh, php.ini, php-fpm.conf, supervisor/{supervisord,php-fpm,nginx,horizon,scheduler,pulse-check}.conf, dev/pg-init.sql
 ├─ .dockerignore  compose.dev.yaml  package.json (packageManager yarn@4)  .yarnrc.yml  yarn.lock
-├─ .github/                     workflows/ci.yml, scripts/{changed-since-last-deploy,coolify-deploy}.sh
-├─ tests/  (Pest: Feature/, Unit/, Browser/)  resources/js/**/__tests__ (Vitest)
+├─ .github/                     workflows/ci.yml, scripts/{changed-since-last-deploy,coolify-deploy,audit-gate}.sh
+├─ tests/  (Pest: Unit/, Feature/ incl. Feature/Contract/, Browser/ incl. Browser/playwright/; Support/; fixtures/ — `16 §3`)  resources/js/**/__tests__ (Vitest)
+├─ scripts/                     check-bench.mjs, check-bundle-size.mjs, props-keys.mjs (test/CI helpers, `16`)  playwright.config.ts  vitest.config.ts
 └─ docs/                        specs, ops/ (owner reference files), ops-log.md
 ```
 
@@ -340,7 +341,7 @@ Queue connections (`config/queue.php`): `redis` (`retry_after` 180) for `default
 | `default` | `redis` | misc, activity side effects, `ProcessUpload`, media conversions | 2 | 60 s | 3 |
 | `imports` | `redis-long` | `RunBlueprintRecognition`, `PrepareImportPreview` | 2 | 660 s | 2 (backoff 30 s; `RunBlueprintRecognition` uses `retryUntil` + `maxExceptions = 2`, `06 §4.7`) |
 | `engine` | `redis` | `ComputeRevisionBom`, `NestOrderSheets` | 2 | 120 s | 2 |
-| `pdf` | `redis` | `RenderQuotePdf`, `RenderCutListPdf`, `RenderPlanSheetPdf` | 1 | 120 s | 3 |
+| `pdf` | `redis` | `RenderQuotePdf`, `RenderCutListPdf` | 1 | 120 s | 3 |
 | `notify` | `redis` | queued notifications (all channels), webhook processing, `DispatchCallbackDue` | 2 | 60 s | 5 (exp. backoff 10/30/90/270/600 s) |
 
 There is no `queue:work` process: Horizon manages all workers. `php artisan pulse:check` runs as its own supervisor program (`17 §5.7`), not as a scheduler entry.

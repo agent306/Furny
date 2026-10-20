@@ -979,7 +979,7 @@ Mark notification read / all read; mark message thread read; append own message 
 10. **Colour independence:** status = colour + text/icon; diff highlighting in 3D has a legend and the `DiffList` text; confidence colours in import review also use line style (solid/dashed/dotted — 06).
 11. **Language:** `<html lang>` = user locale; numbers/dates via `Intl`.
 12. **Zoom/reflow:** usable at 200 % zoom and 320 px width without horizontal scroll (editors excepted: canvas pans).
-13. **Testing:** Pest browser tests run `axe-core` (injected) on: welcome, login, dashboard (customer), project page, order page (states `quoted`, `completed`), notifications, settings, admin dashboard, admin order detail, catalog list — zero `serious`/`critical` violations (`16`).
+13. **Testing:** the Playwright accessibility suite (`@axe-core/playwright`, `16 §11`) runs axe-core on: welcome, login, dashboard (customer), project page, order page (states `quoted`, `completed`), notifications, settings, admin dashboard, admin order detail, catalog list — zero `serious`/`critical` violations (`16`).
 
 ### 14.6 Token contrast test
 `resources/js/__tests__/tokens-contrast.test.ts` parses `resources/css/app.css` (`:root` and `.dark` blocks), converts OKLCH with `culori`, and asserts WCAG ratios for these pairs in both themes:

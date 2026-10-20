@@ -1390,7 +1390,7 @@ The mode is passed as a prop; a `423` autosave response (`03 §5`) switches a ru
 - ≥ 1280 px: three columns as drawn; "split" shows 3D and Front side by side.
 - 768–1279 px: left panel becomes a slide-over drawer (toggle button in toolbar), right panel collapses into a bottom sheet with the estimate price always visible (48 px bar).
 - < 768 px: `readonly` presentation (3D + estimate + issues) with notice `t('builder.use_larger_screen')`.
-- Toolbar menu `⋯`: Create checkpoint (POST revisions, label prompt), Revision history (list + restore, `03 §5`), Duplicate, Save as preset (staff with `presets.manage`), Delete design (customer; not when locked).
+- Toolbar menu `⋯`: Create checkpoint (POST revisions; furniture revisions carry no label, `02 §5.2`), Revision history (list + restore, `03 §5`), Duplicate, Save as preset (staff with `presets.manage`), Delete design (customer; not when locked).
 - Selection model (store): `selection: { kind: 'section' | 'front' | 'part' | 'hardware' | null; id: string | null }`. Selecting in any view syncs all views and panels; `Esc` clears.
 
 ### 8.4 3D preview (`views/Preview3D.vue`)
@@ -1607,7 +1607,7 @@ Used by the customer proposal page (10) and the staff preview (§8.2). Props: `b
 
 ### 11.2 Cut list exports
 
-CSV and PDF formats, routes and generation are specified in `08 §8`. In the builder, the **Export** menu shows "Cut list (CSV)" and "Cut list (PDF)" to staff with permission `orders.view` (13 §7.1; customers never see cut-list exports). CSV is produced client-side from the live estimate BOM with `cutListCsv(bom, catalog, doc)` (engine) and downloaded as `cutlist-{slug}-working.csv`. PDF requires a revision: if the working copy differs from `current_revision` (or there is none), the menu first creates a `manual_checkpoint` revision (label prompt), then calls the PDF endpoint and shows a toast "Preparing PDF…" until the file is ready (`08 §8.2`).
+CSV and PDF formats, routes and generation are specified in `08 §8`. In the builder, the **Export** menu shows "Cut list (CSV)" and "Cut list (PDF)" to staff with permission `orders.view` (13 §7.1; customers never see cut-list exports). CSV is produced client-side from the live estimate BOM with `cutListCsv(bom, catalog, doc)` (engine) and downloaded as `cutlist-{slug}-working.csv`. PDF requires a revision: if the working copy differs from `current_revision` (or there is none), the menu first creates a `manual_checkpoint` revision (no label, `02 §5.2`), then calls the PDF endpoint and shows a toast "Preparing PDF…" until the file is ready (`08 §8.2`).
 
 ### 11.3 GLB export (`export/exportGlb.ts`)
 

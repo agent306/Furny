@@ -577,7 +577,7 @@ Applies identically to plans (`/api/plans/{plan}/working-copy`), furniture desig
 6. If no revision exists for the plan created today (business TZ), create an `auto_daily` revision of the **new** document (plans only).
 7. Broadcast nothing (single editor assumption); log activity only for staff saves.
 
-**Revisions API**: `POST …/revisions { label? }` → creates `manual_checkpoint` from the current working copy (furniture: also dispatches `ComputeRevisionBom`). `POST …/revisions/{rev}/restore` → creates `before_restore` revision of the current working copy, then copies the revision document into the working copy (version + 1).
+**Revisions API**: `POST …/revisions { label? }` (`label` ≤ 120 chars is stored for plans only; furniture revisions have no label column, `02 §5.2`, and ignore it) → creates `manual_checkpoint` from the current working copy (furniture: also dispatches `ComputeRevisionBom`). `POST …/revisions/{rev}/restore` → creates `before_restore` revision of the current working copy, then copies the revision document into the working copy (version + 1).
 
 ---
 
