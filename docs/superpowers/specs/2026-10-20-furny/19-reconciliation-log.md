@@ -306,6 +306,13 @@
 | `17 §10.2` | `npm ci`, `npx …`, `cache: npm` | `corepack enable`, `yarn install --immutable`, `yarn …`, `cache: yarn` |
 | `12 §8.2`, `17 §1 O12`, `§6.1` | mail transport `ses` with `AWS_*`/`SES_REGION` (collides with the R2 `AWS_*` keys); `RESEND_KEY`, `SESSION_HTTP_ONLY`, `SESSION_EXPIRE_ON_CLOSE` missing from `17 §6.1` | `ses` dropped (`postmark`\|`resend`\|`smtp`\|`log`); variables added to `17 §6.1` |
 | `18 §0–§16` | `ai.usage.view`, `ai.credits.manage`, `settings.ai.manage`, `CustomerRegistered`, presign 20/h, `settings.ai_updated`, params `amount/filename` | `ai.manage`, gate `settings.manage_restricted`, `ContactVerified`, `uploads-presign`, `ai.settings_updated`, `credits/fileName`; `SENTRY_DSN` in §4 |
+| `01 §1.1–§1.3` (found while writing `16`) | dev tooling without the Pest browser plugin, happy-dom, Vitest coverage, Playwright Test, axe and pytest-cov that `16` requires | `pestphp/pest-plugin-browser`, `@vitest/coverage-v8`, `happy-dom`, `playwright` + `@playwright/test`, `@axe-core/playwright`, `pytest-cov` added |
+| `01 §3` (found while writing `16`) | test tree `Feature/ Unit/ Browser/` only; no `scripts/`; `.github/scripts` without an audit gate | tree of `16 §3` (`Feature/Contract`, `Browser/playwright`, `Support`, `fixtures`), `scripts/{check-bench,check-bundle-size,props-keys}.mjs`, `.github/scripts/audit-gate.sh` |
+| `01 §3`, `01 §7`, §8.6 (found while writing `14`) | queue `pdf` job `RenderPlanSheetPdf` and a "plan sheet" Blade template with no route or trigger anywhere (plan PDFs are generated client-side, `05 §14.3`) | removed; `13 §10`'s `exports` limiter ("cut list, plan sheet") applies in v1 only to `admin.furniture-revisions.cutlist.pdf.store` (`14 §1.11`) |
+| `03 §5`, `07 §8.3`, `07 §11.2` (found while writing `14`) | `POST …/revisions {label?}` and a "label prompt" for furniture checkpoints, but `02 §5.2` `furniture_revisions` has no `label` column | `02` wins: labels are stored for plan revisions only; furniture checkpoints are unlabeled and a sent `label` is ignored (`14 §18.2`) |
+| `15 §14` item 13 (found while writing `16`) | axe-core "injected" by Pest browser tests | Playwright accessibility suite with `@axe-core/playwright` (`16 §11`), same page list |
+| `17 §10.2` (found while writing `16`) | CI without the `13 §19` audit gates, the master §6.6 `i18n:export` check, `06 §17` `evaluate.py --fail-under`, `06 §16.1` `-m "not live"`, coverage gates, the Playwright suite, bench and bundle-size budgets; `vue-tsc` ran before any step generated the Wayfinder helpers; `mypy app` | steps added in place (`audit-gate.sh`, `i18n:export` diff, seed-snapshot check, pcov + `coverage-gate.php`, `vitest --coverage`, `bench:check`, `check-bundle-size.mjs`, `wayfinder:generate` before ESLint/vue-tsc, `pytest -m "not live" --cov`, `evaluate.py` with `none` and `replay`, `yarn playwright test`); `mypy --strict app` |
+| `13 §1`, `§2`, `§5.3`, `§6.4` (gaps filled by `14`, no contradiction) | Fortify routes could not carry the `register`/`password-reset`/`verification-resend` limiters, Turnstile and `recent.auth` (no `Fortify::ignoreRoutes()`); Google re-authentication for passwordless users had no intent; middleware JSON behaviour unspecified; staff-only `/api` routes had no staff/2FA middleware; session ids exposed in revoke URLs | `web`-group middleware `FortifyRouteGuards` (`14 §3.1`); intent `reauthenticate` (`14 §3.2`); JSON table `14 §1.2`; route group `APIS` (`14 §1.1`); `{sessionKey}` = HMAC prefix of the session id (`14 §1.6`) |
 
 ---
 
@@ -323,7 +330,7 @@
 2. **`corepack enable` inside Nixpacks**: taken verbatim from the owner's proven file; if a future Nix Node package ships without corepack, install yarn with `npm i -g corepack` in the install phase (record in `17` Appendix B).
 3. **php.ini `${ENV}` substitution** of the owner's `[variables]` (`17 §5.5`) depends on PHP's ini env expansion through `PHPRC`; `docker/check-runtime.sh` verifies `memory_limit` at build and start, and `17` Appendix B has the fallback.
 4. **`CSP_REPORT_ONLY`** is `true` in the production bulk-paste block for the first 7 days (13 §12.1 rollout) — the owner must flip it to `false` after the report-only week.
-5. `14` and `16` must be written from §6/§8 before implementation starts.
+5. `14` and `16` must be written from §6/§8 before implementation starts — done: `14-routes-and-api.md` and `16-testing-quality.md` (their fixes are the last rows of §5).
 
 ---
 ## 8. Canonical registries

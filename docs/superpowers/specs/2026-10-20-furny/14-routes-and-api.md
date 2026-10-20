@@ -53,7 +53,7 @@ Aliases of `13 §1` (`active`, `customer`, `staff`, `onboarded`, `verified.conta
 - **Controllers**: `App\Http\Controllers\{Customer|Admin|Api|Auth|Account|Webhooks}\…Controller`; single-action controllers use `__invoke`. Controllers are thin (`01 §4`): authorise → validate → one Action → respond.
 - **FormRequests**: `App\Http\Requests\{same folder}\{Verb}{Thing}Request` (e.g. `Customer\Orders\SubmitOrderRequest`). Every write route has one, even with an empty body (the request's `authorize()` calls the policy; `rules()` returns `[]`). Body keys are camelCase except Fortify/`13` auth forms (`password_confirmation`, `current_password`, `marketing_opt_in`, `cf_turnstile_response`, `terms`, `phone`, `code`). Validation error keys equal submitted field paths (`items.2.quantity`).
 - **Actions**: `App\Domain\{Domain}\Actions\{Verb}{Thing}` (`01 §4`); order transitions are one Action each (`09`).
-- **Page props types**: the TS interface named in the page tables (§4–§18) lives in `resources/js/types/pages.d.ts` (hand-written; nested types come from `resources/js/types/generated.d.ts`); names follow `10`/`11` where given, otherwise `{PageComponentPathWithoutSlashes}Props` (e.g. `Customer/Projects/Index` → `CustomerProjectsIndexProps`). Controllers build props exclusively from `spatie/laravel-data` classes (§19) and scalars; Pest asserts shapes with `assertInertia` (`16 §6.4`).
+- **Page props types**: the TS interface named in the page tables (§2–§18) lives in `resources/js/types/pages.d.ts` (hand-written; nested types come from `resources/js/types/generated.d.ts`); names follow `10`/`11` where given, otherwise `{PageComponentPathWithoutSlashes}Props` (e.g. `Customer/Projects/Index` → `CustomerProjectsIndexProps`). Controllers build props exclusively from `spatie/laravel-data` classes (§19) and scalars; Pest asserts shapes with `assertInertia` (`16 §6.4`).
 
 ### 1.4 Shared validation rule objects (`app/Rules`)
 
@@ -179,9 +179,7 @@ Status → codes used by this API:
 | `broadcasting-auth` | 120/min | user id | `POST /broadcasting/auth` |
 | `webhooks` | 600/min | ip | `webhooks.*` |
 | `client-errors` | 10/min | ip | `api.client-errors.store` |
-| `csp-report` | 30/min | ip | `notifications.unsubscribe` | GET `/notifications/unsubscribe/{user}/{event}/{channel}` | web · `SGN` (no login) | `NotificationUnsubscribeController@show` | — (invalid signature → page `Error` 403) | signature | — | page `Auth/Unsubscribe` · `UnsubscribeProps {eventLabel, channel: 'mail', done: false, preferencesUrl}` |
-| `notifications.unsubscribe.store` | POST `/notifications/unsubscribe/{user}/{event}/{channel}` | web · `SGN` (CSRF-exempt for RFC 8058 one-click; signed URL generated with the GET name) | `@store` | `Notifications\UnsubscribeRequest`: — (`{event}` must be a non-transactional catalogue key, `{channel}` = `mail`) | signature | `UnsubscribeFromEvent` (upserts `notification_preferences.enabled = false`) | page `Auth/Unsubscribe` with `done: true` (one-click POST from a mail client: 200 empty body) |
-| `csp.report` |
+| `csp-report` | 30/min | ip | `csp.report` |
 | `api` | 120/min (guests 60/min by ip) | user id | every other `/api/*` route |
 
 Non-limiter quotas enforced in Actions: `ai.max_recognitions_per_day` (429 `daily_limit_reached`), `imports.max_active_per_user` (429 `too_many_active_imports`), OTP global hourly cap (`13 §4.1`), push subscriptions ≤ 10 per user (`12 §8.3`).
@@ -207,6 +205,8 @@ Shared props (`HandleInertiaRequests::share`, `01 §6`) are typed as `SharedProp
 | `links.order` | GET `/o/{number}` | web · `AUTH` | `LinkController@order` | — | owner customer or staff `orders.view`, else 404 | — | 302 to the order's primary page (`12 §3.6`): customer → proposal (`changes_proposed`), quote (`quoted`), completion (`completed`), else `customer.orders.show`; staff → `admin.orders.show`. Logged out → `login` with intended URL |
 | `media.show` | GET `/media/{media:uuid}?conversion=` | web · `AUTH` | `MediaController@show` | query `conversion` nullable\|in:thumb,small,large,preview | per `13 §8.9` (model + collection map; unknown → 404) | — | 302 → 15-min signed URL; PDFs/non-images `ResponseContentDisposition: attachment`; `Cache-Control: private, no-store` |
 | `account.deletion-scheduled` | GET `/account-deleted` | web · `PUB` | `Auth\AccountDeletedController` | — | — | — | page `Auth/AccountDeletionScheduled` · `AccountDeletionScheduledProps {anonymiseOn: IsoDate \| null, supportEmail}` (`anonymiseOn` from a one-time session flash; null when opened directly) |
+| `notifications.unsubscribe` | GET `/notifications/unsubscribe/{user}/{event}/{channel}` | web · `SGN` (no login) | `NotificationUnsubscribeController@show` | — (invalid signature → page `Error` 403) | signature | — | page `Auth/Unsubscribe` · `UnsubscribeProps {eventLabel, channel: 'mail', done: false, preferencesUrl}` |
+| `notifications.unsubscribe.store` | POST `/notifications/unsubscribe/{user}/{event}/{channel}` | web · `SGN` (CSRF-exempt for RFC 8058 one-click; signed URL generated with the GET name) | `@store` | `Notifications\UnsubscribeRequest`: — (`{event}` must be a non-transactional catalogue key, `{channel}` = `mail`) | signature | `UnsubscribeFromEvent` (upserts `notification_preferences.enabled = false`) | page `Auth/Unsubscribe` with `done: true` (one-click POST from a mail client: 200 empty body) |
 | `csp.report` | POST `/csp-report` | web · `PUB` (CSRF-exempt) + `throttle:csp-report` | `CspReportController` | raw JSON (`application/csp-report` or `application/reports+json`), ≤ 16 KB | — | — | 204; logs to channel `security` truncated to 2 KB (`13 §12.1`) |
 | `health.deep` | GET `/up/deep` | webhooks.php · `HLTH` | `HealthController` | header `X-Health-Token` or `?token=` = `HEALTH_CHECK_TOKEN` (else 404) | token | — | 200/503 `{status: 'ok'\|'degraded'\|'down', version, checks: {database, redis, horizon, scheduler, storage, vision, gotenberg, reverb: {ok, ms, error?}}}` (`17 §5.11`) |
 
@@ -318,7 +318,7 @@ All `two-factor.*` routes return 403 for `type = customer` (`PreventCustomerTwoF
 
 ---
 
-## 6. Customer import pages (file `customer.php`, `CUS`; JSON API in §18.4)
+## 6. Customer import pages (file `customer.php`, `CUS`; JSON API in §18.3)
 
 | Name | Method · Path | Controller | Request | Authz | Response |
 |---|---|---|---|---|---|
@@ -335,7 +335,7 @@ All `two-factor.*` routes return 403 for `type = customer` (`PreventCustomerTwoF
 | `customer.furniture.index` | GET `/furniture` | `Customer\FurnitureDesignController@index` | query `filter[project]`, `filter[template]`, `filter[availability]` in:all,available,in_order, `search`, `sort` in:-updated_at,name, `page` (24) | own designs | — | page `Customer/Furniture/Index` · `CustomerFurnitureIndexProps` (`10 §10.1`) |
 | `customer.projects.furniture.create` | GET `/projects/{project}/furniture/create` | `@create` | query `return_plan` (plan of the project), `hint_width` (int mm) | `FurnitureDesignPolicy::create` | — | page `Customer/Furniture/Create` · `FurnitureCreateProps {project: {id, name}, templates: TemplateSummaryData[], presets: PresetSummaryData[], catalogVersion, returnPlan: {id, name} \| null, hintWidthMm: number \| null}` (`07 §8.1`, `10 §10.2`) |
 | `customer.projects.furniture.store` | POST `/projects/{project}/furniture` | `@store` | `Customer\Furniture\StoreFurnitureDesignRequest`: `name` required\|string\|max:120; `templateKey` required\|string\|in:enabled template keys; `presetId` nullable\|ulid\|exists active preset with the same `templateKey`; `document` required\|`FurnitureDocumentPayload`; `returnPlanId` nullable\|ulid\|plan of the project | `create` | `CreateFurnitureDesign` (engine `validate-furniture`; save-blocking issues → errors `document` + `code: invalid_document`) | 302 `customer.furniture.edit` (`?return_plan=` when given) |
-| `customer.furniture.edit` | GET `/furniture/{design}/edit` | `@edit` | query `return_plan` | `view` | — | page `Customer/Furniture/Edit` · `FurnitureEditPageProps` (§19.3; `mode` = `customer` or `readonly`) |
+| `customer.furniture.edit` | GET `/furniture/{design}/edit` | `@edit` | query `return_plan` | `view` | — | page `Customer/Furniture/Edit` · `FurnitureEditPageProps` (§19.1; `mode` = `customer` or `readonly`) |
 | `customer.furniture.update` | PATCH `/furniture/{design}` | `@update` | `Customer\Furniture\RenameFurnitureDesignRequest`: `name` required\|string\|max:120 | `update` (locked → 423 → flash `furniture.errors.locked`) | `RenameFurnitureDesign` | back |
 | `customer.furniture.destroy` | DELETE `/furniture/{design}` | `@destroy` | `Customer\Furniture\DestroyFurnitureDesignRequest`: — | `delete` (locked or referenced → 422 `design_in_order`) | `DeleteFurnitureDesign` (soft delete; placements become `plan.placement_design_missing` warnings) | 302 `customer.projects.show?tab=designs` flash `furniture.toasts.deleted` |
 
