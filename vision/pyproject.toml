@@ -1,0 +1,67 @@
+[project]
+name = "furny-vision"
+version = "1.0.0"
+description = "Furny vision service: turns floor-plan blueprints into editable plan documents"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "opencv-python-headless>=4.10,<5",
+    "numpy>=2.0",
+    "scipy>=1.14",
+    "shapely>=2.0",
+    "scikit-image>=0.24",
+    "rapidocr>=3.4,<4",
+    "onnxruntime>=1.20",
+    "pdfplumber>=0.11",
+    "pypdfium2>=4.30",
+    "pi-heif>=0.20",
+    "pillow>=11",
+    "ezdxf>=1.3",
+    "httpx>=0.28",
+    "anthropic>=1.17,<2",
+    "openai>=3.35,<4",
+    "anyio>=4.6",
+    "sentry-sdk[fastapi]>=2,<3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pypdf>=5",
+    "httpx2>=2.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = ["-m", "not live"]
+markers = [
+    "live: real provider calls (manual/nightly)",
+    "slow: >5 s",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF"]
+ignore = ["N803", "N806"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["skimage.*", "scipy.*", "pdfplumber.*", "rapidocr.*", "pi_heif.*", "shapely.*", "pypdfium2.*"]
+ignore_missing_imports = true
