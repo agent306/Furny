@@ -47,9 +47,9 @@
 ## Review Focus
 
 1. **Dirty imported plans** (vision output): walls crossing without nodes, collinear overlapping walls, orphan nodes, out-of-bounds openings → derivation never throws or emits NaN, and commands still work without adding new errors. Test: Task 28 `dirty-import.test.ts` (built by `makeDirtyPlan()` of Task 8).
-2. **Degenerate/extreme geometry:** 20° wedges, 30 mm walls, coincident directions, coordinates at ±1 000 000 mm, near-coincident nodes (< `EPS`) → finite, CW, simple outputs; Clipper scaling stays exact. Tests: Task 5 (clip at ±1e6), Task 9 (§3.9 table + `Number.isFinite` sweep), Task 11 (near-coincident nodes cluster).
+2. **Degenerate/extreme geometry:** 20° wedges, 30 mm walls, coincident directions, coordinates at ±1 000 000 mm, near-coincident nodes (< `EPS`) → finite, CW, simple outputs; Clipper scaling stays exact. Tests: Task 5 (clip at ±1e6), Task 6 (near-coincident endpoints cluster), Task 9 (§3.9 table + `Number.isFinite` sweep).
 3. **Catalog drift:** a design saved against a catalog in which its material is archived, an item was deleted (unknown code) or a role default is missing → `generateFurniture`/`computeBom`/`priceBom` never throw; warnings `furniture.archived_code`, `furniture.no_default_hardware`, error `furniture.unknown_code`, model still rendered. Test: Task 36 `catalogDrift.test.ts`.
-4. **Malformed server input to the CLI:** invalid JSON, wrong types, future `schemaVersion`, unknown command, 2 MB+ documents → `{ ok: false }` with exit code 0, never a crash or partial stdout. Test: Task 48 `cli.e2e.test.ts`.
+4. **Malformed server input to the CLI:** invalid JSON, wrong types, future `schemaVersion`, unknown command, 2 MB+ documents → `{ ok: false }` (oversize plans: `{ ok: true }` with `valid: false` and `plan.too_large`) with exit code 0, never a crash or partial stdout. Test: Task 48 `cli.e2e.test.ts`.
 5. **Out-of-order worker responses** while the user types quickly → only the latest request per method resolves; stale ones reject with `EngineWorkerStaleError` and never overwrite newer results; worker errors surface as rejections. Test: Task 49 `engineRpc.test.ts`.
 
 ## Task index
@@ -71,10 +71,10 @@
 | 13 | `validatePlan` + `planSummary` | 39 | Carcass templates (14) |
 | 14 | Reference plan fixtures (HDB 3-room, brochure 2BHK) | 40 | Table templates (4), furniture fixtures, template property test |
 | 15 | Footprints + placement conflicts | 41 | Furniture commands |
-| 16 | Snap index, `snapPoint`, grid | 42 | `diffFurniture` + `highlightMap` |
-| 17 | Opening snapping + footprint snapping | 43 | `computeBom` (cut sizes, banding, rows, sheets, finishing) |
-| 18 | Plan drawing model | 44 | Guillotine nesting |
-| 19 | `svgFromDrawing` + hit index | 45 | Pricing (`priceBom`, `displayUnitPrice`, `estimateFurniture`) |
+| 16 | Snap index, `snapPoint`, grid | 42 | `computeBom` (cut sizes, banding, rows, sheets, finishing) |
+| 17 | Opening snapping + footprint snapping | 43 | Guillotine nesting |
+| 18 | Plan drawing model | 44 | Pricing (`priceBom`, `displayUnitPrice`, `estimateFurniture`) |
+| 19 | `svgFromDrawing` + hit index | 45 | `diffFurniture` + `highlightMap` |
 | 20 | Generic command bus | 46 | Cut list CSV |
 | 21 | Plan command pipeline, post-process, room-meta reconciliation | 47 | Quote totals TS port + shared quote fixtures |
 | 22 | Plan command helpers | 48 | Engine CLI |
@@ -100,7 +100,7 @@
 
 - [ ] **Step 0: Verify the scaffold** — `yarn --version` prints 4.x; `vitest.config.ts`, `eslint.config.js`, `tsconfig.json` exist. If `vitest.config.ts` is missing create it with `defineConfig({ test: { environment: 'node' } })` plus the include/exclude below.
 - [ ] **Step 1: Write the failing tests**
-  - `ids.test.ts`: `newId('n')` matches `/^n_[0-9a-z]{10}$/`; `newId('fr')` matches `/^fr_[0-9a-z]{10}$/`; 1000 calls unique; `isEntityId('w_abc0000001','w') === true`, `isEntityId('w_ABC0000001','w') === false`; `testIds()` yields `s_0000000001`, `s_0000000002`, then `fr_0000000001` (independent counters per prefix); `mulberry32(42)` first three values are stable across runs (assert equality of two generators); `roundMm(2.5) === 3`, `roundMm(-2.5) === -3`, `roundMm(-0.4) === -0` is treated as `0` via `Object.is(roundMm(-0.4) + 0, 0)`; `ENGINE_VERSION === '1.0.0'`.
+  - `ids.test.ts`: `newId('n')` matches `/^n_[0-9a-z]{10}$/`; `newId('fr')` matches `/^fr_[0-9a-z]{10}$/`; 1000 calls unique; `isEntityId('w_abc0000001','w') === true`, `isEntityId('w_ABC0000001','w') === false`; `testIds()` yields `s_0000000001`, `s_0000000002`, then `fr_0000000001` (independent counters per prefix); `mulberry32(42)` first three values are stable across runs (assert equality of two generators); `roundMm(2.5) === 3`, `roundMm(-2.5) === -3`, `roundMm(-0.4) + 0 === 0`; `ENGINE_VERSION === '1.0.0'`.
   - `purity.test.ts` (first line `// @vitest-environment node`): `import.meta.glob(['../**/*.ts', '!../**/__tests__/**', '!../**/__perf__/**', '!../**/*.bench.ts'])`, await every loader (none throws); `typeof window === 'undefined' && typeof document === 'undefined'`; a static scan of every engine source file text finds no `from 'vue'`, `from 'three'`, `from '@tresjs`, `\bwindow\.`, `\bdocument\.`, `\blocalStorage\b`, `\bfetch\(`; `clipper2-ts` appears only in `geometry/clip.ts`, `earcut` only in `geometry/triangulate.ts` (vacuously true until Task 5).
   - `lintRules.test.ts`: `new ESLint({ cwd: repoRoot })`, `lintText(code, { filePath: 'resources/js/engine/plan/x.ts' })` reports `no-restricted-imports` for `import { ref } from 'vue'`, `import * as T from 'three'`, `import { TresCanvas } from '@tresjs/core'`, `import x from '@/lib/http'`, `import { Clipper64 } from 'clipper2-ts'`, `import earcut from 'earcut'`; reports `no-restricted-globals` for `window.alert(1)`, `document.body`, `localStorage.x`, `fetch('/')`; reports nothing for `import { Clipper64 } from 'clipper2-ts'` at `resources/js/engine/geometry/clip.ts` and `import earcut from 'earcut'` at `resources/js/engine/geometry/triangulate.ts`.
 - [ ] **Step 2: Run, expect FAIL** — `yarn vitest run resources/js/engine/__tests__` → module-not-found / missing rule errors.
@@ -288,7 +288,7 @@
   - Collinear equal: corners coincide at x = 1000, y = ±57.5. Collinear 230/115: perpendicular step at the node.
   - Acute 20° wedge: `joint === 'bevel'`, via contains the midpoint `M = (B_i + B_j)/2`.
   - 30 mm wall between two L-corners: bevel by the half-length rule; outline simple (O(n²) edge-crossing check).
-  - Dangling `(0,0)→(1000,0)` t = 100: outline `[(0,-50),(1000,-50),(1000,50),(0,50)]` (CW, after rotation to start index normalisation compare as sets), `joint 'free'`.
+  - Dangling `(0,0)→(1000,0)` t = 100: outline equals `[(0,-50),(1000,-50),(1000,50),(0,50)]` up to the choice of start vertex (CW), `joint 'free'`.
   - Two walls with identical outgoing direction (overlap): no throw, finite output.
   - Node with walls in all 4 quadrants plus a 15° acute one: every output coordinate `Number.isFinite` (review focus 2).
   - Tessellation for `makeRectPlan(5000,4000,230)`, `makeLPlan()`, `makeGridPlan(7,6)`: union area of all outlines = Σ areas within 0.1 %; every outline CW, ≥ 4 finite vertices, no self-intersection; the left face of a wall drawn left→right on screen has smaller y than its centre line.
@@ -358,7 +358,7 @@
 - Consumes: Tasks 10–11; `create` from `mutative` (tests only).
 - Produces: `createPlanDeriver(): { derive(doc: PlanDocument): DerivedPlan; clear(): void; stats(): DeriverStats }` with `DeriverStats { joins: number; outlines: number; roomNets: number; fullHit: boolean }` (counts recomputed in the last `derive` call; for tests and perf diagnostics). `derivePlanGeometry` = fresh deriver per call.
 
-- [ ] **Step 1: Write the failing tests** — same document twice → identical result object (`toBe`) except `docRef`, `stats().fullHit === true`; changing only `placements`/`view` (via `mutative.create`) → full hit; changing only `rooms` → walls reused (`stats().outlines === 0`) and association recomputed; moving one node of `makeGridPlan(7,6)` → `stats().joins ≤ 5`, `stats().roomNets ≤ 6`, and the result deep-equals `derivePlanGeometry(newDoc)` (compare with a float tolerance helper `expectGeomClose`); adding an opening recomputes one wall's poché only; `clear()` forces a full recompute.
+- [ ] **Step 1: Write the failing tests** — same document twice → identical result object (`toBe`) except `docRef`, `stats().fullHit === true`; changing only `placements`/`view` (via `mutative.create`) → full hit; changing only `rooms` → walls reused (`stats().outlines === 0`) and association recomputed; moving one interior node of `makeGridPlan(7,6)` → `stats().joins ≤ 5` (the node and its ≤ 4 neighbours), `stats().roomNets ≤ 16` (rooms touching those nodes; the other 26+ are reused), and the result deep-equals `derivePlanGeometry(newDoc)` (compare with a float tolerance helper `expectGeomClose`); adding an opening → `stats().outlines === 1` (only that wall's outline/poché); `clear()` forces a full recompute.
 - [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/plan/__tests__/deriverCache.test.ts`
 - [ ] **Step 3: Implement** — reference-identity caches of 04 §7.2 items 1–7 (node-join signature string, per-wall memo keyed by wall object + end join objects + opening objects, per-face net memo keyed by ring coordinate string + intersecting outline objects).
 - [ ] **Step 4: Run tests, expect PASS** — `yarn vitest run resources/js/engine/plan`
@@ -687,3 +687,532 @@ RoomMetas: Bedroom 1/bedroom (1600,1800); Deck/deck (4800,700); Bedroom 2/bedroo
 - [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
 - [ ] **Step 6: Commit** — `git add resources/js/engine/plan/commands` → `feat(engine): add selection-wide plan commands and command invariant tests`
 
+### Task 29: Catalog snapshot schema, hardware specs, seed catalog, CatalogIndex
+
+**Files:**
+- Create: `resources/js/engine/catalog/snapshot.ts`, `resources/js/engine/catalog/specs.ts`, `resources/js/engine/furniture/catalogIndex.ts`, `resources/js/engine/furniture/rules/weight.ts`, `tests/fixtures/catalog/seed-snapshot.json`, `resources/js/engine/testing/seedCatalog.ts`
+- Test: `resources/js/engine/catalog/__tests__/snapshot.test.ts`, `resources/js/engine/furniture/__tests__/catalogIndex.test.ts`
+
+**Spec refs:** `08 §2.1–§2.3`, `08 §7` (seed rows), `02 §13` (`pricing` defaults), `02 §14` (tax rates seed), `07 §1.5`, `07 §2.3` (role defaults), `07 §6.1` (densities), `07 §6.11`, `01 §5.3`
+
+**Interfaces:**
+- Consumes: `zod`.
+- Produces: types + schemas `BoardType, Surface, HardwareCategory, FinishType, LabourUnit, LabourKey (14 keys of 08 §4.3), CatalogMaterial, CatalogEdgeBand, CatalogHardware, CatalogFinish, CatalogLabourRate, CatalogTaxRate, PricingSettings, CatalogSnapshot` and `CatalogSnapshotSchema` (strips unknown keys); `HARDWARE_SPEC_SCHEMAS: Record<HardwareCategory, z.ZodTypeAny>` (`.passthrough()`), `parseHardwareSpecs(category, specs)`; `HardwareRoleKey` (the 28 keys of 07 §6.11) + `HARDWARE_ROLE_KEYS`; `DEFAULT_DENSITY: Record<BoardType, number>`; `CatalogIndex` (07 §1.5) and `indexCatalog(snapshot): CatalogIndex` (memoised with a `WeakMap`); test-only `seedCatalog(patch?: { pricing?: Partial<PricingSettings> }): CatalogSnapshot` and `mutateCatalog(base, recipe): CatalogSnapshot`.
+
+- [ ] **Step 1: Write the failing tests** — the seed JSON contains exactly 08 §7: 12 materials, 8 edge bands, 40 hardware rows (`sortOrder` = row number × 10, row order of 08 §7.3 with the SLD rows expanded), 6 finishes, 14 labour rates, tax rates `GST 18%` (1800, `isDefault`), `GST 12%` (1200), `GST 5%` (500), `No tax 0%` (0) with ids `seed-tax-gst18|gst12|gst5|none`; prices = rupees × 100 (e.g. PB18-WHITE `pricePerSheetMinor 215000`, EB08-WHITE `600`, HNG-FO-SC `12000`); other ids `seed-<code>`/`seed-<key>`; `version 1`, `currency 'INR'`, `generatedAt '2026-10-20T00:00:00Z'`; pricing = 02 §13 defaults (`marginBps 3500, overheadBps 1000, roundingMinor 100, installationBps 800, kerfMm 4, sheetTrimMm 10, nestingAllowRotationDefault true, sheetBillingMode 'used_area', edgePremillMm 0, pricesIncludeTax false, defaultTaxRateId 'seed-tax-gst18', minimumOrderMinor 0, deliveryFlatMinor 0, estimateDisclaimerKey 'estimates.disclaimer'`). It parses with `CatalogSnapshotSchema`; arrays are in the 08 §2.1 sort orders; an extra key is stripped. Index: `defaultMaterialFor` gives carcass/shelf/front/top/plinth → `PB18-WHITE`, back/drawer_bottom → `HDF3-WHITE`, drawer_box → `PLY12-BWR`, leg → `SW50-RUBBER` (07 §2.3); `defaultHardware('slide.side_mount').code === 'SLD-BB-450'`, `'slide.undermount' → 'SLD-UM-450'`, `'hinge.full_overlay' → 'HNG-FO-SC'`; every role key of 07 §6.11 is assigned to exactly one seed row; `hardwareFamily('drawer_slide','bb45')` = 8 codes ordered 250→600; inactive rows resolve via `material(code)` but are skipped by defaults/families; `glassMaterial().code === 'GLASS5-CLEAR'`; `densityOf` uses `densityKgM3` then `DEFAULT_DENSITY` (`hdf 900`, `glass 2500`); `indexCatalog(s) === indexCatalog(s)`.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/catalog resources/js/engine/furniture/__tests__/catalogIndex.test.ts`
+- [ ] **Step 3: Implement** — transcribe 08 §7 tables into the JSON; spec schemas per 08 §2.3 table (required fields marked `*`).
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine tests/fixtures/catalog && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/catalog resources/js/engine/furniture resources/js/engine/testing tests/fixtures/catalog resources/js/engine/index.ts` → `feat(engine): add catalog snapshot schema, seed catalog and catalog index`
+
+### Task 30: Furniture schema, migrate, constants, model types, makePart, part names
+
+**Files:**
+- Create: `resources/js/engine/furniture/schema.ts`, `migrate.ts`, `constants.ts`, `types.ts`, `context.ts`, `parts.ts`, `partNames.ts`
+- Test: `resources/js/engine/furniture/__tests__/schema.test.ts`, `parts.test.ts`, `partNames.test.ts`
+
+**Spec refs:** `03 §2`, `03 §3.1`, `03 §4`, `07 §1.1–§1.3`, `07 §1.6`, `07 §5.1`
+
+**Interfaces:**
+- Consumes: Tasks 8 (`Issue`, `EngineInputError`), 29.
+- Produces: zod schemas + types `FurnitureDocument, MaterialRole (MATERIAL_ROLES), MaterialAssignments, CarcassSpec, Section, SectionChild, Content, Front, TableSpec, Overrides, PartOverride, ExtraPart, HardwareOverride, ExtraHardware, EdgeId`, `TemplateKey` + `TEMPLATE_KEYS` (19); `FURNITURE_SCHEMA_VERSION = 1`, `FURNITURE_MIGRATIONS`, `migrateFurniture(doc: unknown): FurnitureDocument`; every constant of 07 §1.3 by name; `fl(v)`; `types.ts`: `Box3, Part, HardwareLine, ModelFront, FurnitureModel, Axis, PhysEdge, PanelSpec, Joint { member: PartKey; other: PartKey; length: number }, GenContext`; `context.ts`: `createGenContext(doc, catalog): GenContext` with helpers `ctx.mat(role)` (effective material; unknown code → `defaultMaterialFor(role)`), `ctx.t(role)` (`Math.round(thicknessMm)`), `ctx.roleBand(role)`, `ctx.issue(code, severity, params?, entityIds?)`, `ctx.addHardware(line)`; `parts.ts`: `makePart(spec: PanelSpec, ctx): Part`, `mapEdges`, `mapGrain`; `partNames.ts`: `PART_NAMES_EN`, `partNameEn(nameKey, nameParams): string`.
+
+- [ ] **Step 1: Write the failing tests** — schema accepts the 07 §12.2 wardrobe JSON (inline in the test) and rejects `content.count: 0` for shelves, `leaves: 'many'`, `EdgeId 'L3'`; `migrateFurniture` no-op for v1 and throws `EngineInputError('unsupported_schema_version')` for v2. `makePart` examples of 07 §1.2: side panel (thin x, box size [18, 2000, 582]) → `length 2000, width 582`, `L1 = front, L2 = back, W1 = top, W2 = bottom` recorded in `ctx.edgeMap`; top panel 1764 × 582 (thin y) → `L1 front, W1 left`; door leaf (thin z, 606.5 × 1997) → `length 1997, width 606` (`fl`), `L1 left, W1 top`; square panel uses `grainAxis` as length axis; banded `['front']` on the side → `edges { L1: 'EB08-WHITE', L2: null, W1: null, W2: null }` (role band = material default band); `spec.bandCode: null` gives no band; grain `'none'` for `PB18-WHITE` (no grain), `'length'` for `PB18-OAK` with grainAxis = length axis, `'width'` when grainAxis = width axis; `thickness 18`, `qty 1`, `source 'generated'`, zero operations; `fl(1.9999999) === 2`, `fl(605.9999995) === 606`. `partNameEn('parts.back', { n: 2 }) === 'Back panel 2'`, `('parts.back', {}) === 'Back panel'`, `('parts.shelf', { n: 3 }) === 'Shelf 3'`, `('parts.door', { leaf: 1 }) === 'Door 1'`, `('parts.extra', { name: 'Filler' }) === 'Filler'`; `PART_NAMES_EN` has one entry per nameKey of 07 §1.6.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/furniture`
+- [ ] **Step 3: Implement** — schemas per 03 §2 (ranges belong to `validateFurniture`, schema only enforces types/enums/ints and the count ranges written in the 03 comments); `makePart` rules 1–8 of 07 §1.2.
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/furniture resources/js/engine/index.ts` → `feat(engine): add furniture document schema, constants and part builder`
+
+### Task 31: Template infrastructure + `wardrobe_hinged` + wardrobe fixture
+
+**Files:**
+- Create: `resources/js/engine/furniture/templates/types.ts`, `common.ts`, `index.ts`, `wardrobe_hinged.ts`, `database/fixtures/furniture/wardrobe-3door.json`
+- Test: `resources/js/engine/furniture/templates/__tests__/common.test.ts`, `wardrobe_hinged.test.ts`
+
+**Spec refs:** `07 §2.1–§2.3`, `07 §2.4.1`, `07 §2.5` (`reidentify`), `07 §12.1–§12.2` (fixture JSON)
+
+**Interfaces:**
+- Consumes: Tasks 29–30, `testIds()`.
+- Produces: `TemplateCategory`, `Condition`, `ParamField`, `TemplateContext { catalog: CatalogIndex; newId }`, `TemplateDefinition<P>`; `common.ts`: `resolveDefaultMaterials(def, ctx)`, `commonCarcass(ctx): Omit<CarcassSpec,'interior'|'fronts'>`, `leaf(content, ctx)`, `split(dir, children, ctx)`, `hingedFront(covers, leaves, hingeSide, ctx, overlay = 'full')`, `columnsFromDoors(doors, singleColumnSide = 'left'): number[]`, `interiorHeight(H, plinthHeight)`, `shelfCount(h, pitch)`, `clamp`, `emptyOverrides()`, `reidentify(doc, newId): FurnitureDocument`, `effectiveParams(def, defaultOverrides): P`; `templates/index.ts`: `TEMPLATES` (partial until Task 40), `getTemplate(key)`, `templateDefaultDocument(key, defaultOverrides, catalog, newId = newIdFn): { document: FurnitureDocument; issues: Issue[] }` (issues filled after Task 37; until then `[]`). Field `labelKey`s are `templates.fields.{key}`, select option labels `templates.options.{value}` (pinned; 07 leaves them open).
+
+- [ ] **Step 1: Write the failing tests** — `TEMPLATES.wardrobe_hinged.generate(defaults, { catalog: indexCatalog(seedCatalog()), newId: testIds() })` deep-equals the JSON block of 07 §12.2 (pasted into `database/fixtures/furniture/wardrobe-3door.json`, test reads the file); shelf count 4 (`shelfCount(1964, 400)`); `columnsFromDoors(3) = [1,2]`, `(4) = [2,2]`, `(5,'right') = [2,2,1]`, `(1) = [1]`; doors `'auto'` at width 1800 → 3, at 600 → 1, at 3600 → 6; `internalDrawers: 2` turns the first single column into `rows[ flex 1: shelves(shelfCount(1964 − 18 − 360, 400)) / fixed 360: drawers(2, 'equal', null, behindDoor: true) ]`; `hangingStyle 'double'` → three rows with two rods; `plinthHeight 0` → plinth `none`; field order starts `width, height, depth` with the ranges of §2.4.1; `paramsSchema` rejects `width 3610`; `effectiveParams` merges `{ width: 2400 }`, ignores unknown keys and falls back to code defaults when the merged object fails `paramsSchema`; `reidentify` gives fresh section/front ids, rewrites `covers` and every override key containing an old id (`front.fr_0000000001.leaf.1` → new id); `templateDefaultDocument('wardrobe_hinged', {}, catalog, testIds())` returns the same document.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/furniture/templates`
+- [ ] **Step 3: Implement** — 07 §2.3 helpers (section ids depth-first pre-order, children left→right/top→bottom, then front ids); `wardrobe_hinged` generation steps 1–5 of §2.4.1; `TEMPLATES = { wardrobe_hinged } satisfies Partial<Record<TemplateKey, TemplateDefinition>>`, `getTemplate` throws `EngineInputError('invalid_input')` for a missing key.
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine database/fixtures/furniture && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/furniture database/fixtures/furniture resources/js/engine/index.ts` → `feat(engine): add template infrastructure and hinged wardrobe template`
+
+### Task 32: Carcass envelope, panels, plinth, countertop
+
+**Files:**
+- Create: `resources/js/engine/furniture/carcass/envelope.ts`, `panels.ts`, `plinth.ts`, `countertop.ts`
+- Test: `resources/js/engine/furniture/carcass/__tests__/envelope.test.ts`, `panels.test.ts`
+
+**Spec refs:** `07 §3.2`, `§3.3`, `§3.5`, `§3.6`, `§5.2–§5.4`, `07 §12.2` (derived values), `§12.3` (envelope), `§12.4` (plinth returns)
+
+**Interfaces:**
+- Consumes: Task 30 (`GenContext`, `makePart`), Task 29.
+- Produces: `Envelope` (07 §3.2), `computeEnvelope(ctx): Envelope | null` (null + error `furniture.envelope_too_small`), `hasExternalDrawers(doc)`, `coveringFront(doc, sectionId): Front | undefined`; `carcassPanels(ctx, env): void` (pushes parts + 4 joints); `plinthParts(ctx, env): void`; `countertopPart(ctx, env): void`.
+
+- [ ] **Step 1: Write the failing tests** — wardrobe fixture (`t_c = t_s = t_f = t_p = 18`, `t_b = 3`): `fz 18, Wc 1800, Hc 2000, Dc 582, x0 0, y0 100, zp 0, zBackFront 13, slidingZone 0, drawerStyle 'full'`, interior `x [18,1782] y [118,2082] z [13,582]`. Panels: `carcass.side.left` 2000 × 582 edges `{L1:'EB08-WHITE', L2:null, W1:'EB08-WHITE', W2:null}`, `visibleFaces 1`; `carcass.top` / `carcass.bottom` 1764 × 582 with only `L1` banded, faces 0; 4 joints of length 582. Plinth: `plinth.front` 1800 × 100 banded `W1`,`W2` (setback 20 > 0), `plinth.back` 1800 × 100 unbanded, returns `526 × 100` at x = 0, 891, 1782. Returns count: `Wc 1000 → 2`, `1001 → 3`, `2001 → 4` (07 §12.4); `Dc − sb − 2·t_p < 50` → no returns + `furniture.plinth_too_shallow`. Drawer-test box (`custom_box` 600 × 720 × 560, external drawers, no plinth): `fz 18, Dc 542`, interior `x [18,582] y [18,702]`, depth 529. Countertop (custom_box 600 × 850 × 560, legs plinth 100 setback 50, countertop overhangFront 20, top material `PB25-WHITE`): `fz 0` (no fronts), `ctT 25`, `Hc 725`, `Dc 540`, part `countertop` 600 × 560 banded front/left/right, faces 1; overhang 301 → `furniture.countertop_overhang_large`. `over_sides` top bands left/right and has `visibleFaces 1` without countertop. Wall mounting with a plinth → plinth ignored + info `furniture.plinth_ignored`. `W 150, plinth 100, H 100` → `envelope_too_small`, no parts.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/furniture/carcass`
+- [ ] **Step 3: Implement** — formula table of 07 §3.2; panel table §3.3; plinth table §3.5 (legs-type kickboard only when `sb > 0`); countertop §3.6.
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/furniture/carcass` → `feat(engine): generate carcass envelope, panels, plinth and countertop`
+
+### Task 33: Section layout, dividers, shelves/rod/baskets, back panels
+
+**Files:**
+- Create: `resources/js/engine/furniture/carcass/layout.ts`, `contents.ts`, `back.ts`, `resources/js/engine/furniture/sheetFit.ts`
+- Test: `resources/js/engine/furniture/carcass/__tests__/layout.test.ts`, `contents.test.ts`, `back.test.ts`
+
+**Spec refs:** `07 §3.4` (incl. §3.4.1 split), `§3.7–§3.11`, `§6.7`, `§12.2`, `§12.4` (back split)
+
+**Interfaces:**
+- Consumes: Tasks 30, 32.
+- Produces: `SectionBoxInfo`, `SectionLabel`, `Divider`, `SectionLayout`, `layoutSections(doc, catalog): SectionLayout` (public), `layoutFromEnvelope(ctx, env): SectionLayout`, `allocate(children, avail): { sizes: number[]; overBy: number | null; adjusted: boolean }`, `dividerParts(ctx, layout)`, `shelvesFor(ctx, leaf, content)`, `rodFor(ctx, leaf, content)`, `basketsFor(ctx, leaf, content)`, `contentDepth(ctx, env, sectionId)`, `backPanels(ctx, env, layout)`, `fitsSheet(a, b, material, grain, trim): boolean`.
+
+- [ ] **Step 1: Write the failing tests** — wardrobe layout: columns 582 / 1164 with partition `section.s_0000000001.partition.1` at `x [600,618]` (part 1964 × 569, `L1` banded, faces 0); rows of `s_0000000003` = 350 / 1596, fixed shelf `y [1714,1732]` (part 1164 × 569); labels `Interior`, `Column 1`, `Column 2 › Row 1`. `allocate`: avail 1000 with three flex 1 → `[334, 333, 333]`; fixed 600 + fixed 500 in 1000 → error `furniture.fixed_sizes_exceed { overBy: 100 }` and proportional fallback sizes; all-fixed children → last treated as flex + info `furniture.fixed_sizes_adjusted`. Shelves (wardrobe `s_0000000002`): 4 parts `section.s_0000000002.shelf.1..4` each 580 × 549, `L1` banded; hardware `section.s_0000000002.shelf_supports` = `SHF-PIN-5 × 16`; `shelfPinHoles` 116 on `carcass.side.left` and 116 on the partition (`pr = 58`); 18 shelves in a 300 mm-high leaf (18 × 18 > 300) → `shelves_dont_fit`; non-adjustable shelves record 2 joints each. Rod (`s_0000000005`): `ROD-OVAL-1200 × 1`, `ROD-SUP × 2`; 1300-wide rod section → 2 pieces and `rod_span_long`; depth 500 → `rod_section_shallow { depth: 500 }`; height 850 → `rod_section_short`. Baskets: `base_cabinet` `basket` variant (leaf 564 wide, 714 high, 529 deep) → `BSK-PULL-600 × 2`, no warning; a 500-wide leaf → `basket_size_mismatch`; count 5 in a 700-high leaf → `baskets_dont_fit`. Back: wardrobe grooved back 1778 × 1978 split at the partition centre x = 609 → `carcass.back.1` 1978 × 598 and `carcass.back.2` 1978 × 1180, info `furniture.back_split { count: 2 }`, no seam warning; `custom_box` 2400 × 2000 × 600, plinth none, nailed HDF3 back → 2 pieces 1200 × 2000 + warning `furniture.back_seam_unsupported { axis: 'x', position: 1200 }` (07 §12.4); `fitsSheet(1978, 1778, HDF3, 'none', 10) === false`, `(2420, 1200, …) === true`.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/furniture/carcass`
+- [ ] **Step 3: Implement** — 07 §3.7 allocation rules (leftover +1 mm to flex children in order); divider tables §3.8 with geometric joint discovery (face equality within 0.5 mm, positive overlap); §3.9–§3.11; back table §3.4 + greedy split §3.4.1 using `fitsSheet` (`trim = pricing.sheetTrimMm`).
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/furniture resources/js/engine/index.ts` → `feat(engine): lay out sections and generate dividers, shelves, rods and backs`
+
+### Task 34: Fronts + hinge, flap and handle rules
+
+**Files:**
+- Create: `resources/js/engine/furniture/fronts/openings.ts`, `hinged.ts`, `flap.ts`, `glass.ts`, `sliding.ts`, `resources/js/engine/furniture/rules/hardware.ts`
+- Modify: `resources/js/engine/furniture/rules/weight.ts` (add `partWeightKg`, `leafWeightKg`)
+- Test: `resources/js/engine/furniture/fronts/__tests__/openings.test.ts`, `hinged.test.ts`, `sliding.test.ts`, `glass.test.ts`, `resources/js/engine/furniture/rules/__tests__/hardware.test.ts`
+
+**Spec refs:** `07 §4.1–§4.3`, `§4.5–§4.6`, `§6.1–§6.4`, `§6.10`, `§12.2` (fronts, hinges), `§12.4` (inset, half overlay, hinge counts, sliding)
+
+**Interfaces:**
+- Consumes: Tasks 30–33.
+- Produces: `OpeningRect { x0; x1; y0; y1; edges: Record<'left'|'right'|'top'|'bottom', { cls: 'outer'|'shared'|'divider_open'; tp: number }> }`, `computeOpenings(ctx, env, layout): Map<frontId, OpeningRect>`, `coverFor(overlay, cls, tp): number`, `frontRect(opening, overlay)`; `hingedFront(ctx, env, front, opening)`, `flapFront(…)`, `slidingFront(…)`, `glassLeaf(…)`; `hingeCount(edgeLengthMm, leafWeightKg)`, `hingeRoleKey(overlay, cls): HardwareRoleKey`, `handleCodeFor(ctx, front)`, `handlesFor(ctx, frontId, leafRects, orientation)`, `flapMechanism(ctx, front, leafWidth)`; `partWeightKg(part, idx)`, `leafWeightKg(parts, idx)`.
+
+- [ ] **Step 1: Write the failing tests** — worked example 07 §4.1: wardrobe column 1 opening `x [18,600] y [118,2082]`, left `outer` (cv 16.5), right `shared` on the partition (cv 8), front rect `X0 1.5, X1 608, Y0 101.5, Y1 2098.5`; leaf part `front.fr_0000000001.leaf.1` 1997 × 606 banded all four, faces 2, grain axis y; `fr_0000000002` → 2 leaves of 593 × 1997; model fronts `{ x: 1, y: 101, w: 606, h: 1997 }` hinge `left`, `{ x: 610, … w: 593 }` hinge `left`, `{ x: 1205, … }` hinge `right`. `hingeCount`: `(900,5)=2, (901,5)=3, (1600,11)=3, (1997,14.16)=4, (2100,10)=5, (800,13)=4, (500,25)=5`; leaf weights 14.16 and 13.86 kg (1 decimal). Hardware lines: `front.fr_0000000001.hinges HNG-FO-SC 4`, `.hinge_plates HNG-PLATE-0 4`, `.handles HDL-BAR-160 1`; `front.fr_0000000002.hinges HNG-FO-SC 4`, `.hinges.shared HNG-HO-SC 4`, `.hinge_plates 8`, `.handles 2`; operations `hingeCups 4` and `handleHoles 2` per leaf. Inset (07 §12.4): custom_box 600 wide, single inset door over root → opening 564, leaf width 560, height = opening height − 4, `fz 0`, hinge `HNG-IN-SC`. Half overlay: custom_box 1200 × 720 × 560, two equal columns (573) each with a half-overlay single door → leaf 1 `X [10, 599]`, leaf 2 `X [601, 1190]` (589 each), both `HNG-HO-SC`. `hingeCode: null` → no hinges/plates; hinge item with `integratedPlate: true` (mutated catalog) → no plates; leaf > 22 kg → `furniture.door_heavy`; opening share > 600 → `door_wide`; `leaves: 3` hinged → error `hinged_leaves_unsupported` and 2 leaves generated. Flap up 900 wide → `GAS-80N × 2`, flap down 500 → `LFT-STAY-SC × 1`, flap with `leaves: 2` → `flap_leaves_ignored`; handle `HDL-BAR-320` on a 300-wide drawer-front-like flap → `KNB-ROUND-30` + info `handle_replaced_by_knob`. Glass (`glass: true`) leaf 593 × 1997 → stiles 60 × 1997, rails 473 × 60, glass `487 × 1891` in `GLASS5-CLEAR`, no solid leaf key, model front `partKey` = `.stile.left`; a 300-wide glass leaf → `glass_door_too_small` and a solid leaf. Sliding wardrobe defaults (07 §12.4): leaves 3, `Wo 2364`, leaf width 808, height 1924, `TRK-SLD-2T-3000 × 1`, `ROL-SLD-SET × 3`, `HDL-FLUSH × 3`, odd leaves on the front track; partial sliding front → `sliding_front_partial`; two sliding fronts → `sliding_front_multiple`.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/furniture/fronts resources/js/engine/furniture/rules`
+- [ ] **Step 3: Implement** — classification + cover table of 07 §4.1; §4.2–§4.6 leaf generators; hinge primary/shared split of §6.2; handles §6.4; flap mechanisms §6.3; `furniture.front_not_rectangle`/`front_overlap` evaluation helpers exported for Task 37 (`frontCoverageIssues(doc, layout)`).
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/furniture` → `feat(engine): generate hinged, flap, glass and sliding fronts with hardware`
+
+### Task 35: Drawers and slide selection
+
+**Files:**
+- Create: `resources/js/engine/furniture/carcass/drawers.ts`, `resources/js/engine/furniture/fronts/drawerFronts.ts`
+- Test: `resources/js/engine/furniture/carcass/__tests__/drawers.test.ts`
+
+**Spec refs:** `07 §3.12`, `§4.4`, `§6.5`, `§12.3`, `§12.4` (slide selection)
+
+**Interfaces:**
+- Consumes: Tasks 30–34.
+- Produces: `drawerFrontRects(ctx, opening, content): Array<{ x0; x1; y0; y1 }>`; `selectSlide(ctx, { slideCode, maxLen, family? }): { slide: CatalogHardware | null; boxLength: number; issues }`; `drawersFor(ctx, env, layout, leaf, content, keyPrefix = 'section.{S}.drawer'): void` (also used by the table family with prefixes `table.drawer` / `table.cabinet.drawer`).
+
+- [ ] **Step 1: Write the failing tests** — 07 §12.3 verbatim: `custom_box` 600 × 720 × 560, root leaf `drawers { count: 3, frontHeights: 'equal', slideCode: null, behindDoor: false }`: `maxLen 519` → `SLD-BB-500`, no depth warning; `Wb 538`, `Win 514`, `Lb 500`; fronts block `x [1.5,598.5] y [1.5,718.5]`, fronts 597 × 237 with rect y = 480, 241, 1; box heights 180 / 190 / 180; drawer 1 parts `…drawer.1.side.left/right` 500 × 180 in `PLY12-BWR` (banded edge `top` = `L1`, which receives the `drawer_box` role band — `null` with the seed catalog because PLY12-BWR has no default band), `.back` 514 × 167, `.bottom` 524 × 500 (`HDF3-WHITE`, unbanded), `.front` 597 × 237 banded all four faces 2; hardware `.slides SLD-BB-500 × 1`, `.handle HDL-BAR-160 × 1` per drawer; `slideScrewSets` +1 on each side panel per drawer; model fronts of kind `drawer` with `frontId null`. Undermount (`slideCode 'SLD-UM-500'`): kept, `Win 522`, `Wb 546`, `Lb 490`, bottom 532 × 490, back 522 × 164. Slide selection (07 §12.4): explicit `SLD-BB-350` with `maxLen 519` → kept + warning `drawer_depth_unused { unused: 169 }`; `maxLen 240` → error `drawer_no_slide` and no box parts; explicit `SLD-UM-500` with `maxLen 480` → `SLD-UM-450` + info `slide_resized { from: 'SLD-UM-500', to: 'SLD-UM-450' }`. Behind door (wardrobe with `internalDrawers: 2`): inner fronts `…drawer.{j}.front` in `PLY12-BWR` with nameKey `parts.drawer_inner_front`, `Wo` reduced by 40 (packers), available depth −20, no `.handle`; drawers under a Front with `behindDoor: false` → warning `drawers_forced_behind_door`. Slot of 95 mm → `drawer_too_low`; the §12.3 box with `frontHeights [320, 320, 1]` → last front `717 − 640 − 4 = 73 < 80` → error `drawer_heights_invalid`; a 2-element list for count 3 → treated as `'equal'` + warning `drawer_heights_invalid`.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/furniture/carcass/__tests__/drawers.test.ts`
+- [ ] **Step 3: Implement** — 07 §3.12 (slots, box height, opening width, available depth, slide selection steps 1–5, box table by slide type, placement) and §4.4 front division.
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/furniture` → `feat(engine): generate drawer boxes, fronts and slide selection`
+
+### Task 36: `generateFurniture` orchestration, carcass hardware, overrides
+
+**Files:**
+- Create: `resources/js/engine/furniture/generate.ts`, `resources/js/engine/furniture/rules/connectors.ts`, `resources/js/engine/furniture/rules/carcassHardware.ts` (legs, mounting, screws), `resources/js/engine/furniture/overrides.ts`, `resources/js/engine/furniture/codes.ts`
+- Test: `resources/js/engine/furniture/__tests__/generate.wardrobe.test.ts`, `overrides.test.ts`, `catalogDrift.test.ts`, `carcassHardware.test.ts`
+
+**Spec refs:** `07 §3.1`, `§3.14`, `§6.1` (weight estimate), `§6.6`, `§6.8–§6.9`, `§12.2` (complete expected tables), `§12.4` (cabinet legs)
+
+**Interfaces:**
+- Consumes: Tasks 29–35.
+- Produces: `generateFurniture(doc: FurnitureDocument, catalog: CatalogSnapshot): FurnitureModel` (public); `referencedCodes(doc): Array<{ code; kind: 'material'|'edge_band'|'finish'|'hardware' }>`, `codeIssues(doc, idx): Issue[]`; `connectorsForJoints(ctx, family: 'carcass'|'table')`; `cabinetLegs(ctx, env)`, `mountingHardware(ctx, env)`, `screwPacks(ctx, prefix)`; `applyOverrides(ctx): void`.
+
+- [ ] **Step 1: Write the failing tests**
+  - `generate.wardrobe.test.ts` — wardrobe fixture + seed catalog → exactly the 20 parts of the 07 §12.2 table (key, material, T, L, W, L1/L2/W1/W2 per row; all `qty 1`, all grain `'none'`), sorted by key; `fronts` exactly the three rects; hardware lines exactly the 14-row table (key, code, qty); operations: `hingeCups` 4 per leaf, `shelfPinHoles` 116 on `carcass.side.left` and on the partition, `handleHoles` 2 per leaf, `camLocks` 16 / `dowels` 16 summed over members, `slideScrewSets` 0; issues **exactly** `[info furniture.back_split {count:2}, info furniture.anti_tip_added, info furniture.weight_estimate {kg:144.4}]` (order-insensitive); `bbox = { min: [0,0,0], size: [1800,2100,600] }`; `sections` = leaf boxes in pre-order; calling twice yields deep-equal output (determinism).
+  - `carcassHardware.test.ts` — cabinet legs (07 §12.4): `Wc 600 → 4`, `900 → 6`, `1800 → 8` legs; code `LEG-PLINTH-100` when setback > 0, `LEG-CAB-ADJ` when 0; plinth height 90 with `LEG-PLINTH-100` (95–150) → `leg_height_mismatch`; wall mounting 1800 wide → `BRK-WALL-HANG × 4`; floor `H 1499` → no anti-tip; screw packs `max(1, ceil(31/30)) = 2` for 31 generated parts.
+  - `overrides.test.ts` — `removed` drops the part and its model front; `materialCode 'PB18-OAK'` changes material and thickness, marks `overridden`; `edges { W2: 'EB20-WHITE' }`; `lengthDelta −10` shrinks length and the box; result ≤ 0 → error `override_invalid` and size kept; override on a missing key → dropped + info `override_orphaned { key }`; hardware `qtyDelta −4` on a 4-qty line drops it, `code` replaces; extra part `p_…` → `extra.p_…`, nameKey `parts.extra`, `visibleFaces 2` for role front, zero-size box when `placement null`; extra hardware → `extra.h_…`, reason `hardware.reason.extra`.
+  - `catalogDrift.test.ts` (**review focus 3**) — catalog with `PB18-WHITE.isActive = false` → warning `furniture.archived_code { code: 'PB18-WHITE' }`, parts unchanged; catalog with the `HNG-FO-SC` row deleted (the wardrobe references hinges only through `hingeCode: 'auto'`) → warning `no_default_hardware { roleKey: 'hinge.full_overlay' }` and the full-overlay hinge lines omitted; document with `materials.front.materialCode = 'GONE-01'` → error `furniture.unknown_code { code: 'GONE-01', kind: 'material' }` and leaves still generated with `PB18-WHITE`; none of these throw.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/furniture/__tests__`
+- [ ] **Step 3: Implement** — pipeline order of 07 §3.1 steps 1–8 (step 6 model-level validation is added in Task 37; leave a hook `modelRules(ctx)` that is a no-op here); joints → cams/dowels `max(2, ceil(length / 320))` on the member part; screw packs from the generated `Σ qty` before overrides; weight estimate `Math.round(kg × 10) / 10`; overrides order of §3.14.
+- [ ] **Step 4: Run tests, expect PASS** — `yarn vitest run resources/js/engine/furniture`
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/furniture resources/js/engine/index.ts` → `feat(engine): orchestrate furniture generation with carcass hardware and overrides`
+
+### Task 37: `validateFurniture`, sag table, model-level rules
+
+**Files:**
+- Create: `resources/js/engine/furniture/validate.ts`, `resources/js/engine/furniture/rules/sag.ts`, `resources/js/engine/furniture/rules/model.ts`
+- Modify: `resources/js/engine/furniture/generate.ts` (call `modelRules`), `resources/js/engine/furniture/templates/index.ts` (`templateDefaultDocument` returns `validateFurniture` issues)
+- Test: `resources/js/engine/furniture/__tests__/validate.test.ts`, `resources/js/engine/furniture/rules/__tests__/sag.test.ts`
+
+**Spec refs:** `03 §2.4`, `07 §1.4`, `§7.1–§7.3`, `§12.4` (sag cases)
+
+**Interfaces:**
+- Consumes: Tasks 33–36.
+- Produces: `SAVE_BLOCKING_CODES: ReadonlySet<string>` (exactly the 9 codes of 03 §2.4), `CRITICAL_WARNING_CODES`, `FURNITURE_ISSUE_CODES` (every code of 07 §7.3 incl. `furniture.part_exceeds_sheet_back`), `validateFurniture(doc, catalog): Issue[]` (structural + generated issues, deduplicated by `code + entityIds`), `isSaveBlocking(issues): boolean`; `SAG_TABLE`, `sagLimits(boardType, thickness, clamped: boolean): { warn: number; critical: number }`; `modelRules(ctx): void` (sag, `part_exceeds_sheet`, `too_many_parts`, `loft_no_access`, `thin_carcass`, `back_too_thick_for_groove`, `drawer_bottom_thick`, `drawer_box_thickness`).
+
+- [ ] **Step 1: Write the failing tests** — wardrobe fixture → only the 3 info issues, `isSaveBlocking === false`; width 6001 → `dims_range { dimension: 'width', min: 150, max: 6000 }`; `carcass` set on a table-family doc → `family_mismatch`; duplicate section id / `split 'columns'` with one child / leaf with `content null` → `section_tree_invalid`; leaf 95 mm wide → `section_too_small { width: 95, … }`; L-shaped `covers` → `front_not_rectangle`; two fronts on one leaf → `front_overlap`; unknown code → `unknown_code`; 401 parts (extra part qty 99 × 5) → `too_many_parts { count }` (count = Σ qty); every code in `SAVE_BLOCKING_CODES` blocks, `furniture.shelves_dont_fit` (error) does not. Sag (07 §12.4, PB18): adjustable span 801 → `shelf_sag`, 1001 → `shelf_sag_critical`; fixed 1164 → none; fixed 1201 → `shelf_sag`; MDF18 adjustable 900 → `shelf_sag`; PLY18 adjustable 1100 → `shelf_sag` only; `sagLimits('particle_board', 17, false)` uses the 16 mm row; `('hdf', 2, …)` scales the 3 mm row by 2/3; unknown type 20 mm → `44 × 20 / 55 × 20`. A non-back part larger than the sheet (2500 × 600 side) → `part_exceeds_sheet` with sheet dims; loft with no fronts → `loft_no_access`; carcass material 12 mm → `thin_carcass`; grooved back 9 mm → `back_too_thick_for_groove`; `templateDefaultDocument('wardrobe_hinged', {}, …).issues` equals the 3 info issues.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/furniture`
+- [ ] **Step 3: Implement** — structural checks of 03 §2.4 on the raw doc (run even when generation stops), then `generateFurniture(doc, catalog).issues`; sag lookup rules of 07 §7.2 (largest thickness ≤ t, else scale smallest; ×1.5 for clamped shelves; applies to loose, fixed, table lower and table cabinet shelves).
+- [ ] **Step 4: Run tests, expect PASS** — `yarn vitest run resources/js/engine/furniture`
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/furniture resources/js/engine/index.ts` → `feat(engine): validate furniture documents and models`
+
+### Task 38: Table family generator
+
+**Files:**
+- Create: `resources/js/engine/furniture/table/generateTable.ts`, `resources/js/engine/furniture/table/outlines.ts`
+- Modify: `resources/js/engine/furniture/generate.ts`
+- Test: `resources/js/engine/furniture/table/__tests__/generateTable.test.ts`
+
+**Spec refs:** `07 §3.13`, `§5.2–§5.4` (table rows), `§6.4` (table handles), `§6.9`
+
+**Interfaces:**
+- Consumes: Tasks 30–37 (`drawersFor`, `shelvesFor`, `hingedFront` helpers, `connectorsForJoints`).
+- Produces: `tableParts(ctx): void`; `roundedRectOutline(W, D, r, segmentsPerCorner = 8)`, `circleOutline(d, segments = 64)`, `ellipseOutline(W, D, segments = 64)` (CW `[x, z]` pairs).
+
+- [ ] **Step 1: Write the failing tests** — dining table defaults (1800 × 750 × 900, overhang 50, solid legs 50, apron 90 inset 15, top `PB25-WHITE`, legs `SW50-RUBBER`): `Tt 25`, `Hb 725`, `Wb 1700`, `Db 800`; `table.top` 1800 × 900 banded all four with `EB10-WHITE-28`, faces 1; `table.leg.fl` box x `[50,100]`, z `[800,850]`, part 725 × 50 thickness 50 grain `'length'`; `table.apron.front` 1600 × 90 (z `[817,835]`), `table.apron.left` 700 × 90 (x `[65,83]`), aprons banded `bottom` only, faces 1; hardware `table.connectors.corner CON-TBL-CORNER × 4`, `table.connectors.dowel × 16`, `table.screws × 1`, no `table.legs`. Hardware legs (`legSource 'hardware'`) → `table.legs LEG-TBL-710 × 4`, leg height check against `Hb 725` (710 + 15 ≥ 725 → no warning; `Hb 760` → `leg_height_mismatch`). `stretcher: true` → left/right/center stretchers at y `[150,210]` and dowels +12. `lowerShelf` → `table.shelf` at y `[100,118]` banded front+back, +8 dowels. `round` with W ≠ D → `round_top_not_square`; `rounded_rectangle` r 100 → extruded outline with 4 × 8 corner segments; r > min(W,D)/2 → `corner_radius_too_large`; `round` 1000 → 64-segment circle outline and legs placed in the inscribed square (`Wb = fl((W − 2o)/√2)`); `thickness: 50` with 25 mm material → 2 layers `table.top` + `table.top.layer.2`; `thickness: 40` → rounded to 2 layers + info `table_top_thickness_rounded`. Study desk defaults (1200 × 750 × 600, cabinet_ends 400 drawers): `table.end.left` 725 × 600 banded front/back; `table.cabinet.side.left` 725 × 582; cabinet drawer fronts 397 wide (`X [801.5, 1198.5]`, top cover −2); slides `SLD-BB-550 × 3`; modesty `table.stretcher.back` 782 × 362; no `knee_space_narrow`; cabinet width 700 on a 1200 desk → `knee_space_narrow { width: 482 }`. Pedestal on 1300 round → `pedestal_unstable`; trestle → `table.trestle.left.upright/foot/cleat` + cams 4 + dowels 8; `storage.drawers { count: 1, side: 'left' }` on `panel_ends` → `table_drawer_side_unsupported`; endCabinets content `hanging_rod` → `cabinet_content_unsupported`.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/furniture/table`
+- [ ] **Step 3: Implement** — 07 §3.13 tables for `four_legs`, `panel_ends`, `trestle`, `pedestal`, `cabinet_ends`, under-top drawers; table handles use `defaultHardware('handle.default')`; no §6.8 hardware for tables.
+- [ ] **Step 4: Run tests, expect PASS** — `yarn vitest run resources/js/engine/furniture`
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/furniture` → `feat(engine): generate table-family furniture`
+
+### Task 39: Carcass templates (14)
+
+**Files:**
+- Create: `resources/js/engine/furniture/templates/{wardrobe_sliding,loft_cabinet,base_cabinet,wall_cabinet,tall_cabinet,bookshelf,open_shelf_wall,tv_unit,shoe_rack,chest_of_drawers,sideboard,bedside_table,dressing_unit,custom_box}.ts`
+- Modify: `resources/js/engine/furniture/templates/index.ts`
+- Test: `resources/js/engine/furniture/templates/__tests__/carcassTemplates.test.ts`
+
+**Spec refs:** `07 §2.4.2–§2.4.13`, `§2.4.18–§2.4.19`, `§2.1` rules 2–5, `§2.3`
+
+**Interfaces:**
+- Consumes: Task 31 helpers, Task 37 (`validateFurniture`).
+- Produces: 14 `TemplateDefinition`s registered in `TEMPLATES`. Every `'auto'` param is resolved to a number before building the document.
+
+- [ ] **Step 1: Write the failing tests** — one `describe` per template asserting its default document structure from §2.4 with `testIds()` (root split, child weights/sizes, contents, fronts, mounting/plinth/back/construction) and that `validateFurniture` has no `error`: e.g. `wardrobe_sliding` → 3 flex columns (shelves / rows[350 empty, rod] / shelves), one sliding front over root with `leaves: 3`, `hingeCode null`, `slidingTrackCode 'auto'`, plinth setback 0, handles `HDL-FLUSH`; `loft_cabinet` → mounting `loft`, back `nailed`, 3 empty columns + hinged fronts; `flap_up` variant → one `flap_up` front per column; `base_cabinet` variants `door` / `drawers` (`SLD-UM-450`, no Front) / `door_drawer` (rows fixed 150 drawers + flex shelves, door over row 2) / `basket`; `countertop: true` sets countertop overhangFront 20 and `materials.top = PB25-WHITE`; `wall_cabinet` height 700 → 2 shelves, 600 → 1, `open` → no front; `tall_cabinet` with niche → rows `[flex, fixed 600 empty, flex]`, doors on rows 1 and 3; `bookshelf` 900 → 2 columns of shelfCount(1704, 330) = 4 shelves, `lowerDoors` → rows with a fixed 700 lower part and hinged fronts; `open_shelf_wall` 1200 × 400 → rows auto 1 → columns auto 2, construction `over_sides`, back `none`, no fronts; `tv_unit` defaults → `columns[w1 drawers(2) | w2 empty | w1 shelves(1)]` + door(col3, 1, right), legs plinth 100 setback 0, top `over_sides`; `shoe_rack` 800 → 2 columns, hinge left then right; `chest_of_drawers` 800 × 1000 → 1 column, `drawerCount auto = 4`; width 1100 → 2 columns; `sideboard` legHeight 0 → plinth none; `bedside_table` three variants; `dressing_unit` rows `[flex columns(3) / fixed 510 columns(2)]` for drawerRows 3; `custom_box` → root leaf empty, no fronts.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/furniture/templates`
+- [ ] **Step 3: Implement** — one file per template from §2.4 (fields with ranges/defaults/`advanced`/`visibleIf` as tabled; hardware codes only through `ctx.catalog.defaultHardware`).
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/furniture/templates` → `feat(engine): add carcass furniture templates`
+
+### Task 40: Table templates (4), furniture fixtures, template property test
+
+**Files:**
+- Create: `resources/js/engine/furniture/templates/{study_desk,dining_table,coffee_table,console_table}.ts`, `database/fixtures/furniture/tv-unit-1800.json`, `bookshelf-5shelf.json`, `kitchen-base-600.json`, `dining-table-6seat.json`, `study-desk-cabinet.json`
+- Modify: `resources/js/engine/furniture/templates/index.ts` (`TEMPLATES` becomes `satisfies Record<TemplateKey, TemplateDefinition>`)
+- Test: `resources/js/engine/furniture/templates/__tests__/tableTemplates.test.ts`, `fixtures.test.ts`, `property.test.ts`
+
+**Spec refs:** `07 §2.4.14–§2.4.17`, `§2.1` rule 3, `§12.5`, `03 §6`
+
+**Interfaces:**
+- Consumes: Tasks 31, 37–39.
+- Produces: the 4 table templates; complete `TEMPLATES` (19 keys, `Object.keys(TEMPLATES).length === 19`); the five fixture JSON files.
+
+- [ ] **Step 1: Write the failing tests** — table templates: `study_desk` defaults = table spec of §2.4.14 (cabinet_ends 400, drawers ×3, `apron.enabled false`, stretcher true, `preferredMaterials.top PB25-WHITE`); `dining_table` defaults → top `{ shape: 'rectangle', thickness: 'material', cornerRadius: 0, overhang: 50 }`, apron 90/15, `legSource 'solid'`; `shape 'round'` forces `depth = width`; `rounded_rectangle` → cornerRadius 100; `coffee_table` overhang 30, apron 70/10, lowerShelf true; `console_table` drawers 2 → `storage.drawers { count: 2, side: 'front', slideCode: null }`, 0 → null. Fixtures (each = `getTemplate(key).generate(params, { catalog: indexCatalog(seedCatalog()), newId: testIds() })`, written once with `UPDATE_FIXTURES=1` then compared): `tv-unit-1800` = `tv_unit` defaults; `bookshelf-5shelf` = `bookshelf { …defaults, height: 2100 }` (shelfCount(2004, 330) = 5 per column, the reason for the file name); `kitchen-base-600` = `base_cabinet` defaults; `dining-table-6seat` = `dining_table` defaults; `study-desk-cabinet` = `study_desk` defaults; the wardrobe fixture test of Task 31 still passes. Property test (07 §12.5): `mulberry32(42)`, for each of the 19 templates the defaults plus 50 random parameter sets inside the declared field ranges (length fields snapped to `step`, selects uniformly, booleans 50/50, `allowAuto` ints 'auto' 25 %): `validateFurniture` has **no `error`** issues, ≤ 400 parts, every part `length ≥ width > 0`, every part box inside the bbox (±1 mm).
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/furniture/templates`
+- [ ] **Step 3: Implement** — 4 template files per §2.4.14–§2.4.17; then fix any template/generator combination the property test exposes (the failing seed and params are printed by the test via `expect(…, JSON.stringify(params))`).
+- [ ] **Step 4: Run tests, expect PASS** — `UPDATE_FIXTURES=1 yarn vitest run resources/js/engine/furniture/templates/__tests__/fixtures.test.ts` once, then `yarn vitest run resources/js/engine/furniture`
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine database/fixtures/furniture && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/furniture/templates database/fixtures/furniture` → `feat(engine): add table templates, furniture fixtures and template property test`
+
+### Task 41: Furniture commands
+
+**Files:**
+- Create: `resources/js/engine/furniture/commands/{dims,construction,sections,fronts,materials,table,overrides,notes,registry,pipeline}.ts`
+- Test: `resources/js/engine/furniture/commands/__tests__/{dims,sections,fronts,materials,overrides,table}.test.ts`
+
+**Spec refs:** `07 §9`, `07 §12.5` (commands), `04 §6.1–§6.2`
+
+**Interfaces:**
+- Consumes: Task 20 (`createCommandBus`, `defaultPipeline`), Tasks 30–40.
+- Produces: `FurnitureCommandContext { catalog: CatalogIndex; newId }`; `FURNITURE_COMMAND_ERROR_CODES = ['not_found','invalid_params','not_leaf','not_split','out_of_range','invalid_document']`; `furniturePipeline` (default pipeline + `FurnitureDocumentSchema.safeParse` after `run` → `invalid_document`); `FURNITURE_COMMANDS` (28 entries keyed `furniture.setDims` … `furniture.setNotes`, `mergeMode 'replace'`, `touchesGeometry false`, labelKey `engine.furniture.command.label.<snake_name>`); `createFurnitureBus({ initial, catalog, newId? })`; `furniturePathToEntityId(path)` (sections/fronts by id where the path walks `carcass.interior`/`carcass.fronts`, overrides by key, else `'*'` for root collections).
+
+- [ ] **Step 1: Write the failing tests** (wardrobe fixture, `testIds()` continuing after the fixture ids; each command: apply → expected doc; undo → deep-equal original): `setDims { width: 7000 }` clamps to 6000; round tables keep `depth = width`; consecutive `setDims` with `merge: true` → 1 entry (mergeKey `dims`); `setMounting 'wall'` resets plinth to none; `setPlinth { type: 'none' }` sets height 0; `splitSection` on leaf `s_0000000002` into 2 columns → content moves to child 1, child 2 `empty`, both flex 1, front `fr_0000000001` still covers `s_0000000002`; on a non-leaf → `not_leaf`; drawers moved under a Front get `behindDoor true`; `setChildSize` with mergeKey `drag:{parentId}`; `insertChild` default flex 1; `removeChild` down to one child makes the parent a leaf with that content and deletes fronts left with empty `covers`; `mergeSections` rewires `covers` (dedupe; second front covering the merged id deleted); `setContent` drawers under a Front → `behindDoor true`; `addFront` creates `fr_…` and syncs drawers; `updateFront` covers change re-syncs; `removeFront` resets `behindDoor false`; `setMaterial { role: 'carcass', materialCode: 'PB18-OAK', applyToRoles: ['shelf','plinth'] }`; `setTable` deep-merges and replaces arrays; `setPartOverride` with `null` or `{}` deletes the entry; `removeExtraPart` also deletes `overrides.parts['extra.' + id]`; `resetOverrides 'parts'` keeps extras; `setNotes '  '` → `null`; `furniturePipeline` with a test-only command that writes `dims.width = 1.5` → `invalid_document`, doc unchanged; `Object.keys(FURNITURE_COMMANDS).length === 28`.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/furniture/commands`
+- [ ] **Step 3: Implement** — one `CommandDef` per 07 §9 row with zod `paramsSchema`, semantics column verbatim; shared `syncBehindDoor(draft)` helper.
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/furniture/commands resources/js/engine/index.ts` → `feat(engine): add furniture builder commands`
+
+### Task 42: `computeBom` — cut sizes, edge banding, cut list rows, sheets, finishing
+
+**Files:**
+- Create: `resources/js/engine/bom/types.ts`, `constants.ts`, `cutSizes.ts`, `edgeBanding.ts`, `rowKey.ts`, `bom.ts`
+- Test: `resources/js/engine/bom/__tests__/cutSizes.test.ts`, `edgeBanding.test.ts`, `rowKey.test.ts`, `bom.wardrobe.test.ts`
+
+**Spec refs:** `08 §3.1–§3.8`, `08 §10.2` (non-nesting parts), `§10.3`, `03 §3.2`
+
+**Interfaces:**
+- Consumes: Tasks 29–37 (`FurnitureModel`, `partNameEn`, `indexCatalog`), Task 2 (`ceilDiv`, `roundHalfUpDiv`).
+- Produces: `Bom`, `CutListRow`, `NestingResult`, `ComputeBomOptions` (03 §3.2 / 08 §3); `EDGE_ALLOWANCE_MM = 50`, `EDGE_WASTE_PERMILLE = 50`, `FINISH_AREA_STEP_MM2 = 10_000`; `cutSize(part, catalog, premillMm): { cutLength; cutWidth }`; `edgeBandLengths(parts, catalog): Array<{ edgeBandCode; lengthMm }>`; `fnv1a32(str): number`, `rowIdentity(part)`, `rowKeyFor(part): string`; `bomOptionsFor(doc, nesting): ComputeBomOptions`; `computeBom(model, catalog, options): Bom` (nesting wired in Task 43; with `nesting: true` before Task 43 it throws `Error('nesting not implemented')`).
+
+- [ ] **Step 1: Write the failing tests** — cut sizes (08 §3.2/§10.3): one 0.8 band → −1; two 0.8 → −2; two 2.0 → −4; two 0.4 → −1; one 0.4 → 0; pre-mill 1 + 0.8 → 0; pre-mill 1 + two 2.0 → −2 (bands on `W1/W2` shorten the length, on `L1/L2` the width). Edge banding: extruded round top Ø 1000 (64-gon) banded → raw `round(P) + 50 = 3190`, `lengthMm = 3350`. `fnv1a32('') === 0x811c9dc5`, `fnv1a32('a') === 0xe40c292c`; `rowKeyFor` matches `/^r[0-9a-f]{8}$/`; a part banded on `L2` instead of `L1` gets the same row key. Wardrobe (`generateFurniture(wardrobe, seed)`, `computeBom(model, seed, bomOptionsFor(doc, false))`): **12 rows** in order HDF3 1978 × 1180, 1978 × 598; PB18 sides `2000 × 582 → cut 1999 × 581` qty 2 name `'Left side / Right side'`; door `1997 × 606 → 1995 × 604` qty 1; doors `1997 × 593 → 1995 × 591` qty 2; partition `1964 × 569 → 1964 × 568`; plinth front `1800 × 100 → 1798 × 100` and plinth back `1800 × 100 → 1800 × 100` (compare this pair as a set); top/bottom `1764 × 582 → 1764 × 581` qty 2 `'Top / Bottom'`; fixed shelf `1164 × 569 → 1164 × 568`; shelves `580 × 549 → 580 × 548` qty 4 named `'Shelf 1 / Shelf 2 / Shelf 3 +1 more'`; plinth returns `526 × 100` qty 3. `edgeBanding = [{ edgeBandCode: 'EB08-WHITE', lengthMm: 32767 }]`. Materials: HDF3-WHITE `{ partCount: 2, netAreaMm2: 3516884, sheetsEstimated: 2, sheetsNested: null, sheetsBilled: 2, utilization: null }`, PB18-WHITE `{ partCount: 18, netAreaMm2: 11531232, sheetsEstimated: 5, sheetsNested: null, sheetsBilled: 5, utilization: null }`. Operations `{ hingeCups: 12, shelfPinHoles: 232, dowels: 16, camLocks: 16, slideScrewSets: 0, handleHoles: 6 }`. Hardware merged by code (11 codes; HNG-FO-SC 8, HNG-HO-SC 4, HNG-PLATE-0 12, HDL-BAR-160 3, SHF-PIN-5 16, ROD-OVAL-1200 1, ROD-SUP 2, CON-CAM-15 16, CON-DOWEL-8 16, SCR-PACK 1, BRK-ANTITIP 1), code asc. `finishing = []`; with `materials.front.finishCode = 'FIN-LAM-MATT'` → `[{ finishCode: 'FIN-LAM-MATT', areaMm2: 7157248 }]` (3 leaves × 2 faces). `engineVersion '1.0.0'`, `catalogVersion 1`, `nesting null`, `issues` = model issues.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/bom`
+- [ ] **Step 3: Implement** — 08 §3.2 (µm arithmetic), §3.3 (extruded perimeter), §3.4 (identity string, FNV-1a over UTF-16 code units with `Math.imul`, collision suffix, row name rule, row order), §3.5 (`wasteMilli`), §3.6, §3.7, §3.8, issues dedupe.
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/bom resources/js/engine/index.ts` → `feat(engine): compute bill of materials and cut list`
+
+### Task 43: Guillotine nesting
+
+**Files:**
+- Create: `resources/js/engine/bom/nesting/guillotine.ts`, `resources/js/engine/bom/nesting/index.ts`
+- Modify: `resources/js/engine/bom/bom.ts` (nesting branch, `sheetsNested`, `utilization`, `bom.part_exceeds_sheet`)
+- Test: `resources/js/engine/bom/__tests__/guillotine.test.ts`, `nestSheets.test.ts`, `bom.nesting.test.ts`
+
+**Spec refs:** `08 §5.1–§5.4` (§5.3 reference implementation is **normative code** — copy it), `08 §3.5`, `§3.9`, `§10.2` (nesting), `§10.4`
+
+**Interfaces:**
+- Consumes: Task 42.
+- Produces: `NestRotation, NestItem, NestSheetSpec, NestOptions, NestPlacement, NestCut, NestedSheet, NestMaterialResult, NEST_PASSES, nestMaterial(items, spec, opts)`; `nestSheets(rows, partQty: Map<PartKey, number>, catalog, options: { kerf; trim; allowRotation }): NestingResult`; `BOM_ISSUE_CODES = ['bom.part_exceeds_sheet']`.
+
+- [ ] **Step 1: Write the failing tests** — 08 §10.4 table: **A** 1000 × 500 / kerf 4 / trim 0, items a 600 × 300, b 396 × 300, c 1000 × 196 (free) → 1 sheet, util 0.9896, c (0,0), a (0,200), b (604,200), cuts `[{x1:0,y1:196,x2:1000,y2:196},{x1:600,y1:200,x2:600,y2:500}]`; **B** 1000 × 800 / 4 / 10, a 700 × 400 `length_along_sheet`, b 700 × 400 `width_along_sheet` → 2 sheets util 0.35, a (10,10) unrotated, b (10,10) rotated; **C** 2440 × 1220 / 4 / 10, big 2500 × 500 → 0 sheets, `unplaced ['big']`; **D** four 1208 × 598 → 1 sheet util 0.9707 at (10,10), (10,612), (1222,10), (1222,612); **D′** three 1208 × 598 + one 1209 × 598 → 2 sheets. Property tests (`mulberry32(99)`, 50 random sets of 1–300 parts): placements inside the usable area; overlapping-in-projection placements ≥ kerf apart; every instance placed exactly once or listed in `unplaced`; grain-locked items never in the forbidden orientation; identical input → deep-equal output across 3 runs. Wardrobe with nesting (kerf 4, trim 10, rotation allowed) — exact placements (`x, y, rotated`) of 08 §10.2: PB sheet 1 (util 0.7803) side.left (10,10), side.right (10,595); sheet 2 (0.8009) `front.fr_0000000001.leaf.1` (10,10), `front.fr_0000000002.leaf.1` (10,618); sheet 3 (0.7708) `front.fr_0000000002.leaf.2` (10,10), partition (10,605); sheet 4 (0.6073) plinth.back (10,10), plinth.front (10,114), carcass.bottom (10,218), shelf.1 (1778,218), plinth.return.1 (1814,10), plinth.return.2 (1812,114); sheet 5 (0.9044) carcass.top (10,10), fixed_shelf.1 (1778,10, rotated), shelf.2 (10,595, rotated), shelf.3 (562,595, rotated), shelf.4 (1114,595, rotated), plinth.return.3 (1666,595, rotated); HDF sheet 1 (0.7841) back.2 (10,10); HDF sheet 2 (0.3974) back.1 (10,10); materials HDF3 `sheetsNested 2, utilization 0.5907`, PB18 `sheetsNested 5, utilization 0.7727`; a 2500-long extra part → issue `bom.part_exceeds_sheet { partKey, materialCode }` (error); glass rows are skipped by nesting and keep `sheetsNested null`; instance keys `key#2`, `key#3` for qty > 1.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/bom`
+- [ ] **Step 3: Implement** — paste the 08 §5.3 code into `guillotine.ts` unchanged (types exported); `nestSheets` per §5.4 steps 1–4; wire into `computeBom` (§3.5 `utilization = round4(Σ placed cut areas / (sheets × sheetArea))`, §3.9 kerf `Math.ceil(pricing.kerfMm)`).
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/bom resources/js/engine/index.ts` → `feat(engine): add deterministic guillotine sheet nesting`
+
+### Task 44: Pricing — `priceBom`, `displayUnitPrice`, `estimateFurniture`
+
+**Files:**
+- Create: `resources/js/engine/bom/pricing.ts`, `resources/js/engine/bom/estimate.ts`
+- Test: `resources/js/engine/bom/__tests__/pricing.test.ts`, `pricing.labour.test.ts`, `estimate.test.ts`
+
+**Spec refs:** `08 §4.1–§4.7`, `08 §10.2` (price), `§10.5`, `03 §3.3`, `07 §8.10`, `master §2.1` (estimate = quote)
+
+**Interfaces:**
+- Consumes: Tasks 2, 42–43.
+- Produces: `PriceBreakdown`, `PriceOptions`, `priceBom(bom, catalog, pricing, options): PriceBreakdown`, `displayUnitPrice(amountExclMinor, pricing, taxRates): number`, `LABOUR_KEYS_ORDER` (table order of 08 §4.3); `estimateFurniture(doc, catalog): { bom: Bom; price: PriceBreakdown }` (generate → `computeBom(model, catalog, bomOptionsFor(doc, true))` → `priceBom(…, catalog.pricing, { quantity: 1, includeInstallation: false })`).
+
+- [ ] **Step 1: Write the failing tests** — wardrobe, seed catalog, `used_area`, `{ quantity: 1, includeInstallation: true }`: lines exactly 08 §4.7 (material PB18-WHITE qty 4.27 unit `sheet` unitCost 215000 cost 918050, description `'PB 18 mm Frosty White (18 mm)'`; HDF3-WHITE 1.30 → 84500; edge band 32.77 m → 19662; hardware lines per code (HNG-FO-SC 8 × 12000 = 96000 … BRK-ANTITIP 6000, sum 298400); labour cutting 5.57 → 83550, edge banding 32.77 → 39324, hinge cup boring 12 → 12000, drilling 302 → 30200, assembly 20 → 80000, hinge install 12 → 24000, hardware fitting 7 → 17500, packing 1 → 30000); totals `materialCostMinor 1002550, edgeBandCostMinor 19662, hardwareCostMinor 298400, finishingCostMinor 0, labourCostMinor 316574, directCostMinor 1637186, overheadMinor 163719, marginMinor 630317, unitPriceMinor 2431300, installationMinor 194600, totalBeforeTaxMinor 2625900, currency 'INR'`; line order materials → edge bands → hardware → finishing → labour; zero-quantity lines omitted. `whole_sheets` (with nesting) → material 1205000, cutting 105000, direct 1861086, overhead 186109, margin 716518, `unitPriceMinor 2763800`. `displayUnitPrice(2431300, { …pricing, pricesIncludeTax: true }, taxRates) === 2869000`; false → unchanged. **Estimate = quote:** the same doc priced from `computeBom(…, nesting false)` gives a deep-equal `PriceBreakdown` in `used_area`. Labour unit tests (minimal BOMs): `assembly_per_part` excludes instances whose key matches `/\.drawer\.\d+\./` and glass rows; `drawer_assembly_each` counts `…drawer.N.side.left` keys; `hinge_install_each` counts only category `hinge` (12 for the wardrobe — plates are not counted, matching §4.7); `hardware_fitting_each` category list; `sliding_door_fitting_each` = Σ `sliding_roller` qty; `glass_fitting_each` = Σ glass row qty; `finishing_per_sqm` = Σ finishing qtyH; `installation_per_item`/`general_per_hour` never produce lines; an inactive labour rate → no line; glass material priced by area even in `whole_sheets` and excluded from cutting; installation minimum (`unitPrice 100000`, 8 % = 8000 < 150000 → 150000); `roundingMinor 0` and `1` → no rounding. `estimateFurniture(wardrobe, seed).price.unitPriceMinor === 2431300` and `installationMinor === 0`.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/bom`
+- [ ] **Step 3: Implement** — 08 §4.1–§4.6 formulas with `costFromHundredths`, `applyBps`, `roundUpToStep`; quantities in lines = `qtyH / 100` for fractional units, integers for count units.
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/bom resources/js/engine/index.ts` → `feat(engine): price BOMs and estimate furniture`
+
+### Task 45: `diffFurniture` + `highlightMap`
+
+**Files:**
+- Create: `resources/js/engine/furniture/diff.ts`, `resources/js/engine/furniture/diffHighlight.ts`
+- Test: `resources/js/engine/furniture/__tests__/diff.test.ts`
+
+**Spec refs:** `07 §10.1–§10.4`, `07 §12.6`, `03 §3.4`
+
+**Interfaces:**
+- Consumes: Tasks 33 (`layoutSections` labels), 36–37, 42–44 (`computeBom`, `bomOptionsFor`, `priceBom`).
+- Produces: `ChangeItem` type, `CHANGE_KINDS`, `CHANGE_MESSAGE_KEYS`, `diffFurniture(before: unknown, after: unknown, catalog: CatalogSnapshot): ChangeItem[]`; `Highlight`, `highlightMap(beforeModel, afterModel): Map<PartKey, Highlight>`.
+
+- [ ] **Step 1: Write the failing tests** (07 §12.6) — identical docs → `[]`; wardrobe vs width 2100 → first item `price_changed` (major, `direction 'up'`), then `dims_changed { dimension: 'width', beforeMm: 1800, afterMm: 2100 }` (major); part changes collapsed into one `parts_changed_many { count }` item; no `front_*` items; wardrobe vs `fr_0000000002.overlay = 'half'` → `front_changed { fields: 'overlay' }` minor, `hardware_qty_changed` HNG-FO-SC 8 → 4 and HNG-HO-SC 4 → 8, part changes for the two leaves; extra hardware `LCK-CAM-20 × 1` → `hardware_added { qty: 1 }`; notes change → `notes_changed` minor; `material_changed` for carcass is major, for drawer_box minor, edge band change minor, finish change major; `construction_changed` on `mounting` major, on `plinth.height` minor with `beforeMm/afterMm`; `section_changed` added/removed/layout/size; ordering = significance → kind rank → entityId (null first) → messageKey; `highlightMap`: width change marks `carcass.top` `changed`; a removed extra part → `removed`; an added part → `added`.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/furniture/__tests__/diff.test.ts`
+- [ ] **Step 3: Implement** — 07 §10.1 steps (migrate both, generate, BOM with nesting, price `{ quantity: 1, includeInstallation: false }`), rule table §10.2, ordering §10.3, highlight rules §10.4 (box delta > 1 mm).
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/furniture resources/js/engine/index.ts` → `feat(engine): diff furniture designs for change review`
+
+### Task 46: Cut list CSV
+
+**Files:**
+- Create: `resources/js/engine/bom/exportCsv.ts`
+- Test: `resources/js/engine/bom/__tests__/exportCsv.test.ts`
+
+**Spec refs:** `08 §8.1`, `07 §11.2`
+
+**Interfaces:**
+- Consumes: Tasks 42–43, `PART_NAMES_EN`.
+- Produces: `CUT_LIST_CSV_COLUMNS` (19 header names), `cutListCsv(bom: Bom, catalog: CatalogSnapshot, doc: FurnitureDocument): string`, `csvField(value: string | number): string`.
+
+- [ ] **Step 1: Write the failing tests** — wardrobe BOM: output starts with `'﻿'`; lines joined by `\r\n` with a trailing `\r\n`; header exactly `row_no,part_name,qty,material_code,material_name,thickness_mm,length_mm,width_mm,cut_length_mm,cut_width_mm,grain,edge_l1,edge_l2,edge_w1,edge_w2,edge_band_mm,area_m2,part_keys,notes`; 12 data rows; row 1 starts `1,Back panel 2,1,HDF3-WHITE,HDF 3 mm White (one side),3,1978,1180,1978,1180,none,,,,,0,2.334,carcass.back.2,`; row 3 = `3,Left side / Right side,2,PB18-WHITE,PB 18 mm Frosty White,18,2000,582,1999,581,none,EB08-WHITE,,EB08-WHITE,,5164,2.328,carcass.side.left carcass.side.right,` (`edge_band_mm` = qty × Σ banded finished edge lengths, `area_m2` 3 decimals); RFC 4180 quoting for an extra part named `Filler, "left"` → `"Filler, ""left"""`; notes column = `overrides.parts[key].note` and extra-part notes of the row's keys joined with ` | `; a name containing a newline is quoted.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/bom/__tests__/exportCsv.test.ts`
+- [ ] **Step 3: Implement** — column table of 08 §8.1; decimal separator `.`.
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/bom resources/js/engine/index.ts` → `feat(engine): export cut lists as CSV`
+
+### Task 47: Quote totals TS port + shared quote fixtures
+
+**Files:**
+- Create: `resources/js/lib/quoteTotals.ts`, `tests/fixtures/quotes/exclusive-two-rates.json`, `inclusive-two-rates.json`, `fractional-qty.json`, `untaxed-group.json`, `discount-exceeds.json`
+- Test: `resources/js/lib/__tests__/quoteTotals.test.ts`
+
+**Spec refs:** `08 §6.2–§6.3`, `08 §10.6`, `02 §8.6` (quote line kinds)
+
+**Interfaces:**
+- Consumes: `costFromMilli`, `applyBps`, `netFromGross` from `@/engine` (the public index).
+- Produces (P7's PHP `QuoteCalculator` must pass the same fixture files): `QuoteLineKind = 'furniture'|'materials'|'hardware'|'labour'|'finishing'|'installation'|'delivery'|'discount'|'custom'`; `QuoteTotalsLine { kind; quantity: string; unitPriceMinor: number; taxRateId: string | null }`; `QuoteTaxRate { id; name; rateBps }`; `QuoteTotalsInput { pricesIncludeTax: boolean; taxRates: QuoteTaxRate[]; lines: QuoteTotalsLine[] }`; `QuoteTotals { amounts: number[]; subtotal: number; discount: number; tax: number; total: number; taxBreakdown: Array<{ taxRateId: string; name: string; rateBps: number; taxableMinor: number; taxMinor: number }> }`; `computeQuoteTotals(input): { ok: true; totals: QuoteTotals } | { ok: false; code: 'discount_exceeds_subtotal' }`; `parseQuantityMilli(q: string): number` (exact string parse, ≤ 3 decimals, throws `RangeError` otherwise). **Fixture file shape:** `{ "description": string, "pricesIncludeTax": boolean, "taxRates": [...], "lines": [...], "expected": QuoteTotals | { "error": "discount_exceeds_subtotal" } }` with tax rate ids `tax-gst18` (`GST 18%`, 1800) and `tax-gst12` (`GST 12%`, 1200).
+
+- [ ] **Step 1: Write the failing tests** — fixtures (08 §10.6; values computed with the §6.3 formulas):
+  1. `exclusive-two-rates`: lines furniture `"1.000"` × 2431300 (gst18), installation `"1.000"` × 194600 (gst18), custom `"1.000"` × 500000 (gst12), discount `"1.000"` × −100000 (null) → `amounts [2431300, 194600, 500000, -100000]`, `subtotal 3125900`, `discount 100000`, breakdown `[{ tax-gst18, 'GST 18%', 1800, taxableMinor 2541895, taxMinor 457541 }, { tax-gst12, 'GST 12%', 1200, 484005, 58081 }]`, `tax 515622`, `total 3541522`.
+  2. `inclusive-two-rates`: same lines, `pricesIncludeTax true` → breakdown taxable (= net) 2154148 / 432147, tax 387747 / 51858, `tax 439605`, `total 3025900`.
+  3. `fractional-qty`: custom `"2.500"` × 99999 (gst18) → `amounts [249998]`, `subtotal 249998`, `discount 0`, `tax 45000`, `total 294998`.
+  4. `untaxed-group`: custom `"1.000"` × 100000 (null), furniture `"1.000"` × 100000 (gst18), discount `"1.000"` × −3 → allocation base 1 + 1, equal remainders, the extra unit goes to `tax-gst18` (taxRateId asc, null last) → gst18 taxable 99998 tax 18000, null group taxable 99999 no tax and not in the breakdown; `subtotal 200000`, `discount 3`, `tax 18000`, `total 217997`.
+  5. `discount-exceeds`: furniture 1 × 1000 (gst18), discount 1 × −1001 → `{ error: 'discount_exceeds_subtotal' }`.
+  The test globs `tests/fixtures/quotes/*.json` and runs each; plus `parseQuantityMilli('2.5') === 2500`, `('0.001') === 1`, `('1.0001')` throws.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/lib/__tests__/quoteTotals.test.ts`
+- [ ] **Step 3: Implement** — 08 §6.3 verbatim: line amounts by `costFromMilli`; allocation `base_g = floor(D × S_g / S)` in BigInt, remainders, leftovers to largest remainders (ties taxRateId asc, null last); exclusive vs inclusive group tax; breakdown ordered `rateBps desc, name asc`.
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/lib && yarn prettier --check resources/js/lib tests/fixtures/quotes && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/lib/quoteTotals.ts resources/js/lib/__tests__/quoteTotals.test.ts tests/fixtures/quotes` → `feat(quotes): port quote totals calculator to TypeScript with shared fixtures`
+
+### Task 48: Engine CLI
+
+**Files:**
+- Create: `engine-cli/src/cli.ts`, `engine-cli/src/commands.ts`, `engine-cli/src/requests.ts`, `engine-cli/vite.config.ts`
+- Modify: `package.json` (scripts `build:engine-cli: vite build --config engine-cli/vite.config.ts`, `build: vite build && yarn build:engine-cli`), `.gitignore` (`engine-cli/dist/`), `tsconfig.json` (include `engine-cli/src/**/*.ts`)
+- Test: `engine-cli/src/__tests__/commands.test.ts`, `engine-cli/src/__tests__/cli.e2e.test.ts`, snapshots `engine-cli/src/__tests__/__snapshots__/{hdb-3room,brochure-2bhk}.{validate-plan,plan-summary}.json`
+
+**Spec refs:** `01 §5.4`, `03 §5` (server steps 2 and 4), `08 §9.2`, `08 §8.1`, `04 §10` (snapshot criterion)
+
+**Interfaces:**
+- Consumes: the engine public index only (`@/engine` is not used — import `../../resources/js/engine/index.ts` relatively so Vite needs no alias).
+- Produces: `CLI_COMMANDS = ['validate-plan','validate-furniture','compute-bom','cutlist-csv','template-default','diff-furniture','plan-summary','version']`; `CLI_ERROR_CODES = ['unknown_command','invalid_json','invalid_input','engine_error']`; `dispatch(command: string, rawInput: string): CliResponse` with `CliResponse = { ok: true; result: unknown } | { ok: false; error: { code: string; message: string; details?: unknown } }`; built artefact `engine-cli/dist/cli.mjs`. Results: `validate-plan` → `{ valid, issues, migratedDocument, summary }` where `issues = validatePlan(migratePlan(document))`, `valid` = no `error` issue, `migratedDocument = removeOrphanNodes(migrated)` (03 §1.1 "auto-fixed on save"), `summary = planSummary(migratedDocument)`; `validate-furniture` → `{ valid: !isSaveBlocking(issues), issues, migratedDocument, bbox }` (`bbox` added because 03 §5 server step 4 reads it); `compute-bom` → `{ bom, price, engineVersion }` with `price` default `{ quantity: 1, includeInstallation: true }` and `allowRotation` passed through; `cutlist-csv` → `{ csv }`; `template-default` → `{ document, issues }` via `templateDefaultDocument`; `diff-furniture` → `{ changes }`; `plan-summary` → `PlanSummary`; `version` → `{ engineVersion }`.
+
+- [ ] **Step 1: Write the failing tests** — `commands.test.ts` (calls `dispatch` directly): `version` → `{ ok: true, result: { engineVersion: '1.0.0' } }`; `compute-bom` on the wardrobe fixture + seed catalog → `result.price.unitPriceMinor 2431300`, `installationMinor 194600`, `bom.nesting.sheets.length 7`; with `options.price { quantity: 2, includeInstallation: false }` → `totalBeforeTaxMinor 4862600`; `validate-furniture` → `valid true`, `bbox.size [1800,2100,600]`; `template-default { templateKey: 'tv_unit', overrides: { width: 2000 } }` → document width 2000; `diff-furniture` identical → `changes []`; `cutlist-csv` → csv starting with BOM; `validate-plan` on a doc with an orphan node → issue `plan.orphan_node` reported and the node absent from `migratedDocument`; `validate-plan` and `plan-summary` on both plan fixtures `toMatchFileSnapshot` (04 §10). Errors: `dispatch('nope', '{}')` → `unknown_command`; `'{'` → `invalid_json`; `compute-bom` with `catalog: {}` → `invalid_input` (zod issues in `details`); furniture `schemaVersion: 2` → `invalid_input` with `details.code 'unsupported_schema_version'`. `cli.e2e.test.ts` (**review focus 4**; `beforeAll` runs `yarn build:engine-cli` once, timeout 120 s): spawn `node engine-cli/dist/cli.mjs version` with stdin `{}` → exit 0, stdout is exactly one JSON document; invalid JSON, unknown command, empty stdin, a 2.5 MB plan (validate-plan → `ok: true`, `valid: false`, issue `plan.too_large`) and wrong-typed input each exit 0 with `ok: false` (or `ok: true` for the large plan) and nothing on stderr.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run engine-cli`
+- [ ] **Step 3: Implement** — `requests.ts`: zod request schemas per command (documents as `unknown` then `migratePlan`/`migrateFurniture`, catalog via `CatalogSnapshotSchema`, `bom` via a minimal `BomInputSchema`); `dispatch` maps `ZodError`/`EngineInputError` → `invalid_input`, other exceptions → `engine_error`; `cli.ts` reads all of stdin, writes `JSON.stringify(response)` + `\n`, sets no non-zero exit code itself. `vite.config.ts`: `build.ssr = 'engine-cli/src/cli.ts'`, `target 'node22'`, `outDir 'engine-cli/dist'`, `rollupOptions.output.entryFileNames 'cli.mjs'`, `ssr.noExternal: true` (bundle zod, mutative, clipper2-ts, earcut, flatbush, nanoid), no Laravel plugin.
+- [ ] **Step 4: Run tests, expect PASS** — `yarn vitest run engine-cli` then `echo '{}' | node engine-cli/dist/cli.mjs version` prints `{"ok":true,"result":{"engineVersion":"1.0.0"}}`
+- [ ] **Step 5: Quality gates** — `yarn eslint engine-cli resources/js/engine && yarn prettier --check engine-cli && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add engine-cli package.json .gitignore tsconfig.json` → `feat(engine-cli): add server-side engine CLI built with Vite`
+
+### Task 49: Worker RPC + `useEngineWorker`
+
+**Files:**
+- Create: `resources/js/editor/workers/engineRpc.ts`, `resources/js/editor/workers/engine.worker.ts`, `resources/js/editor/shared/useEngineWorker.ts`
+- Test: `resources/js/editor/workers/__tests__/engineRpc.test.ts`, `resources/js/editor/shared/__tests__/useEngineWorker.test.ts`
+
+**Spec refs:** `01 §5.5`, `07 §8.10`, `05 §1.1` (file location of `useEngineWorker.ts`)
+
+**Interfaces:**
+- Consumes: `@/engine` (`computeBom`, `nestSheets`, `derivePlanGeometry`, `estimateFurniture`); `vue` (`getCurrentScope`, `onScopeDispose`) in the composable only.
+- Produces: `EngineRpcMethods` (`computeBom(model, catalog, options)`, `nestSheets(rows, partQty, catalog, options)`, `derivePlanGeometry(doc)`, `estimateFurniture(doc, catalog)`); `RpcRequest { id: number; method; params: unknown[] }`; `RpcResponse = { id; ok: true; result } | { id; ok: false; error: { name: string; message: string } }`; `RpcPort { postMessage(msg: RpcRequest): void; onmessage: ((e: { data: RpcResponse }) => void) | null; terminate?(): void }`; `handleRpcRequest(req): RpcResponse`; `createInlinePort(): RpcPort` (main-thread fallback, answers on a macrotask); `createRpcClient(port): EngineRpcClient & { dispose(): void }`; `class EngineWorkerStaleError extends Error` (`name 'EngineWorkerStaleError'`); `useEngineWorker(): EngineRpcClient & { dispose(): void }` (real `Worker` via `new Worker(new URL('../workers/engine.worker.ts', import.meta.url), { type: 'module' })` when `typeof Worker !== 'undefined'`, else inline port; disposes on scope dispose).
+
+- [ ] **Step 1: Write the failing tests** — `engineRpc.test.ts` (**review focus 5**) with a fake port that queues requests and delivers responses in a test-controlled order: two `estimateFurniture` calls, responses delivered newest-first and oldest-first → the latest resolves with `price.unitPriceMinor 2431300` (wardrobe + seed), the earlier rejects with `EngineWorkerStaleError` and its late response is ignored; concurrent calls of different methods do not cancel each other; a handler exception → rejection with the handler's message; unknown method → `{ ok: false }`; `dispose()` rejects pending calls with `EngineWorkerStaleError` and calls `terminate`; `handleRpcRequest({ id: 1, method: 'derivePlanGeometry', params: [makeRectPlan(5000,4000,230)] })` → `ok: true` with 1 room; `createInlinePort` round-trips. `useEngineWorker.test.ts`: inside `effectScope` with `Worker` undefined the composable uses the inline port and resolves `derivePlanGeometry`; `scope.stop()` disposes (pending call rejects stale).
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/editor/workers resources/js/editor/shared`
+- [ ] **Step 3: Implement** — client keeps `latestIdByMethod`; on response, if `id !== latestIdByMethod[method]` drop it (promise already rejected when superseded); worker file: `self.onmessage = (e) => self.postMessage(handleRpcRequest(e.data))`.
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/editor && yarn prettier --check resources/js/editor && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/editor/workers resources/js/editor/shared/useEngineWorker.ts resources/js/editor/shared/__tests__` → `feat(editor): add engine web worker RPC with stale-request cancellation`
+
+### Task 50: Performance budgets (bench + asserted perf tests)
+
+**Files:**
+- Create: `vitest.perf.config.ts`, `resources/js/engine/__perf__/measure.ts`, `resources/js/engine/__perf__/budgets.perf.test.ts`, `resources/js/engine/__perf__/plan.bench.ts`, `resources/js/engine/__perf__/furniture.bench.ts`, `resources/js/engine/__perf__/bom.bench.ts`
+- Modify: `package.json` (scripts `test:perf: vitest run --config vitest.perf.config.ts`, `bench: vitest bench --run --config vitest.perf.config.ts`)
+
+**Spec refs:** `04 §7.3`, `07 §3.1` (budget), `07 §12.7`, `08 §9.3`, `master §2.1`
+
+**Interfaces:**
+- Consumes: everything above; the built CLI (Task 48).
+- Produces: `measure(fn, { warmup = 5, iterations = 30 }): { median: number; p95: number }`; perf fixtures `perfWardrobe()` = `wardrobe_hinged { width: 3600, height: 2400, doors: 6, internalDrawers: 4, hangingStyle: 'double' }` (≈ 50 parts; the spec's "≈ 60" is approximate) and `randomParts(300, mulberry32(5))`.
+
+- [ ] **Step 1: Write the failing tests** — `budgets.perf.test.ts` asserts the **CI thresholds** (2 × target, 04 §7.3; 07 §12.7; 08 §9.3), one `it` each: cold `derivePlanGeometry(makeGridPlan(7,6))` median ≤ 30 ms; warm derive after one `moveNode` (shared deriver) ≤ 8 ms; cold `makeGridPlan(22,22)` ≤ 400 ms; `snapPoint` on `makeGridPlan(16,15)` (511 walls) ≤ 1 ms; `buildSnapIndex` + `buildHitIndex` on it ≤ 6 ms; `executePlanCommand('moveNode', { finalize: false })` incl. derive on the 97-wall plan ≤ 12 ms; `validatePlan` on a fresh 97-wall document per iteration ≤ 6 ms; `generateFurniture(perfWardrobe())` median ≤ 15 ms and part count between 45 and 70; `estimateFurniture` median ≤ 60 ms and p95 ≤ 100 ms; `computeBom` without nesting ≤ 10 ms; `nestSheets` on 300 random parts < 200 ms; spawning `node engine-cli/dist/cli.mjs compute-bom` on the wardrobe ≤ 1.5 s (≤ 3 s CI). The `.bench.ts` files `bench()` the same operations for reporting only.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn test:perf` (script/config missing).
+- [ ] **Step 3: Implement** — `vitest.perf.config.ts` = `mergeConfig(baseConfig, { test: { include: ['resources/js/engine/__perf__/**/*.perf.test.ts'], exclude: [], fileParallelism: false, testTimeout: 120_000 }, benchmark: { include: ['resources/js/engine/__perf__/**/*.bench.ts'] } })`; `measure` uses `performance.now()` (a Node/browser global, not DOM). If a budget fails, profile and fix the engine code (caching of Task 12, Flatbush indexes), never relax the threshold.
+- [ ] **Step 4: Run tests, expect PASS** — `yarn build:engine-cli && yarn test:perf` and `yarn bench`
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine vitest.perf.config.ts && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add vitest.perf.config.ts package.json resources/js/engine/__perf__` → `test(engine): add performance benchmarks and asserted budgets`
+
+### Task 51: Translation keys, coverage gate, public API check
+
+**Files:**
+- Create: `resources/lang/en/engine.php`, `parts.php`, `hardware.php`, `issues.php`, `changes.php`, `templates.php`, `sections.php`; `resources/js/engine/__tests__/messageKeys.test.ts`, `resources/js/engine/__tests__/publicApi.test.ts`
+- Modify: `vitest.config.ts` (coverage: provider `v8`, per-glob thresholds), `package.json` (devDependency `@vitest/coverage-v8@^3`, script `test:coverage:engine: vitest run resources/js/engine --coverage`)
+
+**Spec refs:** `04 §1.6` (keys exist), `04 §10`, `07 §1.6`, `§6.12`, `§7.3`, `§10.2`, `15 §15.2`, `01 §5.2`
+
+**Interfaces:**
+- Consumes: every exported code list (`PARSE_LENGTH_ERROR_CODES`, `PLAN_COMMAND_ERROR_CODES`, `PLAN_COMMANDS`, `DERIVE_ISSUE_CODES`, `SNAP_KINDS`, `CONFLICT_KINDS`, `PLAN_ISSUE_CODES`, `FURNITURE_COMMAND_ERROR_CODES`, `FURNITURE_COMMANDS`, `FURNITURE_ISSUE_CODES`, `BOM_ISSUE_CODES`, `PART_NAMES_EN`, `HARDWARE_REASON_KEYS` (export it from `rules/hardware.ts` here if not yet exported), `CHANGE_MESSAGE_KEYS`, `TEMPLATES`).
+- Produces: the seven ICU lang files (P1's `php artisan i18n:export` picks them up; if P1 already created any of these files, merge keys instead of overwriting); coverage gate.
+
+- [ ] **Step 1: Write the failing tests** — `messageKeys.test.ts` runs `php -r` (via `execFileSync('php', …)`) to `json_encode` the seven files, flattens to dot keys (`engine.units.error.empty`, …) and asserts presence of: `engine.units.error.{code}`; `engine.plan.command.{code}` and `engine.plan.command.label.{snake(type)}` for all 43 plan commands; `engine.plan.derive.{code}`; `engine.plan.snap.kind.{kind}` + `engine.plan.snap.opening_no_fit|opening_overlap`; `engine.plan.conflict.{kind}`; `engine.plan.issue.{rule}`; `engine.furniture.command.{code}` and `engine.furniture.command.label.{snake(name)}` for the 28 furniture commands; `issues.{code}` for every furniture and BOM issue code (English texts of 07 §7.3); `parts.{name}` for every `PART_NAMES_EN` key; `hardware.reason.{key}` (07 §6.12); `changes.{key}` (07 §10.2 incl. `parts_*_many`, `edge_band_changed`, `finish_changed`, `section_*`); `templates.{key}.name|description` for 19 keys, every field `labelKey`/`helpKey`, every select option `templates.options.{value}`, `templates.range`; `sections.interior|column|row`. Every value is a non-empty string. `publicApi.test.ts` asserts `engine/index.ts` exports every public name listed in this plan's *Produces* blocks (list in the test) and nothing from `testing/`.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/__tests__/messageKeys.test.ts resources/js/engine/__tests__/publicApi.test.ts`
+- [ ] **Step 3: Implement** — PHP files `<?php declare(strict_types=1); return [ … ];` with nested arrays and ICU values (`{count}`, `{direction, select, up {increased} other {decreased}}`); optional params of 07 §1.6 (`Back panel {n?}`) are written as an ICU `select` on the param; English texts from the spec tables. Coverage thresholds `lines: 90` for `resources/js/engine/{units,geometry,plan}/**` excluding `**/testing/**`, `**/__tests__/**`, `**/__perf__/**`.
+- [ ] **Step 4: Run tests, expect PASS** — `yarn vitest run` (whole suite) and `yarn test:coverage:engine` (thresholds met)
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js engine-cli && yarn prettier --check resources/js engine-cli && yarn vue-tsc --noEmit && php -l resources/lang/en/engine.php`
+- [ ] **Step 6: Commit** — `git add resources/lang/en resources/js/engine/__tests__ vitest.config.ts package.json yarn.lock` → `feat(engine): add engine translation keys and coverage gate`
+
+---
+
+## Self-review
+
+### Spec coverage (requirement → task)
+
+| Requirement | Task |
+|---|---|
+| 01 §5.1 purity (ESLint rule + Node import test), allowed deps | 1 |
+| 01 §5.2 module tree incl. `version.ts`, `ids.ts`, `money.ts`, units, geometry, plan, furniture, bom, catalog, commands | 1–45 |
+| 01 §5.3 catalog snapshot shape incl. inactive rows | 29 |
+| 01 §5.4 CLI: 8 commands, protocol, exit codes, Vite build to `dist/cli.mjs`, `yarn build:engine-cli` in `yarn build` | 48 |
+| 01 §5.5 worker RPC (`computeBom`, `nestSheets`, `derivePlanGeometry`, `estimateFurniture`), stale cancellation, fallback | 49 |
+| 03 §1 plan types / §1.1 invariants / §1.2 derived geometry | 8, 10–11, 13 |
+| 03 §2 furniture document / §2.4 save-blocking codes | 30, 37 |
+| 03 §3.1–§3.4 model, BOM, price, change items; §3.6 keys | 30–45 |
+| 03 §4 migrations (registry + no-op test) | 8, 30 |
+| 03 §6 fixtures (2 plans, 6 furniture) | 14, 31, 40 |
+| 04 §1 units (every table row, fuzz, round trip) | 4 |
+| 04 §2 primitives, clip, triangulate | 3, 5 |
+| 04 §3 node joins, outlines, faces, openings, poché, caps, exterior | 9–11 |
+| 04 §4 planar faces, nesting, room association/re-association, net polygons, faceKey, polylabel, summary | 6, 11, 13, 21 |
+| 04 §5 snapping, opening/footprint snapping, footprints, conflicts, hit index | 15–17, 19 |
+| 04 §6 command bus, pipeline, post-process, helpers, all 43 commands incl. `rescalePlan`, `calibrateBackground` | 20–28 |
+| 04 §7 deriver caching + budgets | 12, 50 |
+| 04 §8 drawing model, SVG | 18–19 |
+| 04 §10 coverage ≥ 90 %, lint restrictions, CLI snapshots, message keys | 1, 48, 51 |
+| 05 §9 fixture library data | 7 |
+| 06 §7.8 room-name dictionary (TS mirror) | 7 |
+| 07 §1 constants, makePart, catalog index, part names | 29–30 |
+| 07 §2 template catalogue (19) + presets `reidentify` + property test | 31, 39–40 |
+| 07 §3 generation pipeline, envelope, panels, back split, plinth, countertop, layout, contents, drawers, tables, overrides | 32–38 |
+| 07 §4 fronts | 34–35 |
+| 07 §5 banding/grain/visible faces | 30, 32–38 |
+| 07 §6 hardware rules | 33–36 |
+| 07 §7 validation, sag | 37 |
+| 07 §9 furniture commands | 41 |
+| 07 §10 diff + highlight | 45 |
+| 07 §12 required tests (wardrobe 20 parts, drawers, construction, diff, perf) | 31–45, 50 |
+| 08 §1 money + shared fixtures | 2 |
+| 08 §2 snapshot + specs | 29 |
+| 08 §3 computeBom | 42–43 |
+| 08 §4 pricing incl. ₹24,313 example, `displayUnitPrice` | 44 |
+| 08 §5 nesting (normative code) | 43 |
+| 08 §6.3 quote totals TS port + `tests/fixtures/quotes` | 47 |
+| 08 §7 seed catalog (as test catalog JSON) | 29 |
+| 08 §8.1 cut list CSV | 46 |
+| 08 §9.2–§9.3 CLI `compute-bom` contract, budgets | 48, 50 |
+| Review focus 1–5 | 28, 5/6/9, 36, 48, 49 |
+
+Out of scope here (owned elsewhere): `vision/tests/fixtures/reference/*.expected.json` and the Python room-name key-parity test (P3); PHP `MinorMath`/`QuoteCalculator` consuming the shared fixtures (P7); `CatalogSeeder`/`BuildCatalogSnapshot` (P5, may compare against `tests/fixtures/catalog/seed-snapshot.json`); Laravel `EngineCli` wrapper (P5); editor/builder UIs (P4/P5).
+
+### Step scan, types, proportion
+
+- Every task has the six steps with exact commands; no step says "handle edge cases" or "add tests" without naming them.
+- Names are defined once in an *Interfaces → Produces* block and consumed by later tasks with the same spelling (`DerivedPlan`, `PlanCommandContext`, `GenContext`, `CatalogIndex`, `Bom`, `PriceBreakdown`, `estimateFurniture`, `EngineInputError`, `testIds`, `seedCatalog`).
+- Task count is 51, above the 30–45 estimate: the plan-command and furniture-generator areas are split so that each task keeps one reviewable test cycle (merging them would produce tasks with several hundred lines of unrelated assertions).
+- Spec tables (template rules, formulas, issue catalogue, command semantics) are referenced, not copied; only test values are copied. The only code reproduced is pinned behaviour the spec itself gives as code (08 §5.3 is pasted by the implementer from the spec, not from this plan).
+
+### Spec gaps found (resolved here; record in the PR description)
+
+1. Message-key patterns for plan validation issues, furniture/BOM issues and furniture command errors are unspecified → pinned in *Plan conventions*; the numeric-range rule of 03 §1.1 has no code → `plan.value_out_of_range`.
+2. 15 §15.2 limits keys to depth 4 and lists no `sections` namespace, but 04/07 define `engine.plan.command.label.*` (depth 5) and `sections.*` → spec keys kept as written.
+3. 03 §5 server step 4 reads `bbox` from `validate-furniture`, which 01 §5.4 does not return → `bbox` added to the result.
+4. "Orphan nodes auto-fixed on save" has no owner → `validate-plan` returns `migratedDocument` with orphans removed.
+5. 04 §6.1 `CommandDef` lacks the zod params schema required by 04 §6.7 and the `Pipeline` type → `paramsSchema`, `labelParams`, `Pipeline` pinned in Task 20.
+6. `bookshelf-5shelf.json` cannot be the bookshelf defaults (4 shelves) → generated with `height: 2100`.
+7. 03 §6 plan fixtures give room lists but no geometry; 04 §9 requires "≥ 9 rooms" → coordinates and expected areas pinned in Task 14 (10 and 8 rooms); P3's `*.expected.json` must derive from them.
+8. 08 §4.3 says hinge installation counts hinges "plates included", but the 08 §4.7 worked example counts 12 (hinges only) → hinges only.
+9. 07 §12.7's "3600-wide 6-door wardrobe ≈ 60 parts" yields ≈ 25 parts with defaults → perf fixture adds internal drawers (≈ 50 parts).
+10. Template field `labelKey`s / option labels and quote-fixture JSON shape (tax rate names, `untaxed-group` numbers) unspecified → pinned (Tasks 31, 47).
+11. 04 §5.6 grid majors for 10 000 mm and 50′ unspecified → ×10 and ×2.
+12. ICU rendering of optional params (`Back panel {n?}`) depends on P1's `t()` handling of missing arguments → flagged for P1.
+13. CLI error codes other than `invalid_input` unspecified → `unknown_command`, `invalid_json`, `engine_error`.
+14. Task 51's key check needs `php` on the frontend CI runner (P1/P9 CI config).
