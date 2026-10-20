@@ -2,21 +2,27 @@
 
 Read the master document, `01`, `02`, `03`, `09` and `15` first. This file is normative for **every customer-facing page**: route name, URL, Inertia page component, layout, props, sections, actions, validation messages, empty/loading/error states, visibility, responsive behaviour, real-time behaviour and acceptance criteria.
 
-Owned elsewhere (referenced, not re-specified): plan editor canvas, tools and panels → `05`; blueprint import pipeline and review-mode editor internals → `06`; furniture builder internals → `07`; BOM/pricing formulas → `08`; notification events/channels/templates → `12`; authentication flows, OTP rules, rate limits, account anonymisation → `13`; controllers/FormRequests → `14` (which is written **from the route tables in §2 of this file and of `11`**); tokens/components/layouts → `15`.
+Owned elsewhere (referenced, not re-specified): plan editor canvas, tools, panels, view-only mode → `05`; blueprint import pipeline, import API (A1–A12), options step details (page picker, photo corner editor) and the review-mode editor → `06`; furniture create page internals and builder (`FurnitureBuilder.vue`, modes) → `07`; BOM/pricing → `08`; notification catalogue, `NotificationPayloadData`, preferences matrix rules, web push and service worker → `12`; authentication flows, OTP, Google, sessions, recent-auth, uploads security (`api.uploads.*`), media serving, account deletion/export, permissions → `13`; AI credits (`CreditSummaryData`, ledger rules) → `18`; controllers/FormRequests → `14` (built from §2 here and §2 of `11`); tokens/components/layouts → `15`.
 
 ---
 
 ## 1. Conventions used in this file
 
-- **Route names** `customer.*` (authenticated customer pages and actions), `auth.*` / Fortify names (auth), shared names without prefix only for cross-audience endpoints (`media.show`, `notifications.*`, `pwa.*`, `welcome`), JSON endpoints `api.*`.
-- **Controllers** live in `app/Http/Controllers/Customer/*` (pages + form actions), `Auth/*`, `Api/*` (`01` §3). All customer routes use middleware `web`, `auth`, `customer` (middleware `EnsureCustomer`: a staff user requesting a `customer.*` GET route is redirected to `admin.dashboard`; non-GET → 403), and `onboarded` (§5.1). Email verification is **not** required to use the app; only T2 requires a verified email or phone (checked in the action).
-- **Page components** under `resources/js/pages/`. Every page sets `<Head :title="t(...)">` and `defineOptions({ layout })`.
-- **Props** are TypeScript shapes of spatie/laravel-data objects (names end in `Data`), **snake_case** properties (decision in `15` Appendix 6). JSONB contents (`summary`, `estimate`, `hints`, documents) keep their camelCase keys. Types are generated into `types/generated.d.ts`; the shapes below are normative.
-- **Permissions:** customers have no spatie permissions; access is decided by policies (owner of project/order). Every page below is customer-only. "Visible if" conditions refer to the `can` ability object the server sends (never re-derive state rules on the client).
-- **Responsive:** phone < 768 px = view, approve, chat, quotes, progress **and simple forms** (projects, orders draft/submit, settings, uploads). The **editors** (plan editor, import review, furniture builder) are view-only on phones (`05`/`06`/`07` view-only modes). Tablet 768–1023 and desktop ≥ 1024 = everything.
-- **Strings:** every text below is given as `translation.key` "English value". Keys not listed explicitly follow `15` §15.2.
-- **Ids** in URLs are ULIDs; route model binding with `scopeBindings()` for nested routes (a plan must belong to the project in the URL, else 404).
-- Error pages: 403/404/419/429/500/503 rendered by the Inertia error page `pages/Error.vue` (§4.9).
+- **Route names:** `customer.*` (authenticated customer pages/actions); auth routes use Fortify names or `auth.*`/`account.*` as defined in `13`; cross-audience names without prefix (`welcome`, `legal.*`, `media.show`, `manifest`, `links.order`); JSON endpoints `api.*`.
+- **Resource URLs:** creation is nested under the parent (`/projects/{project}/plans`), existing resources are flat (`/plans/{plan}/edit`, `/furniture/{design}/edit`, `/imports/{import}`, `/orders/{order}`) — matching `06`, `07`, `12`.
+- **Middleware** (from `13` §1): customer group `['web', 'auth', 'active', 'customer']` plus `onboarded` (§5.1). `verified.contact` (verified email **or** phone) additionally gates: order submission (T2), starting an **auto** blueprint import, posting messages, account data export. Pages never require verification; the UI explains what is blocked (§1.1).
+- **Page components** under `resources/js/pages/`. Every page sets `<Head :title="t(...)">` and a persistent layout via `defineOptions`.
+- **Wire format (decision, aligned with `06`, `07`, `12`, `13`, `18`):** Inertia props and JSON responses are **camelCase** (spatie/laravel-data classes with camelCase PHP properties; generated TS types). Request bodies are **camelCase** too, **except** Fortify-handled forms and the auth endpoints of `13` (login, register, password reset/update/confirm, `user-profile-information`, 2FA, OTP), which keep the field names given in `13` (`password_confirmation`, `current_password`, `marketing_opt_in`, `cf_turnstile_response`, `terms`, `phone`, `code`). Query-string parameters keep Laravel conventions (`page`, `per_page`, `sort`, `search`, `filter[...]`). DB columns, settings keys and enum values are snake_case (prose that names a column uses `table.column`). Validation error keys equal the submitted field names (camelCase dot paths, e.g. `items.2.quantity`).
+- **Prop notation:** `Inertia.Deferred<T>` = prop sent with `Inertia::defer()` (type `T | undefined` until loaded; rendered inside `<Deferred data="…">` with the stated skeleton). `Inertia.ScrollProp<T>` = prop sent with `Inertia::scroll()` (merged by `<InfiniteScroll>`). `Paginated<T>` = `15` §9.29.
+- **Abilities:** customers have no spatie permissions; ownership policies decide (`13` §8). Pages receive a `can` object computed server-side; the client never re-derives state rules.
+- **Responsive:** phone < 768 px = view, approve, chat, quotes, progress **and simple forms** (projects, order draft/submit, account settings, uploads). The **editors** (plan editor, import review, furniture builder) are view-only on phones (`05`/`06`/`07`). Tablet 768–1023 and desktop ≥ 1024 = everything.
+- **Strings:** given as `translation.key` "English value". Keys not listed follow `15` §15.2.
+- **Error pages:** 403/404/419/429/500/503 via `pages/Error.vue` (§4.10). Non-owners get 404 (`13` §8).
+
+### 1.1 Unverified contact UX (shared)
+When `auth.user.emailVerified === false && auth.user.phoneVerified === false`:
+- `VerifyContactBanner` (`15` §9.31) shows in `CustomerLayout` `#banner`: "Verify your email or phone to send orders and messages." + **Resend email link** (Fortify `verification.send`, only if an email exists) + **Verify phone** (opens `PhoneVerifyDialog`, §13.2.3).
+- Gated actions render disabled with the same inline explanation (`common.verify_required` "Verify your email or phone first.") and a **Verify** link: order Submit (§11.3), import **Analyze** (§9.2; Trace stays available), message composer (§11.9), data export (§13.7). Server responses 403 `{code:'contact_unverified'}` show the same message as a toast.
 
 ---
 
@@ -24,120 +30,124 @@ Owned elsewhere (referenced, not re-specified): plan editor canvas, tools and pa
 
 ### 2.1 Pages (GET, Inertia)
 
-| # | Route name | Path | Page component | Layout | §|
+| # | Route name | Path | Page component | Layout | § |
 |---|---|---|---|---|---|
-| 1 | `welcome` | `/` | `Welcome` | AuthLayout (variant `wide`) | 4.1 |
+| 1 | `welcome` | `/` | `Welcome` | AuthLayout `wide` | 4.1 |
 | 2 | `login` (Fortify) | `/login` | `Auth/Login` | AuthLayout | 4.2 |
 | 3 | `register` (Fortify) | `/register` | `Auth/Register` | AuthLayout | 4.3 |
-| 4 | `auth.otp.verify.show` | `/login/phone/verify` | `Auth/PhoneVerify` | AuthLayout | 4.4 |
-| 5 | `password.request` (Fortify) | `/forgot-password` | `Auth/ForgotPassword` | AuthLayout | 4.5 |
-| 6 | `password.reset` (Fortify) | `/reset-password/{token}` | `Auth/ResetPassword` | AuthLayout | 4.5 |
-| 7 | `verification.notice` (Fortify) | `/email/verify` | `Auth/VerifyEmail` | AuthLayout | 4.6 |
-| 8 | `two-factor.login` (Fortify) | `/two-factor-challenge` | `Auth/TwoFactorChallenge` | AuthLayout | 4.7 |
-| 9 | `password.confirm` (Fortify) | `/user/confirm-password` | `Auth/ConfirmPassword` | AuthLayout | 4.8 |
-| 10 | `customer.onboarding.show` | `/onboarding` | `Customer/Onboarding/Wizard` | AuthLayout (variant `wide`) | 5 |
-| 11 | `customer.dashboard` | `/dashboard` | `Customer/Dashboard` | CustomerLayout | 6 |
-| 12 | `customer.projects.index` | `/projects` | `Customer/Projects/Index` | CustomerLayout | 7.1 |
-| 13 | `customer.projects.create` | `/projects/create` | `Customer/Projects/Create` | CustomerLayout | 7.2 |
-| 14 | `customer.projects.show` | `/projects/{project}` | `Customer/Projects/Show` | CustomerLayout | 7.3 |
-| 15 | `customer.projects.edit` | `/projects/{project}/edit` | `Customer/Projects/Edit` | CustomerLayout | 7.4 |
-| 16 | `customer.plans.show` | `/projects/{project}/plans/{plan}` | `Customer/Plans/Editor` | EditorLayout | 8.2 |
-| 17 | `customer.imports.create` | `/projects/{project}/imports/create` | `Customer/Imports/Create` | CustomerLayout | 9.1 |
-| 18 | `customer.imports.show` | `/projects/{project}/imports/{import}` | `Customer/Imports/Show` | CustomerLayout | 9.2 |
-| 19 | `customer.imports.review` | `/projects/{project}/imports/{import}/review` | `Customer/Imports/Review` | EditorLayout | 9.3 |
-| 20 | `customer.designs.index` | `/designs` | `Customer/Designs/Index` | CustomerLayout | 10.1 |
-| 21 | `customer.designs.create` | `/projects/{project}/designs/create` | `Customer/Designs/Create` | CustomerLayout | 10.2 |
-| 22 | `customer.designs.show` | `/projects/{project}/designs/{design}` | `Customer/Designs/Builder` | EditorLayout | 10.3 |
-| 23 | `customer.orders.index` | `/orders` | `Customer/Orders/Index` | CustomerLayout | 11.1 |
-| 24 | `customer.orders.create` | `/projects/{project}/orders/create` | `Customer/Orders/Create` | CustomerLayout | 11.2 |
-| 25 | `customer.orders.edit` | `/orders/{order}/edit` | `Customer/Orders/Draft` | CustomerLayout | 11.3 |
-| 26 | `customer.orders.show` | `/orders/{order}` | `Customer/Orders/Show` | CustomerLayout | 11.4 |
-| 27 | `customer.orders.proposals.show` | `/orders/{order}/proposals/{proposal}` | `Customer/Orders/ProposalReview` | CustomerLayout | 11.5 |
-| 28 | `customer.orders.quotes.show` | `/orders/{order}/quotes/{quote}` | `Customer/Orders/Quote` | CustomerLayout | 11.6 |
-| 29 | `customer.orders.completion.show` | `/orders/{order}/completion` | `Customer/Orders/CompletionReview` | CustomerLayout | 11.8 |
-| 30 | `customer.notifications.index` | `/notifications` | `Customer/Notifications/Index` | CustomerLayout | 12 |
-| 31 | `customer.settings.profile` | `/settings/profile` | `Customer/Settings/Profile` | CustomerLayout + `SettingsNav` | 13.2 |
-| 32 | `customer.settings.password` | `/settings/password` | `Customer/Settings/Password` | same | 13.3 |
-| 33 | `customer.settings.preferences` | `/settings/preferences` | `Customer/Settings/Preferences` | same | 13.4 |
-| 34 | `customer.settings.notifications` | `/settings/notifications` | `Customer/Settings/Notifications` | same | 13.5 |
-| 35 | `customer.settings.credits` | `/settings/ai-credits` | `Customer/Settings/Credits` | same | 13.6 |
-| 36 | `customer.settings.account` | `/settings/account` | `Customer/Settings/Account` | same | 13.7 |
-| 37 | `customer.help` | `/help` | `Customer/Help` | CustomerLayout | 14 |
-| 38 | `pwa.manifest` | `/manifest.webmanifest` | (JSON response) | — | 15 |
+| 4 | `auth.otp.create` (13) | `/login/phone` | `Auth/PhoneLogin` | AuthLayout | 4.4 |
+| 5 | `auth.otp.verify.show` (13) | `/auth/otp/verify` | `Auth/PhoneVerify` | AuthLayout | 4.4 |
+| 6 | `auth.otp.complete.show` (13) | `/auth/otp/complete` | `Auth/PhoneComplete` | AuthLayout | 4.4 |
+| 7 | `password.request` (Fortify) | `/forgot-password` | `Auth/ForgotPassword` | AuthLayout | 4.5 |
+| 8 | `password.reset` (Fortify) | `/reset-password/{token}` | `Auth/ResetPassword` | AuthLayout | 4.5 |
+| 9 | `verification.notice` (Fortify) | `/email/verify` | `Auth/VerifyEmail` | AuthLayout | 4.6 |
+| 10 | `two-factor.login` (Fortify) | `/two-factor-challenge` | `Auth/TwoFactorChallenge` | AuthLayout | 4.7 |
+| 11 | `password.confirm` (Fortify) | `/user/confirm-password` | `Auth/ConfirmPassword` | AuthLayout | 4.8 |
+| 12 | `auth.reauthenticate` (13) | `/auth/reauthenticate` | `Auth/Reauthenticate` | AuthLayout | 4.8 |
+| 13 | `legal.terms` | `/terms` | `Legal/Terms` | AuthLayout `wide` (guest) / CustomerLayout (auth) | 4.9 |
+| 14 | `legal.privacy` | `/privacy` | `Legal/Privacy` | same | 4.9 |
+| 15 | `customer.onboarding.show` | `/onboarding` | `Customer/Onboarding/Wizard` | AuthLayout `wide` | 5 |
+| 16 | `customer.dashboard` | `/dashboard` | `Customer/Dashboard` | CustomerLayout | 6 |
+| 17 | `customer.projects.index` | `/projects` | `Customer/Projects/Index` | CustomerLayout | 7.1 |
+| 18 | `customer.projects.create` | `/projects/create` | `Customer/Projects/Create` | CustomerLayout | 7.2 |
+| 19 | `customer.projects.show` | `/projects/{project}` | `Customer/Projects/Show` | CustomerLayout | 7.3 |
+| 20 | `customer.projects.edit` | `/projects/{project}/edit` | `Customer/Projects/Edit` | CustomerLayout | 7.4 |
+| 21 | `customer.plans.edit` | `/plans/{plan}/edit` | `Customer/Plans/Edit` | EditorLayout | 8.2 |
+| 22 | `customer.projects.imports.create` (06) | `/projects/{project}/imports/new` | `Customer/Imports/Create` | CustomerLayout | 9.1 |
+| 23 | `customer.imports.show` (06) | `/imports/{import}` | `Customer/Imports/Show` | CustomerLayout | 9.2 |
+| 24 | `customer.imports.review` (06) | `/imports/{import}/review` | `Customer/Imports/Review` | EditorLayout | 9.3 |
+| 25 | `customer.furniture.index` | `/furniture` | `Customer/Furniture/Index` | CustomerLayout | 10.1 |
+| 26 | `customer.projects.furniture.create` (07) | `/projects/{project}/furniture/create` | `Customer/Furniture/Create` | CustomerLayout | 10.2 |
+| 27 | `customer.furniture.edit` (07) | `/furniture/{design}/edit` | `Customer/Furniture/Edit` | EditorLayout | 10.3 |
+| 28 | `customer.orders.index` | `/orders` | `Customer/Orders/Index` | CustomerLayout | 11.1 |
+| 29 | `customer.projects.orders.create` | `/projects/{project}/orders/create` | `Customer/Orders/Create` | CustomerLayout | 11.2 |
+| 30 | `customer.orders.edit` | `/orders/{order}/edit` | `Customer/Orders/Draft` | CustomerLayout | 11.3 |
+| 31 | `customer.orders.show` | `/orders/{order}` | `Customer/Orders/Show` | CustomerLayout | 11.4 |
+| 32 | `customer.orders.proposals.show` | `/orders/{order}/proposals/{proposal}` | `Customer/Orders/ProposalReview` | CustomerLayout | 11.5 |
+| 33 | `customer.orders.quotes.show` | `/orders/{order}/quotes/{quote}` | `Customer/Orders/Quote` | CustomerLayout | 11.6 |
+| 34 | `customer.orders.completion` | `/orders/{order}/completion` | `Customer/Orders/CompletionReview` | CustomerLayout | 11.8 |
+| 35 | `customer.notifications.index` | `/notifications` | `Customer/Notifications/Index` | CustomerLayout | 12 |
+| 36 | `customer.account.profile` | `/account/profile` | `Customer/Account/Profile` | CustomerLayout + `AccountNav` | 13.2 |
+| 37 | `customer.account.security` (13) | `/account/security` | `Customer/Account/Security` | same | 13.3 |
+| 38 | `customer.account.preferences` | `/account/preferences` | `Customer/Account/Preferences` | same | 13.4 |
+| 39 | `customer.account.notifications` (12) | `/account/notifications` | `Customer/Account/Notifications` | same | 13.5 |
+| 40 | `customer.account.ai-credits` (18) | `/account/ai-credits` | `Customer/Account/AiCredits` | same | 13.6 |
+| 41 | `customer.account.delete` (13) | `/account` | `Customer/Account/Delete` | same | 13.7 |
+| 42 | `customer.help` | `/help` | `Customer/Help` | CustomerLayout | 14 |
+| 43 | `links.order` (12) | `/o/{number}` | (redirect, `12` §3.6) | — | — |
+| 44 | `manifest` (12) | `/manifest.webmanifest` | (JSON) | — | 15 |
 
-`/` for an authenticated customer redirects to `customer.dashboard` (or `customer.onboarding.show` if not onboarded); for staff to `admin.dashboard`. Fortify `home` path is `/dashboard`; staff hitting `/dashboard` are redirected to `admin.dashboard`.
+`/` for an authenticated customer redirects to `customer.dashboard` (or onboarding); for staff to `admin.dashboard`. Fortify `home` = `/dashboard`; staff visiting customer pages are redirected to `admin.dashboard` by the `customer` middleware (`13` §1).
 
-### 2.2 Actions (form posts; Inertia redirects back or to the named route)
+### 2.2 Actions
 
-| Route name | Method | Path | Body (snake_case) | Effect / transition | Redirect |
+Unless stated, actions redirect back (Inertia) with a translated `flash.success`. Auth/account routes owned by `13`/`12`/`18` are listed for completeness with their owner in brackets.
+
+| Route name | Method | Path | Body | Effect / transition | Redirect |
 |---|---|---|---|---|---|
-| `auth.otp.send` | POST | `/login/phone` | `phone_e164`, `purpose` (`login`), `channel?` (`whatsapp`\|`sms`), `name?` (registration) | Send OTP (`13`) | `auth.otp.verify.show` |
-| `auth.otp.verify` | POST | `/login/phone/verify` | `phone_e164`, `code` | Log in / register (`13`) | intended or dashboard |
-| `auth.google.redirect` | GET | `/auth/google/redirect` | — | Socialite | Google |
-| `auth.google.callback` | GET | `/auth/google/callback` | — | Login/register (`13`) | dashboard |
-| Fortify: `login`, `logout`, `register`, `password.email`, `password.update`, `verification.send`, `two-factor.login`, `password.confirm`, `user-password.update` | POST/PUT | Fortify defaults | per Fortify | per `13` | — |
-| `customer.onboarding.store` | POST | `/onboarding` | §5.3 | Profile + optional project/plan, sets `onboarded_at` | per choice |
+| Fortify `login`, `logout`, `register`, `password.email`, `password.update`, `verification.send`, `two-factor.login`, `password.confirm`, `user-password.update`, `user-profile-information.update` | POST/PUT | Fortify defaults | Fortify fields (`13`) | `13` | per `13` |
+| `auth.otp.send` [13] | POST | `/auth/otp/send` | `phone`, `intent` (`login`\|`register`), `name?`, `cf_turnstile_response?` | send OTP | `auth.otp.verify.show` |
+| `auth.otp.verify` [13] | POST | `/auth/otp/verify` | `code` | login / register | intended / dashboard |
+| `auth.otp.resend` [13] | POST | `/auth/otp/resend` | `channel?`, `cf_turnstile_response?` | resend | back |
+| `auth.otp.complete` [13] | POST | `/auth/otp/complete` | `name`, `terms` | create account | dashboard |
+| `auth.google.redirect` / `auth.google.callback` [13] | GET | `/auth/google/redirect?intent=`, `/auth/google/callback` | — | OAuth | — |
+| `account.google.unlink` [13] | DELETE | `/account/google` | — | unlink Google (`recent.auth`) | back |
+| `account.phone.send` [13] | POST | `/account/phone/otp` | `phone` | OTP purpose `verify_phone` | back |
+| `account.phone.verify` [13] | POST | `/account/phone/verify` | `code` | set + verify phone | back |
+| `account.sessions.destroy` / `account.sessions.destroy-others` [13] | DELETE | `/account/sessions/{sessionKey}`, `/account/sessions` | — | revoke sessions | back |
+| `customer.onboarding.store` | POST | `/onboarding` | §5.3 | profile + project (+ plan), sets `onboarded_at` | per choice |
 | `customer.onboarding.skip` | POST | `/onboarding/skip` | — | sets `onboarded_at` | dashboard |
-| `customer.projects.store` | POST | `/projects` | `name`, `property_type`, `notes?`, `site_address?` | `CreateProject` | `customer.projects.show` |
-| `customer.projects.update` | PUT | `/projects/{project}` | same as store | update | `customer.projects.show` |
+| `customer.projects.store` | POST | `/projects` | `name`, `propertyType`, `notes?`, `siteAddressId?`, `siteAddress?` | `CreateProject` | `customer.projects.show` |
+| `customer.projects.update` | PUT | `/projects/{project}` | same | update | `customer.projects.show` |
 | `customer.projects.archive` | POST | `/projects/{project}/archive` | — | `ArchiveProject` | back |
 | `customer.projects.unarchive` | POST | `/projects/{project}/unarchive` | — | status → active | back |
-| `customer.projects.destroy` | DELETE | `/projects/{project}` | `confirmation` (= project name) | soft delete | `customer.projects.index` |
-| `customer.plans.store` | POST | `/projects/{project}/plans` | `name`, `level_index`, `start` (`blank`\|`starter`), `starter_key?` | `CreatePlan` | `customer.plans.show` |
-| `customer.plans.update` | PATCH | `/projects/{project}/plans/{plan}` | `name?`, `level_index?` | rename/reorder | back |
-| `customer.plans.duplicate` | POST | `/projects/{project}/plans/{plan}/duplicate` | `name` | `DuplicatePlan` | back |
-| `customer.plans.destroy` | DELETE | `/projects/{project}/plans/{plan}` | — | soft delete | `customer.projects.show` |
-| `customer.imports.start` | POST | `/projects/{project}/imports/{import}/start` | `selected_page`, `hints`, `target` | queue recognition (`06`), reserve credits | `customer.imports.show` |
-| `customer.imports.cancel` | POST | `/projects/{project}/imports/{import}/cancel` | — | `CancelImport` (`06`) | `customer.imports.show` |
-| `customer.imports.accept` | POST | `/projects/{project}/imports/{import}/accept` | `document`, `plan_name?`, `level_index?` | `AcceptImportIntoPlan` (`06`) | `customer.plans.show` |
-| `customer.imports.discard` | POST | `/projects/{project}/imports/{import}/discard` | — | status `discarded` (`06`) | `customer.projects.show` (tab imports) |
-| `customer.imports.retry` | POST | `/projects/{project}/imports/{import}/retry` | — | new import copying source (`06`) | `customer.imports.create?import={new}` |
-| `customer.imports.trace` | POST | `/projects/{project}/imports/{import}/trace` | `plan_name`, `level_index` | create plan with background, mode `trace` (`06`) | `customer.plans.show` |
-| `customer.designs.store` | POST | `/projects/{project}/designs` | `source` (`preset`\|`template`\|`duplicate`), `preset_id?`, `template_key?`, `from_design_id?`, `name`, `return_plan?` | `CreateFurnitureDesign` | `customer.designs.show` (+`?return_plan=`) |
-| `customer.designs.update` | PATCH | `/projects/{project}/designs/{design}` | `name` | rename | back |
-| `customer.designs.duplicate` | POST | `/projects/{project}/designs/{design}/duplicate` | `name` | `DuplicateFurnitureDesign` (from pinned revision if locked, `09` §3) | `customer.designs.show` (new) |
-| `customer.designs.destroy` | DELETE | `/projects/{project}/designs/{design}` | — | soft delete (blocked if locked or in any order) | `customer.projects.show?tab=designs` |
-| `customer.orders.store` | POST | `/projects/{project}/orders` | `design_ids[]` | **T1** | `customer.orders.edit` |
+| `customer.projects.destroy` | DELETE | `/projects/{project}` | `confirmation` (= project name) | soft delete (blocked with any non-draft order) | `customer.projects.index` |
+| `customer.projects.plans.store` | POST | `/projects/{project}/plans` | `name`, `levelIndex`, `start` (`blank`\|`starter`), `starterKey?` | `CreatePlan` | `customer.plans.edit` |
+| `customer.plans.update` | PATCH | `/plans/{plan}` | `name?`, `levelIndex?` | rename / reorder | back |
+| `customer.plans.duplicate` | POST | `/plans/{plan}/duplicate` | `name` | `DuplicatePlan` | back |
+| `customer.plans.destroy` | DELETE | `/plans/{plan}` | — | soft delete | `customer.projects.show` |
+| `customer.projects.furniture.store` [07] | POST | `/projects/{project}/furniture` | `name`, `templateKey`, `presetId?`, `document`, `returnPlanId?` | `CreateFurnitureDesign` | `customer.furniture.edit` (+ `?return_plan=`) |
+| `customer.furniture.update` | PATCH | `/furniture/{design}` | `name` | rename | back |
+| `customer.furniture.destroy` | DELETE | `/furniture/{design}` | — | soft delete (blocked if locked or referenced by any order item) | project designs tab |
+| `customer.projects.orders.store` | POST | `/projects/{project}/orders` | `designIds[]` | **T1** | `customer.orders.edit` |
 | `customer.orders.update` | PUT | `/orders/{order}` | §11.3.4 | save draft | back |
-| `customer.orders.submit` | POST | `/orders/{order}/submit` | §11.3.4 (full payload) | save + **T2** | `customer.orders.show` |
+| `customer.orders.submit` | POST | `/orders/{order}/submit` | §11.3.4 (full payload) | save + **T2** (`verified.contact`) | `customer.orders.show` |
 | `customer.orders.destroy` | DELETE | `/orders/{order}` | — | `DeleteDraftOrder` (never-submitted draft) | `customer.orders.index` |
 | `customer.orders.cancel` | POST | `/orders/{order}/cancel` | `note?` | **T3** | `customer.orders.show` |
 | `customer.orders.withdraw` | POST | `/orders/{order}/withdraw` | `note?` | **T29** | `customer.orders.show` |
 | `customer.orders.reopen` | POST | `/orders/{order}/reopen` | — | **T5** | `customer.orders.edit` |
-| `customer.orders.proposals.resolve` | POST | `/orders/{order}/proposals/{proposal}/resolve` | `decisions[]: {item_id, decision, comment?}`, `comment?` | **T7** | `customer.orders.show` |
-| `customer.orders.quotes.accept` | POST | `/orders/{order}/quotes/{quote}/accept` | `accept_terms` (must be `true`) | **T10** | `customer.orders.show` |
-| `customer.orders.quotes.negotiate` | POST | `/orders/{order}/quotes/{quote}/negotiate` | `message`, `proposed_total_minor?`, `item_comments?[]: {order_item_id, comment}` | **T11** | `customer.orders.show` |
+| `customer.orders.proposals.resolve` | POST | `/orders/{order}/proposals/{proposal}/resolve` | `decisions[]: {itemId, decision, comment?}`, `comment?` | **T7** | `customer.orders.show` |
+| `customer.orders.quotes.accept` | POST | `/orders/{order}/quotes/{quote}/accept` | `acceptTerms` (`true`) | **T10** | `customer.orders.show` |
+| `customer.orders.quotes.negotiate` | POST | `/orders/{order}/quotes/{quote}/negotiate` | `message`, `proposedTotalMinor?`, `itemComments?[]: {orderItemId, comment}` | **T11** | `customer.orders.show` |
 | `customer.orders.quotes.decline` | POST | `/orders/{order}/quotes/{quote}/decline` | `reason` | **T14** | `customer.orders.show` |
-| `customer.orders.quotes.pdf` | GET | `/orders/{order}/quotes/{quote}/pdf` | — | 302 to temporary URL (404 `pdf_not_ready` while rendering) | — |
+| `customer.orders.quotes.pdf` | GET | `/orders/{order}/quotes/{quote}/pdf` | — | 302 to temporary URL; 404 `pdf_not_ready` while rendering | — |
 | `customer.orders.completion.approve` | POST | `/orders/{order}/completion/approve` | — | **T21** | `customer.orders.show` |
-| `customer.orders.issues.store` | POST | `/orders/{order}/issues` | `issues[]: {description, order_item_id?, upload_tokens[]}` (≥ 1) | **T22** | `customer.orders.show` |
-| `customer.orders.messages.store` | POST | `/orders/{order}/messages` | `body`, `upload_tokens[]`, `template?` (`callback_request`), `callback_at?` | `PostMessage` | back (preserveScroll) |
-| `customer.orders.messages.update` | PATCH | `/orders/{order}/messages/{message}` | `body` | edit within 10 min | back |
-| `customer.orders.messages.read` | POST | `/orders/{order}/messages/read` | `last_message_id` | `MarkThreadRead` | 204 (XHR via `lib/http.ts`) |
-| `notifications.read` | POST | `/notifications/{notification}/read` | — | mark read | 204 |
-| `notifications.read-all` | POST | `/notifications/read-all` | — | mark all read | back |
-| `customer.settings.profile.update` | PUT | `/settings/profile` | `name`, `email?`, `marketing_opt_in` | update; email change resets `email_verified_at` and sends verification | back |
-| `customer.settings.avatar.update` | PUT | `/settings/avatar` | `upload_token` \| null | set/remove avatar | back |
-| `customer.settings.phone.send-code` | POST | `/settings/phone/send-code` | `phone_e164`, `channel?` | OTP purpose `verify_phone` (`13`) | back |
-| `customer.settings.phone.verify` | POST | `/settings/phone/verify` | `phone_e164`, `code` | sets `phone_e164`, `phone_verified_at` | back |
-| `customer.settings.preferences.update` | PUT | `/settings/preferences` | `unit_system`, `length_unit`, `timezone` | update | back |
-| `customer.settings.notifications.update` | PUT | `/settings/notifications` | `changes[]: {event_key, channel, enabled}` | `UpdatePreferences` | back |
-| `customer.settings.account.destroy` | DELETE | `/settings/account` | `password?` \| `code?`, `confirmation` (= `DELETE`) | anonymise (`13`) + logout | `welcome` |
+| `customer.orders.issues.store` | POST | `/orders/{order}/issues` | `issues[]: {description, orderItemId?, uploadIds[]}` (≥ 1) | **T22** | `customer.orders.show` |
+| `customer.orders.messages.store` | POST | `/orders/{order}/messages` | `body`, `uploadIds[]`, `template?` (`callback_request`), `callbackAt?` | `PostMessage` (`verified.contact`) | back (`preserveScroll`) |
+| `customer.orders.messages.update` | PATCH | `/orders/{order}/messages/{message}` | `body` | edit own within 10 min | back |
+| `customer.orders.messages.read` | POST | `/orders/{order}/messages/read` | `lastMessageId` | `MarkThreadRead` | 204 (XHR) |
+| `customer.account.avatar.update` | PUT | `/account/avatar` | `uploadId` \| null | set/remove avatar | back |
+| `customer.account.preferences.update` | PUT | `/account/preferences` | `unitSystem`, `lengthUnit`, `timezone` | update | back |
+| `customer.account.notifications.update` [12] | PUT | `/account/notifications` | `preferences[]: {eventKey, channel, enabled}` | `UpdatePreferences` | back |
+| `customer.account.notifications.reset` | DELETE | `/account/notifications` | — | delete all preference rows (`12` §10.2 "Reset to defaults") | back |
+| `customer.account.notifications.test-push` | POST | `/account/notifications/test-push` | — | test web push to own subscriptions (throttle 3/min) | back |
+| `customer.account.destroy` [13] | DELETE | `/account` | `confirmation` | `RequestAccountDeletion` (`recent.auth`) | public "deletion scheduled" page (`13` §9.1) |
+| `customer.account.export` [13] | GET | `/account/export` | — | JSON download (`recent.auth`, `verified.contact`) | — |
 
 ### 2.3 JSON endpoints used by customer pages
 
-| Name | Method | Path | Used by | Response |
+| Name | Method | Path | Owner | Used by |
 |---|---|---|---|---|
-| `api.uploads.presign` | POST | `/api/uploads/presign` | `FileDropzone` | `15` §9.10 |
-| `api.imports.store` | POST | `/api/projects/{project}/imports` | Import wizard | §9.1.4 |
-| `api.imports.uploaded` | POST | `/api/imports/{import}/uploaded` | Import wizard | §9.1.4 |
-| `api.imports.show` | GET | `/api/imports/{import}` | Import wizard (page previews), progress fallback polling | `{ import: ImportData, pages: ImportPagePreviewData[] }` |
-| `api.notifications.index` | GET | `/api/notifications?limit=10` | `NotificationBell` | `{ data: NotificationData[], unread_count: number }` |
-| `api.push-subscriptions.store` | POST | `/api/push-subscriptions` | Push enable | `{ endpoint, keys: { p256dh, auth }, content_encoding }` → 201 |
-| `api.push-subscriptions.destroy` | DELETE | `/api/push-subscriptions` | Push disable | `{ endpoint }` → 204 |
-| `api.furniture-revisions.show` | GET | `/api/furniture-revisions/{revision}` | `Thumbnail3D`, proposal viewer | `{ id, number, document: FurnitureDocument, bom_status, catalog_version }` |
-| `media.show` | GET | `/media/{media:uuid}?conversion=` | every `MediaData.url` | 302 → 15-min temporary URL after policy check |
-| Editors (`03` §5): `/api/plans/{plan}/working-copy`, `/api/furniture-designs/{design}/working-copy`, revisions, `/api/catalog/snapshot` | — | — | `05`/`07` | `03` |
+| `api.uploads.presign` / `api.uploads.confirm` / `api.uploads.show` | POST/POST/GET | `/api/uploads/presign`, `/api/uploads/{upload}/confirm`, `/api/uploads/{upload}` | `13` §11 | `FileDropzone`, `ImageUploader` |
+| `api.imports.*` (A1–A12) | — | `/api/projects/{project}/imports`, `/api/imports/{import}/…` | `06` §4.3 | import pages |
+| `api.notifications.index` | GET | `/api/notifications?filter=&cursor=&limit=` | `12` §8.4 | bell, notification center |
+| `api.notifications.read` / `.unread` / `.read-all` | POST | `/api/notifications/{id}/read`, `/unread`, `/api/notifications/read-all` | `12` | bell, center |
+| `api.push-subscriptions.store` / `.destroy` | POST/DELETE | `/api/push-subscriptions` | `12` §8.3 | `PushOptIn` |
+| `api.ai.credits` | GET | `/api/me/ai-credits` | `18` | `CreditBadge` refresh |
+| `api.furniture-designs.duplicate` | POST | `/api/furniture-designs/{design}/duplicate` | `07` | design card menu, builder |
+| `api.furniture-revisions.show` | GET | `/api/furniture-revisions/{revision}` | this file (Appendix A8) | `Thumbnail3D`, proposal viewer |
+| `media.show` | GET | `/media/{media:uuid}?conversion=` | `13` §8.9 | every `MediaData.url` |
+| Editors: `/api/plans/{plan}/working-copy`, `/api/furniture-designs/{design}/working-copy`, revisions, `/api/catalog/snapshot` | — | — | `03`, `05`, `07` | editors |
 
 ---
 
@@ -145,7 +155,7 @@ Owned elsewhere (referenced, not re-specified): plan editor canvas, tools and pa
 
 ```ts
 type Ulid = string;
-type IsoDateTime = string;          // ISO-8601 UTC, e.g. "2026-10-20T09:15:00Z"
+type IsoDateTime = string;          // ISO-8601 UTC
 type IsoDate = string;              // "YYYY-MM-DD" (business TZ date)
 type OrderStateKey = 'draft' | 'submitted' | 'in_review' | 'changes_proposed' | 'quoted' | 'negotiating'
   | 'accepted' | 'confirmed' | 'in_production' | 'completed' | 'rework' | 'ready_for_delivery'
@@ -153,61 +163,60 @@ type OrderStateKey = 'draft' | 'submitted' | 'in_review' | 'changes_proposed' | 
 type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'primary';
 type PropertyType = 'apartment' | 'independent_house' | 'villa' | 'office' | 'other';
 
-interface UserRefData { id: Ulid; name: string; avatar_url: string | null; is_staff: boolean }
+interface UserRefData { id: Ulid; name: string; avatarUrl: string | null; isStaff: boolean }
 
 interface AddressData {
   id: Ulid; label: string | null; line1: string; line2: string | null; city: string;
-  region: string | null; postal_code: string | null; country_code: string;
-  one_line: string;                 // server-formatted single line for display
+  region: string | null; postalCode: string | null; countryCode: string;
+  oneLine: string;                  // server-formatted single line
 }
-interface AddressFormData {         // form payload (nested key e.g. site_address.*)
-  id?: Ulid | null;                 // existing address id to reuse/update
+interface AddressFormData {
   label: string | null; line1: string; line2: string | null; city: string;
-  region: string | null; postal_code: string | null; country_code: string;
+  region: string | null; postalCode: string | null; countryCode: string;
 }
 
 interface MediaData {
   id: string;                       // media uuid
-  name: string; mime_type: string; size: number;
-  url: string;                      // route('media.show', uuid) — stable, policy-checked redirect
-  thumb_url: string | null;         // media.show?conversion=thumb (images only)
-  large_url: string | null;         // media.show?conversion=large
+  name: string; mimeType: string; size: number;
+  url: string;                      // route('media.show', uuid) — stable; policy-checked redirect (13 §8.9)
+  thumbUrl: string | null;          // ?conversion=thumb (images)
+  largeUrl: string | null;          // ?conversion=large
   width: number | null; height: number | null;
 }
 
 interface ProjectSummaryData {
-  id: Ulid; name: string; property_type: PropertyType; status: 'active' | 'archived';
-  cover_url: string | null;         // project cover (auto 3D thumbnail) or first plan thumbnail
-  plan_count: number; design_count: number; active_order_count: number;
-  action_needed_count: number;      // orders of this project with a customer action (§11.4.2)
-  updated_at: IsoDateTime;
+  id: Ulid; name: string; propertyType: PropertyType; status: 'active' | 'archived';
+  coverUrl: string | null;          // project cover or first plan thumbnail
+  planCount: number; designCount: number; activeOrderCount: number;
+  actionNeededCount: number;        // orders of this project with a customer action (§11.4.2)
+  updatedAt: IsoDateTime;
 }
 interface ProjectData extends ProjectSummaryData {
-  notes: string | null; site_address: AddressData | null; created_at: IsoDateTime;
-  can: { update: boolean; archive: boolean; unarchive: boolean; delete: boolean; create_order: boolean };
+  notes: string | null; siteAddress: AddressData | null; createdAt: IsoDateTime;
+  can: { update: boolean; archive: boolean; unarchive: boolean; delete: boolean; createOrder: boolean };
 }
 interface ProjectRefData { id: Ulid; name: string; status: 'active' | 'archived' }
 
-interface PlanSummaryJson { wallCount: number; roomCount: number; totalAreaMm2: number; rooms: { id: string; name: string; areaMm2: number }[] }
+interface PlanSummaryJson { wallCount: number; roomCount: number; totalAreaMm2: number; rooms: { id: string; name: string; areaMm2: number }[] }  // plans.summary (02 §3.2)
 interface PlanSummaryData {
-  id: Ulid; project_id: Ulid; name: string; level_index: number;
+  id: Ulid; projectId: Ulid; name: string; levelIndex: number;
   source: 'drawn' | 'imported' | 'traced' | 'duplicated';
-  thumbnail_url: string | null; thumbnail_small_url: string | null;
+  thumbnailUrl: string | null; thumbnailSmallUrl: string | null;
   summary: PlanSummaryJson;
-  working_saved_at: IsoDateTime | null; updated_at: IsoDateTime;
+  workingSavedAt: IsoDateTime | null; updatedAt: IsoDateTime;
 }
 
-interface FurnitureEstimateJson { totalMinor: number; currency: string; partCount: number; sheetCount: number; catalogVersion: number; engineVersion: string; computedAt: string }
+interface FurnitureEstimateJson { totalMinor: number; currency: string; partCount: number; sheetCount: number; catalogVersion: number; engineVersion: string; computedAt: string }  // furniture_designs.estimate
 interface OrderRefData { id: Ulid; number: string; state: OrderStateKey }
 interface FurnitureDesignSummaryData {
-  id: Ulid; project_id: Ulid; project_name: string; name: string;
-  template_key: string; template_label: string;   // translated template name (07)
-  thumbnail_url: string | null;
-  width_mm: number; height_mm: number; depth_mm: number;
+  id: Ulid; projectId: Ulid; projectName: string; name: string;
+  templateKey: string; templateLabel: string;     // translated (07)
+  thumbnailUrl: string | null;
+  widthMm: number; heightMm: number; depthMm: number;
   estimate: FurnitureEstimateJson | null;
-  estimate_stale: boolean;          // estimate.catalogVersion < current catalog.version
-  locked_by_order: OrderRefData | null;
-  updated_at: IsoDateTime;
+  estimateStale: boolean;           // estimate.catalogVersion < current catalog.version
+  lockedByOrder: OrderRefData | null;
+  updatedAt: IsoDateTime;
 }
 
 interface CustomerOrderAction {
@@ -215,142 +224,126 @@ interface CustomerOrderAction {
   href: string; since: IsoDateTime;
 }
 interface OrderSummaryData {
-  id: Ulid; number: string; is_draft_number: boolean; title: string;
-  state: OrderStateKey; state_before_hold: OrderStateKey | null;
-  project: ProjectRefData; item_count: number;
-  thumbnail_urls: string[];         // up to 3 item thumbnails
-  quote_total_minor: number | null; // current sent/accepted quote total
-  production_progress: number; production_stage_label: string | null;
+  id: Ulid; number: string; isDraftNumber: boolean; title: string;
+  state: OrderStateKey; stateBeforeHold: OrderStateKey | null;
+  project: ProjectRefData; itemCount: number;
+  thumbnailUrls: string[];          // up to 3
+  quoteTotalMinor: number | null;   // current sent/accepted quote total
+  productionProgress: number; productionStageLabel: string | null;
   action: CustomerOrderAction | null;
-  expected_delivery_on: IsoDate | null;
-  unread_messages: number;
-  submitted_at: IsoDateTime | null; updated_at: IsoDateTime;
+  expectedDeliveryOn: IsoDate | null;
+  unreadMessages: number;
+  submittedAt: IsoDateTime | null; updatedAt: IsoDateTime;
 }
 
-interface TimelineEntryData {       // 09 §12 (customer variant filters internal entries server-side)
+interface TimelineEntryData {       // 09 §12 (customer variant: internal entries removed server-side)
   id: string;
   kind: 'state_change' | 'proposal' | 'quote' | 'negotiation' | 'call' | 'production_update' | 'issue' | 'delivery' | 'system';
   at: IsoDateTime; actor: UserRefData | null;
-  title_key: string; params: Record<string, string | number | null>;
-  body_html: string | null; photos: MediaData[];
-  links: { label_key: string; href: string }[];
+  titleKey: string; params: Record<string, string | number | null>;
+  bodyHtml: string | null;          // sanitised server-side (13 §12.6); rendered only via MessageBody.vue
+  photos: MediaData[];
+  links: { labelKey: string; href: string }[];
   visibility: 'customer' | 'internal';
-  state: OrderStateKey | null;      // for state_change entries (icon/tone)
+  state: OrderStateKey | null;
 }
 
 interface MessageData {
   id: Ulid; kind: 'text' | 'system' | 'internal_note';
   author: UserRefData | null;
-  body: string;                     // raw Markdown subset (for editing own messages)
-  body_html: string;                // sanitised HTML rendered server-side (Str::markdown, html_input=strip, allow_unsafe_links=false)
-  system_event: string | null; system_payload: Record<string, unknown> | null;
+  body: string;                     // raw Markdown subset (own messages, for editing)
+  bodyHtml: string;                 // Str::markdown per 13 §12.6
+  systemEvent: string | null; systemPayload: Record<string, unknown> | null;
   attachments: MediaData[];
-  edited_at: IsoDateTime | null; created_at: IsoDateTime;
-  can_edit: boolean;                // own text message, < 10 min old
+  editedAt: IsoDateTime | null; createdAt: IsoDateTime;
+  canEdit: boolean;                 // own text message < 10 min old
 }
 
-interface NotificationData {
-  id: string;                       // notifications.id (uuid)
-  event_key: string;                // 12 catalogue
-  title: string; body: string | null;   // rendered server-side with trans_icu from the stored payload (12)
-  action_url: string | null; icon: string;   // lucide icon name from the event group
-  read_at: IsoDateTime | null; created_at: IsoDateTime;
-}
-
-interface AiCreditsData {
-  balance: number; monthly_allowance: number; next_grant_on: IsoDate;
-  cost_per_recognition: number; cost_per_recognition_none: number;
-  recognitions_today: number; max_recognitions_per_day: number;
-  ai_available: boolean;            // ai.provider !== 'none' and budget not exhausted with behaviour 'block'
-}
+// From 12 §4.5 (unchanged): NotificationPayloadData { id, eventKey, titleKey, bodyKey, params, url, icon, createdAt, readAt }
+// From 18 §9.6 (unchanged): CreditSummaryData { balance, pending, unlimited, monthlyCredits, nextTopUpOn, creditsPerRecognition,
+//                                                creditsPerRecognitionNone, dailyLimit, usedToday, aiAvailable }
+// From 06 §4.3 (unchanged): ImportStatusData, ImportHints
 ```
 
 ---
 
 ## 4. Public & authentication pages
 
-All use `AuthLayout` (`15` §7.4). Flows, rate limits and security behaviour are defined in `13`; this section defines UI only. Every form shows field errors inline and a generic error `Alert` for `_error`. Throttling responses (429) show `auth.errors.throttled` "Too many attempts. Try again in {seconds} seconds." with a live countdown.
+All use `AuthLayout` (`15` §7.4). Flows, limits, captcha (Turnstile when `features.captcha`, widget rendered from the `turnstileSiteKey` prop) and error codes are owned by `13`; this section defines the UI. Every auth page receives `features`, `turnstileSiteKey`, `canRegister` (`13` §2). Field errors inline; `_error`/`code` errors in an `Alert`. 429 responses show `auth.errors.throttled` "Too many attempts. Try again in {seconds} seconds." with a live countdown.
 
 ### 4.1 Welcome — `welcome` · `/` · `Welcome`
-Props: `{ can_register: boolean }` (+ shared `features`, `business`).
-Content (no marketing site): logo + app name (Display), tagline `welcome.tagline` "Design furniture that fits your home perfectly.", three rows with icons: `scan-line` `welcome.points.upload` "Upload your floor plan or draw it", `armchair` `welcome.points.design` "Design custom furniture in 2D and 3D", `package-check` `welcome.points.track` "Get a quote and follow production to delivery". Buttons: **Create account** (primary, → `register`, hidden if `!can_register`) and **Log in** (outline, → `login`). Footer: business phone (`tel:`), email (`mailto:`), working hours.
-Phone: single column, buttons full-width. Acceptance: no external requests other than to own origin; Lighthouse accessibility ≥ 95.
+Props: `{ canRegister: boolean }`.
+Content (no marketing site): logo + app name (Display style), tagline `welcome.tagline` "Design furniture that fits your home perfectly.", three rows with icons: `scan-line` "Upload your floor plan or draw it", `armchair` "Design custom furniture in 2D and 3D", `package-check` "Get a quote and follow production to delivery". Buttons **Create account** (primary → `register`; hidden if `!canRegister`) and **Log in** (outline → `login`). Footer: business phone (`tel:`), email (`mailto:`), working hours, links Terms · Privacy.
+Phone: single column, full-width buttons. Acceptance: no third-party requests; Lighthouse accessibility ≥ 95.
 
 ### 4.2 Login — `login` · `/login` · `Auth/Login`
-Props: `{ status: string | null; can_reset_password: boolean; can_register: boolean; phone_login_enabled: boolean /* features.whatsapp || features.sms */; google_enabled: boolean }`.
+Props: `{ status: string | null; canResetPassword: boolean; canRegister: boolean; features; turnstileSiteKey: string | null }`.
 - Title `auth_ui.login.title` "Log in".
-- If `phone_login_enabled`: `Tabs` "Email" | "Phone" (remember last tab in `localStorage['fs:ui:login-tab']`).
-- Email tab: Email (`type=email`, `autocomplete=username`), Password (`autocomplete=current-password`, show/hide toggle), "Remember me" checkbox, "Forgot password?" link (→ `password.request`), **Log in** button (full width). Errors: Fortify `auth.failed` rendered under email.
-- Phone tab: `PhoneInput`, helper `auth_ui.login.phone_hint` "We'll send a 6-digit code by WhatsApp or SMS.", **Send code** → `auth.otp.send` (`purpose=login`) → `auth.otp.verify.show`.
-- Divider "or", **Continue with Google** (outline, Google "G" SVG mark inline, only if `google_enabled`) → `auth.google.redirect`.
-- Footer: "New here? Create an account" (→ `register`).
-- `status` (e.g. after password reset) shown as `success` Alert.
-- Staff use the same page; after login staff go to `admin.dashboard`; if 2FA is enabled Fortify redirects to `two-factor.login`.
+- Email (`autocomplete=username`), Password (`autocomplete=current-password`, show/hide), "Remember me", "Forgot password?" (→ `password.request`), **Log in** (full width).
+- **Use my phone instead** (outline, `smartphone` icon) → `auth.otp.create` — shown when `features.whatsapp || features.sms`.
+- **Continue with Google** (if `features.google_login`) → `auth.google.redirect?intent=login`; caption "By continuing you accept the Terms and Privacy Policy." (links).
+- Footer "New here? Create an account" (→ `register`, if `canRegister`). `status` → success `Alert`.
+- Staff use the same page (13: staff never use phone OTP; the phone button is still visible, `13` returns `auth.errors.staff_use_email`).
 
 ### 4.3 Register — `register` · `/register` · `Auth/Register`
-Props: `{ phone_login_enabled: boolean; google_enabled: boolean }`.
-- Tabs "Email" | "Phone" (as login). Email tab fields: Name (≤ 120), Email, Password (with strength hint `auth_ui.password_rules` "At least 8 characters."), Confirm password, checkbox "Send me occasional updates and offers" (`marketing_opt_in`, unchecked). **Create account** → Fortify `register` → `verification.notice`.
-- Phone tab: Name, `PhoneInput` → **Send code** → `auth.otp.send` with `purpose=login`, `name` → verify page; on verify the account is created (`13`).
-- Google button as on login.
-- Legal line `auth_ui.register.consent` "By creating an account you agree to our privacy notice." linking to `customer.help#privacy` (help is authenticated; for guests the link opens a dialog containing `help.privacy.body`).
+Props: as login. If `!canRegister` → page shows `auth.registration_closed` text only.
+Fields (`13` §5.1, Fortify field names): `name` (2–120), `email`, `password` (hint `auth_ui.password_rules` "At least 8 characters."), `password_confirmation`, `terms` checkbox (required: "I accept the [Terms] and [Privacy Policy]" linking `legal.terms` / `legal.privacy` in a new tab), `marketing_opt_in` checkbox (unchecked, "Send me occasional updates and offers"), Turnstile widget. **Create account** → Fortify `register` → dashboard (verification banner per `13`).
+Links: **Use my phone instead** (`auth.otp.create?intent=register`), **Continue with Google**.
 
-### 4.4 Phone code — `auth.otp.verify.show` · `/login/phone/verify` · `Auth/PhoneVerify`
-Props: `{ phone_e164: string; phone_masked: string; channel: 'whatsapp' | 'sms'; resend_available_in: number /* seconds */; alternate_channel: 'whatsapp' | 'sms' | null }` (session-backed; visiting without a pending OTP redirects to `login`).
-- Text `auth_ui.otp.sent` "We sent a code to {phone} via {channel, select, whatsapp {WhatsApp} other {SMS}}."
-- shadcn `PinInput` 6 digits (`inputmode=numeric`, `autocomplete=one-time-code`), auto-submits on the 6th digit → `auth.otp.verify`.
-- "Resend code" (disabled with countdown), "Send by SMS instead" / "Send by WhatsApp instead" when `alternate_channel`. "Use a different number" → back.
-- Errors: `auth.otp.invalid` "That code isn't right. {remaining, plural, one {# attempt} other {# attempts}} left.", `auth.otp.expired` "This code has expired. Request a new one.", `auth.otp.too_many` "Too many wrong codes. Request a new code."
+### 4.4 Phone sign-in / sign-up — `auth.otp.create`, `auth.otp.verify.show`, `auth.otp.complete.show`
+- `Auth/PhoneLogin` (props `{ intent: 'login' | 'register'; features; turnstileSiteKey }`): `PhoneInput` (`phone`), Name field when `intent=register`, `terms` checkbox when `intent=register`, Turnstile when required (422 `captcha_required` → render widget and resubmit), **Send code** → `auth.otp.send`. Hint "We'll send a 6-digit code by WhatsApp or SMS."
+- `Auth/PhoneVerify` (props `{ channel: 'whatsapp' | 'sms'; maskedPhone: string; resendAvailableIn: number; channels: ('whatsapp' | 'sms')[] }`): per `13` §4.4 — single code field (`inputmode=numeric`, `autocomplete=one-time-code`, `maxlength=6`, auto-submit at 6 digits; shadcn `PinInput` with a hidden native input carrying `autocomplete=one-time-code` for iOS/Android autofill and WebOTP), text `auth_ui.otp.sent` "We sent a code to {phone} via {channel, select, whatsapp {WhatsApp} other {SMS}}.", resend countdown 60 s, **Resend on WhatsApp** / **Send by SMS**, **Change number**. Polls `auth.otp.status` every 5 s (max 2 min) while channel is WhatsApp; on `fallbackSent` shows "We couldn't reach you on WhatsApp, so we sent an SMS instead." Errors: `auth.errors.otp_invalid` "That code isn't right. {attemptsLeft, plural, one {# attempt} other {# attempts}} left.", `auth.errors.otp_expired`, `auth.errors.otp_too_many_attempts`.
+- `Auth/PhoneComplete` (props `{ maskedPhone: string }`): Name*, `terms`* → `auth.otp.complete`.
 
-### 4.5 Forgot / reset password — `password.request`, `password.reset`
-`Auth/ForgotPassword` props `{ status: string | null }`: Email field, **Email reset link**; success Alert with `status`. `Auth/ResetPassword` props `{ email: string; token: string }`: Email (read-only), Password, Confirm, **Reset password** → redirect to login with status.
+### 4.5 Forgot / reset password
+`Auth/ForgotPassword` (`{ status }`): Email, **Email reset link**; success `Alert` (never reveals existence). `Auth/ResetPassword` (`{ email, token }`): Email (read-only), Password, Confirm → login with status.
 
 ### 4.6 Verify email — `verification.notice` · `Auth/VerifyEmail`
-Props `{ status: string | null; email: string }`. Text `auth_ui.verify.body` "We sent a verification link to {email}. Click it to verify your address." Buttons: **Resend email** (`verification.send`; success "A new link has been sent."), **Continue without verifying** (→ dashboard — verification is required only to submit orders, which may also be satisfied by a verified phone), **Log out** (link button).
+Props `{ status: string | null; email: string }`. "We sent a verification link to {email}." **Resend email** (`verification.send`), **Continue to the app** (→ dashboard; app works unverified, §1.1), **Log out**.
 
 ### 4.7 Two-factor challenge — `two-factor.login` · `Auth/TwoFactorChallenge`
-Staff only in practice. Props `{}`. `PinInput` 6 digits for TOTP or toggle "Use a recovery code" (text input). **Continue**.
+Staff only (`13` §5.10). Code field (6 digits) or "Use a recovery code" toggle. **Continue**.
 
-### 4.8 Confirm password — `password.confirm` · `Auth/ConfirmPassword`
-Props `{}`. Password field + **Confirm**. Used before account deletion and staff sensitive actions (`13`).
+### 4.8 Confirm password / reauthenticate
+`Auth/ConfirmPassword`: password + **Confirm** (Fortify). `Auth/Reauthenticate` (`13` §6.4, passwordless users): options **Send me a code** (phone OTP, same phone) and **Continue with Google**; success returns to the intended page.
 
-### 4.9 Error page — `pages/Error.vue`
-Props `{ status: 403 | 404 | 419 | 429 | 500 | 503 }`. Uses CustomerLayout when authenticated customer, AdminLayout for staff, AuthLayout for guests (decided in `HandleInertiaRequests` exception renderer). `EmptyState` per status: 403 `lock` "You don't have access to this page."; 404 `map-pin-off` "We couldn't find that page."; 419 `refresh-cw` "Your session expired. Please reload."; 429 `hourglass` "Too many requests. Please wait a moment."; 500 `triangle-alert` "Something went wrong on our side."; 503 `wrench` "We're doing maintenance. Back shortly." Actions: "Go to dashboard", "Reload" (419/500/503).
+### 4.9 Legal pages — `legal.terms`, `legal.privacy`
+Public. Props `{ businessName: string; updatedOn: IsoDate }`. Body = translation `legal.terms.body` / `legal.privacy.body` (ICU with `{business}`; owner edits translations), rendered as paragraphs (no HTML). Layout: AuthLayout `wide` for guests, CustomerLayout for customers, AdminLayout for staff.
+
+### 4.10 Error page — `pages/Error.vue`
+Props `{ status: 403 | 404 | 419 | 429 | 500 | 503 }`. Layout by audience (customer/staff/guest). `EmptyState` per status: 403 `lock` "You don't have access to this page."; 404 `map-pin-off` "We couldn't find that page."; 419 `refresh-cw` "Your session expired. Please reload."; 429 `hourglass` "Too many requests. Please wait a moment."; 500 `triangle-alert` "Something went wrong on our side."; 503 `wrench` "We're doing maintenance. Back shortly." Actions: "Go to dashboard", "Reload" (419/500/503).
 
 ---
 
-## 5. Onboarding (first login wizard)
+## 5. Onboarding (first-login wizard)
 
 ### 5.1 Gate
-Middleware `EnsureCustomerOnboarded` (alias `onboarded`) on all `customer.*` routes except `customer.onboarding.*`, `customer.settings.*`, `customer.help`, `logout`, notifications: if `auth()->user()->type === 'customer' && onboarded_at === null` → redirect (GET only) to `customer.onboarding.show`. Uses column `users.onboarded_at` (Appendix A1).
+Middleware `EnsureCustomerOnboarded` (alias `onboarded`) on all `customer.*` routes except `customer.onboarding.*`, `customer.account.*`, `customer.help`, `customer.notifications.index`: for `type = customer` with `users.onboarded_at` null, GET requests redirect to `customer.onboarding.show` (column: Appendix A1). Customers created by staff also see it on first login.
 
 ### 5.2 Page — `customer.onboarding.show` · `/onboarding` · `Customer/Onboarding/Wizard`
 Props:
 ```ts
 interface OnboardingProps {
-  user: { name: string; email: string | null; phone_e164: string | null; phone_verified: boolean };
-  defaults: { unit_system: 'metric' | 'imperial'; length_unit: string; timezone: string };  // from business settings
-  property_types: PropertyType[];
+  user: { name: string; email: string | null; phoneE164: string | null; phoneVerified: boolean };
+  defaults: { unitSystem: 'metric' | 'imperial'; lengthUnit: string; timezone: string };   // business settings
+  propertyTypes: PropertyType[];
   starters: PlanStarterData[];                 // §8.3
-  ai_credits: AiCreditsData;                   // shows "You have N free credits to recognise a blueprint"
+  credits: CreditSummaryData;                  // 18
 }
 ```
-Layout: AuthLayout `wide` variant (card `max-w-2xl`). Header: step indicator "Step {n} of 4" + `Progress` bar. Footer: **Back** (ghost, hidden on step 1), **Continue** (primary), link "Skip for now" (→ `customer.onboarding.skip`, confirm dialog "You can set this up later from your dashboard.").
+AuthLayout `wide` (card `max-w-2xl`). Header "Step {n} of 4" + `Progress`. Footer: **Back** (hidden on step 1), **Continue**, link **Skip for now** (ConfirmDialog "You can set this up later from your dashboard." → `customer.onboarding.skip`).
 
 Steps (client-side; one final POST):
-1. **About you** — Name (prefilled, required, ≤ 120); Phone (`PhoneInput`, optional if email exists, required if not; hint `onboarding.phone_hint` "We'll call this number to confirm orders."). Validation: `onboarding.errors.name_required` "Please enter your name.", `phone.errors.invalid`.
-2. **Units** — Radio cards: **Metric** (mm · cm · m, example "2400 mm") / **Imperial** (feet & inches, example `7' 10 1/2"`); then length unit select (metric: mm/cm/m, imperial: ft-in/in) and timezone `Combobox` (default: `Intl.DateTimeFormat().resolvedOptions().timeZone` if in `Intl.supportedValuesOf('timeZone')`, else business default).
-3. **Your first project** — Project name (default `onboarding.default_project_name` "My home"), property type (radio cards with icons: apartment `building`, independent_house `house`, villa `building-2`, office `briefcase`, other `shapes`).
-4. **How do you want to start?** — `StartPlanChooser` (§8.1) with three large option cards:
-   - **Upload a blueprint** (`upload`): "Photo, scan, PDF or DXF — we'll turn it into an editable plan." + `CreditBadge` "Uses {cost} credit · you have {balance}" (if `cost_per_recognition` > 0). Phone shows this option too (uploading from the camera is supported).
-   - **Draw from scratch** (`pencil-ruler`): "Draw walls, doors and windows yourself." (on phone: disabled with note "Drawing needs a tablet or computer.")
-   - **Start from a template room** (`layout-template`): reveals starter gallery (§8.3) to pick one (phone: disabled like draw).
-   Selecting a card + **Finish** submits.
+1. **About you** — Name* (prefilled, 2–120). Phone is **not** collected here (phone changes require OTP verification, `13` §5.7); instead, when no verified phone: card "Add a phone number for our confirmation calls" with **Verify phone** (opens `PhoneVerifyDialog`, §13.2.3) and "Later".
+2. **Units** — radio cards **Metric** (example "2400 mm") / **Imperial** (example `7' 10 1/2"`); length unit `Select` (metric: mm/cm/m; imperial: ft-in/in); time zone `Combobox` (default browser `Intl.DateTimeFormat().resolvedOptions().timeZone` if in `Intl.supportedValuesOf('timeZone')`, else business default).
+3. **Your first project** — name (default `onboarding.default_project_name` "My home", ≤ 120), property type (radio cards: apartment `building`, independent_house `house`, villa `building-2`, office `briefcase`, other `shapes`).
+4. **How do you want to start?** — `StartPlanChooser` (§8.1, mode `select`): **Upload a blueprint** ("Photo, scan, PDF or DXF — we'll turn it into an editable plan." + "Uses {cost} credit · you have {balance}" when `creditsPerRecognition > 0`), **Draw from scratch**, **Start from a template room** (opens starter gallery). On phones Draw/Template are disabled ("Drawing needs a tablet or computer."); Upload works (camera).
 
 ### 5.3 Submit — `customer.onboarding.store` (POST)
-Body: `{ name, phone_e164?, unit_system, length_unit, timezone, project: { name, property_type }, start: 'upload' | 'draw' | 'starter' | 'none', starter_key? }`.
-Server: updates user, sets `onboarded_at`, creates project; `draw` → creates plan "Ground floor" (`start=blank`) → redirect `customer.plans.show`; `starter` → creates plan from starter → `customer.plans.show`; `upload` → `customer.imports.create` for the new project; `none` → `customer.projects.show`.
-Validation messages: `name` required; `phone_e164` E.164 + unique (`phone.errors.taken` "This number is already linked to another account."); `unit_system` in enum; `length_unit` consistent with system (`settings.errors.length_unit` "Choose a unit that matches your measurement system."); `timezone` valid IANA; `project.name` required ≤ 120 (`projects.errors.name_required` "Give your project a name."); `starter_key` required if `start=starter`, must exist.
-Acceptance: a new customer is redirected to onboarding on first login; finishing with "Draw" lands in the plan editor of a new project; "Skip" never shows the wizard again; staff never see it.
+Body `{ name, unitSystem, lengthUnit, timezone, project: { name, propertyType }, start: 'upload' | 'draw' | 'starter' | 'none', starterKey? }`.
+Server: update user, set `onboarded_at`, create project; `draw` → plan "Ground floor" blank → `customer.plans.edit`; `starter` → plan from starter → `customer.plans.edit`; `upload` → `customer.projects.imports.create`; `none` → `customer.projects.show`.
+Messages: `onboarding.errors.name_required` "Please enter your name."; `account.errors.length_unit` "Choose a unit that matches your measurement system."; timezone "Choose a valid time zone."; `projects.errors.name_required` "Give your project a name."; `starterKey` required for `starter` and must exist.
+Acceptance: first login lands in the wizard; finishing with Draw opens the plan editor of the new project; Skip never shows it again; staff never see it.
 
 ---
 
@@ -359,817 +352,634 @@ Acceptance: a new customer is redirected to onboarding on first login; finishing
 Props:
 ```ts
 interface CustomerDashboardProps {
-  action_items: ActionItemData[];                 // sorted: tone danger/warning first, then since asc
-  projects: ProjectSummaryData[];                 // up to 6 active, by updated_at desc
-  project_count: number;
-  orders_in_progress: OrderSummaryData[];         // Active orders (09 §1), up to 5, by updated_at desc
-  ai_credits: AiCreditsData;
-  contact_status: { email_verified: boolean; phone_verified: boolean };
+  actionItems: ActionItemData[];                  // tone danger/warning first, then since asc
+  projects: ProjectSummaryData[];                 // up to 6 active, updatedAt desc
+  projectCount: number;
+  ordersInProgress: OrderSummaryData[];           // Active orders (09 §1), up to 5
+  credits: CreditSummaryData;
 }
 interface ActionItemData {
   kind: 'review_proposal' | 'review_quote' | 'quote_expiring' | 'check_completion' | 'resubmit_order'
       | 'finish_draft' | 'review_import' | 'import_failed' | 'verify_contact';
-  title_key: string; params: Record<string, string | number>;
-  description_key: string | null;
+  titleKey: string; params: Record<string, string | number>;
+  descriptionKey: string | null;
   href: string; since: IsoDateTime; tone: Tone;
 }
 ```
-Action item sources: order `changes_proposed` → `review_proposal` (warning); `quoted` → `review_quote` (warning) or `quote_expiring` (danger, ≤ 2 days left); `completed` → `check_completion` (warning); `draft` with `submitted_at` → `resubmit_order` (info); `draft` never submitted, updated < 30 days ago → `finish_draft` (neutral); imports `ready_for_review` → `review_import` (warning); imports `failed` in last 7 days and not retried → `import_failed` (danger); no verified email **and** no verified phone → `verify_contact` (info, href `customer.settings.profile`).
+Sources: `changes_proposed` → `review_proposal` (warning); `quoted` → `review_quote` (warning) or `quote_expiring` (danger, ≤ 2 days left); `completed` → `check_completion` (warning); `draft` with `submitted_at` → `resubmit_order` (info); never-submitted `draft` updated < 30 days ago → `finish_draft` (neutral); imports `ready_for_review` → `review_import` (warning); imports `failed` in last 7 days without a newer import from the same source → `import_failed` (danger); no verified email and phone → `verify_contact` (info, href `customer.account.profile#phone`).
 
-Sections (desktop: 12-col grid; main 8 cols + side 4 cols):
-1. `PageHeader` title `dashboard.title` "Hello, {name}"; actions: **New project** (primary).
-2. **Action needed** (main, only if items): heading + list of `ActionPanel`-style compact cards (icon, title, description, `RelativeTime` since, chevron). Whole card is a link.
-3. **Orders in progress** (main): rows with thumbnail stack, number, title, `StatusBadge`, compact `Stepper`, `ProductionProgress` (compact) when in production, unread message badge. "View all orders" link. Empty: hidden if no orders at all (the projects section carries the CTA).
-4. **Your projects** (main): card grid (2 cols tablet/desktop, 1 col phone): cover image (16:10, placeholder grain), name, property type, counts "2 floors · 5 designs", action badge if `action_needed_count`. "+ New project" ghost card. "View all ({count})".
-5. **AI credits** widget (side): big number balance, text `credits.widget.body` "Credits are used to recognise uploaded blueprints automatically. You get {monthly} free credits every month (next on {date})." Link **Upload a blueprint** (→ project chooser dialog if > 1 project, else import create of that project; if no project → `customer.projects.create`). Link "History" → `customer.settings.credits`. If `!ai_available`: note `credits.widget.ai_off` "Automatic recognition is unavailable right now; you can still trace your plan manually."
-6. **Help** card (side): "Need help?" with business phone/WhatsApp and link to Help.
+Sections (desktop: main 8/12 + side 4/12):
+1. `PageHeader` `dashboard.title` "Hello, {name}"; action **New project**.
+2. **Action needed** (only if items): compact link cards (icon by tone, title, description, `RelativeTime(since)`, chevron).
+3. **Orders in progress**: rows (thumbnail stack, number, title, `StatusBadge`, compact `Stepper`, `ProductionProgress` when in production, unread badge); "View all orders". Hidden when there are none.
+4. **Your projects**: cards (2 cols tablet/desktop, 1 phone): cover 16:10 (grain placeholder), name, property type, "{plans} floors · {designs} designs", action badge; ghost card "+ New project"; "View all ({count})".
+5. **AI credits** (side): balance (large), `credits.widget.body` "Credits are used to recognise uploaded blueprints automatically. You get {monthly} free credits every month (next on {date})." (omit second sentence when `monthlyCredits = 0`); `pending > 0` → "Pending: {pending}"; **Upload a blueprint** (1 project → its import page; several → project chooser dialog; none → `customer.projects.create`); "History" → `customer.account.ai-credits`. `!aiAvailable` → `credits.widget.ai_off` "Automatic recognition is unavailable right now; you can still trace your plan manually."
+6. **Need help?** (side): business phone/WhatsApp, link to Help.
 
-Empty state (no projects): replaces sections 3–4 with `EmptyState` (lg, icon `house`) title `dashboard.empty.title` "Let's start with your home", description "Create a project, then upload your floor plan or draw it.", action **Create your first project**.
-Loading: initial props are not deferred (fast queries). Errors: standard Inertia error page.
-Real-time: `useUserChannel` → `NotificationCreated` triggers `router.reload({ only: ['action_items', 'orders_in_progress'] })` (throttled); `AiCreditsChanged` → reload `ai_credits`.
-Phone: single column order: Action needed → Orders → Projects → Credits → Help.
-Acceptance: an order in `quoted` shows a "Review your quote" action linking to the quote page; an import `ready_for_review` shows "Review your imported plan"; credits update live after an import is charged.
+Empty (no projects): `EmptyState` lg icon `house` "Let's start with your home" / "Create a project, then upload your floor plan or draw it." + **Create your first project**.
+Real-time: `NotificationCreated` → `router.reload({ only: ['actionItems', 'ordersInProgress'] })` (throttled 2 s); `AiCreditsChanged` → reload `credits`.
+Phone order: Action needed → Orders → Projects → Credits → Help.
+Acceptance: a `quoted` order shows "Review your quote" linking to the quote page; an import `ready_for_review` shows "Review your imported plan".
 
 ---
 
 ## 7. Projects
 
-### 7.1 Index — `customer.projects.index` · `/projects` · `Customer/Projects/Index`
-Props: `{ projects: Paginated<ProjectSummaryData>; filters: { status: 'active' | 'archived'; search: string | null; sort: 'updated_at' | 'name' } }`. Default `status=active`, `sort=-updated_at`, `per_page=12`.
-UI: `PageHeader` "Projects" + **New project**. Toolbar: segmented control Active / Archived, `SearchInput` (name), sort select (Recently updated / Name A–Z). Card grid (same card as dashboard) + `Pagination`.
-Empty (active, no search): `EmptyState` icon `house` "No projects yet" + **Create project**. Empty archived: "No archived projects". No results: "No projects match “{search}”" + Clear.
+### 7.1 Index — `customer.projects.index` · `Customer/Projects/Index`
+Props: `{ projects: Paginated<ProjectSummaryData>; filters: { status: 'active' | 'archived'; search: string | null; sort: '-updated_at' | 'name' } }` (`per_page` 12).
+`PageHeader` "Projects" + **New project**; segmented Active / Archived; `SearchInput`; sort select; card grid; `Pagination`.
+Empty: active "No projects yet" + **Create project**; archived "No archived projects"; no results "No projects match “{search}”" + Clear.
 
-### 7.2 Create — `customer.projects.create` · `/projects/create` · `Customer/Projects/Create`
-Props: `{ property_types: PropertyType[]; addresses: AddressData[] /* user's saved */; default_country_code: string }`.
-Form (`<Form>` → `customer.projects.store`): Name* (≤ 120), Property type* (radio cards), Site address (optional; `Select` of saved addresses or "Add an address" → `AddressFields` inline; nested `site_address.*`), Notes (≤ 2000, textarea). Buttons: **Create project** / Cancel. After creation → project page with the **Start** chooser open (empty project state §7.3.6).
-Validation: `projects.errors.name_required`, `name` max "Name must be at most 120 characters." (Laravel default message), address fields per `AddressFields`.
+### 7.2 Create — `customer.projects.create` · `Customer/Projects/Create`
+Props: `{ propertyTypes: PropertyType[]; addresses: AddressData[]; defaultCountryCode: string }`.
+`<Form>` → `customer.projects.store`: Name* (≤ 120), Property type* (radio cards), Site address (optional: `Select` of saved addresses or "Add an address" → `AddressFields`, payload `siteAddressId` or `siteAddress`), Notes (≤ 2000). **Create project** → project page with the start chooser (§7.3.7).
 
 ### 7.3 Project page — `customer.projects.show` · `/projects/{project}` · `Customer/Projects/Show`
-Query: `tab` ∈ `plans` (default) | `designs` | `orders` | `imports`; `plan` (selected plan id within plans tab).
+Query: `tab` ∈ `plans` (default) | `designs` | `orders` | `imports`; `plan` (selected plan id).
 Props:
 ```ts
 interface ProjectShowProps {
   project: ProjectData;
-  plans: PlanSummaryData[];                               // ordered by level_index asc
-  designs: FurnitureDesignSummaryData[];                  // all non-deleted, updated_at desc
-  orders: OrderSummaryData[];                             // all orders of the project, created desc (incl. drafts, closed, cancelled)
-  imports: Inertia.Deferred<ImportSummaryData[]>;         // deferred (tab imports), last 50
+  plans: PlanSummaryData[];                               // levelIndex asc
+  designs: FurnitureDesignSummaryData[];                  // updatedAt desc
+  orders: OrderSummaryData[];                             // all incl. drafts/closed/cancelled, createdAt desc
+  imports: Inertia.Deferred<ImportSummaryData[]>;         // last 50
   starters: PlanStarterData[];
-  ai_credits: AiCreditsData;
+  credits: CreditSummaryData;
 }
 interface ImportSummaryData {
-  id: Ulid; original_filename: string; status: ImportStatus; mode: 'auto' | 'trace';
-  source_kind: string | null; credits_charged: number; plan: { id: Ulid; name: string } | null;
-  created_at: IsoDateTime; finished_at: IsoDateTime | null;
-  href: string;                                           // show or review page
+  id: Ulid; originalFilename: string; status: ImportStatus; mode: 'auto' | 'trace';
+  sourceKind: string | null; creditsCharged: number; plan: { id: Ulid; name: string } | null;
+  createdAt: IsoDateTime; finishedAt: IsoDateTime | null; href: string;   // customer.imports.show or .review
 }
 type ImportStatus = 'awaiting_upload' | 'uploaded' | 'queued' | 'preprocessing' | 'recognizing' | 'ready_for_review' | 'accepted' | 'discarded' | 'failed' | 'cancelled';
 ```
 
 #### 7.3.1 Header
-`PageHeader`: title = project name; meta: property type label, site address one-line (or "No address yet" link to edit), `Badge` "Archived" if archived. Actions: **New order** (primary; visible if `can.create_order` and ≥ 1 design; → `customer.orders.create`), overflow `DropdownMenu`: Edit project (→ edit), Archive / Unarchive (ConfirmDialog; archive copy `projects.confirm.archive` "Archive {name}? It will be hidden from your dashboard. You can restore it any time."), Delete (only if `can.delete`; ConfirmDialog destructive with `requireText` = project name; copy "This permanently removes the project, its plans and designs.").
-Archived banner: `Alert` info "This project is archived. Unarchive it to make changes." + **Unarchive**. While archived, all create/edit actions are hidden and editors open read-only.
+`PageHeader`: project name; meta: property type, site address (or link "Add an address"), `Badge` "Archived". Actions: **New order** (if `can.createOrder` and ≥ 1 design → `customer.projects.orders.create`); overflow: Edit, Archive/Unarchive (Confirm "Archive {name}? It will be hidden from your dashboard. You can restore it any time."), Delete (if `can.delete`; destructive, `requireText` = name; "This permanently removes the project, its plans and designs.").
+Archived: info `Alert` "This project is archived. Unarchive it to make changes." + **Unarchive**; create/edit actions hidden; editors open read-only.
 
 #### 7.3.2 Tabs
-`Tabs` synced to `?tab=` via `router.get(..., { preserveState: true, replace: true, only: [] })` (no reload; tab content already in props except deferred imports). Tab labels with counts: Plans (n), Designs (n), Orders (n), Imports.
+`Tabs` synced to `?tab=` via `router.get(url, query, { preserveState: true, replace: true, only: [] })`. Labels with counts.
 
 #### 7.3.3 Plans tab
-- Floor sub-tabs (`ToggleGroup` / scrollable pills) — one per plan in `level_index` order, plus **+ Add floor**.
-- Selected plan panel: large thumbnail (`aspect-[16/10]`, `object-contain`, `bg-canvas-bg`; placeholder "Preview will appear after the first save" if null), stats `KeyValueList`: Rooms `summary.roomCount`, Floor area `AreaDisplay(summary.totalAreaMm2)`, Walls `summary.wallCount`, Last saved `RelativeTime(working_saved_at)`, Source label (`plans.sources.{source}`: Drawn / Imported from blueprint / Traced / Duplicated). Room list (collapsible): name + area.
-- Buttons: **Open editor** (primary, → `customer.plans.show`; phone label "View plan"), overflow: Rename (dialog, name ≤ 80), Move up/down (`customer.plans.update` `level_index` swap), Duplicate (dialog with name default "{name} (copy)" → `customer.plans.duplicate`), Delete (ConfirmDialog destructive: "Delete {name}? Furniture designs are kept; only their placement on this floor is removed." → `customer.plans.destroy`; always allowed, including for the last plan).
-- **Add floor** opens `Dialog` "Add a floor": Name* (default by level: `plans.default_names.{n}` "Ground floor", "First floor", "Second floor", "Basement"), Level select (−2…10, default max+1), then `StartPlanChooser` (§8.1).
+- Floor pills (one per plan, `levelIndex` order) + **+ Add floor**.
+- Selected plan: thumbnail (`aspect-[16/10] object-contain bg-canvas-bg`; placeholder "Preview will appear after the first save"), `KeyValueList`: Rooms, Floor area (`AreaDisplay`), Walls, Last saved, Source (`plans.sources.{source}`: Drawn / Imported from blueprint / Traced / Duplicated); collapsible room list (name + area).
+- **Open editor** (→ `customer.plans.edit`; phone label "View plan"); overflow: Rename (≤ 80), Move up/down (swap `levelIndex` via `customer.plans.update`), Duplicate (name default "{name} (copy)"), Upload a blueprint for this floor (→ import page with `?plan=`), Delete (destructive: "Delete {name}? Furniture designs are kept; only their placement on this floor is removed.").
+- **Add floor** dialog: Name* (default `plans.default_names.{level}`: "Ground floor", "First floor", "Second floor", "Basement"), Level (−2…10, default max + 1), then `StartPlanChooser`.
 
 #### 7.3.4 Designs tab
-- Toolbar: **New design** (→ `customer.designs.create`), `SearchInput` (name, client-side filter), filter chips All / Available / In an order.
-- Grid of `DesignCard` (2 cols phone, 3 tablet, 4 desktop): `Thumbnail3D` (static), name, template label, `DimensionText` (W×H×D), estimate `MoneyDisplay approx` (+ "May be outdated" muted text if `estimate_stale`), `Badge` "In order {number}" (link) if `locked_by_order`. Card click → builder. Card menu: Rename, Duplicate, Order this design (→ `customer.orders.create?designs={id}`), Delete (disabled with tooltip "It's part of order {number}" when locked; ConfirmDialog otherwise).
-- Empty: `EmptyState` icon `armchair` "No furniture designs yet" "Design a wardrobe, shelves, a TV unit and more." + **New design**.
+Toolbar: **New design** (→ `customer.projects.furniture.create`), search (client-side), chips All / Available / In an order. Grid of `DesignCard` (2/3/4 cols): `Thumbnail3D`, name, template label, `DimensionText`, estimate `MoneyDisplay approx` (+ "May be outdated" when `estimateStale`), `Badge` "In order {number}" (link) when `lockedByOrder`. Card → builder. Menu: Rename, Duplicate (`api.furniture-designs.duplicate` → visit returned `editUrl`), Order this design (→ order create `?designs={id}`), Delete (disabled with tooltip "It's part of order {number}" when locked).
+Empty: icon `armchair` "No furniture designs yet" / "Design a wardrobe, shelves, a TV unit and more." + **New design**.
 
 #### 7.3.5 Orders tab
-List of `OrderRow` (same as orders index rows) + **New order**. Empty: icon `package` "No orders yet" "When your designs are ready, send them to us for a quote." + **New order** (disabled if no designs, tooltip "Create a design first").
+`OrderRow` list (§11.1) + **New order**. Empty: icon `package` "No orders yet" / "When your designs are ready, send them to us for a quote." (**New order** disabled without designs: "Create a design first").
 
 #### 7.3.6 Imports tab
-`<Deferred data="imports">` with `LoadingState variant=table rows=4`. Table: File name, Status (`StatusPill` with `IMPORT_STATUS_TONE`), Floor (plan link or —), Credits used, Started (`RelativeTime`). Row link → `href`. Button **Upload a blueprint** (→ `customer.imports.create`). Empty: icon `scan-line` "No blueprint uploads yet".
+`<Deferred data="imports">` (`LoadingState table rows=4`). Columns: File, Status (`StatusPill`, `IMPORT_STATUS_TONE`), Floor, Credits used, Started. Row → `href`. **Upload a blueprint**. Empty: icon `scan-line` "No blueprint uploads yet". While any import is non-terminal and the tab is visible: poll `only: ['imports']` every 10 s.
 
 #### 7.3.7 Empty project (no plans)
-Plans tab shows `EmptyState` (lg) "Add your floor plan" + inline `StartPlanChooser` (three option cards, §8.1).
+`EmptyState` lg "Add your floor plan" + inline `StartPlanChooser`.
 
-Real-time: none (static page); imports in non-terminal status show a spinner pill and the page polls `only: ['imports']` every 10 s while any import is non-terminal and the tab is visible.
-Phone: tabs become a horizontally scrollable `TabsList`; plan panel stacks; "Open editor" reads "View plan".
-Acceptance: switching tabs does not reload the page; deleting a plan returns to the plans tab; an archived project shows no create/edit actions.
+Phone: scrollable tabs; panels stack. Acceptance: tab switches don't reload; an archived project shows no create/edit controls.
 
-### 7.4 Edit — `customer.projects.edit` · `/projects/{project}/edit` · `Customer/Projects/Edit`
-Props: `{ project: ProjectData; property_types: PropertyType[]; addresses: AddressData[] }`. Same form as create, prefilled, submit → `customer.projects.update`. Changing the site address does **not** change existing orders' addresses (orders copy the address id at submission; editing an address row used by an Active order creates a new address row instead — `UpdateProject` action rule, Appendix A6).
+### 7.4 Edit — `customer.projects.edit` · `Customer/Projects/Edit`
+Props `{ project: ProjectData; propertyTypes: PropertyType[]; addresses: AddressData[] }`; same form as create → `customer.projects.update`. Editing an address that an Active order references creates a new address row (Appendix A6).
 
 ---
 
 ## 8. Plans
 
-### 8.1 `StartPlanChooser` component (`components/projects/StartPlanChooser.vue`)
-Props: `{ projectId: Ulid; levelIndex: number; planName: string; starters: PlanStarterData[]; credits: AiCreditsData; mode: 'navigate' | 'select' }` (`select` = onboarding: emits `select(choice)` instead of navigating). Emits `select({ start: 'upload' | 'draw' | 'starter', starter_key? })`.
-Three option cards (as §5.2 step 4). In `navigate` mode: Upload → `customer.imports.create?level_index=&plan_name=`; Draw → POST `customer.plans.store` `{ name, level_index, start: 'blank' }`; Template → opens starter picker `Dialog` → POST `{ start: 'starter', starter_key }`. Phone: Draw and Template disabled (tooltip/inline note `plans.phone_draw_disabled` "Drawing needs a tablet or computer.").
+### 8.1 `StartPlanChooser` (`components/projects/StartPlanChooser.vue`)
+Props `{ projectId: Ulid; levelIndex: number; planName: string; starters: PlanStarterData[]; credits: CreditSummaryData; mode: 'navigate' | 'select' }`; emits `select({ start: 'upload' | 'draw' | 'starter'; starterKey?: string })`.
+Three option cards (§5.2 step 4). `navigate` mode: Upload → `customer.projects.imports.create?level_index=&plan_name=`; Draw → POST `customer.projects.plans.store` `{ name, levelIndex, start: 'blank' }`; Template → starter dialog → POST `{ …, start: 'starter', starterKey }`. Phones: Draw/Template disabled (`plans.phone_draw_disabled` "Drawing needs a tablet or computer.").
 
-### 8.2 Plan editor host — `customer.plans.show` · `/projects/{project}/plans/{plan}` · `Customer/Plans/Editor`
-Lazy-loaded chunk (three.js only here). Layout `EditorLayout`. The editor itself (tools, canvas, panels, shortcuts, view-only mode, export) is `05`.
+### 8.2 Plan editor host — `customer.plans.edit` · `/plans/{plan}/edit` · `Customer/Plans/Edit`
+Lazy chunk; EditorLayout. Editor internals = `05` (06 links here after accepting an import).
 Props:
 ```ts
-interface PlanEditorPageProps {
+interface PlanEditPageProps {
   project: ProjectRefData;
   plan: PlanSummaryData;
-  working_document: PlanDocument;          // 03 §1
-  working_version: number;
-  floors: { id: Ulid; name: string; level_index: number }[];     // floor switcher
-  designs: FurnitureDesignSummaryData[];   // placeable designs of this project (07 thumbnails)
-  place_design_id: Ulid | null;            // from ?place= (handoff §10.4); validated to belong to the project
-  background_url: string | null;           // signed URL (15 min) of BackgroundImage.mediaUuid, refreshed via partial reload when expired
-  read_only: boolean;                      // archived project OR phone (client also forces read-only on phone)
-  read_only_reason: 'archived' | null;
-  defaults: { wall_height_mm: number; exterior_wall_thickness_mm: number; interior_wall_thickness_mm: number; door_width_mm: number; door_height_mm: number; window_width_mm: number; window_height_mm: number; window_sill_mm: number };   // units settings
+  workingDocument: PlanDocument;           // 03 §1
+  workingVersion: number;
+  floors: { id: Ulid; name: string; levelIndex: number }[];
+  designs: FurnitureDesignSummaryData[];   // placeable designs of the project
+  placeDesignId: Ulid | null;              // ?place= (handoff §10.4), validated to belong to the project
+  backgroundUrl: string | null;            // signed URL (15 min) of BackgroundImage.mediaUuid; refreshed via partial reload `only: ['backgroundUrl']` before expiry
+  readOnly: boolean;                       // archived project (phones are forced read-only client-side)
+  readOnlyReason: 'archived' | null;
+  defaults: { wallHeightMm: number; exteriorWallThicknessMm: number; interiorWallThicknessMm: number; doorWidthMm: number; doorHeightMm: number; windowWidthMm: number; windowHeightMm: number; windowSillMm: number };   // units settings
 }
 ```
-Page responsibilities (outside 05's editor component): `<Head>` title "{plan name} · {project name}"; `EditorLayout` `title` = plan name, `backHref` = `customer.projects.show(project)?tab=plans&plan={id}`; floor switcher `Select` in `#topbar-start` (navigates with unsaved-changes guard per `03` §5); `#topbar-end` overflow items owned by the page: "Order furniture" (→ `customer.orders.create`), "Upload a blueprint for this floor" (→ `customer.imports.create?plan={id}`). Mount `<PlanEditor :plan-id … />` from `@/editor/plan` passing props.
-Read-only banner (`#banner`) when archived: "This project is archived — viewing only." + Unarchive (POST then reload).
-Phone: `05` view-only mode; banner `plans.phone_view_only` "View only on phones. Open on a tablet or computer to edit."
-Errors: autosave/conflict per `03` §5 (editor). Load failure is impossible (Inertia props), 404 if plan deleted.
-Acceptance: opening a plan with `?place={designId}` starts placement mode for that design (05) and the param is removed from the URL after placing or cancelling.
+Page chrome (outside `05`): `<Head>` "{plan} · {project}"; `title` = plan name; `backHref` = `customer.projects.show?tab=plans&plan={id}`; floor switcher `Select` in `#topbar-start` (navigation guarded per `03` §5); `#topbar-end` overflow: "Order furniture" (→ order create), "Upload a blueprint for this floor". Mounts `<PlanEditor>` (`@/editor/plan`).
+Banners: archived → "This project is archived — viewing only." + Unarchive; phone → `plans.phone_view_only` "View only on phones. Open on a tablet or computer to edit."
+Acceptance: `?place={designId}` starts placement mode for that design (`05`); the param is removed after placing/cancelling.
 
 ### 8.3 Plan starters (`PlanStarterData`)
 ```ts
-interface PlanStarterData { key: string; label: string; description: string; thumbnail_url: string; total_area_mm2: number; room_count: number }
+interface PlanStarterData { key: string; label: string; description: string; thumbnailUrl: string; totalAreaMm2: number; roomCount: number }
 ```
-Registry `config/plan_starters.php` (Appendix A3) with keys: `single_room` (one 4000 × 3000 mm room with a door and a window), `l_shaped_room`, `studio`, `one_bhk`, `two_bhk` (= `database/fixtures/plans/brochure-2bhk.json`), `three_room_hdb` (= `database/fixtures/plans/hdb-3room.json`). Documents in `database/fixtures/plan-starters/{key}.json` (valid `PlanDocument`s), thumbnails `public/images/plan-starters/{key}.svg`. Starter picker dialog: grid of cards (thumbnail, label, "{rooms} rooms · {area}"), select → **Use this layout**. If `05` defines its own starter registry, `05` wins and this list maps onto it.
+Registry `config/plan_starters.php` (Appendix A3): `single_room` (4000 × 3000 mm, one door, one window), `l_shaped_room`, `studio`, `one_bhk`, `two_bhk` (= `database/fixtures/plans/brochure-2bhk.json`), `three_room_hdb` (= `database/fixtures/plans/hdb-3room.json`). Picker dialog: cards (thumbnail, label, "{rooms} rooms · {area}") → **Use this layout**. If `05` defines a starter registry, `05` wins.
 
 ---
 
-## 9. Blueprint import flow
+## 9. Blueprint import pages
 
-Pipeline, statuses, error codes, credit rules and the review editor mode are owned by `06`. This section defines the three pages.
+The flow, API (A1–A12), statuses, `ImportStatusData`, error codes (`imports.error.{code}`), credit rules and the review editor are defined in `06` (§1, §4.3, §11, §14) and `18` (§15.1). This section fixes the page UI around them.
 
-### 9.1 Upload wizard — `customer.imports.create` · `/projects/{project}/imports/create` · `Customer/Imports/Create`
-Query: `plan` (existing plan id → target existing plan; replaces its content on accept per `06`), `level_index`, `plan_name` (target new plan), `import` (resume an existing `uploaded` import, e.g. after "Try again").
-Props:
-```ts
-interface ImportCreateProps {
-  project: ProjectRefData;
-  target: { kind: 'new_plan'; name: string; level_index: number } | { kind: 'existing_plan'; plan: { id: Ulid; name: string } };
-  existing_plans: { id: Ulid; name: string; level_index: number }[];
-  resume_import: ImportData | null;
-  credits: AiCreditsData;
-  limits: { max_bytes_image_pdf: number /* 25 MB */; max_bytes_dxf: number /* 15 MB */; accepted_mime: string[]; accepted_ext: string[] };
-  dxf_enabled: boolean;                    // features.dxf_import
-}
-interface ImportData {
-  id: Ulid; project_id: Ulid; plan_id: Ulid | null; status: ImportStatus; mode: 'auto' | 'trace';
-  source_kind: 'raster' | 'pdf_vector' | 'pdf_raster' | 'dxf' | 'heic' | null;
-  original_filename: string; mime_type: string | null; file_size_bytes: number | null;
-  page_count: number | null; selected_page: number;
-  hints: { unitSystem?: 'metric' | 'imperial'; knownDimension?: { label: string; mm: number }; wallHeightMm?: number; isPhoto?: boolean };
-  credits_reserved: number; credits_charged: number;
-  error_code: string | null;               // customer sees t('imports.errors.' + error_code)
-  progress: { stage: string; percent: number | null } | null;   // latest ImportStatusChanged payload (cached server-side)
-  source_preview_url: string | null;       // for images: media.show of source; PDFs: page 1 preview
-  created_at: IsoDateTime; started_at: IsoDateTime | null; finished_at: IsoDateTime | null;
-}
-interface ImportPagePreviewData { page: number; thumb_url: string; width: number; height: number; has_vector_content: boolean }
-```
+### 9.1 Upload — `customer.projects.imports.create` · `/projects/{project}/imports/new` · `Customer/Imports/Create`
+Query: `plan` (replace target), `level_index`, `plan_name` (new-plan defaults).
+Props (06): `{ project: ProjectRefData; plans: { id: Ulid; name: string }[]; credits: CreditSummaryData; limits: { maxBytes: number; maxBytesDxf: number; acceptedExtensions: string[] }; features: { dxfImport: boolean }; target: { planId: Ulid | null; name: string; levelIndex: number } }`.
+Layout: `PageHeader` "Import a floor plan" (back → project).
+1. **Mode** radio cards: **Analyze automatically** (default; "We recognise walls, doors, windows and rooms." + `CreditBadge` cost "{n} credit(s) · you have {balance}" or "Free") / **Trace it myself (free)** ("Use the drawing as a background and draw over it.").
+2. **Target**: "Create a new floor" (name ≤ 80, level) / "Replace a floor" (`Select` of `plans`; warning "The current drawing of this floor is replaced only after you accept the result. A backup revision is kept.").
+3. **Dropzone** (`FileDropzone` visuals, single file, implemented with `lib/upload.ts` against `api.imports.store` → presigned PUT → `api.imports.confirm`), **Take a photo** on touch devices (`capture=environment`).
+4. **File type guidance** (`Accordion`, open on desktop): ✓ Photos & scans JPG, PNG, WebP, HEIC — "Take the photo straight on, in good light, with the whole plan visible."; ✓ PDF — "Brochures and architect drawings. Vector PDFs work best."; ✓ DXF (if `features.dxfImport`) — "CAD export. Choose millimetres if asked."; ✗ **DWG** — `imports.guidance.dwg` "DWG files can't be opened directly. In your CAD program use **Save As → DXF** (or export to PDF) and upload that file instead."; limits "Up to 25 MB (DXF up to 15 MB)."
+Client checks before upload: extension/MIME → `imports.error.unsupported_type`; `.dwg` → `imports.error.dwg_not_supported` (no network request); size → `imports.error.file_too_large` (texts per `06` §14). Upload progress bar + **Cancel** (abort + `api.imports.cancel`). On upload failure: `Alert` "The upload didn't finish. Check your connection and try again." + **Retry** (cancels the unfinished import, restarts with the same `File`).
+On confirm success → `router.visit(customer.imports.show)`.
+Phone: fully supported (camera upload is a primary use case).
 
-Wizard (single page, client-side steps, `Stepper`-like header "1 File · 2 Page · 3 Details · 4 Start"; step 2 shown only for multi-page PDFs):
-
-**Step 1 — File.**
-- `ImportDropzone` (FileDropzone visual style, single file; implemented with `lib/upload.ts` but the import endpoints): text "Drop your floor plan here or browse"; on touch devices also **Take a photo** (`capture=environment`).
-- **File type guidance** panel (always visible, `Accordion` default open on desktop): 
-  - ✓ Photos & scans: JPG, PNG, WebP, HEIC — "Take the photo straight on, in good light, with the whole plan visible."
-  - ✓ PDF — "Brochures and architect drawings. Vector PDFs give the best results."
-  - ✓ DXF (if `dxf_enabled`) — "CAD export. Choose millimetres if your software asks."
-  - ✗ **DWG** — `imports.guidance.dwg` "DWG files can't be opened directly. In your CAD program use **Save As → DXF** (or export to PDF) and upload that file instead."
-  - Size limits: "Up to 25 MB (DXF up to 15 MB)."
-- Client validation before upload: extension/MIME (`imports.errors.client_type` "This file type isn't supported. Use JPG, PNG, WebP, HEIC, PDF or DXF."); `.dwg` → `imports.errors.dwg` (same text as guidance) without uploading; size (`imports.errors.client_size` "This file is {size}; the limit is {max}.").
-- Upload sequence:
-  1. `POST api.imports.store` `{ filename, size, mime, target }` → `201 { import: ImportData, upload: { url, method: 'PUT', headers, expires_at } }` (status `awaiting_upload`). Errors: 422 (type/size), 429 `imports.errors.rate_limited` "You've started too many uploads. Try again later."
-  2. PUT file to `upload.url` with progress bar (percentage + bytes), **Cancel** (aborts and calls `customer.imports.cancel`).
-  3. `POST api.imports.uploaded` → `202 { import }` (status `uploaded`; for PDFs the server dispatches `PrepareImportPreview` which renders page thumbnails).
-  4. If `source_kind` is a PDF with `page_count > 1` → step 2 (poll `api.imports.show` every 1.5 s until `pages.length === page_count` or 60 s; show skeleton thumbnails meanwhile; timeout → `imports.errors.preview_timeout` "We couldn't prepare page previews. You can still choose a page number." with a number input fallback). Otherwise → step 3.
-- Upload failure (PUT error, network, presign expired): inline `Alert` `imports.errors.upload_failed` "The upload didn't finish. Check your connection and try again." with **Retry**: the client calls `customer.imports.cancel` for the unfinished import (fire-and-forget) and restarts sub-step 1 (`api.imports.store`) with the same `File` object.
-
-**Step 2 — Page picker** (PDF only): grid of page thumbnails (3 cols desktop, 2 phone) with page number and a "Vector" badge if `has_vector_content`; single select (radio semantics, arrow keys move selection); larger preview on hover/focus (desktop). Default selection = first page with vector content, else page 1. Text: "Which page shows the floor plan?"
-
-**Step 3 — Details (hints)**, all optional; collapsed "Why we ask" help text: "These hints make recognition more accurate."
-- **Measurements on the plan are in**: radio Metric / Imperial / Not sure (→ `hints.unitSystem` omitted).
-- **One known dimension** (recommended): label text (e.g. "Living room width", ≤ 60) + `LengthInput` (any unit; stored mm) → `hints.knownDimension`. Both or neither (`imports.errors.known_dimension_incomplete` "Enter both a label and a length, or leave both empty."). Range 500–50 000 mm.
-- **Ceiling height**: `LengthInput` default business `default_wall_height_mm`, range 2000–6000 → `hints.wallHeightMm`.
-- **This is a photo of a paper plan** checkbox (prefilled true when the file came from the camera or is JPEG/HEIC with EXIF camera make) → `hints.isPhoto`.
-- **Target**: radio "Create a new floor" (name ≤ 80 + level) / "Replace an existing floor" (`Select` of `existing_plans`; warning "The current drawing of this floor will be replaced after you accept the result. A backup revision is kept.").
-
-**Step 4 — Start**:
-- **Credit cost display**: card "This uses **{cost}** AI credit(s). Your balance: **{balance}**." With `cost = credits.cost_per_recognition` (or `cost_per_recognition_none` when `!ai_available`, with note "Automatic AI is unavailable right now; we'll use basic recognition."). After start: "Balance after: {balance - cost}".
-- Daily limit: if `recognitions_today >= max_recognitions_per_day` → disabled with `imports.errors.daily_limit` "You've reached today's limit of {max} recognitions. Try again tomorrow or trace the plan manually."
-- Insufficient credits (`balance < cost`): **Start recognition** disabled; text `imports.errors.no_credits` "You don't have enough credits. They renew on {date}, or contact us for more."; secondary **Trace it manually instead** (always available; no credits) → `customer.imports.trace`.
-- Buttons: **Start recognition** (primary) → `customer.imports.start` `{ selected_page, hints, target }`; **Trace manually** (outline) → `customer.imports.trace`.
-- Server-side 422 codes mapped to the same messages: `insufficient_credits`, `daily_limit_reached`, `ai_budget_exhausted` (`imports.errors.ai_budget_exhausted` "Automatic recognition is paused. Please trace the plan manually or try later.").
-
-Phone: full wizard supported (upload from camera is a primary use case); after start, progress page says the review needs a tablet/computer.
-Acceptance: a DWG file is rejected client-side with the DXF/PDF message and no network upload; a 3-page PDF shows the page picker; insufficient credits disables Start but allows Trace.
-
-### 9.2 Progress — `customer.imports.show` · `/projects/{project}/imports/{import}` · `Customer/Imports/Show`
-Props: `{ project: ProjectRefData; import: ImportData; credits: AiCreditsData; can: { cancel: boolean; review: boolean; retry: boolean; trace: boolean; discard: boolean } }`.
-UI by status:
-- `uploaded` (not started): redirect to the wizard with `?import=`.
-- `queued` / `preprocessing` / `recognizing`: centred card: source preview thumbnail, file name, animated indeterminate or determinate `Progress` (`progress.percent` when present), stage text `t('imports.stages.' + progress.stage)` (fallback `imports.statuses.{status}`: "Waiting in line…", "Preparing your image…", "Recognising walls, doors and rooms…"), estimated time note "This usually takes 1–3 minutes. You can leave this page — we'll notify you.", **Cancel** (if `can.cancel`; ConfirmDialog "Cancel recognition? Reserved credits are returned.").
-- `ready_for_review`: success card "Your plan is ready to review" + **Review plan** (→ `customer.imports.review`; on phone: disabled with "Open on a tablet or computer to review"), **Discard** (ConfirmDialog; "Credits used for this recognition are not refunded.").
+### 9.2 Import page — `customer.imports.show` · `/imports/{import}` · `Customer/Imports/Show`
+Props (06): `{ import: ImportStatusData; credits: CreditSummaryData; project: ProjectRefData; contactVerified: boolean }`.
+Status-driven UI (live via `useImportChannel(import.id)`; fallback poll `api.imports.show` every 5 s when disconnected; terminal statuses reload `only: ['import', 'credits']`; stage changes announced in a polite live region):
+- `uploaded` with `sourceKind` null: "Checking your file…" spinner (≤ 30 s).
+- `uploaded` (options step, `06` §1.1 step 4): **Page picker** (PDF > 1 page: thumbnail grid from `import.pages`, radio semantics, arrow keys, default page 1), **corner editor** (photos; component from `06`), **hints** (collapsed "Help us read your drawing": unit system Auto/Metric/Feet & inches; "A measurement I know" label ≤ 60 + `LengthInput` 500–50 000 mm — both or neither: `imports.hints.known_dimension_incomplete` "Enter both a label and a length, or leave both empty."; wall height `LengthInput` 2000–6000, default `units.default_wall_height_mm`) saved via `api.imports.update` (debounced 500 ms), **cost line** from `import.cost` + `credits` per `18` §15.1 ("This analysis uses **{n}** AI credit(s). You have **{balance}**." / "Free"), and buttons **Analyze drawing** (→ `api.imports.start`) and, for trace mode, **Start tracing**. Disabled states: insufficient credits (`imports.error.insufficient_credits` text + "Credits renew on {date}" + **Trace it myself instead** → `api.imports.convert-to-trace`), daily limit (`daily_limit_reached`), budget block (`ai_budget_exhausted`), unverified contact (§1.1; trace remains available).
+- `queued` / `preprocessing` / `recognizing`: card with source preview, indeterminate `Progress`, stage text `t('imports.stages.' + import.stage)`, elapsed timer, note "This usually takes 1–3 minutes. You can leave this page — we'll notify you.", **Cancel** (Confirm "Cancel? Reserved credits are returned." → `api.imports.cancel`).
+- `ready_for_review`: success card "Your plan is ready to review" + **Review plan** (→ `import.reviewUrl`; phone: disabled "Open on a tablet or computer to review") + **Discard** (Confirm "Credits used for this analysis are not refunded." → `api.imports.discard`).
 - `accepted`: "Imported into {plan}" + **Open plan**.
-- `failed`: danger card with `t('imports.errors.' + error_code)` (fallback `imports.errors.unknown` "We couldn't recognise this plan."), credits note "Your {n} credit(s) have been refunded." (if refunded per `06`), actions **Try again** (`customer.imports.retry`), **Trace manually** (`customer.imports.trace`), **Upload a different file** (→ wizard).
+- `failed`: danger card `t(import.error.messageKey)`; actions per `06` §1.4: **Try again** (if `error.retryable`; → `api.imports.rerun` `{ useAi: true }` → visit the new import), **Trace it myself instead** (→ `api.imports.convert-to-trace`), **Upload a different file** (→ upload page).
 - `cancelled` / `discarded`: neutral card + **Upload again**.
-Real-time: `useImportChannel(import.id)` → `ImportStatusChanged` updates `progress`/`status` locally; on terminal status `router.reload({ only: ['import', 'credits', 'can'] })`. Fallback poll every 5 s (`only: ['import']`) when disconnected. Live region announces stage changes.
-Acceptance: the page transitions from "recognising" to "ready to review" without manual reload when the socket is connected, and within 5 s via polling when not.
+Acceptance: with the socket connected the page moves from "recognising" to "ready to review" without reload; within 5 s by polling otherwise; an unverified customer can start tracing but not analysis.
 
-### 9.3 Review — `customer.imports.review` · `/projects/{project}/imports/{import}/review` · `Customer/Imports/Review`
-EditorLayout; the plan editor in **import review mode** (`06` §review). Props:
-```ts
-interface ImportReviewProps {
-  project: ProjectRefData;
-  import: ImportData;
-  result_document: PlanDocument;
-  result_meta: unknown;                    // ImportResultMeta (06 §6), passed through
-  background_url: string;                  // normalized page image (signed)
-  target: ImportCreateProps['target'];
-  defaults: PlanEditorPageProps['defaults'];
-}
-```
-Page-owned chrome: `#banner` "Check the recognised plan. Fix anything that's wrong, then accept." ; `#topbar-end`: **Discard** (ConfirmDialog) and **Accept plan** (primary) → `customer.imports.accept` with the corrected document (+ `plan_name`/`level_index` for new plans; editable in the accept dialog). Everything else (confidence overlays, issue list, tools) is `06`. Phone: not available — page renders `ScreenTooSmall` with link back to the progress page. 409/422 on accept are shown in a dialog listing issues (`03` §1.1 codes translated).
+### 9.3 Review — `customer.imports.review` · `/imports/{import}/review` · `Customer/Imports/Review`
+EditorLayout; plan editor in `import-review` mode; props per `06` §4.3 (A7 payload + `{ project, plans, userUnits }`). Page chrome only: `#banner` "Check the recognised plan. Fix anything that's wrong, then accept."; `#topbar-end` **Discard** / **Accept plan** (accept dialog with target name/level per `06` §11.7). Phone: `ScreenTooSmall` with link back to `customer.imports.show`.
 
 ---
 
 ## 10. Furniture designs
 
-### 10.1 Designs list — `customer.designs.index` · `/designs` · `Customer/Designs/Index`
-All designs across the customer's active projects.
+### 10.1 List — `customer.furniture.index` · `/furniture` · `Customer/Furniture/Index`
 Props: `{ designs: Paginated<FurnitureDesignSummaryData>; projects: ProjectRefData[]; templates: { key: string; label: string }[]; filters: { project: Ulid | null; template: string | null; availability: 'all' | 'available' | 'in_order'; search: string | null; sort: '-updated_at' | 'name' } }` (`per_page` 24).
-UI: `PageHeader` "Furniture designs" + **New design** (if 1 project → direct; if many → `Dialog` "Which project is it for?" with project select; if none → `customer.projects.create`). `FilterBar` (project, template, availability) + search + sort. Grid of `DesignCard` (§7.3.4) showing project name as meta.
-Empty: icon `armchair` "No designs yet" + **New design**. No results: standard.
+`PageHeader` "Furniture designs" + **New design** (1 project → create page; several → project chooser dialog; none → `customer.projects.create`). `FilterBar` (project, template, availability) + search + sort; `DesignCard` grid with project name as meta. Empty / no-results states as §7.3.4.
 
-### 10.2 New design — `customer.designs.create` · `/projects/{project}/designs/create` · `Customer/Designs/Create`
-Query: `return_plan` (plan id; placement handoff), `hint_width` (mm, optional prefill from the plan editor's free wall length), `category` (preselect tab).
-Props:
-```ts
-interface DesignCreateProps {
-  project: ProjectRefData;
-  return_plan: { id: Ulid; name: string } | null;
-  hint_width_mm: number | null;
-  presets: FurniturePresetCardData[];      // active presets of enabled templates, by category then sort_order
-  templates: FurnitureTemplateCardData[];  // enabled templates (furniture_template_settings), sort_order
-  categories: { key: string; label: string }[];   // preset categories (02 §5.3)
-  copyable_designs: FurnitureDesignSummaryData[]; // other designs of the same customer (any project) for "Copy an existing design"
-}
-interface FurniturePresetCardData { id: Ulid; name: string; category: string; template_key: string; description: string | null; thumbnail_url: string | null; width_mm: number; height_mm: number; depth_mm: number; estimate_minor: number | null }
-interface FurnitureTemplateCardData { key: string; label: string; description: string; icon: string; family: 'carcass' | 'table' }
-```
-UI: `PageHeader` "New furniture design" (back → project designs tab or plan editor if `return_plan`). `Tabs`: **Ready-made starting points** (presets, grouped by category with category pill filter) | **Start from scratch** (templates grid) | **Copy an existing design**. Cards are radio-selectable; selection shows a bottom `StickyActionBar` with Name* (prefilled with preset/template label, ≤ 120) and **Create design** → `customer.designs.store` `{ source, preset_id | template_key | from_design_id, name, return_plan, hint_width_mm }`. If `hint_width_mm` is set, the server applies it as `dims.width` when within the template's range (07 decides clamping).
-Phone: page allowed (choose + create), but the builder opens view-only; show note "You'll be able to adjust it on a tablet or computer."
-Empty presets: tab shows "No ready-made designs yet" and defaults to "Start from scratch".
+### 10.2 Create — `customer.projects.furniture.create` · `/projects/{project}/furniture/create` · `Customer/Furniture/Create`
+Owned by `07` §8.1 (props, tabs, category chips, side sheet, client-side generation, POST `customer.projects.furniture.store`). Additions from this file:
+- Query `return_plan` (plan id) and `hint_width` (mm): props `returnPlan: { id: Ulid; name: string } | null`, `hintWidthMm: number | null`. When `hintWidthMm` is set and within the template's width range, the side sheet pre-fills `width`. The POST includes `returnPlanId`; the server redirects to `customer.furniture.edit?return_plan={id}`.
+- Back link: plan editor when `returnPlan`, else project designs tab.
+- Phone: page allowed; note "You'll be able to adjust it on a tablet or computer." (builder is view-only on phones).
 
-### 10.3 Builder host — `customer.designs.show` · `/projects/{project}/designs/{design}` · `Customer/Designs/Builder`
-Lazy chunk. EditorLayout. Builder internals = `07`.
-Query: `return_plan` (plan id).
-Props:
-```ts
-interface DesignBuilderPageProps {
-  project: ProjectRefData;
-  design: FurnitureDesignSummaryData;
-  working_document: FurnitureDocument;     // 03 §2
-  working_version: number;
-  lock: { order: OrderRefData } | null;    // locked_by_order (09 §3) → read-only
-  return_plan: { id: Ulid; name: string } | null;
-  plans: { id: Ulid; name: string; level_index: number }[];   // for "Place in plan"
-  catalog_version: number;                 // builder fetches /api/catalog/snapshot with ETag (01 §5.3)
-  read_only: boolean;                      // locked OR archived project (phone handled client-side)
-}
-```
-Page-owned chrome: title = design name (inline rename on click → `customer.designs.update`); `backHref` = plan editor if `return_plan` else project designs tab. `#topbar-end`:
-- **Place in plan** (primary when `return_plan`): → `customer.plans.show(project, return_plan)?place={design.id}` (after flushing autosave; waits for "Saved" up to 5 s, otherwise asks "Leave with unsaved changes kept on this device?").
-- Without `return_plan`: **Place in plan** `DropdownMenu` listing `plans` (→ same URL pattern); disabled if no plans.
-- **Order this design** (outline) → `customer.orders.create?designs={id}` (hidden when locked).
-- Overflow: Duplicate (`customer.designs.duplicate`), Save checkpoint (07/03 revisions API), Delete.
-Locked banner (`#banner`, info): `designs.locked_banner` "This design is part of order {number} and can't be changed right now." + **Duplicate to edit** + link "View order". (Mirrors `03` §5 423 handling.)
-Phone: `07` view-only.
-Acceptance: from a plan, "Add furniture → New design" → create → builder → **Place in plan** returns to the same plan with the new design attached to the cursor.
+### 10.3 Builder host — `customer.furniture.edit` · `/furniture/{design}/edit` · `Customer/Furniture/Edit`
+Owned by `07` §8 (mode `customer` / `readonly`, autosave, 423 handling, locked banner with **Duplicate to edit**). Page-level additions (props merged with `07`'s): `project: ProjectRefData`, `returnPlan: { id: Ulid; name: string } | null`, `plans: { id: Ulid; name: string; levelIndex: number }[]`, `lockedByOrder: OrderRefData | null`.
+`#topbar-end` actions owned by this file:
+- **Place in plan** (primary when `returnPlan`): flush autosave (wait for "Saved" ≤ 5 s, else confirm "Leave with unsaved changes kept on this device?") → `customer.plans.edit(returnPlan)?place={design.id}`. Without `returnPlan`: dropdown of `plans` (disabled if none).
+- **Order this design** (outline; hidden when locked) → `customer.projects.orders.create?designs={id}`.
+- Title inline rename → `customer.furniture.update`.
+Acceptance: plan → "Add furniture → New design" → create → builder → **Place in plan** returns to that plan with the design attached to the cursor.
 
 ### 10.4 Placement handoff contract (shared with `05`/`07`)
-1. Plan editor "Add furniture" panel (05) offers existing project designs (drag/click to place) and **New design**, which visits `customer.designs.create` with `return_plan={planId}` and optionally `hint_width={mm}`.
-2. `customer.designs.store` redirects to the builder with `?return_plan={planId}`.
-3. Builder **Place in plan** visits `customer.plans.show` with `?place={designId}`; the server validates the design belongs to the project (else ignores the param) and passes `place_design_id`.
-4. The plan editor enters placement mode with that design (05). Placing creates a new `FurniturePlacement`; Esc cancels. The editor then removes `place` from the URL with `history.replaceState`.
-5. Placing the same design more than once is allowed (05 may warn "Already placed on this floor").
+1. Plan editor "Add furniture" panel (`05`) offers existing designs and **New design**, which visits `customer.projects.furniture.create?return_plan={planId}[&hint_width={mm}]`.
+2. Store redirects to `customer.furniture.edit?return_plan={planId}`.
+3. **Place in plan** visits `customer.plans.edit?place={designId}`; the server validates the design belongs to the plan's project (else ignores the param) and passes `placeDesignId`.
+4. The editor enters placement mode (`05`); placing creates a new `FurniturePlacement`; Esc cancels; the editor then removes `place` with `history.replaceState`.
+5. Placing the same design more than once is allowed (`05` may warn).
 
 ---
 
 ## 11. Orders
 
-### 11.0 Shared order data (customer variants)
+### 11.0 Order data (customer variants)
 ```ts
 interface OrderItemData {
-  id: Ulid; sort_order: number;
-  design: { id: Ulid; name: string; template_label: string; thumbnail_url: string | null; project_id: Ulid };
-  revision: { id: Ulid; number: number; bom_status: 'pending' | 'ready' | 'failed' } | null;   // null while draft
-  dims: { width_mm: number; height_mm: number; depth_mm: number };
-  quantity: number; room_label: string | null; customer_notes: string | null;
-  estimate_minor: number | null;           // draft only: design.estimate.totalMinor × quantity
-  estimate_stale: boolean;
-  quoted_amount_minor: number | null;      // sum of customer-visible current-quote lines of this item
-  open_issue_count: number;
+  id: Ulid; sortOrder: number;
+  design: { id: Ulid; name: string; templateLabel: string; thumbnailUrl: string | null; projectId: Ulid };
+  revision: { id: Ulid; number: number; bomStatus: 'pending' | 'ready' | 'failed' } | null;   // null while draft
+  dims: { widthMm: number; heightMm: number; depthMm: number };
+  quantity: number; roomLabel: string | null; customerNotes: string | null;
+  estimateMinor: number | null;            // draft only: design.estimate.totalMinor × quantity
+  estimateStale: boolean;
+  quotedAmountMinor: number | null;        // sum of customer-visible current-quote lines of this item
+  openIssueCount: number;
 }
 
-interface CustomerOrderAbilities {
-  edit_draft: boolean; delete_draft: boolean; submit: boolean;
-  cancel_draft: boolean;                    // T3
-  withdraw: boolean;                        // T29
-  reopen: boolean;                          // T5
-  review_proposal: boolean;                 // open sent proposal exists (T7)
-  accept_quote: boolean; negotiate: boolean; decline_quote: boolean;   // T10/T11/T14
-  approve_completion: boolean; report_issue: boolean;                  // T21/T22
-  request_callback: boolean;                // accepted + ≥1 no_answer call
-  post_message: boolean;                    // 09 §2 message rule
+interface CustomerOrderAbilities {         // OrderPolicy (13 §8.5) + state (09)
+  editDraft: boolean; deleteDraft: boolean; submit: boolean;
+  cancelDraft: boolean;                    // T3
+  withdraw: boolean;                       // T29
+  reopen: boolean;                         // T5
+  reviewProposal: boolean;                 // T7
+  acceptQuote: boolean; negotiate: boolean; declineQuote: boolean;   // T10 / T11 / T14
+  approveCompletion: boolean; reportIssue: boolean;                  // T21 / T22
+  requestCallback: boolean;                // accepted + ≥ 1 no_answer call
+  postMessage: boolean;                    // 09 §2 rule AND verified contact
+  postMessageBlockedReason: 'thread_closed' | 'contact_unverified' | null;
 }
 
 interface OrderData {
-  id: Ulid; number: string; is_draft_number: boolean; title: string;
-  state: OrderStateKey; state_before_hold: OrderStateKey | null; hold_reason: string | null;
+  id: Ulid; number: string; isDraftNumber: boolean; title: string;
+  state: OrderStateKey; stateBeforeHold: OrderStateKey | null; holdReason: string | null;
   project: ProjectRefData;
-  site_address: AddressData | null; needs_installation: boolean;
-  preferred_delivery_on: IsoDate | null; expected_delivery_on: IsoDate | null;
-  customer_notes: string | null;
-  production_progress: number; production_stage: string | null; production_stage_label: string | null;
-  cancel_reason: string | null; cancel_note: string | null;
-  was_submitted: boolean;                   // submitted_at !== null
-  milestones: Record<'submitted_at' | 'reviewed_at' | 'quoted_at' | 'accepted_at' | 'confirmed_at' | 'production_started_at' | 'completed_at' | 'customer_approved_at' | 'delivered_at' | 'closed_at' | 'cancelled_at', IsoDateTime | null>;
-  contact_person: UserRefData | null;       // assigned estimator (name + avatar only)
-  current_quote: QuoteData | null;          // status sent | accepted | expired (latest non-draft)
-  open_proposal: ChangeProposalSummaryData | null;   // status sent
-  negotiation: { rounds_used: number; rounds_max: number; open: QuoteNegotiationData | null };
-  no_answer_calls: { called_at: IsoDateTime }[];     // only call outcome 'no_answer' (09 §7)
+  siteAddress: AddressData | null; needsInstallation: boolean;
+  preferredDeliveryOn: IsoDate | null; expectedDeliveryOn: IsoDate | null;
+  customerNotes: string | null;
+  productionProgress: number; productionStage: string | null; productionStageLabel: string | null;
+  cancelReason: string | null; cancelNote: string | null;
+  wasSubmitted: boolean;
+  milestones: Record<'submittedAt' | 'reviewedAt' | 'quotedAt' | 'acceptedAt' | 'confirmedAt' | 'productionStartedAt' | 'completedAt' | 'customerApprovedAt' | 'deliveredAt' | 'closedAt' | 'cancelledAt', IsoDateTime | null>;
+  contactPerson: UserRefData | null;       // assigned estimator
+  currentQuote: QuoteData | null;          // latest non-draft
+  openProposal: ChangeProposalSummaryData | null;
+  negotiation: { roundsUsed: number; roundsMax: number; open: QuoteNegotiationData | null };
+  noAnswerCalls: { calledAt: IsoDateTime }[];   // outcome no_answer only (09 §7)
   delivery: DeliveryData | null;
-  open_issues: OrderIssueData[];
+  openIssues: OrderIssueData[];
   can: CustomerOrderAbilities;
 }
 
-interface ChangeProposalSummaryData { id: Ulid; number: number; status: 'sent' | 'resolved' | 'withdrawn'; sent_at: IsoDateTime | null; item_count: number; href: string }
+interface ChangeProposalSummaryData { id: Ulid; number: number; status: 'sent' | 'resolved' | 'withdrawn'; sentAt: IsoDateTime | null; itemCount: number; href: string }
 
 interface QuoteLineData {
-  id: Ulid; order_item_id: Ulid | null;
+  id: Ulid; orderItemId: Ulid | null;
   kind: 'furniture' | 'materials' | 'hardware' | 'labour' | 'finishing' | 'installation' | 'delivery' | 'discount' | 'custom';
   description: string; details: Record<string, unknown> | null;
-  quantity: string;                         // decimal string, e.g. "1.000"
-  unit: string; unit_price_minor: number; amount_minor: number;
-  tax_rate_id: Ulid | null; tax_rate_label: string | null;
-  sort_order: number;
+  quantity: string;                        // decimal string "1.000"
+  unit: string; unitPriceMinor: number; amountMinor: number;
+  taxRateId: Ulid | null; taxRateLabel: string | null;
+  sortOrder: number;
 }
 interface QuoteNegotiationData {
-  id: Ulid; quote_id: Ulid; proposed_total_minor: number | null; message: string;
-  item_comments: { order_item_id: Ulid; item_name: string; comment: string }[];
+  id: Ulid; quoteId: Ulid; proposedTotalMinor: number | null; message: string;
+  itemComments: { orderItemId: Ulid; itemName: string; comment: string }[];
   status: 'open' | 'answered_with_revision' | 'answered_keep_price' | 'closed';
-  answer_message: string | null; answered_by: UserRefData | null; answered_at: IsoDateTime | null;
-  resulting_quote_id: Ulid | null; created_at: IsoDateTime;
+  answerMessage: string | null; answeredBy: UserRefData | null; answeredAt: IsoDateTime | null;
+  resultingQuoteId: Ulid | null; createdAt: IsoDateTime;
 }
 interface QuoteData {
   id: Ulid; version: number; number: string;
   status: 'sent' | 'accepted' | 'declined' | 'superseded' | 'expired' | 'withdrawn';   // customers never see drafts
-  currency: string; prices_include_tax: boolean;
-  subtotal_minor: number; discount_minor: number; tax_minor: number; total_minor: number;
-  tax_breakdown: { taxRateId: string; name: string; rateBps: number; taxableMinor: number; taxMinor: number }[];
-  valid_until: IsoDate; days_left: number;  // ≥ 0 in business TZ; negative never sent
-  lead_time_days: number | null;
-  notes_to_customer: string | null; terms: string;
-  lines: QuoteLineData[];                   // customer-visible lines only
-  pdf_url: string | null;                   // customer.orders.quotes.pdf when media exists
-  sent_at: IsoDateTime | null; accepted_at: IsoDateTime | null; declined_at: IsoDateTime | null;
-  expired_at: IsoDateTime | null; superseded_at: IsoDateTime | null; withdrawn_at: IsoDateTime | null;
-  decline_reason: string | null;
+  currency: string; pricesIncludeTax: boolean;
+  subtotalMinor: number; discountMinor: number; taxMinor: number; totalMinor: number;
+  taxBreakdown: { taxRateId: string; name: string; rateBps: number; taxableMinor: number; taxMinor: number }[];
+  validUntil: IsoDate; daysLeft: number;
+  leadTimeDays: number | null;
+  notesToCustomer: string | null; terms: string;
+  lines: QuoteLineData[];                  // customer-visible lines only
+  pdfUrl: string | null;                   // customer.orders.quotes.pdf when the PDF exists
+  sentAt: IsoDateTime | null; acceptedAt: IsoDateTime | null; declinedAt: IsoDateTime | null;
+  expiredAt: IsoDateTime | null; supersededAt: IsoDateTime | null; withdrawnAt: IsoDateTime | null;
+  declineReason: string | null;
   negotiations: QuoteNegotiationData[];
 }
-interface QuoteVersionData { id: Ulid; version: number; number: string; status: QuoteData['status']; total_minor: number; sent_at: IsoDateTime | null; pdf_url: string | null; href: string }
+interface QuoteVersionData { id: Ulid; version: number; number: string; status: QuoteData['status']; totalMinor: number; sentAt: IsoDateTime | null; pdfUrl: string | null; href: string }
 
 interface ProductionUpdateData {
-  id: Ulid; author: UserRefData; stage: string; stage_label: string; progress: number;
-  title: string; body_html: string | null; visibility: 'customer' | 'internal';
-  is_completion: boolean; photos: MediaData[]; created_at: IsoDateTime;
+  id: Ulid; author: UserRefData; stage: string; stageLabel: string; progress: number;
+  title: string; bodyHtml: string | null; visibility: 'customer' | 'internal';
+  isCompletion: boolean; photos: MediaData[]; createdAt: IsoDateTime;
 }
 interface OrderIssueData {
-  id: Ulid; order_item_id: Ulid | null; item_name: string | null; raised_by: UserRefData;
+  id: Ulid; orderItemId: Ulid | null; itemName: string | null; raisedBy: UserRefData;
   description: string; status: 'open' | 'in_progress' | 'resolved' | 'rejected';
-  resolution_note: string | null; resolved_at: IsoDateTime | null; photos: MediaData[]; created_at: IsoDateTime;
+  resolutionNote: string | null; resolvedAt: IsoDateTime | null; photos: MediaData[]; createdAt: IsoDateTime;
 }
 interface DeliveryData {
-  scheduled_for: IsoDateTime | null; scheduled_until: IsoDateTime | null;
-  delivered_at: IsoDateTime | null; installed: boolean; recipient_name: string | null;
+  scheduledFor: IsoDateTime | null; scheduledUntil: IsoDateTime | null;
+  deliveredAt: IsoDateTime | null; installed: boolean; recipientName: string | null;
   notes: string | null; photos: MediaData[];
 }
 ```
 
 ### 11.1 Orders list — `customer.orders.index` · `/orders` · `Customer/Orders/Index`
-Props: `{ orders: Paginated<OrderSummaryData>; counts: Record<'active' | 'action' | 'drafts' | 'done' | 'cancelled', number>; filters: { tab: 'active' | 'action' | 'drafts' | 'done' | 'cancelled'; search: string | null } }`.
-Tabs: **Active** (Active states), **Needs action** (rows with `action` ≠ null), **Drafts** (`draft`), **Completed** (`delivered`, `closed`), **Cancelled**. Search by order number or title. Sort: `updated_at desc` (fixed). `per_page` 12.
-Row (`OrderRow`): thumbnails stack, number (mono), title, project name, `StatusBadge`, compact `Stepper` (desktop), quote total (`MoneyDisplay`) when present, progress bar when `in_production`, "Action needed" pill (warning) with the action label, unread message count badge, `RelativeTime(updated_at)`. Whole row links to `customer.orders.show` (drafts never submitted → `customer.orders.edit`).
-Empty per tab: Active "No orders in progress", Needs action "You're all caught up" (icon `check-circle`), Drafts "No drafts", Completed "No completed orders yet", Cancelled "No cancelled orders". Global empty (no orders at all): "No orders yet" + **Start an order** (project chooser dialog).
+Props: `{ orders: Paginated<OrderSummaryData>; counts: Record<'active' | 'action' | 'drafts' | 'done' | 'cancelled', number>; filters: { tab: 'active' | 'action' | 'drafts' | 'done' | 'cancelled'; search: string | null } }` (`per_page` 12; sort `updated_at desc`).
+Tabs: **Active**, **Needs action** (`action ≠ null`), **Drafts**, **Completed** (`delivered`, `closed`), **Cancelled**; search by number or title.
+`OrderRow`: thumbnail stack, number (mono), title, project, `StatusBadge`, compact `Stepper` (desktop), quote total, progress bar when `in_production`, "Action needed" pill with the action label, unread badge, `RelativeTime(updatedAt)`. Row → `customer.orders.show` (never-submitted drafts → `customer.orders.edit`).
+Empty per tab: "No orders in progress" / "You're all caught up" (`check-circle`) / "No drafts" / "No completed orders yet" / "No cancelled orders"; no orders at all: "No orders yet" + **Start an order** (project chooser).
 
-### 11.2 Create (select designs, T1) — `customer.orders.create` · `/projects/{project}/orders/create` · `Customer/Orders/Create`
-Query: `designs` (comma-separated ids to preselect).
-Props: `{ project: ProjectRefData; designs: (FurnitureDesignSummaryData & { selectable: boolean; unavailable_reason: 'in_active_order' | null })[]; preselected: Ulid[] }`.
-UI: `PageHeader` "New order" — description "Choose the furniture you'd like us to make. You can adjust quantities next." Grid of selectable `DesignCard`s (checkbox top-right; unselectable cards dimmed with "Already in order {number}"). Sticky bar: "{n} selected" + **Continue** → `customer.orders.store` `{ design_ids }` → T1 → `customer.orders.edit`.
-Validation: `design_ids` required min 1 (`orders.errors.no_designs` "Choose at least one design."); each owned by the project; 422 `design_in_active_order` → `orders.errors.design_in_active_order` "{name} is already part of order {number}."
-Empty (no designs): `EmptyState` "Design some furniture first" + **New design**.
+### 11.2 Create (select designs, T1) — `customer.projects.orders.create` · `Customer/Orders/Create`
+Query `designs` (comma list to preselect). Props: `{ project: ProjectRefData; designs: (FurnitureDesignSummaryData & { selectable: boolean; unavailableReason: 'in_active_order' | null })[]; preselected: Ulid[] }`.
+`PageHeader` "New order" — "Choose the furniture you'd like us to make. You can adjust quantities next." Selectable cards (checkbox; unavailable cards dimmed "Already in order {number}"). Sticky bar "{n} selected" + **Continue** → `customer.projects.orders.store` `{ designIds }` (T1) → draft editor.
+Errors: `orders.errors.no_designs` "Choose at least one design."; 422 `design_in_active_order` → `orders.errors.design_in_active_order` "{name} is already part of order {number}." Empty: "Design some furniture first" + **New design**.
 
 ### 11.3 Draft editor & submission (T2) — `customer.orders.edit` · `/orders/{order}/edit` · `Customer/Orders/Draft`
-Only for `state = draft` (else redirect to `customer.orders.show`).
+Only for `state = draft` (else redirect to show).
 Props:
 ```ts
 interface OrderDraftProps {
-  order: OrderData;                        // state draft
+  order: OrderData;
   items: OrderItemData[];
-  addable_designs: (FurnitureDesignSummaryData & { selectable: boolean; unavailable_reason: 'in_active_order' | null })[];
-  addresses: AddressData[];                // user's saved addresses
-  project_site_address_id: Ulid | null;
-  room_suggestions: string[];              // distinct room names from the project's plans' summaries
-  min_preferred_date: IsoDate;             // today + 7 days (business TZ) — Appendix A5 note
-  contact_status: { email: string | null; email_verified: boolean; phone_e164: string | null; phone_verified: boolean };
-  estimate_disclaimer: string;             // trans_icu(pricing.estimate_disclaimer_key)
+  addableDesigns: (FurnitureDesignSummaryData & { selectable: boolean; unavailableReason: 'in_active_order' | null })[];
+  addresses: AddressData[];
+  projectSiteAddressId: Ulid | null;
+  roomSuggestions: string[];               // distinct room names from the project's plan summaries
+  minPreferredDate: IsoDate;               // today + workflow.min_preferred_delivery_days (Appendix A5)
+  contact: { email: string | null; emailVerified: boolean; phoneE164: string | null; phoneVerified: boolean };
+  estimateDisclaimer: string;              // trans_icu(pricing.estimate_disclaimer_key)
   currency: string;
 }
 ```
 
 #### 11.3.1 Layout
-Desktop: left column (8/12) with three `Card` sections; right column (4/12) sticky **Summary** card. Tablet: single column, summary card at bottom. Phone: 3-step wizard (Items → Delivery → Review) with bottom sticky nav (**Back** / **Next** / **Submit order**).
-`PageHeader`: "Draft order" (or "Order {number} — reopened" when `was_submitted`), meta `StatusBadge`. Actions: **Save draft** (outline), overflow: Delete draft (if `can.delete_draft`; ConfirmDialog destructive "Delete this draft? Your designs are not affected.") or **Cancel order** (if `can.cancel_draft`, T3; `ReasonDialog` with optional note; copy "Cancel order {number}? We'll stop working on it.").
-Reopened info `Alert` (when `was_submitted`): "Your order is open for changes. Edit your designs, then submit it again. Its number stays {number}."
+Desktop: three section cards (8/12) + sticky **Summary** card (4/12). Tablet: one column. Phone: 3-step wizard (Items → Delivery → Review) with sticky **Back / Next / Submit order**.
+`PageHeader` "Draft order" (or "Order {number} — reopened"); actions **Save draft** (outline) + overflow **Delete draft** (`can.deleteDraft`; "Delete this draft? Your designs are not affected.") or **Cancel order** (`can.cancelDraft`, T3, `ReasonDialog` optional note).
+Reopened `Alert`: "Your order is open for changes. Edit your designs, then submit it again. Its number stays {number}."
 
-#### 11.3.2 Section 1 — Items
-For each item: thumbnail, design name (link → builder, opens in same tab with unsaved-changes guard), `DimensionText`, estimate `MoneyDisplay approx` (× qty; "May be outdated — open the design to refresh" when `estimate_stale`), **Quantity** (`number-field` 1–99), **Room** (`Combobox` free text ≤ 80 with `room_suggestions`), **Notes for us** (textarea ≤ 2000, collapsed "Add a note" link), remove button (`aria-label` "Remove {name}"; disabled if it is the last item, tooltip "An order needs at least one item"). **Add designs** button → `Dialog` listing `addable_designs` (checkboxes) → adds rows client-side.
-Per-item server errors (from submit) render under the item: `orders.errors.design_invalid` "{name} has problems that must be fixed before submitting." + list of issue messages (`t(issue.messageKey, issue.params)`) + **Open design**.
+#### 11.3.2 Items
+Per item: thumbnail, design name (link → builder, unsaved-changes guard), `DimensionText`, estimate `MoneyDisplay approx` × qty ("May be outdated — open the design to refresh"), **Quantity** (`number-field` 1–99), **Room** (`Combobox` free text ≤ 80 with `roomSuggestions`), **Notes for us** (≤ 2000, collapsed "Add a note"), remove (`aria-label` "Remove {name}"; disabled for the last item). **Add designs** dialog (checkbox list of `addableDesigns`).
+Per-item submit errors: `orders.errors.design_invalid` "{name} has problems that must be fixed before submitting." + issue list (`t(issue.messageKey, issue.params)`) + **Open design**.
 
-#### 11.3.3 Section 2 — Delivery & installation
-- **Site address*** — `RadioGroup` of saved addresses (project's site address first, labelled "Project address") + "Use a new address" (reveals `AddressFields`, `site_address.*`, checkbox "Also set as this project's address" default checked if the project has none).
-- **Installation*** — radio cards (no default selection on first submission; preselected with the stored value after a reopen): "Yes, deliver and install" / "No, delivery only". Error `orders.errors.installation_required` "Tell us whether you need installation."
-- **Preferred delivery date** (optional) — `DateInput` min `min_preferred_date`; hint "We'll confirm the actual date when we call you."
-- **Notes** (optional, ≤ 5000) — "Anything we should know? Access, lift, timings…"
+#### 11.3.3 Delivery & installation
+- **Site address*** — `RadioGroup` of saved addresses (project address first, labelled "Project address") + "Use a new address" (`AddressFields`, payload `siteAddress`; checkbox `setAsProjectAddress`, default checked when the project has none).
+- **Installation*** — radio cards "Yes, deliver and install" / "No, delivery only"; no default on first submission (stored value after reopen). `orders.errors.installation_required` "Tell us whether you need installation."
+- **Preferred delivery date** (optional) — `DateInput` min `minPreferredDate`; hint "We'll confirm the actual date when we call you."
+- **Notes** (≤ 5000) — "Anything we should know? Access, lift, timings…"
 
-#### 11.3.4 Section 3 — Review & submit
-- Summary list: items × qty, estimate per item, **Estimated total** (sum of item estimates; `MoneyDisplay approx size=xl`), lines "Installation: included in your quote" / "Delivery: included in your quote", tax note (`orders.draft.tax_note` "Taxes are added in the quote.").
-- **Disclaimer** (`Alert` neutral, icon `info`): `estimate_disclaimer` (e.g. "This is an automatic estimate. Your final price is in the quote we send after reviewing your designs.").
-- **Contact check**: if neither email nor phone verified → `Alert` warning `orders.errors.contact_unverified` "Verify your email or phone before submitting." with inline actions **Verify phone** (opens the phone verification dialog from §13.2.3, same endpoints) and **Resend email link**. Submit disabled until verified (re-checked server-side).
-- **Submit order** (primary, lg) → `customer.orders.submit` with full payload; `processing` shows "Submitting…" spinner (engine validation can take a few seconds).
-Payload (both `update` and `submit`):
+#### 11.3.4 Review & submit
+- Summary: items × qty with estimates, **Estimated total** (`MoneyDisplay approx xl`), "Installation: included in your quote", "Delivery: included in your quote", `orders.draft.tax_note` "Taxes are added in the quote."
+- Disclaimer `Alert` (`info` icon): `estimateDisclaimer`.
+- **Submit order** → opens **Submit dialog**: summary line ("{count} items · estimated {total}"); if neither email nor phone verified → required verification block (`orders.errors.contact_unverified` "Verify your email or phone before submitting." + **Verify phone** inline `PhoneVerifyDialog` flow + **Resend email link**); else if no verified phone → optional step (`13` §5.7) "Add a phone number for our confirmation call" with inline phone verification and **Skip**. Confirm button **Send order** → `customer.orders.submit` (processing label "Submitting…"; engine validation can take seconds).
+Payload (`update` and `submit`):
 ```ts
 {
-  items: { id?: Ulid; design_id: Ulid; quantity: number; room_label: string | null; customer_notes: string | null }[];
-  site_address_id: Ulid | null;
-  site_address: AddressFormData | null;    // when new address
-  set_as_project_address: boolean;
-  needs_installation: boolean | null;      // null allowed for update, required for submit
-  preferred_delivery_on: IsoDate | null;
-  customer_notes: string | null;
+  items: { id?: Ulid; designId: Ulid; quantity: number; roomLabel: string | null; customerNotes: string | null }[];
+  siteAddressId: Ulid | null;
+  siteAddress: AddressFormData | null;
+  setAsProjectAddress: boolean;
+  needsInstallation: boolean | null;      // null allowed for update; required for submit
+  preferredDeliveryOn: IsoDate | null;
+  customerNotes: string | null;
 }
 ```
-Server validation messages (submit): `orders.errors.no_items` "Add at least one item."; `items.*.quantity` 1–99 "Quantity must be between 1 and 99."; `orders.errors.site_address_required` "Choose where we should deliver."; `orders.errors.installation_required`; `preferred_delivery_on` after_or_equal min date "Choose a date on or after {date}."; `orders.errors.design_invalid` (per item, from engine CLI); `orders.errors.design_in_active_order`; `orders.errors.contact_unverified`; `orders.errors.design_deleted` "{name} was deleted. Remove it from the order."
-Autosave: none; **Save draft** explicit + save on step change (phone wizard) + unsaved-changes guard.
-On success: redirect `customer.orders.show` with flash `orders.toasts.submitted` "Order {number} submitted. We'll review it soon."
-Acceptance: submit with an invalid design shows the engine issues on that item and keeps the draft; after submit the design builders open read-only (locked); the order receives an `ORD-YYYY-NNNNN` number.
+Server messages (submit): `orders.errors.no_items` "Add at least one item."; `items.*.quantity` "Quantity must be between 1 and 99."; `orders.errors.site_address_required` "Choose where we should deliver."; `orders.errors.installation_required`; `preferredDeliveryOn` "Choose a date on or after {date}."; `orders.errors.design_invalid` (per item); `orders.errors.design_in_active_order`; `orders.errors.contact_unverified`; `orders.errors.design_deleted` "{name} was deleted. Remove it from the order."
+Save: explicit **Save draft**, save on wizard step change, unsaved-changes guard. Success → `customer.orders.show` with flash `orders.toasts.submitted` "Order {number} submitted. We'll review it soon." After the first ever submission the order page shows the `PushOptIn` card once (`12` §8.3).
+Acceptance: an invalid design shows engine issues on its item and keeps the draft; after submit the designs open read-only; the order gets an `ORD-YYYY-NNNNN` number.
 
 ### 11.4 Order page — `customer.orders.show` · `/orders/{order}` · `Customer/Orders/Show`
-Never-submitted drafts redirect to `customer.orders.edit`.
-Query: `tab` ∈ `overview` (default) | `designs` | `quote` | `messages` | `documents`.
+Never-submitted drafts redirect to `customer.orders.edit`. Query `tab` ∈ `overview` (default) | `designs` | `quote` | `messages` | `documents` (`links.order` and notification CTAs may add `#messages`, which selects the Messages tab).
 Props:
 ```ts
 interface CustomerOrderShowProps {
   order: OrderData;
   items: OrderItemData[];
-  latest_production_update: ProductionUpdateData | null;
-  production_updates: Inertia.Deferred<ProductionUpdateData[]>;   // customer-visible, newest first
+  latestProductionUpdate: ProductionUpdateData | null;
+  productionUpdates: Inertia.Deferred<ProductionUpdateData[]>;    // customer-visible, newest first
   timeline: Inertia.Deferred<TimelineEntryData[]>;
-  messages: Inertia.ScrollProp<MessageData>;                       // Inertia infinite scroll, 30 per page, newest page first, rendered oldest→newest
-  last_read_message_id: Ulid | null;
-  unread_messages: number;
-  quote_versions: QuoteVersionData[];                              // all non-draft quotes, newest first
+  messages: Inertia.ScrollProp<MessageData>;                       // 30 per page; rendered oldest → newest
+  lastReadMessageId: Ulid | null;
+  unreadMessages: number;
+  quoteVersions: QuoteVersionData[];                               // non-draft quotes, newest first
+  showPushOptIn: boolean;                                          // 12 §8.3 rule
+  vapidPublicKey: string | null;                                   // only when showPushOptIn
 }
 ```
 
 #### 11.4.1 Header & structure
-- `PageHeader`: title "Order {number}"; description = order title; meta: `StatusBadge` (customer audience) + project link + "Submitted {date}". Actions overflow (`DropdownMenu`): **Print summary** (`window.print()` with `OrderPrintSummary`), **Edit my designs** (if `can.reopen`, T5), **Withdraw request** (if `can.withdraw`, T29), **Cancel order** (if `can.cancel_draft`, T3).
-- **Stepper** (horizontal ≥ 768, vertical collapsed to current step + "Show all steps" on phone). Cancelled → `Alert` danger "This order was cancelled{reason, select, …}." with `t('orders.cancel_reasons.' + cancel_reason)` and `cancel_note` if any. On hold → `Alert` warning "Your order is on hold: {hold_reason}".
-- `Tabs`: Overview · Designs ({items}) · Quote (dot if `can.accept_quote`) · Messages ({unread} badge) · Documents. Tab state in `?tab=` (no reload).
-- Desktop ≥ 1024: Overview tab uses 2 columns: main (ActionPanel, production card, timeline) and right rail (Details card, Quote card, Contact card). Other tabs full width.
+- `PageHeader`: "Order {number}", description = title; meta `StatusBadge` + project link + "Submitted {date}". Overflow: **Print summary**, **Edit my designs** (`can.reopen`, T5), **Withdraw request** (`can.withdraw`, T29), **Cancel order** (`can.cancelDraft`, T3).
+- **Stepper** (horizontal ≥ 768; vertical collapsed to the current step + "Show all steps" on phone). Cancelled → danger `Alert` "This order was cancelled: {reason}" (`orders.cancel_reasons.{reason}`) + `cancelNote`. On hold → warning `Alert` "Your order is on hold: {holdReason}".
+- `Tabs`: Overview · Designs ({n}) · Quote (dot when `can.acceptQuote`) · Messages ({unread}) · Documents.
+- Desktop Overview: main column (ActionPanel, production card, timeline) + right rail (Details, Quote, Delivery cards).
 
-#### 11.4.2 Action panel per state (`ActionPanel`; exactly one panel)
+#### 11.4.2 Action panel per state (exactly one `ActionPanel`)
 
-| State | Tone/icon | Title / body (keys `orders.panel.{state}.*`) | Actions |
+| State | Tone/icon | Title / body (`orders.panel.{state}.*`) | Actions |
 |---|---|---|---|
-| `draft` (submitted before) | info `file-pen` | "Your order is open for changes" / "Update your designs, then submit again." | **Continue editing** (→ edit), **Cancel order** (T3, ReasonDialog note optional) |
+| `draft` (submitted before) | info `file-pen` | "Your order is open for changes" / "Update your designs, then submit again." | **Continue editing** · **Cancel order** (T3) |
 | `submitted` | info `send` | "Waiting for review" / "We usually start reviewing within 1 business day." | **Edit my designs** (T5) · **Withdraw request** (T29) |
 | `in_review` | info `search` | "We're reviewing your designs" / "{contact} is checking your designs and will send a quote or suggestions." | **Edit my designs** (T5) · **Withdraw request** (T29) |
-| `changes_proposed` | warning `git-compare` | "Action needed: review our suggested changes" / staff `message` excerpt (2 lines) | **Review changes** (primary → proposal page) · overflow: Edit my designs (T5) |
-| `quoted` | warning `receipt` | "Action needed: review your quote" / "{total} · valid until {date} ({days} days left)" | **Accept quote** (T10 dialog) · **Negotiate** (T11 dialog, if `can.negotiate`; else **Contact us** → Messages tab) · **Decline** (T14) · link "View quote details" |
-| `quoted` & `current_quote.status = expired` (transient before T15 runs; also after T15 the state is `in_review`) | neutral `clock` | "This quote has expired" / "We're preparing an updated one." | — |
-| `negotiating` | info `messages-square` | "We're reviewing your response" / your counter-offer summary (target total, message excerpt) | **Decline quote** (T14) · **Edit my designs** (T5) |
-| `accepted` | primary `phone` | "Accepted — we'll call you to confirm" / "We'll call {phone} to confirm details." + link "Not your number? Update it" (→ settings) | If `can.request_callback`: sub-panel "We tried to reach you on {date}." + **Request a call back** (dialog) |
-| `confirmed` | success `badge-check` | "Confirmed — production will start soon" / "Expected delivery: {expected_delivery_on}" | — |
-| `in_production` | primary `hammer` | "In production" / current stage + progress | **See progress** (scrolls to production card) |
-| `completed` | warning `camera` | "Action needed: check the photos of your furniture" | **Check photos** (primary → completion page) |
-| `rework` | warning `wrench` | "We're fixing the issue you reported" / list of `open_issues` with `StatusPill` | — |
-| `ready_for_delivery` | success `truck` | delivery scheduled ? "Delivery scheduled for {date}, {time window}" : "We'll contact you to schedule delivery." | — |
-| `delivered` | success `package-check` | "Delivered on {date}" + "{installed, select, true {Installed} other {Delivered only}}" | "Problem? **Message us**" (→ Messages tab) |
-| `closed` | neutral `archive` | "Order closed — thank you!" | **Order more furniture** (→ `customer.orders.create` for the project) |
-| `cancelled` | — (Alert above replaces panel) | — | — |
-| `on_hold` | warning `pause-circle` | "On hold" / `hold_reason` | **Message us** |
+| `changes_proposed` | warning `git-compare` | "Action needed: review our suggested changes" / staff message excerpt | **Review changes** (→ proposal page) · overflow Edit my designs (T5) |
+| `quoted` | warning `receipt` | "Action needed: review your quote" / "{total} · valid until {date} ({days} days left)" | **Accept quote** (T10) · **Negotiate** (T11; when `!can.negotiate` → **Contact us** → Messages) · **Decline** (T14) · "View quote details" |
+| `quoted` with `currentQuote.status = expired` (until T15 runs) | neutral `clock` | "This quote has expired" / "We're preparing an updated one." | — |
+| `negotiating` | info `messages-square` | "We're reviewing your response" / your counter-offer (target, message excerpt) | **Decline quote** (T14) · **Edit my designs** (T5) |
+| `accepted` | primary `phone` | "Accepted — we'll call you to confirm" / "We'll call {phone}." + "Not your number? Update it" (→ profile `#phone`) | when `can.requestCallback`: "We tried to reach you on {date}." + **Request a call back** |
+| `confirmed` | success `badge-check` | "Confirmed — production will start soon" / "Expected delivery: {date}" | — |
+| `in_production` | primary `hammer` | "In production" / stage + progress | **See progress** |
+| `completed` | warning `camera` | "Action needed: check the photos of your furniture" | **Check photos** (→ completion page) |
+| `rework` | warning `wrench` | "We're fixing the issue you reported" / `openIssues` with `StatusPill` | — |
+| `ready_for_delivery` | success `truck` | scheduled ? "Delivery scheduled for {date}, {window}" : "We'll contact you to schedule delivery." | — |
+| `delivered` | success `package-check` | "Delivered on {date}" + "{installed, select, true {Installed} other {Delivered only}}" | "Problem? **Message us**" |
+| `closed` | neutral `archive` | "Order closed — thank you!" | **Order more furniture** |
+| `cancelled` | (Alert replaces panel) | — | — |
+| `on_hold` | warning `pause-circle` | "On hold" / `holdReason` | **Message us** |
 
-Dialogs (all `ConfirmDialog`/`ReasonDialog`, `15` §9.20–21):
-- **Edit my designs (T5)** — title "Edit your designs?"; body depends on state: `submitted`/`in_review` "We'll pause our review until you submit again."; `changes_proposed` "Our suggested changes will be withdrawn."; `quoted`/`negotiating` "The current quote will be withdrawn and a new one prepared after you resubmit." Confirm → `customer.orders.reopen` → edit page.
-- **Withdraw request (T29)** — `ReasonDialog`, note optional (≤ 2000), destructive, confirm "Withdraw request".
-- **Cancel order (T3)** — `ReasonDialog`, note optional.
-- **Accept quote (T10)** — `Dialog`: total (`MoneyDisplay xl`), quote number, valid until, collapsible **Terms** (`terms` rendered as plain text with line breaks), required checkbox `quotes.accept.checkbox` "I accept the quote and its terms." (`accept_terms`), button **Accept quote** (success variant). Errors: `quotes.errors.expired` "This quote has expired. We'll send an updated one."; `quotes.errors.not_current` "A newer quote is available." (both reload the page).
-- **Negotiate (T11)** — `Dialog` (phone: full-screen `Drawer`): Message* (textarea ≤ 2000, `quotes.negotiate.message_hint` "Tell us what you'd like to change — price, materials, timing…"), **Your target total** (optional `CurrencyInput`, must be > 0 and < quote total: `quotes.errors.target_range` "Enter an amount between {min} and {max}."), **Comments on specific items** (optional repeatable rows: item `Select` + comment ≤ 500; max one per item), info "You can send {remaining, plural, one {# more counter-offer} other {# more counter-offers}}." Submit **Send counter-offer**. Errors: `quotes.errors.negotiation_limit` "You've reached the maximum number of counter-offers. Please message us instead."; `quotes.errors.negotiation_disabled`.
-- **Decline (T14)** — `ReasonDialog` destructive: note **required** (`reason`, ≤ 2000, label "Why are you declining?"), body "Declining cancels this order. You can still order these designs again later." confirm "Decline quote".
-- **Request a call back** — `Dialog`: `DateTimeInput` (min now + 1 h, within business working hours hint), optional note → posts `customer.orders.messages.store` `{ template: 'callback_request', callback_at, body: note ?? '' }`; the server composes the message text `messages.templates.callback_request` "I'd like a call back at {datetime}." (+ note).
+Dialogs:
+- **Edit my designs (T5)** — "Edit your designs?"; body by state: `submitted`/`in_review` "We'll pause our review until you submit again."; `changes_proposed` "Our suggested changes will be withdrawn."; `quoted`/`negotiating` "The current quote will be withdrawn and a new one prepared after you resubmit." → `customer.orders.reopen`.
+- **Withdraw request (T29)** / **Cancel order (T3)** — `ReasonDialog`, optional note ≤ 2000, destructive.
+- **Accept quote (T10)** — total (`MoneyDisplay xl`), number, valid until, collapsible **Terms**, required checkbox `quotes.accept.checkbox` "I accept the quote and its terms." → `acceptTerms`; button **Accept quote** (success variant). Errors: `quotes.errors.expired` "This quote has expired. We'll send an updated one."; `quotes.errors.not_current` "A newer quote is available." (both reload).
+- **Negotiate (T11)** (phone: full-screen `Drawer`) — Message* (≤ 2000, hint "Tell us what you'd like to change — price, materials, timing…"), **Your target total** (optional `CurrencyInput`, > 0 and < total: `quotes.errors.target_range` "Enter an amount between {min} and {max}."), **Comments on specific items** (repeatable: item `Select` + comment ≤ 500, one per item), info "You can send {remaining, plural, one {# more counter-offer} other {# more counter-offers}}." → **Send counter-offer**. Errors: `quotes.errors.negotiation_limit` "You've reached the maximum number of counter-offers. Please message us instead."; `quotes.errors.negotiation_disabled`.
+- **Decline (T14)** — `ReasonDialog` destructive, note **required** (`reason`, ≤ 2000, "Why are you declining?"), body "Declining cancels this order. You can still order these designs again later."
+- **Request a call back** — `DateTimeInput` (≥ now + 1 h; hint shows business working hours) + optional note → `customer.orders.messages.store` `{ template: 'callback_request', callbackAt, body: note ?? '' }`; server text `messages.templates.callback_request` "I'd like a call back at {datetime}." (+ note).
 
-#### 11.4.3 Overview tab content
-1. ActionPanel (above).
-2. **Production card** (states `in_production`, `completed`, `rework`, `ready_for_delivery`, `delivered`, `closed` when any update exists): `ProductionProgress` (progress + stage label), latest update (title, body, `PhotoGallery max=4`, `RelativeTime`), **All updates** expands `<Deferred data="production_updates">` → vertical list of updates each with gallery (Lightbox), stage chip, progress at that time.
-3. **Timeline** (`<Deferred data="timeline">`, `LoadingState variant=list rows=5`; `Timeline` audience customer; error → `ErrorState` with retry `router.reload({ only: ['timeline'] })`).
-Right rail: **Details** card (`KeyValueList`: Project, Site address, Installation yes/no, Preferred date, Expected delivery, Contact person with avatar); **Quote** card (if `current_quote`: total, status pill, valid until, "View quote"); **Delivery** card (if `delivery`: scheduled window / delivered at / recipient / installed, photos gallery).
+#### 11.4.3 Overview tab
+1. ActionPanel. 2. `PushOptIn` card (when `showPushOptIn`, dismissible). 3. **Production card** (when any update exists): `ProductionProgress`, latest update (title, `MessageBody` body, `PhotoGallery max=4`), **All updates** → `<Deferred data="productionUpdates">` list with galleries. 4. **Timeline** (`<Deferred data="timeline">`, `LoadingState list rows=5`; failure → `ErrorState` retry `router.reload({ only: ['timeline'] })`).
+Right rail: **Details** (`KeyValueList`: Project, Site address, Installation, Preferred date, Expected delivery, Contact person), **Quote** (total, status, valid until, "View quote"), **Delivery** (window / delivered at / recipient / installed / photos).
 
 #### 11.4.4 Designs tab
-Grid of item cards (1 col phone, 2 tablet, 3 desktop): `Thumbnail3D` (`interactive`, `revisionId` = pinned revision; loads `api.furniture-revisions.show`), name, `DimensionText`, quantity, room label, item notes, quoted amount (if quote), "Revision {n}", issue count pill. Link **Open design** → builder (read-only while locked). While `draft` (reopened) items link to the draft editor.
+Item cards (1/2/3 cols): `Thumbnail3D` (`interactive`, `revisionId` = pinned), name, `DimensionText`, quantity, room, notes, quoted amount, "Revision {n}", issue pill. **Open design** → builder (read-only while locked).
 
 #### 11.4.5 Quote tab
-If `current_quote`: renders `QuoteView` (§11.6.2) inline with actions (same as quote page). Else `EmptyState` icon `receipt` "No quote yet" "We'll send a quote after reviewing your designs."
+`QuoteView` (§11.6.2) inline with actions, or `EmptyState` `receipt` "No quote yet" / "We'll send a quote after reviewing your designs."
 
-#### 11.4.6 Messages tab (§11.9).
+#### 11.4.6 Messages tab — §11.9.
 
 #### 11.4.7 Documents tab
-List: for each `quote_versions` entry — "Quote {number}" + `StatusPill` + date + total + **Download PDF** (`pdf_url`; disabled with "Preparing PDF…" when null). Plus **Order summary** → Print. Empty: "No documents yet".
+Per `quoteVersions`: "Quote {number}" + `StatusPill` + date + total + **Download PDF** (disabled "Preparing PDF…" when `pdfUrl` null) ; **Order summary** → Print. Empty "No documents yet".
 
 #### 11.4.8 Real-time
-`useOrderChannel(order.id)`:
-- `OrderStateChanged` → `router.reload({ only: ['order', 'items', 'timeline', 'quote_versions', 'latest_production_update'] })` + toast `orders.toasts.state_changed` "Order updated: {state}".
-- `MessagePosted` → append to thread (if not own) and increment `unread_messages` when the Messages tab is not visible.
-- `QuoteSent` / `ChangeProposalSent` → reload `order`, `quote_versions`, `timeline`.
-- `ProductionUpdatePosted` → reload `latest_production_update`, `production_updates`, `order`.
-Disconnected > 5 s → poll every 30 s (`only: ['order', 'timeline']`).
+`useOrderChannel(order.id)` (customer-safe channel `orders.{id}`, `13` §8.10): `OrderStateChanged` → `router.reload({ only: ['order', 'items', 'timeline', 'quoteVersions', 'latestProductionUpdate'] })` + toast `orders.toasts.state_changed` "Order updated: {state}"; `MessagePosted` → append (if not own) and bump `unreadMessages` when the tab is hidden; `QuoteSent`/`ChangeProposalSent` → reload `order`, `quoteVersions`, `timeline`; `ProductionUpdatePosted` → reload `latestProductionUpdate`, `productionUpdates`, `order`. Disconnected > 5 s → poll 30 s (`only: ['order', 'timeline']`).
 
 #### 11.4.9 Responsive
-Phone: header compact, Stepper vertical (collapsed), tabs scrollable and sticky under the header, ActionPanel full-width with stacked full-width buttons, right-rail cards move below the timeline in Overview.
+Phone: compact header, vertical collapsed Stepper, sticky scrollable tabs, full-width stacked panel buttons, right-rail cards below the timeline.
 
 #### 11.4.10 Acceptance
-- Each of the 16 states renders the panel and actions in §11.4.2 and nothing else (Pest browser test per state using DemoSeeder orders).
-- Accepting a quote moves the order to `accepted` and the page updates without reload for other open tabs (socket).
-- An expired quote shows no Accept/Negotiate/Decline buttons.
+- Each of the 16 states renders exactly the panel/actions of §11.4.2 (browser test per DemoSeeder order).
+- Accepting a quote updates other open tabs via the socket.
+- An expired quote shows no Accept/Negotiate/Decline.
 
-### 11.5 Proposal review (T7) — `customer.orders.proposals.show` · `/orders/{order}/proposals/{proposal}` · `Customer/Orders/ProposalReview`
+### 11.5 Proposal review (T7) — `customer.orders.proposals.show` · `Customer/Orders/ProposalReview`
 Props:
 ```ts
 interface ProposalReviewProps {
   order: Pick<OrderData, 'id' | 'number' | 'title' | 'state' | 'project'>;
   proposal: ChangeProposalData;
-  can_resolve: boolean;                    // proposal.status = sent && order.state = changes_proposed
+  canResolve: boolean;                     // proposal sent && order changes_proposed
 }
 interface ChangeProposalData {
   id: Ulid; number: number; status: 'draft' | 'sent' | 'resolved' | 'withdrawn';
-  message: string | null; created_by: UserRefData;
-  sent_at: IsoDateTime | null; resolved_at: IsoDateTime | null; withdrawn_at: IsoDateTime | null;
-  customer_comment: string | null;
+  message: string | null; createdBy: UserRefData;
+  sentAt: IsoDateTime | null; resolvedAt: IsoDateTime | null; withdrawnAt: IsoDateTime | null;
+  customerComment: string | null;
   items: ChangeProposalItemData[];
 }
 interface ChangeProposalItemData {
-  id: Ulid; order_item_id: Ulid; item_name: string; quantity: number;
-  from_revision: { id: Ulid; number: number; bom_status: 'pending' | 'ready' | 'failed' };
-  to_revision: { id: Ulid; number: number; bom_status: 'pending' | 'ready' | 'failed' } | null;
-  from_thumbnail_url: string | null; to_thumbnail_url: string | null;
+  id: Ulid; orderItemId: Ulid; itemName: string; quantity: number;
+  fromRevision: { id: Ulid; number: number; bomStatus: 'pending' | 'ready' | 'failed' };
+  toRevision: { id: Ulid; number: number; bomStatus: 'pending' | 'ready' | 'failed' } | null;
+  fromThumbnailUrl: string | null; toThumbnailUrl: string | null;
   changes: ChangeItem[];                   // 03 §3.4
-  staff_note: string | null;
-  decision: 'pending' | 'approved' | 'rejected'; customer_comment: string | null; decided_at: IsoDateTime | null;
-  price: { before_minor: number | null; after_minor: number | null; ready: boolean };   // per unit, from server revision PriceBreakdown.unitPriceMinor; ready when both BOMs ready
+  staffNote: string | null;
+  decision: 'pending' | 'approved' | 'rejected'; customerComment: string | null; decidedAt: IsoDateTime | null;
+  price: { beforeMinor: number | null; afterMinor: number | null; ready: boolean };   // per unit (server PriceBreakdown.unitPriceMinor); ready when both BOMs ready
 }
 ```
+The body is `components/orders/ProposalReviewBody.vue` (props `proposal`, `canResolve`, `preview?: boolean` — preview disables decisions), reused by the staff preview (`11` §5.11).
 UI:
-- `PageHeader` "Suggested changes" (description "Proposal #{number} · from {staff} · {date}"), back → order page.
-- Staff message card (if `message`), with avatar.
-- Item cards (one per proposal item):
-  - **Viewer** (tablet/desktop: two columns before | after; phone: single viewer with `ToggleGroup` Before / After) — the compare viewer component from `07` (`FurnitureCompareViewer`, props `beforeRevisionId`, `afterRevisionId`, `changes`, `highlightEntity`, `showDifferences`). Toggle **Show differences** (default on): changed parts amber (`--diff-changed`), added green (`--diff-added`), removed red ghost (`--diff-removed-ghost`) with a legend (09 §4.6). Static thumbnails shown until the viewer chunk loads (`Thumbnail3D` placeholders).
-  - `DiffList` (major first; hovering a row highlights the entity in the viewer).
-  - **Price impact**: `price.ready` ? "Price per item: {before} → {after} ({delta, signed})" with `MoneyDisplay` (delta tone: increase `warning`, decrease `success`) × quantity note : "Calculating new price…" with spinner (reload `only: ['proposal']` every 5 s while any item is not ready).
-  - Staff note (quote style).
-  - **Decision** (`RadioGroup` as two large toggle buttons): **Approve** (check) / **Reject** (x). Reject reveals required comment textarea (≤ 1000): "Tell us why, so we can adjust." Error `proposals.errors.comment_required` "Please tell us why you're rejecting this change."
-- Sticky footer bar: progress "{decided} of {total} decided", **Approve all** (sets every pending item to approved; ConfirmDialog not needed), optional overall comment (expandable, ≤ 2000), **Send my decisions** (primary; disabled until all decided) → `customer.orders.proposals.resolve`.
-- Payload: `{ decisions: [{ item_id, decision: 'approved' | 'rejected', comment: string | null }], comment: string | null }`. Errors: `proposals.errors.undecided` "Decide on every change before sending."; `proposals.errors.not_open` "This proposal is no longer open." (reload).
-- Read-only mode (`!can_resolve`): decisions shown as `StatusPill` with comments; status banner "Resolved on {date}" / "Withdrawn on {date}".
-Phone: fully supported (approve is a phone capability); viewer height 50vh, touch orbit.
-Real-time: `ChangeProposalSent`/`OrderStateChanged` → reload. 
-Acceptance: Send stays disabled until every item is decided; rejecting without a comment shows the error; after sending, the order moves to `in_review` and the page becomes read-only.
+- `PageHeader` "Suggested changes" ("Proposal #{number} · from {staff} · {date}"), back → order.
+- Staff message card.
+- Per item card: **viewer** (tablet/desktop two columns before | after; phone single viewer with `ToggleGroup` Before/After) using the compare/diff viewer of `07` §10 (`diffHighlight`: changed parts amber `--diff-changed`, added green `--diff-added`, removed red ghost `--diff-removed-ghost`, legend), loaded lazily over `Thumbnail3D` placeholders; **Show differences** toggle (default on). `DiffList` (major first; hover highlights the entity — 07's `ChangeList` may be reused if it has the same props). **Price impact**: ready → "Price per item: {before} → {after} ({delta})" (increase `warning`, decrease `success`), else "Calculating new price…" (reload `only: ['proposal']` every 5 s). Staff note. **Decision**: Approve / Reject toggle buttons; Reject reveals required comment (≤ 1000, "Tell us why, so we can adjust."; `proposals.errors.comment_required` "Please tell us why you're rejecting this change.").
+- Sticky footer: "{decided} of {total} decided", **Approve all**, optional overall comment (≤ 2000), **Send my decisions** (disabled until all decided) → `customer.orders.proposals.resolve` `{ decisions: [{ itemId, decision, comment }], comment }`. Errors: `proposals.errors.undecided` "Decide on every change before sending."; `proposals.errors.not_open` "This proposal is no longer open." (reload).
+- Read-only (`!canResolve`): decisions as `StatusPill`s with comments; banner "Resolved on {date}" / "Withdrawn on {date}".
+Phone: supported (viewer 50vh, touch orbit). Real-time: `ChangeProposalSent`/`OrderStateChanged` → reload.
+Acceptance: Send disabled until all decided; reject without comment errors; after sending the order is `in_review` and the page read-only.
 
-### 11.6 Quote page — `customer.orders.quotes.show` · `/orders/{order}/quotes/{quote}` · `Customer/Orders/Quote`
-Props: `{ order: Pick<OrderData, 'id' | 'number' | 'title' | 'state' | 'project' | 'site_address' | 'needs_installation' | 'negotiation' | 'can'>; quote: QuoteData; items: OrderItemData[]; versions: QuoteVersionData[]; is_current: boolean; business: { name: string; legal_name: string | null; tax_id: string | null; address_one_line: string | null; logo_url: string | null } }`.
-Drafts → 404.
+### 11.6 Quote page — `customer.orders.quotes.show` · `Customer/Orders/Quote`
+Props: `{ order: Pick<OrderData, 'id' | 'number' | 'title' | 'state' | 'project' | 'siteAddress' | 'needsInstallation' | 'negotiation' | 'can'>; quote: QuoteData; items: OrderItemData[]; versions: QuoteVersionData[]; isCurrent: boolean; business: { name: string; legalName: string | null; taxId: string | null; addressOneLine: string | null; logoUrl: string | null } }`. Drafts → 404.
 
 #### 11.6.1 Header
-`PageHeader` "Quote {number}" + `StatusPill`; meta "Sent {date}". Actions: **Download PDF** (`pdf_url`; disabled "Preparing PDF…" when null, reload every 10 s up to 2 min), **Print**.
-Banners: expired → `Alert` neutral "This quote has expired; we're preparing an updated one." (09 §5); superseded → "A newer quote is available." + link; withdrawn → "This quote was withdrawn."; accepted → success "You accepted this quote on {date}."; declined → "You declined this quote: {decline_reason}".
+"Quote {number}" + `StatusPill`; "Sent {date}". Actions **Download PDF** (disabled "Preparing PDF…" when null; reload every 10 s up to 2 min), **Print**.
+Banners: expired "This quote has expired; we're preparing an updated one."; superseded "A newer quote is available." + link; withdrawn "This quote was withdrawn."; accepted "You accepted this quote on {date}."; declined "You declined this quote: {declineReason}".
 
-#### 11.6.2 `QuoteView` (`components/orders/QuoteView.vue`)
-- Validity countdown (if `sent`): "Valid until {date} · {days_left, plural, =0 {last day} one {# day left} other {# days left}}" (warning tone when ≤ 2).
-- Per-item sections (lines with `order_item_id`, grouped by item in `items` order): thumbnail, item name, `DimensionText`, quantity, room label; lines table (description, details summary e.g. key materials, qty × unit price, amount).
-- Order-level lines (installation, delivery, custom, discount) table.
-- `QuoteSummary`: subtotal, discount (negative, success tone), tax breakdown rows ("GST 18% on {taxable}" → tax), **Total** (xl), note "Prices include tax" / "Taxes shown separately" per `prices_include_tax`. Lead time "Made in about {lead_time_days} days after confirmation."
-- Notes to customer (if any), Terms (collapsible).
-- Negotiation history (if any): each counter-offer (your message, target, item comments) and our answer.
-- Actions (only when `is_current && quote.status = sent && order.state = quoted`): **Accept quote**, **Negotiate** / **Contact us**, **Decline** — same dialogs as §11.4.2. In `negotiating`: only **Decline**.
-- Version history (`versions` > 1): collapsible list "Earlier versions" with total and delta vs this quote (`MoneyDisplay signDisplay=always`), link to each.
-Print: `PrintHeader` + `QuoteView` (actions hidden); the official document remains the PDF.
-Phone: tables become stacked rows (description + amount; qty × price on second line).
-Acceptance: totals displayed equal server values exactly; hidden lines (`is_visible_to_customer = false`) never appear in props (server-filtered).
+#### 11.6.2 `QuoteView` (`components/orders/QuoteView.vue`, props `quote`, `items`, `audience`, `actions?: boolean`)
+- Countdown (if `sent`): "Valid until {date} · {daysLeft, plural, =0 {last day} one {# day left} other {# days left}}" (warning ≤ 2).
+- Per item (lines with `orderItemId`, in item order): thumbnail, name, `DimensionText`, quantity, room; lines table (description, details summary, qty × unit price, amount).
+- Order-level lines (installation, delivery, custom, discount).
+- `QuoteSummary`: subtotal, discount (success tone), tax rows ("GST 18% on {taxable}"), **Total** (xl), "Prices include tax" / "Taxes shown separately"; lead time "Made in about {leadTimeDays} days after confirmation."
+- Notes to customer; Terms (collapsible); negotiation history (your counter-offers, our answers).
+- Actions (only `isCurrent && quote.status = 'sent' && order.state = 'quoted'`): Accept / Negotiate or Contact us / Decline (dialogs §11.4.2); in `negotiating`: Decline only.
+- Earlier versions (collapsible) with delta vs this quote (`signDisplay=always`).
+Print: `PrintHeader` + `QuoteView` without actions (the PDF remains the official document). Phone: line tables become stacked rows.
+Acceptance: displayed totals equal server values; hidden lines never appear in props.
 
 ### 11.7 Production timeline
-Rendered within the order page (§11.4.3). No separate route. Photo galleries open `Lightbox`. Internal updates are never sent to customers (server-filtered).
+Within the order page (§11.4.3). Internal updates are never sent to customers.
 
-### 11.8 Completion review (T21/T22) — `customer.orders.completion.show` · `/orders/{order}/completion` · `Customer/Orders/CompletionReview`
-Available when state ∈ `completed`, `rework`, `ready_for_delivery`, `delivered`, `closed` (read-only unless `completed`).
-Props: `{ order: Pick<OrderData, 'id' | 'number' | 'title' | 'state' | 'can' | 'open_issues'>; completion: ProductionUpdateData | null /* latest is_completion */; previous_completions: ProductionUpdateData[]; items: OrderItemData[]; issues: OrderIssueData[] }`.
-UI:
-- `PageHeader` "Check your furniture" + back.
-- Intro: "Here are photos of your finished furniture. If everything looks right, confirm and we'll schedule delivery." + completion message (`body_html`).
-- **Photo gallery** large (`PhotoGallery` columns 1/2/3, aspect 4/3; Lightbox).
-- **Compare with your designs**: per item row — design `Thumbnail3D` (interactive) beside the photos (no automatic photo↔item mapping; all photos above).
-- Previous issues & resolutions (if rework happened): list with status.
-- Actions (if `can.approve_completion`): **Looks good** (success, lg; ConfirmDialog "Confirm everything looks right? We'll schedule delivery next." → `customer.orders.completion.approve` T21) and **Report an issue** (outline → T22 dialog).
-- **Report an issue dialog** (phone: full-screen `Drawer`): repeatable issue blocks (min 1, max 5): Item (`Select` "Whole order" or an item), Description* (≤ 2000, "What's wrong?"), Photos (`ImageUploader`, purpose `issue_photo`, ≤ 10). **Send report** → `customer.orders.issues.store` `{ issues: [{ order_item_id, description, upload_tokens }] }`. Errors: `issues.errors.description_required` "Describe the problem."; upload errors per `15`.
-Read-only states show the decision outcome ("You approved on {date}" / issues list).
-Acceptance: Looks good → `ready_for_delivery`; Report → `rework` with issues listed on the order page.
+### 11.8 Completion review (T21/T22) — `customer.orders.completion` · `/orders/{order}/completion` · `Customer/Orders/CompletionReview`
+Available in `completed`, `rework`, `ready_for_delivery`, `delivered`, `closed` (read-only unless `completed`).
+Props: `{ order: Pick<OrderData, 'id' | 'number' | 'title' | 'state' | 'can' | 'openIssues'>; completion: ProductionUpdateData | null; previousCompletions: ProductionUpdateData[]; items: OrderItemData[]; issues: OrderIssueData[] }`.
+UI: `PageHeader` "Check your furniture"; intro "Here are photos of your finished furniture. If everything looks right, confirm and we'll schedule delivery." + completion message; large `PhotoGallery` (1/2/3 cols, 4:3, Lightbox); **Compare with your designs** (per item `Thumbnail3D` interactive); previous issues & resolutions; actions (if `can.approveCompletion`): **Looks good** (success; Confirm "Confirm everything looks right? We'll schedule delivery next." → `customer.orders.completion.approve`, T21) and **Report an issue** (T22 dialog).
+**Report an issue** (phone: full-screen `Drawer`): 1–5 issue blocks: Item (`Select` "Whole order"/item), Description* (≤ 2000, "What's wrong?"), Photos (`ImageUploader` purpose `issue_photo`, ≤ 10) → `customer.orders.issues.store` `{ issues: [{ description, orderItemId, uploadIds }] }`. Errors: `issues.errors.description_required` "Describe the problem."
+Acceptance: Looks good → `ready_for_delivery`; Report → `rework` with issues on the order page.
 
 ### 11.9 Message thread
-`MessageThread` (`15` §9.16) in the Messages tab; full-height on phone.
-- Data: `messages` uses Inertia v3 infinite scrolling (`Inertia::scroll()` server-side, cursor = message id, 30 per page; `<InfiniteScroll>` client-side in reverse mode). If the installed Inertia version lacks it, implement with partial reload `only: ['messages']` + `?before={id}` and prepend (same server query object).
-- Post: `customer.orders.messages.store` (`preserveScroll`, `only: ['messages', 'unread_messages']`); attachments via `FileDropzone` purpose `message_attachment` (≤ 5, jpg/png/webp/pdf ≤ 15 MB).
-- Read: on view, `customer.orders.messages.read`.
-- Disabled (`!can.post_message`): composer replaced by note `messages.closed` "This conversation is closed. Contact us if you need help." + link to Help.
-- Validation: `messages.errors.empty`, `body` ≤ 5000 ("Messages can be at most 5,000 characters."), `messages.errors.edit_window` "Messages can only be edited for 10 minutes."
-- Staff names show with a "Team" badge; system messages centred (`t('messages.system.' + system_event, system_payload)`); internal notes never sent to customers.
+`MessageThread` + `MessageComposer` (`15` §9.16) in the Messages tab (full height on phone).
+- `messages` uses Inertia infinite scroll (`Inertia::scroll()`, cursor = message id, 30 per page, `<InfiniteScroll>` reverse). Fallback if unavailable: partial reload `only: ['messages']` with `?before={id}` and prepend.
+- Post → `customer.orders.messages.store` (`preserveScroll`, `only: ['messages', 'unreadMessages']`); attachments via `FileDropzone` purpose `message_attachment` (≤ 5; jpeg/png/webp/pdf ≤ 15 MB) sending `uploadIds`.
+- Read → `customer.orders.messages.read` `{ lastMessageId }`.
+- Blocked (`!can.postMessage`): `thread_closed` → `messages.closed` "This conversation is closed. Contact us if you need help." + Help link; `contact_unverified` → §1.1 text + **Verify**.
+- Validation: `messages.errors.empty` "Write a message or attach a file."; body ≤ 5000 ("Messages can be at most 5,000 characters."); `messages.errors.edit_window` "Messages can only be edited for 10 minutes."
+- Staff names show a "Team" badge; system messages centred `t('messages.system.' + systemEvent, systemPayload)`; message HTML only via `MessageBody.vue` (`13` §12.6).
 
 ---
 
-## 12. Notifications center — `customer.notifications.index` · `/notifications` · `Customer/Notifications/Index`
-Props: `{ notifications: Paginated<NotificationData>; filters: { status: 'all' | 'unread' }; unread_count: number }` (`per_page` 20).
-UI: `PageHeader` "Notifications" + **Mark all as read** (if unread; → `notifications.read-all`) + link "Notification settings". Segmented All / Unread. List grouped by day: icon, title, body, `RelativeTime`, unread dot + `bg-accent/40` row; click → mark read (optimistic) + visit `action_url`. Pagination (load more button on phone).
-Empty: All → icon `bell` "No notifications yet" "We'll let you know when something happens with your orders."; Unread → "You're all caught up".
-Real-time: `NotificationCreated` → prepend when on page 1 and filter allows.
-Bell dropdown: `15` §9.17.
-Acceptance: unread count in header/tab bar decrements immediately on click and matches the server after reload.
+## 12. Notification center — `customer.notifications.index` · `/notifications` · `Customer/Notifications/Index`
+Per `12` §8.4. Props: `{ initial: { data: NotificationPayloadData[]; nextCursor: string | null; unreadCount: number }; filter: 'all' | 'unread' }` (first page server-rendered; 25 per page).
+UI: `PageHeader` "Notifications" + **Mark all as read** (`api.notifications.read-all`, optimistic) + link "Notification settings" (→ `customer.account.notifications`). Tabs All / Unread (`?filter=`). List grouped by day: icon, `t(titleKey, params)` (bold if unread), `t(bodyKey, params)`, `RelativeTime`, unread dot; row click → `api.notifications.read` (fire-and-forget) + `router.visit(url)`; row menu "Mark as read/unread" (`.read` / `.unread`). **Load more** (`api.notifications.index?cursor=`).
+Empty: All → `bell` "No notifications yet" / "We'll let you know when something happens with your orders."; Unread → "You're all caught up".
+Real-time: `NotificationCreated` → prepend when the filter allows.
+Bell dropdown: `15` §9.17. Acceptance: unread counts (header, tab bar, page) update immediately and match the server after reload.
 
 ---
 
-## 13. Settings
+## 13. Account
 
-### 13.1 Settings shell
-All settings pages use CustomerLayout with a `SettingsNav` (desktop: left vertical nav 220 px; tablet/phone: horizontal scrollable pills at top): Profile · Password · Preferences · Notifications · AI credits · Account. Each page uses `FormSection` blocks and `StickyActionBar` for dirty forms.
+### 13.1 Shell
+CustomerLayout + `AccountNav` (desktop: left vertical nav 220 px; tablet/phone: horizontal scrollable pills): Profile · Security · Preferences · Notifications · AI credits · Delete account. Sections use `FormSection`; dirty forms show `StickyActionBar`.
 
-### 13.2 Profile — `customer.settings.profile` · `Customer/Settings/Profile`
-Props: `{ user: AuthUserData; marketing_opt_in: boolean; sign_in_methods: { password: boolean; phone: boolean; google: boolean }; google_enabled: boolean; otp_channels: ('whatsapp' | 'sms')[] }`.
-Sections:
-1. **Photo** — avatar preview + **Change** (`ImageUploader` single, purpose `avatar`) → `customer.settings.avatar.update`; **Remove**.
-2. **Your details** — Name* (≤ 120), Email (optional if phone verified; change → `Alert` "We'll send a verification link to the new address."), checkbox marketing opt-in. Save → `customer.settings.profile.update`. Errors: `email` unique "This email is already used by another account."; at least one contact: `settings.errors.contact_required` "Keep at least an email or a phone number."
-3. **Phone** — current number + status pill (Verified / Not verified). Buttons **Verify** / **Change number**. Dialog (§13.2.3).
-4. **Email verification** — if email unverified: `Alert` + **Resend link** (`verification.send`).
-5. **Sign-in methods** — rows: Password (set/changed → link to Password page), Phone code (enabled when phone verified), Google (Connected as … / **Connect** → `auth.google.redirect`, **Disconnect** per `13` if another method exists).
+### 13.2 Profile — `customer.account.profile` · `Customer/Account/Profile`
+Props: `{ user: AuthUserData; marketingOptIn: boolean; otpChannels: ('whatsapp' | 'sms')[] }`.
+1. **Photo** — avatar + **Change** (`ImageUploader` single, purpose `avatar`) → `customer.account.avatar.update` `{ uploadId }`; **Remove** (`uploadId: null`).
+2. **Your details** — Fortify `user-profile-information.update` (`13` §5.8) with fields `name` (2–120), `email`, `marketing_opt_in`. Changing the email requires `recent.auth` (redirect to confirm/reauthenticate) and shows "We'll send a verification link to the new address." Errors: `auth.email_unavailable`; `auth.errors.last_login_method` "You need at least one way to sign in."
+3. **Phone** (`id="phone"`) — number + pill (Verified / Not verified); **Verify** / **Change number** → `PhoneVerifyDialog`.
+4. **Email verification** — if unverified: `Alert` + **Resend link** (`verification.send`).
 
-#### 13.2.3 Phone verification dialog
-Step 1: `PhoneInput` + channel radio (WhatsApp/SMS, only enabled channels) → **Send code** (`customer.settings.phone.send-code`). Step 2: `PinInput` 6 digits → `customer.settings.phone.verify`; resend countdown 60 s. Success toast `settings.toasts.phone_verified` "Phone number verified." Errors: `phone.errors.taken`, `auth.otp.invalid`, `auth.otp.expired`, throttled. Reused by the order draft contact check (§11.3.4).
+#### 13.2.3 `PhoneVerifyDialog` (`components/account/PhoneVerifyDialog.vue`)
+Step 1: `PhoneInput` → **Send code** (`account.phone.send` `{ phone }`; channel chosen by the server per `13` §4.2; shows "Sent via WhatsApp/SMS"). Step 2: code field (as §4.4) → `account.phone.verify` `{ code }`; resend countdown 60 s. Success toast `account.toasts.phone_verified` "Phone number verified." Errors: `auth.errors.phone_unavailable`, `auth.errors.otp_invalid`, `auth.errors.otp_expired`, throttling. Reused by onboarding, the order submit dialog, `VerifyContactBanner` and staff account pages.
 
-### 13.3 Password — `customer.settings.password` · `Customer/Settings/Password`
-Props `{ has_password: boolean }`. Fields: Current password (only if `has_password`), New password, Confirm. Submit → Fortify `user-password.update`. When `has_password` is false the form omits Current password and the title reads "Set a password"; the app's Fortify `UpdateUserPassword` action (`13`) accepts a missing `current_password` only when `users.password` is null. Success toast `settings.toasts.password_updated` "Password updated." Errors: Fortify `current_password` "The provided password does not match your current password.", password rules per `13`.
+### 13.3 Security — `customer.account.security` · `Customer/Account/Security`
+Props: `{ hasPassword: boolean; googleLinked: boolean; googleEnabled: boolean; sessions: { id: string; uaSummary: string; ipMasked: string; lastActiveAt: IsoDateTime; isCurrent: boolean; method: string }[] }` (`13` §6.3).
+Sections: **Password** — current (if `hasPassword`), new, confirm → Fortify `user-password.update` (when no password: title "Set a password", no current field; `13`); toast `account.toasts.password_updated` "Password updated." **Google** — "Connected" + **Disconnect** (`account.google.unlink`, `recent.auth`; error `auth.errors.last_login_method`) or **Connect** (`auth.google.redirect?intent=link`). **Phone sign-in** — status + link to Profile `#phone`. **Devices** — session list (browser/OS, masked IP, last active, "This device"), **Sign out** per session (`account.sessions.destroy`), **Sign out all other devices** (`account.sessions.destroy-others`, Confirm).
 
-### 13.4 Preferences — `customer.settings.preferences` · `Customer/Settings/Preferences`
-Props `{ unit_system: 'metric' | 'imperial'; length_unit: string; timezone: string; timezones: string[] }` (`timezones` = PHP `DateTimeZone::listIdentifiers()`).
-Fields: Measurement system (radio cards with examples), Length unit for editing (`Select`: metric → mm/cm/m; imperial → ft-in/in; resets to the first option when the system changes), Time zone (`Combobox`, searchable). Section **Appearance** (device-level, `15` §11): Light / Dark / System radio — saved locally, no server call; note "Saved on this device." Save → `customer.settings.preferences.update`; shared `auth.user` updates (editors re-read units on next load).
-Validation: `settings.errors.length_unit`; timezone `in:` list "Choose a valid time zone."
+### 13.4 Preferences — `customer.account.preferences` · `Customer/Account/Preferences`
+Props `{ unitSystem: 'metric' | 'imperial'; lengthUnit: string; timezone: string; timezones: string[] }`.
+Measurement system (radio cards), editing length unit (`Select`, resets when the system changes), time zone (`Combobox`); **Appearance** (device-level, `15` §11): Light / Dark / System, "Saved on this device." Save → `customer.account.preferences.update`. Errors: `account.errors.length_unit`; "Choose a valid time zone."
 
-### 13.5 Notifications — `customer.settings.notifications` · `Customer/Settings/Notifications`
-Props:
-```ts
-interface NotificationSettingsProps {
-  channels: { channel: 'database' | 'mail' | 'whatsapp' | 'sms' | 'webpush'; available: boolean; unavailable_reason: 'feature_off' | 'no_email' | 'email_unverified' | 'no_phone' | 'phone_unverified' | 'no_push_subscription' | null }[];
-  groups: {
-    key: string; label: string;            // e.g. "Orders", "Quotes", "Production", "Messages", "Imports", "Reminders"
-    events: {
-      event_key: string; label: string; description: string;
-      cells: Record<'database' | 'mail' | 'whatsapp' | 'sms' | 'webpush', { enabled: boolean; locked: boolean; supported: boolean }>;
-    }[];
-  }[];
-  vapid_public_key: string | null;
-  push_subscription_count: number;         // this user's stored subscriptions (all devices)
-}
-```
-Event list, defaults, `locked` (mandatory channels) and `supported` (event × channel combinations that exist) come from `12` (`config/notification_events.php`); only customer-audience events are listed.
-UI:
-- **This device** card (web push): states —
-  - Push unsupported (`!('serviceWorker' in navigator) || !('PushManager' in window)`): if iOS Safari and not standalone (`navigator.standalone !== true` && `!matchMedia('(display-mode: standalone)').matches`): **iOS guidance** box: "To get notifications on iPhone or iPad: 1. Tap the **Share** button. 2. Choose **Add to Home Screen**. 3. Open {app} from your home screen and come back here." (requires iOS 16.4+; include a small inline share-icon glyph). Otherwise: "This browser doesn't support notifications."
-  - Permission `denied`: "Notifications are blocked for this site. Allow them in your browser settings."
-  - Not subscribed: **Enable notifications on this device** → `usePushSubscription().enable()`: `Notification.requestPermission()` → `navigator.serviceWorker.register('/sw.js', { scope: '/' })` → `pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapid_public_key })` → `POST api.push-subscriptions.store` → reload `channels`.
-  - Subscribed: "Notifications are on for this device." + **Turn off** (unsubscribe + `DELETE api.push-subscriptions.destroy`) + **Send test** (POST `customer.settings.notifications.test-push` → server sends a `system.test_push` web push; Appendix A9).
-  - Hidden entirely when `features.web_push` is false.
-- **Matrix** — `Table`: rows = events grouped by `groups` (group header rows), columns = channels (only channels whose `available` or feature is on; unavailable columns rendered disabled with a tooltip explaining `unavailable_reason`, e.g. "Verify your phone to use WhatsApp" with link). Cells: `Switch` (`aria-label` "{event} by {channel}"); `locked` → disabled checked with lock icon tooltip "Required for this notification"; `!supported` → "—". Toggle = optimistic, sends `customer.settings.notifications.update` `{ changes: [{ event_key, channel, enabled }] }` (debounced batch 500 ms); failure reverts + toast.
-- Phone: matrix becomes per-event cards with a row of channel switches.
-Acceptance: disabling "Quote sent" email persists a `notification_preferences` row with `enabled=false`; locked cells cannot be toggled; iOS Safari (non-standalone) shows the Add-to-Home-Screen guidance.
+### 13.5 Notifications — `customer.account.notifications` · `Customer/Account/Notifications`
+Props and rules: `12` §10.2 (`PreferencesPageProps`, `PreferencesMatrix.vue`, locked/unavailable cells, toggle-all, **Reset to defaults** → `customer.account.notifications.reset`, save `{ preferences }`). Top of page: `PushOptIn` card (`12` §8.3: feature detection, iOS Add-to-Home-Screen instructions, denied state, enable/disable; hidden when `!features.web_push`) plus **Send test notification** (when this device is subscribed → `customer.account.notifications.test-push`).
+Phone: matrix renders as per-event cards with a row of channel switches.
+Acceptance: per `12` §13; iOS Safari non-standalone shows the Add-to-Home-Screen instructions.
 
-### 13.6 AI credits — `customer.settings.credits` · `Customer/Settings/Credits`
-Props: `{ credits: AiCreditsData; ledger: Paginated<AiLedgerEntryData> }` (`per_page` 20).
-```ts
-interface AiLedgerEntryData {
-  id: Ulid; delta: number; kind: 'monthly_grant' | 'admin_grant' | 'admin_revoke' | 'reservation' | 'reservation_release' | 'consumption' | 'refund' | 'signup_grant';
-  note: string | null; created_at: IsoDateTime; balance_after: number;
-  reference: { type: 'blueprint_import'; id: Ulid; label: string; href: string } | null;
-}
-```
-UI: balance card (big number, "Next {monthly} free credits on {date}", cost per recognition, today's usage "{n} of {max} recognitions today"); explanation text; ledger table: Date, Description (`t('credits.kinds.' + kind)` + reference link + note), Change (`+3` success / `−1` neutral, `tabular-nums`), Balance after. Reservation/release pairs are shown as-is (transparent). Empty: "No credit activity yet." Real-time: `AiCreditsChanged` → reload.
+### 13.6 AI credits — `customer.account.ai-credits` · `Customer/Account/AiCredits`
+Owned by `18` §15.1 (balance, pending, top-up explanation, paginated history without reservation rows). Real-time: `AiCreditsChanged` → reload.
 
-### 13.7 Account — `customer.settings.account` · `Customer/Settings/Account`
-Props: `{ active_order_count: number; has_password: boolean; phone_verified: boolean }`.
-Sections: **Download my data** — out of scope v1 (not shown). **Delete account** — explanation `settings.delete.body` "Deleting your account removes your personal details and signs you out. Projects, designs and order records are anonymised and kept for our accounting. This can't be undone." If `active_order_count > 0`: disabled with `settings.delete.blocked` "You have {count} active order(s). Please wait until they're delivered or cancelled, or contact us." Else button **Delete my account** → `Dialog`: password (if `has_password`) or "Send me a code" OTP (if phone verified, purpose `login`) and type `DELETE` → `customer.settings.account.destroy`. Success: logged out, redirect `welcome` with flash "Your account has been deleted."
-Errors: `settings.errors.password_incorrect` "That password isn't right.", `settings.errors.confirmation` "Type DELETE to confirm."
+### 13.7 Delete account — `customer.account.delete` · `/account` · `Customer/Account/Delete`
+Per `13` §9. Props: `{ activeOrders: { id: Ulid; number: string }[]; canExport: boolean }`.
+Sections: **Download my data** — **Download** (`customer.account.export`; `recent.auth`, `verified.contact`; disabled with §1.1 text when unverified). **Delete account** — explanation (what is kept anonymised: orders/quotes; what is deleted; 30-day recovery window), blocked list when `activeOrders` non-empty ("Finish or cancel these orders first: {numbers}" with links); otherwise input "Type DELETE to confirm" (`confirmation`; translated word per `13`) + **Delete my account** (destructive) → `customer.account.destroy`. Errors: `account.errors.active_orders`, `account.errors.confirmation` "Type DELETE to confirm."
 
 ---
 
 ## 14. Help & contact — `customer.help` · `/help` · `Customer/Help`
-Props: `{ business: { name: string; phone_e164: string | null; whatsapp_url: string | null /* https://wa.me/{digits} when phone set */; email: string; working_hours: string; address_one_line: string | null } }`.
-Sections: **Contact us** card (call `tel:`, WhatsApp link, email `mailto:`, working hours, address); "Questions about an order? Use the messages on the order page — that's the fastest way to reach your team." + link to orders. **FAQ** (`Accordion`, keys `help.faq.{1..10}.{q,a}`): 1 How do I upload my floor plan? 2 My file is DWG — what do I do? 3 What are AI credits? 4 How accurate is the automatic estimate? 5 Can I change my designs after submitting? 6 What happens after I accept a quote? 7 How do I follow production? 8 What if something is wrong when it's finished? 9 How do I get notifications on my phone? 10 How do I delete my account? **Privacy** (`id="privacy"`): `help.privacy.body` (text owned by `13`).
+Props `{ business: { name: string; phoneE164: string | null; whatsappUrl: string | null; email: string; workingHours: string; addressOneLine: string | null } }` (`whatsappUrl` = `https://wa.me/{digits}` when a phone is set).
+Sections: **Contact us** (call, WhatsApp, email, hours, address) + "Questions about an order? Use the messages on the order page — that's the fastest way to reach your team." (link to orders). **FAQ** (`Accordion`, keys `help.faq.{1..10}.{q,a}`): uploading a plan; DWG files; AI credits; estimate accuracy; changing designs after submitting; what happens after accepting a quote; following production; problems when finished; phone notifications; deleting the account. Links to Terms and Privacy.
 
 ---
 
 ## 15. PWA (installability + web push)
-
-- **Manifest** — route `pwa.manifest` `GET /manifest.webmanifest` (`Content-Type: application/manifest+json`, cache 1 h), built from settings:
-```json
-{
-  "name": "<business.name>", "short_name": "<first 12 chars of app name>",
-  "id": "/", "start_url": "/dashboard?source=pwa", "scope": "/",
-  "display": "standalone", "orientation": "any",
-  "background_color": "#fbfaf7", "theme_color": "#fbfaf7",
-  "icons": [
-    { "src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/pwa/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "/pwa/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
-  ]
-}
-```
-  `app.blade.php` links it plus `<link rel="apple-touch-icon" href="/pwa/apple-touch-icon-180.png">`, `<meta name="apple-mobile-web-app-capable" content="yes">`, `<meta name="theme-color">` (§`15` §11). Default icons (committed in `public/pwa/`): a neutral rounded-square mark (walnut `#6b4a33` background, white simple "house + panel" glyph). Owners replace files in place; no admin UI in v1.
-- **Service worker** — static `public/sw.js`, scope `/`, served with `Service-Worker-Allowed: /` and `Cache-Control: no-cache`. **No fetch handler and no offline caching in v1.** Handlers:
-  - `push`: payload JSON `{ title, body, url, tag?, icon?, badge? }` (exact payload from `12`) → `self.registration.showNotification(title, { body, icon: icon ?? '/pwa/icon-192.png', badge: badge ?? '/pwa/badge-72.png', tag, data: { url }, renotify: !!tag })`.
-  - `notificationclick`: close; focus an existing same-origin client and `navigate(url)`, else `clients.openWindow(url)`.
-  - `pushsubscriptionchange`: no network call (no CSRF available); the app re-syncs on next load.
-- **Registration** — `usePushSubscription()` on app boot (authenticated, `features.web_push`): if `Notification.permission === 'granted'`, register `sw.js`, get the current subscription and POST it (idempotent upsert by endpoint) once per session.
-- Acceptance: Chrome "Install app" is offered on the dashboard; a web push for `quote.sent` opens the quote page when clicked; iOS (home-screen app) receives pushes after enabling.
+- Manifest route `manifest` and service worker `public/sw.js` are specified in `12` §8.3 (push, notificationclick, pushsubscriptionchange; **no fetch caching**). This file adds:
+  - Manifest values: `name` = business name, `short_name` = app name (≤ 12 chars, truncated), `id` `/`, `start_url` `/`, `scope` `/`, `display` `standalone`, `background_color` / `theme_color` `#fbfaf7` (light background token), icons `/icons/app-192.png` (192), `/icons/app-512.png` (512), `/icons/app-maskable-512.png` (512, `purpose: maskable`).
+  - `app.blade.php` head: `<link rel="manifest" href="/manifest.webmanifest">`, `<link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png">`, `<meta name="apple-mobile-web-app-capable" content="yes">`, `<meta name="theme-color">` per `15` §11.
+  - Default icon set committed in `public/icons/` (rounded square, walnut `#6b4a33` background, white simple "house + panel" glyph); owners replace files in place (no admin UI in v1). Notification icons per `12` (`/icons/notification-192.png`, `/icons/badge-72.png`).
+- Acceptance: Chrome offers "Install app"; a web push for `quote.sent` opens the quote page; iOS home-screen app receives pushes after enabling.
 
 ---
 
 ## 16. Real-time summary (customer)
 
-| Page | Channel | Events → behaviour |
+| Page | Channel | Behaviour |
 |---|---|---|
-| All (AppShell) | `users.{id}` | `NotificationCreated` → bell count + toast; `AiCreditsChanged` → update `CreditBadge` |
-| Dashboard | `users.{id}` | reload `action_items`, `orders_in_progress`, `ai_credits` (throttled 2 s) |
-| Order page, quote page, proposal page, completion page | `orders.{id}` | §11.4.8 |
-| Import progress | `imports.{id}` | §9.2 |
-| Furniture builder | `furniture-designs.{id}` | `FurnitureDesignLocked/Unlocked` → toggle read-only (07) |
-| Project page | — | poll imports while non-terminal (§7.3) |
+| All (AppShell) | `users.{id}` | `NotificationCreated` → bell + toast; `AiCreditsChanged` → `CreditBadge` refresh |
+| Dashboard | `users.{id}` | reload `actionItems`, `ordersInProgress`, `credits` (throttled 2 s) |
+| Order, quote, proposal, completion pages | `orders.{id}` | §11.4.8 |
+| Import page | `imports.{id}` | §9.2 |
+| Furniture builder | `furniture-designs.{id}` | lock/unlock → read-only toggle (`07`) |
+| Project page | — | poll imports while non-terminal (§7.3.6) |
 
 ---
 
 ## 17. Acceptance criteria (customer app, cross-cutting)
 
-1. Every route in §2 exists with the stated name, method, path, controller folder and page component; Wayfinder helpers are used for all links (no hard-coded URLs).
-2. Customers can never load another customer's project/plan/design/order/import (404 via scoped policies), never see staff-internal data (internal notes, internal updates, hidden quote lines, cost snapshots, call details other than `no_answer` dates) — covered by Pest feature tests asserting prop payloads.
-3. Every page renders without horizontal scroll at 375 px; editors are view-only below 768 px; touch targets ≥ 44 px.
-4. Every list has empty, no-results and loading states as specified; deferred props show skeletons; failures show `ErrorState` with retry.
-5. All visible strings come from translation keys (lint + key test pass).
-6. Every customer-initiated transition (T1, T2, T3, T5, T7, T10, T11, T14, T21, T22, T29) is reachable from the UI exactly in the states listed in `09`, and nowhere else; each shows the confirmations and validation messages in this file.
-7. With the socket disconnected, order and import pages still reflect changes within 30 s (polling).
+1. Every route in §2 exists with the stated name, method, path and page component; links use Wayfinder helpers.
+2. Customers never load another customer's resources (404) and never receive staff-internal data (internal notes, internal updates, hidden quote lines, cost snapshots, call details beyond `no_answer` dates) — Pest tests assert prop payloads.
+3. No horizontal scroll at 375 px; editors view-only below 768 px; touch targets ≥ 44 px.
+4. Every list has empty, no-results and loading states; deferred props show skeletons; failures show `ErrorState` with retry.
+5. All visible strings come from translation keys.
+6. Customer transitions (T1, T2, T3, T5, T7, T10, T11, T14, T21, T22, T29) are reachable exactly in their `09` states with the confirmations and messages specified here.
+7. With the socket disconnected, order and import pages reflect changes within 30 s.
+8. Unverified customers see the explanations of §1.1 instead of failing silently.
 
 ---
 
 ## Appendix: Proposed additions to other documents
 
-**A1 — 02 §1.1 `users`:** add `onboarded_at timestamptz null` (set by onboarding store/skip; staff created with `onboarded_at = now()`). Middleware alias `onboarded` (`App\Http\Middleware\EnsureCustomerOnboarded`).
+**A1 — 02 §1.1 `users`:** `onboarded_at timestamptz null` (set by onboarding store/skip; staff are created with `onboarded_at = now()`). Middleware alias `onboarded` → `App\Http\Middleware\EnsureCustomerOnboarded`.
 
-**A2 — 02 §8.7 `quote_negotiations`:** add `item_comments jsonb not null default '[]'` — array of `{ order_item_id: ulid, comment: string(≤500) }` (09 §6 "optional per-item comments").
+**A2 — 02 §8.7 `quote_negotiations`:** `item_comments jsonb not null default '[]'` — array of `{ order_item_id: ulid, comment: string(≤ 500) }` (09 §6 per-item comments).
 
-**A3 — Plan starters:** `config/plan_starters.php` returning `[key => ['label_key' => 'plans.starters.{key}.label', 'description_key' => …, 'document' => 'database/fixtures/plan-starters/{key}.json', 'thumbnail' => 'images/plan-starters/{key}.svg']]` for keys `single_room`, `l_shaped_room`, `studio`, `one_bhk`, `two_bhk`, `three_room_hdb`; `customer.plans.store` with `start=starter` copies the document (re-generating entity ids with `newId`) and sets `plans.source = 'drawn'`, `meta.createdWith = 'editor'`. (If 05 defines a starter registry, 05 wins.)
+**A3 — Plan starters:** `config/plan_starters.php` → `[key => ['label_key' => 'plans.starters.{key}.label', 'description_key' => 'plans.starters.{key}.description', 'document' => 'database/fixtures/plan-starters/{key}.json', 'thumbnail' => 'images/plan-starters/{key}.svg']]` for `single_room`, `l_shaped_room`, `studio`, `one_bhk`, `two_bhk`, `three_room_hdb`; `customer.projects.plans.store` with `start=starter` copies the document with fresh entity ids (`newId`), `plans.source = 'drawn'`, `meta.createdWith = 'editor'`. (05 wins if it defines a registry.)
 
-**A4 — 02 §8.11 `deliveries`:** add `scheduled_until timestamptz null` (end of the delivery time window; 09 §9 "date/time window").
+**A4 — 02 §8.11 `deliveries`:** `scheduled_until timestamptz null` (end of the delivery window; 09 §9 "date/time window").
 
-**A5 — 02 §13 `workflow`:** add `min_preferred_delivery_days int default 7` (minimum days from today for the customer's preferred delivery date; `min_preferred_date` prop).
+**A5 — 02 §13 `workflow`:** `min_preferred_delivery_days int default 7`.
 
-**A6 — Projects action rule (`UpdateProject`, 01 §4):** editing a site address that is referenced by any Active order creates a new `addresses` row instead of mutating the referenced one.
+**A6 — `UpdateProject` rule:** editing an address referenced by an Active order creates a new `addresses` row instead of mutating it.
 
-**A7 — Shared prop:** `app.vapid_public_key: string | null` (from `config('webpush.vapid.public_key')`) for push re-sync on boot.
+**A7 — Wire-format convention (01 §6 / 14):** Inertia props and JSON are camelCase (01's `auth.user` field list is serialised as `unitSystem`, `lengthUnit`, …); request bodies camelCase except Fortify/`13` auth forms; query strings Laravel-style snake_case.
 
-**A8 — Routes not covered by Fortify (for 13/14):** `auth.otp.send` (POST `/login/phone`), `auth.otp.verify.show` (GET `/login/phone/verify`), `auth.otp.verify` (POST `/login/phone/verify`), `auth.google.redirect`, `auth.google.callback`; phone registration = `auth.otp.send` with `name` and verify creating the account when no user has that phone.
+**A8 — Route:** `api.furniture-revisions.show` GET `/api/furniture-revisions/{revision}` → `{ id, number, document: FurnitureDocument, bomStatus, catalogVersion }` (policy: `FurnitureDesignPolicy::view` on the revision's design; staff `orders.view`).
 
-**A9 — Route:** `customer.settings.notifications.test-push` POST `/settings/notifications/test-push` (throttle 3/min) sends a test web push to the user's subscriptions; and the same for staff `admin.account.notifications.test-push` (see 11). Event key `system.test_push` (12; channel webpush only, not user-configurable).
+**A9 — Routes:** `customer.account.notifications.reset` DELETE `/account/notifications`; `customer.account.notifications.test-push` POST `/account/notifications/test-push` (throttle 3/min) and staff `admin.account.notifications.test-push`; event key `system.test_push` (12: webpush only, not configurable).
 
-**A10 — Shared routes:** `media.show` GET `/media/{media:uuid}` (query `conversion` ∈ `thumb|large|small|preview`) → policy `MediaPolicy@view` (resolves owning model's policy) → 302 to a 15-minute temporary URL; `notifications.read` POST `/notifications/{notification}/read`; `notifications.read-all` POST `/notifications/read-all`; `api.notifications.index` GET `/api/notifications`; `api.push-subscriptions.store|destroy`; `api.furniture-revisions.show` GET `/api/furniture-revisions/{revision}` (policy: owner of the design's project or staff with `orders.view`); `pwa.manifest`.
+**A10 — Public legal pages:** `legal.terms` GET `/terms`, `legal.privacy` GET `/privacy` (pages `Legal/Terms`, `Legal/Privacy`; text keys `legal.terms.body`, `legal.privacy.body`) — targets of the `terms` checkbox links required by `13` §5.1.
 
-**A11 — Import endpoints (for 06/14):** `api.imports.store` POST `/api/projects/{project}/imports` `{ filename, size, mime, target }` → 201 `{ import, upload }`; `api.imports.uploaded` POST `/api/imports/{import}/uploaded` → 202 `{ import }`; `api.imports.show` GET `/api/imports/{import}` → `{ import, pages }`; plus customer actions `customer.imports.start|cancel|accept|discard|retry|trace` (§2.2). `ImportData.progress` is the latest `ImportStatusChanged` payload cached at `import:progress:{id}` (TTL 1 h). If 06 names these differently, 06 wins and 14 maps the names.
+**A11 — Customer route names (14):** furniture list `customer.furniture.index` GET `/furniture`, `customer.furniture.update` PATCH `/furniture/{design}`, `customer.furniture.destroy` DELETE `/furniture/{design}`; plans `customer.projects.plans.store`, `customer.plans.edit` GET `/plans/{plan}/edit`, `customer.plans.update|duplicate|destroy`; orders `customer.projects.orders.create|store`; `customer.account.profile|preferences` (+ `.update`), `customer.account.avatar.update`. `07`'s `customer.projects.furniture.store` body gains optional `returnPlanId`.
 
-**A12 — Order data:** `OrderData.hold_reason` is derived from the latest `order.on_hold` activity-log properties (`reason`); T26 must store `reason` in the activity properties (09 §2 T26 "Msg with reason").
+**A12 — Hold reason:** `OrderData.holdReason` = `reason` stored in the activity-log properties of the latest `order.on_hold` entry (T26).
+
+**A13 — Customer `can.postMessage`** combines `MessagePolicy::create` (13 §8.8, incl. `verified.contact` and the 90-day rule) with `postMessageBlockedReason`.

@@ -608,7 +608,8 @@ Props: `title: string`, `backHref: string`, `readOnly: boolean`, `saveStatus?: '
 
 ### 7.4 `AuthLayout` (`layouts/AuthLayout.vue`)
 
-- Centered card `max-w-md w-full` on `bg-background`, with the wood-grain motif (§13) as a subtle full-bleed background at ≥ 1024 px (`bg-brand-wood-subtle` + SVG pattern at 6 % opacity). Card: logo (business logo or app name in `text-xl font-semibold`), `title` (H1, `text-2xl`), optional `description`, default slot (form), `#footer` slot (links).
+- Prop `variant: 'default' | 'wide'` (default `default`). Pages needing `wide` (welcome, onboarding) declare `defineOptions({ layout: (h, page) => h(AuthLayout, { variant: 'wide' }, () => page) })`. `wide` = card `max-w-2xl`.
+- Centered card `max-w-md w-full` (`default`) on `bg-background`, with the wood-grain motif (§13) as a subtle full-bleed background at ≥ 1024 px (`bg-brand-wood-subtle` + SVG pattern at 6 % opacity). Card: logo (business logo or app name in `text-xl font-semibold`), `title` (H1, `text-2xl`), optional `description`, default slot (form), `#footer` slot (links).
 - Bottom page footer: business name, working hours, "Help" link (public `customer.help` is auth-only → instead show business phone/email from shared `business`).
 - Phone: card becomes full-width without border/shadow, `px-4 pt-10`.
 

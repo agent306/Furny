@@ -36,12 +36,13 @@ The engine contract from `01` §5.1 applies to every file here: **no imports fro
 | `engine/plan/rooms.ts` | `detectRooms`, `associateRoomMetas` (§4) |
 | `engine/plan/reconcile.ts` | `reconcileRoomMetas` (§4.4) |
 | `engine/plan/footprint.ts` | `placementFootprint`, `fixtureFootprint`, `frontVector`, `rotationFromFront` (§5.8) |
-| `engine/plan/conflicts.ts` | `computePlacementConflicts` (§5.9) |
+| `engine/plan/conflicts.ts` | `computePlacementConflicts`, `doorSwingSectors` (§5.9) |
 | `engine/plan/snapping.ts` | `buildSnapIndex`, `snapPoint`, `snapFootprint`, `snapOpeningPosition`, `gridStepFor` (§5) |
 | `engine/plan/hitIndex.ts` | `buildHitIndex`, `hitTest`, `hitTestRect` (§5.12) |
-| `engine/plan/validate.ts` | `validatePlan` (rules from `03` §1.1) |
+| `engine/plan/validate.ts` | `validatePlan(doc: PlanDocument, geom?: DerivedPlan): Issue[]` — rules from `03` §1.1 except the server-only `plan.placement_design_missing`; memoised by document identity (last 4 documents) |
 | `engine/plan/summary.ts` | `planSummary` (§4.8) |
 | `engine/plan/fixtures.ts` | `FIXTURE_KEYS`, `FIXTURE_LIBRARY` (data; content normative in `05` §9) |
+| `engine/plan/roomNames.ts` | `ROOM_NAMES`, `suggestRoomType(name: string): RoomType` — content normative in `06` (mirrors `vision/app/utils/roomnames.py`); used by the editor's room naming (`05` §8.2) |
 | `engine/plan/commands/*.ts` | one file per command group (§6.6) + `registry.ts`, `helpers.ts`, `postprocess.ts` |
 | `engine/plan/drawing/*.ts` | `buildPlanDrawing`, `drawWall`, `drawOpening`, `drawRoom`, `drawPlacement`, `drawFixture`, `drawDimension`, `drawLabel`, `autoDimensions`, `svgFromDrawing` (§8) |
 | `engine/plan/testing/fixtures.ts` | `makeRectPlan`, `makeGridPlan`, `makeLPlan` test document builders (§9) |
@@ -296,7 +297,7 @@ Plan space: **x → right, y → down** (screen convention), units mm (master §
 7. **Angles.** `angleOf(v) = Math.atan2(v.y, v.x)` in `(−π, π]`. Increasing angle is **clockwise on screen**. Document rotations are clockwise degrees (master §6.2), so `rotation` and `angleOf` share orientation.
 8. **Rotation of a vector by θ (clockwise on screen):** `rot(v, θ) = (v.x cosθ − v.y sinθ, v.x sinθ + v.y cosθ)`.
 9. **Front vector of a placement/fixture** with rotation `θ` (deg): `frontVector(θ) = rot((0, 1), θ) = (−sin θ, cos θ)`. Inverse: `rotationFromFront(f) = normDeg(atan2(−f.x, f.y) · 180/π)`.
-10. **Display direction** of a wall (status bar, wall-drawing angle input, `05` §7.2) is **counter-clockwise on screen from east**: `displayDeg = normDeg(−angleOf(d) · 180/π)`. This is the only CCW convention and exists only in the UI; it is never stored.
+10. **Display direction** of a wall (status bar, wall-drawing direction input, `05` §7.3) is **counter-clockwise on screen from east**: `displayDeg = normDeg(−angleOf(d) · 180/π)`. This is the only CCW convention and exists only in the UI; it is never stored.
 
 ### 2.2 `vec2.ts`
 
@@ -382,6 +383,8 @@ export function intersection(a: PolygonWithHoles[], b: PolygonWithHoles[]): Poly
 export function offset(polys: PolygonWithHoles[], delta: number, join: 'miter' | 'square' | 'round', miterLimit = MITER_LIMIT): PolygonWithHoles[];
 export function intersectionArea(a: PolygonWithHoles[], b: PolygonWithHoles[]): number;
 ```
+
+`union`, `difference`, `intersection`, `offset`, `intersectionArea` (and `triangulate`, §2.7) are **public** (re-exported from `engine/index.ts`): the editor's 3D builders use them (`05` §5.2–5.3).
 
 ### 2.7 `triangulate.ts`
 
@@ -506,7 +509,7 @@ For each opening `o` on wall `w` (skip with `DeriveIssue` `engine.plan.derive.op
 
 ### 3.8 Node caps and exterior outline
 
-- `nodeCaps: Record<nodeId, Vec2[]>`: for every node with k ≥ 3, the CW ring of all distinct corners (miter points and bevel side points) of its walls, sorted by angle around `N`. Used only by the 3D builder (`05` §5.2) to close the vertical prism at junctions, because 3D walls are extruded with straight ends between their two corners.
+- `nodeCaps: Record<nodeId, Vec2[]>`: for every node with k ≥ 3 **or** with at least one bevelled wedge, the CW ring of all distinct corners (miter points and bevel side points) of its walls, sorted by angle around `N`. Used only by the 3D builder (`05` §5.2) to close the vertical prism at junctions, because 3D walls are extruded with straight ends between their two corners.
 - `exteriorOutline`: `union(all wall outlines)`; take the result polygon with the largest `|area|`; return its outer ring (CW). `null` if there are no walls.
 
 ### 3.9 Edge cases (each is a required unit test, §9)
@@ -850,11 +853,13 @@ export interface PlacementConflict {
 
 Non-blocking warnings (editor highlights; never prevent saving):
 1. **Wall overlap:** `intersectionArea(footprint, wallPocheParts) > 2500` mm² (tolerates flush contact and ≤ 5 mm rounding). Vertical intervals are ignored for walls (walls are full-height except `half`; for `half` walls only if `elevation < wall.height`).
-2. **Item overlap:** two footprints (placements and fixtures) intersect with area `> 2500` mm² **and** their vertical intervals `[elevation, elevation + height]` overlap by > 10 mm. Fixtures with `libraryKey === 'rug'` never conflict (rugs lie under things).
+2. **Item overlap:** two footprints (placements and fixtures) intersect with area `> 2500` mm² **and** their vertical intervals `[elevation, elevation + height]` overlap by > 10 mm. Fixtures whose library entry has `noConflict: true` (`rug`, `sink`, `hob` — rugs lie under things, sinks and hobs sit inside counters; `05` §9) never conflict.
 3. **Door swing:** for openings with `type ∈ {single_swing, double_swing, main_entrance, french_window}`, build the swing sector polygon(s): centre at the hinge jamb point on the swing face, radius = leaf width (`width` for single/main, `width/2` per leaf for double/french), 90° sector between the closed leaf (along the wall) and the open leaf (along `swingSign·n`), approximated by 16 segments. Footprint ∩ sector area `> 2500` mm² and the item's elevation `< opening.height` → `blocks_door`.
 4. **Window:** footprint intersects the window's cut rectangle extended 300 mm into each side and the item's vertical interval overlaps `[sillHeight, sillHeight + height]` → `blocks_window`.
 
 Placements whose design footprint is unknown (`FootprintProvider` returns `null`) are skipped.
+
+`export function doorSwingSectors(doc: PlanDocument, geom: DerivedPlan): Array<{ openingId: string; polygon: Vec2[] }>` returns the swing sectors of step 3 (CW polygons) for the editor's clearance-zone overlay (`05` §10.6).
 
 ### 5.10 Output consumption
 
@@ -1060,7 +1065,7 @@ function nextOpeningLabel(d, kind: 'door' | 'window'): string;
 
 ### 6.6 Command catalogue
 
-All commands live in `engine/plan/commands/` and are registered in `registry.ts` as `PLAN_COMMANDS`. Unless stated otherwise every coordinate param is rounded to integer mm in `run`, every id param must exist (`validate` → `engine.plan.command.not_found` with `params.id`), and numeric params are range-checked (`engine.plan.command.out_of_range` with `params.field`, `params.min`, `params.max`). Ranges: coordinates `|v| ≤ 1 000 000`; wall thickness 50–1000; wall height 300–10000; opening width 300–6000, opening height 300–(wall height − sill), sill 0–3000; fixture width/depth 50–20000, fixture height 0–10000; elevations 0–10000; label `fontSize` 50–5000; label text 1–200 chars after trim; room name 0–80 chars after trim (fits `order_items.room_label`); background `mmPerPixel` 0.01–1000, `opacity` 0–1. Size limits from `03` §1.1 `plan.too_large` are checked by `validate` of every add/insert command (`engine.plan.command.too_large`).
+All commands live in `engine/plan/commands/` and are registered in `registry.ts` as `PLAN_COMMANDS`. Unless stated otherwise every coordinate param is rounded to integer mm in `run`, every id param must exist (`validate` → `engine.plan.command.not_found` with `params.id`), and numeric params are range-checked (`engine.plan.command.out_of_range` with `params.field`, `params.min`, `params.max`). Ranges: coordinates `|v| ≤ 1 000 000`; wall thickness 50–1000; wall height 300–10000; opening width 300–6000, opening height 300–(wall height − sill), sill 0–3000; fixture width/depth 50–20000, fixture height 0–10000; elevations 0–10000; label `fontSize` 50–5000; label text 1–200 chars after trim; opening `label` null or 1–16 chars; room name 0–80 chars after trim (fits `order_items.room_label`); background `mmPerPixel` 0.01–1000, `opacity` 0–1. Size limits from `03` §1.1 `plan.too_large` are checked by `validate` of every add/insert command (`engine.plan.command.too_large`).
 
 | Command | Params | Merge | Geometry | Result |
 |---|---|---|---|---|
@@ -1099,10 +1104,12 @@ All commands live in `engine/plan/commands/` and are registered in `registry.ts`
 | `deleteLabels` | `{ labelIds }` | — | no | — |
 | `setBackground` | `{ background: BackgroundImage }` | — | no | — |
 | `setBackgroundProps` | `{ props: Partial<{ position; rotation; opacity; visible; locked }> }` | replace `bgProps` | no | — |
-| `calibrateBackground` | `{ p1: Vec2; p2: Vec2; realDistance: number; scaleGeometry: boolean }` | — | yes | `{ factor: number }` |
+| `calibrateBackground` | `{ space: 'plan'; p1: Vec2; p2: Vec2; realDistance: number; scaleGeometry: boolean } \| { space: 'image'; a: Vec2; b: Vec2; distanceMm: number }` | — | yes | `{ factor: number }` |
+| `rescalePlan` | `{ factor: number }` | — | yes | — |
 | `removeBackground` | `{}` | — | no | — |
 | `setPlanMeta` | `{ props: Partial<{ defaultWallHeight; defaultWallThickness; floorThickness; northAngle }> }` | — | no | — |
 | `translateEntities` | `{ ids: string[]; dx; dy; finalize: boolean }` | replace `translate:{hash(ids)}` | yes | — |
+| `nudgeEntities` | `{ ids: string[]; dx; dy }` | **compose** `nudge:{hash(ids)}` | yes | — |
 | `insertFragment` | `{ fragment: PlanFragment; dx; dy }` | — | yes | `{ idMap: Record<string, string> }` |
 | `deleteEntities` | `{ ids: string[] }` | — | yes | `{ deletedIds }` |
 
@@ -1133,15 +1140,17 @@ All commands live in `engine/plan/commands/` and are registered in `registry.ts`
 - **`addDimension` / `setDimension`** — `|a − b| ≥ 10` (else `engine.plan.command.dimension_too_short`); `|offset| ≤ 50 000`. When `attachedTo` is set, `a`/`b` are overwritten in post-process from the wall face.
 - **`addLabel` / `setLabel`** — text trimmed, 1–200 chars (`engine.plan.command.text_length`); `fontSize` default 250.
 - **`setBackground`** — `pixelWidth`, `pixelHeight` > 0 integers; `mediaUuid` non-empty; ranges as above. Replaces any existing background.
-- **`calibrateBackground`** — requires a background (`engine.plan.command.background_missing`) that is not locked (`engine.plan.command.background_locked`). `pxDist = |p1 − p2| / mmPerPixel` must be ≥ 10 (`engine.plan.command.calibration_too_short`); `realDistance ≥ 100`. `k = realDistance / |p1 − p2|`. `mmPerPixel *= k`; `position = round(p1 + (position − p1)·k)`. If `scaleGeometry`: every node, placement `x,y`, fixture `x,y`, label position, unattached dimension point and RoomMeta anchor is scaled about `p1` by `k` (rounded); opening `offset`s are multiplied by `k` then clamped; thicknesses and sizes are **not** scaled. Result `{ factor: k }`.
+- **`calibrateBackground`** — requires a background (`engine.plan.command.background_missing`) that is not locked (`engine.plan.command.background_locked`). **`space: 'image'`** (`06` §12.2 "plan.background.calibrate"): `a`, `b` are image pixel coordinates; `|a − b| ≥ 10` px, `distanceMm ≥ 100`; sets `mmPerPixel = distanceMm / |a − b|`, `position` unchanged; result `factor` = new/old `mmPerPixel`. **`space: 'plan'`** (editor Background tool): `pxDist = |p1 − p2| / mmPerPixel` must be ≥ 10 (`engine.plan.command.calibration_too_short`); `realDistance ≥ 100`. `k = realDistance / |p1 − p2|`. `mmPerPixel *= k`; `position = round(p1 + (position − p1)·k)` (the background rotates about its centre, `05` §4.12; scaling `position` and size about `p1` keeps every image point consistent with that rotation). If `scaleGeometry`: every node, placement `x,y`, fixture `x,y`, label position, unattached dimension point and RoomMeta anchor is scaled about `p1` by `k` (rounded); opening `offset`s are multiplied by `k` then clamped; thicknesses and sizes are **not** scaled. Result `{ factor: k }`.
+- **`rescalePlan`** (`06`'s `plan.rescale`) — `factor ∈ [0.01, 100]`. Multiplies about the origin `(0, 0)` and rounds: every node coordinate, wall `thickness` (clamped 50–1000), opening `offset` and `width` (width clamped 300–6000), RoomMeta `anchor` and `labelOffset`, text label `position`, dimension `a`, `b`, `offset`, placement and fixture `x, y` (not sizes), `background.mmPerPixel` and `background.position`. Heights, sills, elevations and furniture/fixture sizes are unchanged. If any opening no longer fits after rounding it is clamped (`reclampOpenings` rules); abort only if a wall would fall below `MIN_WALL_LENGTH`.
 - **`setPlanMeta`** — ranges: wall height 300–10000, thickness 50–1000, floor 0–1000, `northAngle` null or [0, 360).
 - **`translateEntities`** — collects: nodes of walls in `ids` plus node ids in `ids` (each moved once); placements, fixtures, labels, unattached dimensions in `ids`; RoomMeta anchors whose face's walls are all moved; `'background'` if present and unlocked. Openings move implicitly with their walls. Walls shared with unselected walls stretch. `finalize` → `splitIntersections` for every wall incident to a moved node, and merge moved nodes with unmoved nodes within `NODE_MERGE_TOL`.
+- **`nudgeEntities`** — identical to `translateEntities { finalize: true }` but registered with `mergeMode: 'compose'` so consecutive keyboard nudges (relative steps) merge into one entry (`hash(ids)` = `cyrb53(sorted ids joined by ',')`).
 - **`insertFragment`** — `PlanFragment = Pick<PlanDocument, 'nodes' | 'walls' | 'openings' | 'placements' | 'fixtures'> & { dimensions; labels; rooms }` (a subset with original ids, produced by the editor's copy, `05` §7.14). Every id is remapped with `newId(prefix)`, coordinates offset by `(dx, dy)`, references rewritten; walls are inserted with `insertWallSegment` (so pasted walls join/split existing ones); openings whose wall did not get created (fully covered by an existing wall) are dropped and reported in `warnings` (`engine.plan.command.fragment_opening_dropped`); placements keep `designId` (the editor only pastes placements whose design belongs to the same project).
 - **`deleteEntities`** — partitions `ids` by prefix (`w_`, `n_`, `o_`, `r_`, `f_`, `x_`, `d_`, `t_`, `'background'`) and runs the matching delete logic inside one run; walls first (so their cascades are not double-deleted).
 
 ### 6.7 Command error codes
 
-`messageKey = 'engine.plan.command.' + code`: `not_found`, `out_of_range`, `too_large`, `wall_too_short`, `wall_duplicate`, `split_through_opening`, `opening_no_fit`, `opening_overlap`, `opening_too_tall`, `type_mismatch`, `not_collinear`, `props_differ`, `design_unknown`, `fixture_unknown`, `dimension_too_short`, `text_length`, `background_missing`, `background_locked`, `calibration_too_short`, `introduces_error`, `invalid_params` (zod failure of the params object; every command's params have a zod schema in `registry.ts` and the bus validates them before `validate`). History labels: `engine.plan.command.label.<snake_case_type>`.
+`messageKey = 'engine.plan.command.' + code`: `not_found`, `out_of_range`, `too_large`, `wall_too_short`, `wall_duplicate`, `split_through_opening`, `opening_no_fit`, `opening_overlap`, `opening_too_tall`, `type_mismatch`, `not_collinear`, `props_differ`, `design_unknown`, `fixture_unknown`, `dimension_too_short`, `text_length`, `background_missing`, `background_locked`, `calibration_too_short`, `introduces_error`, `fragment_opening_dropped` (warning only), `invalid_params` (zod failure of the params object; every command's params have a zod schema in `registry.ts` and the bus validates them before `validate`). History labels: `engine.plan.command.label.<snake_case_type>`.
 
 ### 6.8 Acceptance criteria — commands
 
@@ -1153,7 +1162,8 @@ All commands live in `engine/plan/commands/` and are registered in `registry.ts`
 - [ ] Moving node `a` of a wall keeps every opening's distance to node `b`; shrinking a wall below an opening's width aborts with `opening_no_fit`.
 - [ ] `moveWall` on the top wall of a rectangle keeps the rectangle closed and rectangular (neighbours slide).
 - [ ] Deleting the stem of a T merges the two collinear pieces back into one wall (when props equal).
-- [ ] `calibrateBackground` with `p1=(0,0)`, `p2=(1000,0)`, `realDistance 3000` triples `mmPerPixel`, keeps `p1` fixed, and with `scaleGeometry` triples all node coordinates.
+- [ ] `calibrateBackground { space: 'plan' }` with `p1=(0,0)`, `p2=(1000,0)`, `realDistance 3000` triples `mmPerPixel`, keeps `p1` fixed, and with `scaleGeometry` triples all node coordinates; the `image` variant with `a=(0,0)`, `b=(100,0)`, `distanceMm 1500` sets `mmPerPixel = 15`.
+- [ ] `rescalePlan { factor: 2 }` doubles node coordinates and wall thicknesses (clamped at 1000), keeps heights; one undo restores the document.
 - [ ] No command can introduce a `validatePlan` error (property test: 500 random command sequences on `makeGridPlan(3,3)`; after each successful command, the error set never grows).
 - [ ] History never exceeds 200 entries.
 
@@ -1234,7 +1244,9 @@ export type DrawItem =
   | { t: 'line'; a: Vec2; b: Vec2; style: StyleKey }
   | { t: 'arc'; c: Vec2; r: number; startDeg: number; endDeg: number; style: StyleKey } // plan-space angles (§2.1-7), sweep clockwise on screen from start to end
   | { t: 'circle'; c: Vec2; r: number; style: StyleKey }
-  | { t: 'text'; at: Vec2; text: string; sizeMm: number; rotationDeg: number; anchor: 'start' | 'middle' | 'end'; baseline: 'middle' | 'top' | 'bottom'; style: StyleKey }
+  | { t: 'text'; at: Vec2; text: string; sizeMm: number; dyEm: number; rotationDeg: number; anchor: 'start' | 'middle' | 'end'; baseline: 'middle' | 'top' | 'bottom'; style: StyleKey }
+    // dyEm: offset perpendicular to the text direction (positive = down in the text's rotated frame) in multiples of the rendered text size;
+    // lets the live renderer draw screen-sized text (05 §4.3) while exports use sizeMm
   | { t: 'image'; href: string; at: Vec2; width: number; height: number; rotationDeg: number; opacity: number };
 
 export interface DrawGroup { entityId: string | null; entityKind: 'wall' | 'opening' | 'room' | 'placement' | 'fixture' | 'dimension' | 'auto_dimension' | 'label' | 'background'; items: DrawItem[] }
@@ -1278,10 +1290,10 @@ export function svgFromDrawing(d: PlanDrawing, o: SvgExportOptions): string;
   - Swing arcs are omitted when `include.doorSwings === false` or `lod ≥ 1` (leaf lines kept).
 - **Windows** (between the two jambs): `window_frame` lines on both faces; `casement`/`ventilator`: two `window_glass` lines at `±20` mm from the centre line; `ventilator` adds one diagonal; `sliding_window`: two overlapping glass lines at `±thickness/6` each spanning `0.55·width`; `fixed`: one glass line on the centre line; `french_window`: frame + glass as casement plus double-swing leaves (`door_leaf`) and arcs; `bay`: a trapezoid projecting 400 mm to the exterior side (`exteriorSide`, else `+n`) with 45° sides, glass on the outer edge.
 - **Openings (`opening` kind):** two `opening_jamb` lines across the wall at `u0` and `u1`.
-- **Rooms:** `room_fill` polygon (net polygon + holes) with `fill` from the room-type colour (`05` §4.6); label text group at `labelPoint`: name (`room_name`; empty name → `strings.unnamedRoom`), area (`room_area`, `formatArea`) if `meta?.showArea ?? true` and `include.roomAreas`, rectangle dims (`room_dims`, `"{w} × {d}"` with `formatLength(…, {style:'summary'})`) if `netRect` and `include.roomDims`.
+- **Rooms:** `room_fill` polygon (net polygon + holes) with `fill` from the room-type colour (`05` §4.6); label text items at `labelPoint` stacked with `dyEm` (name `−0.6`, area `+0.6`, dims `+1.8` when all three are shown; a single line uses `0`): name (`room_name`; empty name → `strings.unnamedRoom`), area (`room_area`, `formatArea`) if `meta?.showArea ?? true` and `include.roomAreas`, rectangle dims (`room_dims`, `"{w} × {d}"` with `formatLength(…, {style:'summary'})`) if `netRect` and `include.roomDims`.
 - **Furniture:** footprint polygon (`furniture`), front edge (`furniture_front`) plus a small isosceles triangle (base 150 mm, height 100 mm) at the front-edge midpoint pointing outward; name text (`furniture_label`, design name, hidden at `lod ≥ 1`). Unknown design → dashed `furniture_missing` 600 × 600 square with `strings.missingDesign`.
 - **Fixtures:** see `05` §9 (symbol primitives are data in `FIXTURE_LIBRARY`).
-- **Auto dimensions** (one group per wall with length ≥ 300 mm): dimension side = `exteriorSide ?? 'left'`; dimension line offset `thickness/2 + 400` mm from the centre line on that side; row 1 = overall centre-line length; row 2 (only if the wall has openings) = chain `0 → u0₁ → u1₁ → … → length`, offset a further 350 mm. Ticks are 45° `dim_tick` strokes of 150 mm; extension lines (`dim_ext`) from 100 mm off the face to 100 mm beyond the dimension line. Text = `formatLength(segment, units)`, centred above the line, rotated with the line and normalised to `(−90°, 90°]` so it is never upside down.
+- **Auto dimensions** (one group per wall with length ≥ 300 mm): dimension side = `exteriorSide ?? 'left'`; dimension line offset `thickness/2 + 400` mm from the centre line on that side; row 1 = overall centre-line length; row 2 (only if the wall has openings) = chain `0 → u0₁ → u1₁ → … → length`, offset a further 350 mm. Ticks are 45° `dim_tick` strokes of 150 mm; extension lines (`dim_ext`) from 100 mm off the face to 100 mm beyond the dimension line. Text = `formatLength(segment, units)`, anchored at the segment midpoint with `baseline 'bottom'`, `dyEm −0.25` (just above the line), rotated with the line and normalised to `(−90°, 90°]` so it is never upside down.
 - **User dimensions:** same graphics from `a`, `b`, signed `offset` along `perpLeft(normalize(b − a))`.
 - **Labels:** `label` text at `position`, `sizeMm = label.fontSize` (model-space size, scales with zoom by design, `03` §1 `TextLabel.fontSize`), rotation `label.rotation`.
 
