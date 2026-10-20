@@ -755,7 +755,7 @@ External dashboards (package routes, not in this registry's naming scheme): Hori
 | `default` | `redis` (180) | 60 s | 3 | misc, `ProcessUpload`, media conversions |
 | `imports` | `redis-long` (720) | 660 s | 2 (`RunBlueprintRecognition`: `retryUntil` 25 min + `maxExceptions` 2) | `PrepareImportPreview`, `RunBlueprintRecognition` |
 | `engine` | `redis` (180) | 120 s | 2 | `ComputeRevisionBom`, `NestOrderSheets` |
-| `pdf` | `redis` (180) | 120 s | 3 | `RenderQuotePdf`, `RenderCutListPdf`, `RenderPlanSheetPdf` |
+| `pdf` | `redis` (180) | 120 s | 3 | `RenderQuotePdf`, `RenderCutListPdf` |
 | `notify` | `redis` (180) | 60 s | 5 | notifications, webhook processing, `DispatchCallbackDue` |
 
 | Schedule (UTC unless business TZ) | Task |

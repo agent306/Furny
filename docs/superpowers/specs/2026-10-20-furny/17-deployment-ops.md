@@ -1515,7 +1515,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: shivammathur/setup-php@v2
-        with: { php-version: "8.4", extensions: "${{ env.PHP_EXTENSIONS }}", coverage: none, tools: "composer:v2" }
+        with: { php-version: "8.4", extensions: "${{ env.PHP_EXTENSIONS }}", coverage: pcov, tools: "composer:v2" }
       - run: corepack enable                       # before setup-node so its yarn cache detection uses the pinned yarn 4
       - uses: actions/setup-node@v5
         with: { node-version: "22", cache: yarn }
@@ -1532,10 +1532,18 @@ jobs:
         run: vendor/bin/pint --test
       - name: Larastan
         run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+      - name: Composer audit (13 §19)
+        run: bash .github/scripts/audit-gate.sh composer   # composer audit --locked --format=json, filtered by security/audit-allowlist.json (16 §14)
       - name: Generated TS types are current
         run: php artisan typescript:transform && git diff --exit-code -- resources/js/types/generated.d.ts
-      - name: Pest (unit + feature)
-        run: vendor/bin/pest tests/Unit tests/Feature --parallel --ci
+      - name: Generated i18n JSON is current (master §6.6)
+        run: php artisan i18n:export && git diff --exit-code -- resources/js/lang/generated
+      - name: Seed catalog snapshot fixture is current (16 §5.2)
+        run: php artisan testing:seed-catalog-snapshot --check
+      - name: Pest (unit + feature, with coverage)
+        run: vendor/bin/pest tests/Unit tests/Feature --parallel --ci --coverage-clover=build/coverage/php.xml
+      - name: PHP coverage gate (16 §15)
+        run: php tests/Support/coverage-gate.php build/coverage/php.xml
 
   frontend:
     runs-on: ubuntu-24.04
@@ -1549,14 +1557,20 @@ jobs:
       - run: composer install --no-interaction --prefer-dist --no-progress
       - run: yarn install --immutable
       - run: cp .env.example .env && php artisan key:generate
+      - name: Wayfinder helpers (needed by vue-tsc/Vitest before the build generates them)
+        run: php artisan wayfinder:generate --with-form
       - name: ESLint
         run: yarn eslint . --max-warnings=0
       - name: Prettier
         run: yarn prettier --check resources/ engine-cli/
       - name: vue-tsc
         run: yarn vue-tsc --noEmit
-      - name: Vitest
-        run: yarn vitest run
+      - name: yarn audit (13 §19)
+        run: bash .github/scripts/audit-gate.sh yarn       # yarn npm audit --environment production --severity high --json, filtered by the allowlist
+      - name: Vitest (with coverage thresholds, 16 §15)
+        run: yarn vitest run --coverage
+      - name: Vitest bench thresholds (16 §10)
+        run: yarn bench:check
       - name: Build (app + engine CLI)
         run: yarn build
       - name: Engine CLI smoke test
@@ -1585,10 +1599,16 @@ jobs:
         run: uv export --frozen --no-dev --no-hashes --no-emit-project -o /tmp/requirements.txt && diff -u requirements.txt /tmp/requirements.txt
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run mypy app
-      - run: uv run pytest -q
+      - run: uv run mypy --strict app
+      - run: uv run pytest -q -m "not live" --cov=app --cov-fail-under=85
         env:
           ENGINE_CLI: ${{ github.workspace }}/engine-cli/dist/cli.mjs
+      - name: Accuracy targets (06 §16.3)
+        run: |
+          uv run python scripts/evaluate.py --fixtures tests/fixtures/reference --provider none --fail-under
+          uv run python scripts/evaluate.py --fixtures tests/fixtures/reference --provider replay --fail-under
+      - name: pip-audit (13 §19)
+        run: bash ../.github/scripts/audit-gate.sh pip   # uvx pip-audit -r requirements.txt --format json, filtered by the allowlist
 
   browser:
     runs-on: ubuntu-24.04
@@ -1622,11 +1642,16 @@ jobs:
       - run: cp .env.example .env && php artisan key:generate
       - run: yarn build
       - run: yarn playwright install --with-deps chromium
-      - name: Pest browser tests (suite contents per 16)
+      - name: Pest browser tests (journeys, 16 §8)
         run: vendor/bin/pest tests/Browser --ci
+      - name: Playwright suite (3D smoke, accessibility, performance traces; 16 §9–§11)
+        run: yarn playwright test
       - uses: actions/upload-artifact@v4
         if: failure()
         with: { name: browser-screenshots, path: tests/Browser/screenshots, if-no-files-found: ignore }
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: playwright-report, path: build/playwright, if-no-files-found: ignore }
 
   deploy:
     needs: [php, frontend, vision, browser]
