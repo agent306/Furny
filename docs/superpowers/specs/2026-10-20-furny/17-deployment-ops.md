@@ -1573,6 +1573,8 @@ jobs:
         run: yarn bench:check
       - name: Build (app + engine CLI)
         run: yarn build
+      - name: Bundle size budgets (05 §16.1, 16 §10)
+        run: node scripts/check-bundle-size.mjs
       - name: Engine CLI smoke test
         run: echo '{}' | node engine-cli/dist/cli.mjs version | grep -q '"ok":true'
 

@@ -204,7 +204,8 @@ Plus Coolify services: PostgreSQL, Redis, Gotenberg (Dockerfile resource based o
 ├─ docker/                      start.sh, check-runtime.sh, backup-objects.sh, php.ini, php-fpm.conf, supervisor/{supervisord,php-fpm,nginx,horizon,scheduler,pulse-check}.conf, dev/pg-init.sql
 ├─ .dockerignore  compose.dev.yaml  package.json (packageManager yarn@4)  .yarnrc.yml  yarn.lock
 ├─ .github/                     workflows/ci.yml, scripts/{changed-since-last-deploy,coolify-deploy,audit-gate}.sh
-├─ tests/  (Pest: Feature/, Unit/, Browser/)  resources/js/**/__tests__ (Vitest)
+├─ tests/  (Pest: Unit/, Feature/ incl. Feature/Contract/, Browser/ incl. Browser/playwright/; Support/; fixtures/ — `16 §3`)  resources/js/**/__tests__ (Vitest)
+├─ scripts/                     check-bench.mjs, check-bundle-size.mjs, props-keys.mjs (test/CI helpers, `16`)  playwright.config.ts  vitest.config.ts
 └─ docs/                        specs, ops/ (owner reference files), ops-log.md
 ```
 
