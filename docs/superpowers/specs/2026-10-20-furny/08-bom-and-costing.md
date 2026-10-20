@@ -1,6 +1,6 @@
 # 08 — BOM, Cut List, Nesting, Pricing, Quotes & Catalog
 
-Read the master document, `01`, `02`, `03`, `07` and `09` first. `02`/`03` are binding (types `Bom`, `CutListRow`, `NestingResult`, `PriceBreakdown` are defined in `03 §3` and are not repeated except where this file fixes their semantics). Anything this file needs that is not in `02`/`03` is listed in the final appendix.
+Read the master document, `01`, `02`, `03`, `07` and `09` first. `02`/`03` are binding (types `Bom`, `CutListRow`, `NestingResult`, `PriceBreakdown` are defined in `03 §3` and are not repeated except where this file fixes their semantics). Settings, columns and media collections used here are defined in `02` (§13 `pricing`, §10 media), engine CLI commands in `01 §5.4`, permissions in `13 §7`; route names are registered in `14`.
 
 This file is normative for:
 
@@ -143,7 +143,7 @@ interface CatalogTaxRate {             // ← tax_rates (02 §6.6)
   id: string; name: string; rateBps: number; isDefault: boolean; isActive: boolean;
 }
 
-interface PricingSettings {            // ← app_settings 'pricing' (02 §13) + Appendix additions
+interface PricingSettings {            // ← app_settings 'pricing' (02 §13)
   pricesIncludeTax: boolean;
   defaultTaxRateId: string | null;
   marginBps: number;
@@ -156,8 +156,8 @@ interface PricingSettings {            // ← app_settings 'pricing' (02 §13) +
   kerfMm: number;                      // decimal, e.g. 4.0
   sheetTrimMm: number;
   nestingAllowRotationDefault: boolean;
-  sheetBillingMode: 'used_area' | 'whole_sheets';   // Appendix (new setting), default 'used_area'
-  edgePremillMm: number;                            // Appendix (new setting), integer, default 0
+  sheetBillingMode: 'used_area' | 'whole_sheets';   // 02 §13, default 'used_area'
+  edgePremillMm: number;                            // 02 §13, integer 0–3, default 0
 }
 
 interface CatalogSnapshot {
@@ -644,7 +644,7 @@ export function nestSheets(
 
 Invoked by staff with `quotes.create` from the order page ("Create quote") in states `in_review` / `negotiating` (09 §2 "Create/edit quote draft").
 
-1. If the order already has a quote in `draft` → return it unchanged (idempotent; the UI opens it). Staff can call **Rebuild lines from designs** on a draft, which deletes all lines with `kind ∈ {furniture, installation, delivery}` and regenerates them (custom, discount and other manual lines are kept).
+1. If the order already has a quote in `draft` → return it unchanged (idempotent; the UI opens it). Staff can call **Regenerate from designs** (`admin.orders.quotes.regenerate`, POST `/admin/orders/{order}/quotes/{quote}/regenerate`, draft only, `quotes.create`; 11) on a draft, which deletes all lines with `kind ∈ {furniture, installation, delivery}` and regenerates them (custom, discount and other manual lines are kept).
 2. Every order item must have a pinned revision with `bom_status = 'ready'`; otherwise `409 { code: 'bom_not_ready', items: [...] }` (UI shows "Calculating…" and retries via polling).
 3. **Staleness**: for each pinned revision whose `catalog_version ≠ current catalog.version` or `engine_version ≠ current ENGINE_VERSION`, run `RefreshRevisionBom` synchronously (engine CLI `compute-bom`, nesting on, `{ quantity: 1, includeInstallation: true }`) and overwrite the revision's `bom`, `price`, `engine_version`, `catalog_version` (the revision **document** is immutable; its derived BOM may be refreshed; activity `furniture.revision_bom_refreshed`). All quote lines are then built from one catalog version.
 4. In one DB transaction create `quotes` row: `version = max + 1`, `number = "{order.number}-Q{version}"`, `status = 'draft'`, `currency = business.currency`, `prices_include_tax = pricing.prices_include_tax`, `valid_until = today(business TZ) + workflow.quote_validity_days`, `terms = business.quote_terms`, `catalog_version`, `engine_version`, `created_by`.
@@ -677,7 +677,7 @@ Invoked by staff with `quotes.create` from the order page ("Create quote") in st
 
 **Staff edits** after building (09 §5): add/remove/reorder lines, change description, quantity, unit price, tax rate, visibility, a single discount (UI "Discount" field writes/updates one `discount` line with `unit_price_minor = −amount`, `quantity 1`, `tax_rate_id = null`), `valid_until`, `lead_time_days`, notes, terms. Every save re-runs `QuoteCalculator`.
 
-**Revise during negotiation** (09 §6): `DuplicateQuoteAsDraft` copies all lines of the current `sent` quote into a new draft (same `cost_snapshot`); "Rebuild lines from designs" is available there too.
+**Revise during negotiation** (09 §6): `DuplicateQuoteAsDraft` copies all lines of the current `sent` quote into a new draft (same `cost_snapshot`); "Regenerate from designs" is available there too.
 
 ### 6.2 Line validation (FormRequest + `QuoteCalculator::validate`)
 
@@ -708,7 +708,7 @@ tax_breakdown = groups with taxRateId ≠ null, ordered rateBps desc, name asc:
                [{ taxRateId, name, rateBps, taxableMinor: net_g, taxMinor: tax_g }]
 ```
 
-`quotes.discount_minor` is therefore **derived** from discount lines (Appendix). Rounding happens only at line level (`amount_i`), per tax group (`tax_g`, `net_g`) and in the allocation; totals are sums of rounded values (master §6.4).
+`quotes.discount_minor` is therefore **derived** from discount lines (02 §8.5). Rounding happens only at line level (`amount_i`), per tax group (`tax_g`, `net_g`) and in the allocation; totals are sums of rounded values (master §6.4).
 
 Shared fixtures `tests/fixtures/quotes/*.json` (`{ pricesIncludeTax, lines: [...], expected: { subtotal, discount, tax, total, taxBreakdown, amounts } }`) are run by Pest against `QuoteCalculator` and by Vitest against `quoteTotals.ts`. Required fixtures: §10.6.
 
@@ -742,7 +742,7 @@ Staff views always show every line with an "internal" badge on hidden ones.
 
 ## 7. Catalog seed (`CatalogSeeder`, 02 §14)
 
-**All prices are placeholders** (INR, plausible for India in 2026) that the owner must review in Admin → Catalog before going live; the seeder prints a console warning and the admin dashboard shows a dismissible banner "Review the starter catalog prices" until any catalog row is edited. Amounts below are in rupees; store `× 100` in `*_minor`. Materials and finishes have no textures (colour only) until the owner uploads them. `TaxRatesSeeder` (02 §14) seeds tax rates separately.
+**All prices are placeholders** (INR, plausible for India in 2026) that the owner must review in Admin → Catalog before going live; the seeder prints a console warning and the admin dashboard shows a dismissible banner "Review the starter catalog prices" until any catalog row is edited (setting `catalog.seed_reviewed`, 02 §13: default `false`, set `true` by any catalog Upsert action; dismissing the banner hides it for the current browser only, `localStorage` key `fs:seed-banner-dismissed`). Amounts below are in rupees; store `× 100` in `*_minor`. Materials and finishes have no textures (colour only) until the owner uploads them. `TaxRatesSeeder` (02 §14) seeds tax rates separately.
 
 ### 7.1 Materials (`materials`)
 
@@ -874,12 +874,12 @@ Idempotent: `updateOrCreate` by `code` / `key`; existing rows are **not** overwr
 | `notes` | `doc.overrides.parts[key].note` and extra-part notes of the row's keys, joined with ` \| ` |
 
 - File names: builder (working copy) `cutlist-{slug}-working.csv`; revision `cutlist-{slug}-r{number}.csv`.
-- Server route `admin.furniture-revisions.cutlist.csv` (GET, staff `furniture.export_cutlist`; revision `bom_status = ready` else 409) calls engine CLI command `cutlist-csv` (Appendix) with `{ bom, catalog, document }` and streams the result (`text/csv; charset=utf-8`).
+- Server route `admin.furniture-revisions.cutlist.csv` (GET `/admin/furniture-revisions/{revision}/cutlist.csv`, staff `orders.view`; revision `bom_status = ready` else 409) calls engine CLI command `cutlist-csv` (01 §5.4) with `{ bom, catalog, document }` and streams the result (`text/csv; charset=utf-8`).
 
 ### 8.2 PDF (Gotenberg, `RenderCutListPdf`, queue `pdf`)
 
-- Trigger: `POST admin.furniture-revisions.cutlist.pdf.store` (staff `furniture.export_cutlist`, revision BOM ready) → dispatches the job (unique per revision + catalog version) → `202 { status: 'queued' }`. `GET admin.furniture-revisions.cutlist.pdf.show` → `302` to a 15-minute signed URL when ready, `202 { status: 'queued' | 'rendering' }` while pending, `409 { status: 'failed' }` after failure. The builder polls every 3 s (max 2 min).
-- The job renders `resources/views/pdf/cut-list.blade.php` with spatie/laravel-pdf (Gotenberg driver, A4 **landscape**, margins 12 mm, `printBackground`), stores it in the revision's media collection `cutlist_pdf` (Appendix; single file, s3 private) named `CutList-{design-slug}-r{number}.pdf`. Fonts: `@font-face` from `public/fonts` (same font as the UI, embedded via absolute file URL).
+- Trigger: `admin.furniture-revisions.cutlist.pdf.store` (POST `/admin/furniture-revisions/{revision}/cutlist-pdf`, staff `orders.view`, revision BOM ready) → dispatches the job (unique per revision + catalog version) → `202 { status: 'queued' }`. `GET admin.furniture-revisions.cutlist.pdf.show` → `302` to a 15-minute signed URL when ready, `202 { status: 'queued' | 'rendering' }` while pending, `409 { status: 'failed' }` after failure. The builder polls every 3 s (max 2 min).
+- The job renders `resources/views/pdf/cut-list.blade.php` with spatie/laravel-pdf (Gotenberg driver, A4 **landscape**, margins 12 mm, `printBackground`), stores it in the revision's media collection `cutlist_pdf` (02 §10; single file, s3 private) named `CutList-{design-slug}-r{number}.pdf`. Fonts: `@font-face` from `public/fonts` (same font as the UI, embedded via absolute file URL).
 - Layout (sections in order, each starting on a new page where noted):
   1. **Header** (every page): business logo + name, "Cut list", design name, revision number and date, order number if the revision is pinned by an order item, overall dims, `engine_version`/`catalog_version`, generation time (business TZ); footer "Page x of y".
   2. **Summary**: design thumbnail (left, 80 mm), notes; per material table (code, name, thickness, parts, net area m², sheets nested, sheets billed, utilisation %); edge banding totals (code, name, thickness × width, metres incl. allowance and waste); total parts; estimated weight; operations (hinge cups, shelf-pin holes, dowels, cam locks, handle holes, slide screw sets).
@@ -893,7 +893,7 @@ Idempotent: `updateOrCreate` by `code` / `key`; existing rows are **not** overwr
 | Export | Customer (own design) | Staff |
 |---|---|---|
 | GLB (07 §11.3) | yes | yes |
-| Cut list CSV / PDF | no | `furniture.export_cutlist` |
+| Cut list CSV / PDF | no | `orders.view` |
 
 ---
 
@@ -984,18 +984,4 @@ Each labour quantity rule of §4.3 with a minimal BOM; inactive rate → no line
 
 ---
 
-## Appendix: Proposed additions to other documents
-
-1. **02 §13 `pricing` group (new fields)**:
-   | Field | Type | Default |
-   |---|---|---|
-   | `sheet_billing_mode` | `'used_area'` \| `'whole_sheets'` | `'used_area'` |
-   | `edge_premill_mm` | int (0–3) | `0` |
-2. **02 §8.5 `quotes.discount_minor` (clarification)** — derived by `QuoteCalculator` as `−Σ amount_minor` of `kind = 'discount'` lines; discount lines must have `tax_rate_id = null` and `unit_price_minor ≤ 0`.
-3. **02 §10 media collections (addition)** — `FurnitureRevision` · `cutlist_pdf` · disk `s3` · single · `pdf` · 20 MB · no conversions.
-4. **01 §5.3 (clarification)** — the catalog snapshot includes inactive and soft-deleted catalog rows flagged `isActive: false` (required by `03 §2.4` archived-code warnings); its exact shape is 08 §2.
-5. **01 §5.4 engine CLI** — `compute-bom` options gain `allowRotation?: boolean` and `price?: { quantity: number, includeInstallation: boolean }` (default `{ quantity: 1, includeInstallation: true }`); new command `cutlist-csv`: request `{ bom, catalog, document }` → result `{ csv: string }`.
-6. **03 §3.2 (clarification)** — `computeBom(model, catalog, options)` options are `{ nesting: boolean; allowRotation?: boolean; finishByRole: Record<MaterialRole, string | null> }` (`bomOptionsFor(doc, nesting)` builds them); `Bom.edgeBanding[].lengthMm` includes the 50 mm per-edge allowance **and** 5% waste; `NestingResult.placements[].partKey` uses instance keys `key#k` for `k ≥ 2`.
-7. **13 permissions** — new `furniture.export_cutlist` (same entry as in the 07 Appendix); cost visibility uses the existing `quotes.view_costs`.
-8. **14 routes (new)** — `admin.furniture-revisions.cutlist.csv` (GET `/admin/furniture-revisions/{revision}/cutlist.csv`), `admin.furniture-revisions.cutlist.pdf.store` (POST `/admin/furniture-revisions/{revision}/cutlist-pdf`), `admin.furniture-revisions.cutlist.pdf.show` (GET same path), `admin.orders.quotes.rebuild` (POST `/admin/orders/{order}/quotes/{quote}/rebuild`, draft only).
-9. **11 admin dashboard** — dismissible banner "Review the starter catalog prices" until any catalog row is edited (flag `app_settings['catalog.seed_reviewed']` = bool, default false; set true by any catalog Upsert).
+_Appendix merged into the target documents during reconciliation (see 19-reconciliation-log.md)._

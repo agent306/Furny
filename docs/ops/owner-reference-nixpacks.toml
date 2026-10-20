@@ -1,0 +1,99 @@
+# Owner's proven nixpacks.toml for Coolify apps served via Traefik (reference baseline, verbatim).
+[phases.setup]
+nixPkgs = ["php84", "php84Packages.composer", "php84Extensions.exif", "php84Extensions.pcntl", "php84Extensions.pdo_pgsql", "nodejs_22", "nginx", "curl"]
+
+cmds = [
+    "mkdir -p /var/log/nginx && chown -R www-data:www-data /var/log/nginx",
+    "mkdir -p storage/framework/{sessions,views,cache} bootstrap/cache",
+    "chmod -R 775 storage bootstrap/cache",
+    "chown -R www-data:www-data storage bootstrap/cache"
+]
+
+[phases.install]
+cmds = [
+    "composer install --no-interaction --prefer-dist --optimize-autoloader",
+    "corepack enable",
+    "yarn install"
+]
+
+[phases.build]
+cmds = [
+    "php artisan config:clear",
+    "php artisan route:clear",
+    "php artisan view:clear",
+    "php artisan storage:link",
+    "yarn build",
+    "php artisan optimize",
+    # Creating necessary directories for config overrides
+    "mkdir -p /etc/nginx",
+    "cp /assets/nginx.conf /etc/nginx/nginx.conf"
+]
+
+[variables]
+PHP_UPLOAD_MAX_FILESIZE = "200M"
+PHP_POST_MAX_SIZE = "210M"
+PHP_MEMORY_LIMIT = "512M"
+PHP_MAX_EXECUTION_TIME = "600"
+NGINX_CLIENT_MAX_BODY_SIZE = "200M"
+NIXPACKS_PHP_ROOT_DIR = "/app/public"
+
+[staticAssets]
+"nginx.conf" = '''
+user www-data;
+worker_processes auto;
+daemon off;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include mime.types;
+    types {
+        application/javascript  mjs;
+    }
+    default_type application/octet-stream;
+    
+    # FIX: This overrides the 1MB default causing the 413 error
+    client_max_body_size 200M;
+    
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+
+    server {
+        listen ${PORT};
+        listen [::]:${PORT};
+        server_name localhost;
+        root /app/public;
+
+        add_header X-Frame-Options "SAMEORIGIN";
+        add_header X-Content-Type-Options "nosniff";
+
+        index index.php;
+
+        charset utf-8;
+
+        location / {
+            try_files $uri $uri/ /index.php?$query_string;
+        }
+
+        location = /favicon.ico { access_log off; log_not_found off; }
+        location = /robots.txt  { access_log off; log_not_found off; }
+
+        error_page 404 /index.php;
+
+        location ~ \.php$ {
+            fastcgi_pass 127.0.0.1:9000;
+            fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+            include fastcgi_params;
+        }
+
+        location ~ /\.(?!well-known).* {
+            deny all;
+        }
+    }
+}
+'''

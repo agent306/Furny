@@ -35,6 +35,8 @@ Transition number T23 is intentionally unused.
 
 ## 2. Transition table
 
+Every transition (including T26/T27 hold/resume) sets `orders.state_changed_at = now()` (02 §8.1) in addition to the side effects listed.
+
 Legend — Actor: **C** customer (owner of order), **S** staff with permission (in brackets), **Sys** system/scheduler. "Event" = domain event dispatched after commit; notification routing per `12`. "Msg" = system message posted in the order thread (`messages.kind = system`, `system_event` = the event key).
 
 | # | From | To | Actor | Pre-conditions | Side effects | Event |
@@ -44,7 +46,7 @@ Legend — Actor: **C** customer (owner of order), **S** staff with permission (
 | T3 | `draft` | `cancelled` | C ("Cancel order") | `submitted_at` not null (order was submitted before) | `cancel_reason = customer_withdrew`; `cancelled_at` | `order.cancelled` + Msg |
 | T4 | `submitted` | `in_review` | S [`orders.review`] | — | `assigned_to` = actor if null; `reviewed_at` | `order.review_started` + Msg |
 | T5 | `submitted`, `in_review`, `changes_proposed`, `quoted`, `negotiating` | `draft` | C ("Edit my designs") | No proposal in `sent` status will be lost silently: UI confirms; quotes in `sent` → `withdrawn`; proposals `sent`/`draft` → `withdrawn` | Unlock designs; keep items (unpin revisions: set `furniture_revision_id = null`); keep number (number assigned at first submission is reused on resubmission) | `order.reopened` + Msg |
-| T6 | `in_review` | `changes_proposed` | S [`orders.propose_changes`] | Proposal in `draft` with ≥ 1 item having `to_revision_id` (staff draft saved and differing from `from_revision`) | Proposal → `sent` (`sent_at`); for each item: create furniture revision `reason=staff_proposal`, author_kind staff, from `staff_draft_document`; compute `changes` via engine diff; dispatch BOM jobs | `order.changes_proposed` + Msg |
+| T6 | `in_review` | `changes_proposed` | S [`orders.propose_changes`] | Proposal in `draft` with ≥ 1 item having a saved `staff_draft_document` differing from `from_revision`; every item's `staff_draft_document` validates with **no `error` issues** (engine CLI, 07 §7.1) | Proposal → `sent` (`sent_at`); for each item: create furniture revision `reason=staff_proposal`, author_kind staff, from `staff_draft_document`; compute `changes` via engine diff; dispatch BOM jobs | `order.changes_proposed` + Msg |
 | T7 | `changes_proposed` | `in_review` | C (resolve proposal) | Every proposal item has `decision ≠ pending`; rejected items require `customer_comment` | Proposal → `resolved`; for **approved** items: `order_items.furniture_revision_id = to_revision_id`, design `working_document = to_revision.document`, `working_version + 1`, `current_revision_id = to_revision_id`, create revision `reason=proposal_applied` **not** needed (to_revision becomes current); rejected items unchanged | `order.changes_resolved` + Msg (lists approved/rejected counts) |
 | T8 | `changes_proposed` | `in_review` | S [`orders.propose_changes`] | — | Proposal → `withdrawn` | `order.changes_withdrawn` + Msg |
 | T9 | `in_review`, `negotiating` | `quoted` | S [`quotes.send`] | A quote in `draft` exists; every item's pinned revision has `bom_status = ready`; quote lines ≥ 1; total ≥ `pricing.minimum_order_minor`; no proposal in `sent` | Previous `sent` quote → `superseded`; new quote → `sent` (`sent_at`), `orders.current_quote_id`; render PDF job (`RenderQuotePdf`) — notification waits for PDF (job chain) with 2-minute fallback to send without attachment link; `quoted_at` (first time only) | `quote.sent` + Msg |
@@ -63,7 +65,7 @@ Legend — Actor: **C** customer (owner of order), **S** staff with permission (
 | T22 | `completed` | `rework` | C ("Report an issue") | ≥ 1 issue created in the same request (description required, photos optional, item optional) | Issues `open` | `order.issue_raised` + Msg |
 | T24 | `ready_for_delivery` | `delivered` | S [`production.manage`] | Delivery record: `delivered_at` required; `installed` flag; photos optional | `delivered_at` on order + delivery | `order.delivered` + Msg |
 | T25 | `delivered` | `closed` | S [`orders.close`] or Sys after `workflow.auto_close_days` | No open issues | `closed_at`; unlock designs (`locked_by_order_id = null`) | `order.closed` + Msg |
-| T26 | any Active except `on_hold` | `on_hold` | S [`orders.hold`] | Reason required | `state_before_hold = current`; Msg with reason | `order.on_hold` |
+| T26 | any Active except `on_hold` | `on_hold` | S [`orders.hold`] | Reason required | `state_before_hold = current`; Msg with reason; activity-log properties store `reason` (read back as `OrderData.holdReason`, 10/11) | `order.on_hold` |
 | T27 | `on_hold` | `state_before_hold` | S [`orders.hold`] | — | Clear `state_before_hold` | `order.resumed` + Msg |
 | T28 | `submitted`, `in_review`, `changes_proposed`, `quoted`, `negotiating`, `accepted`, `confirmed`, `on_hold` | `cancelled` | S [`orders.cancel`] | Reason (enum) + note required | Sent quote → `withdrawn`; proposal sent/draft → `withdrawn`; unlock designs | `order.cancelled` + Msg |
 | T29 | `submitted`, `in_review` | `cancelled` | C ("Withdraw request") | Reason optional | as T28 with `cancel_reason = customer_withdrew` | `order.cancelled` + Msg |
@@ -75,11 +77,11 @@ Additional non-transition actions (allowed only in listed states):
 |---|---|---|---|---|
 | Assign / reassign estimator | any Active | S [`orders.assign`] | `assigned_to` | `order.assigned` (to new assignee) |
 | Post production update | `confirmed`, `in_production`, `rework` | S [`production.manage`] | `production_updates` row; if visibility customer: update `production_progress`, `production_stage` | `order.production_update` (customer visibility only) |
-| Log confirmation call | `accepted`, `confirmed` | S [`orders.confirm`] | `confirmation_calls` row; if `callback_requested`, schedule `CallbackReminder` notification to the staff at `callback_at` | `call.callback_due` (delayed) |
+| Log confirmation call | `accepted`, `confirmed` | S [`orders.confirm`] | `confirmation_calls` row; outcome `callback_requested` → dispatch job `DispatchCallbackDue` delayed until `callback_at`, which fires `call.callback_due` (notification class `CallbackReminder`) only if the order is still `accepted`/`confirmed` and no newer call was logged; outcome `no_answer` → `call.no_answer` | `call.callback_due` (delayed), `call.no_answer` |
 | Resolve issue | `rework` | S [`production.manage`] | issue `resolved`/`rejected` + note | `order.issue_resolved` |
-| Schedule delivery | `ready_for_delivery` | S [`production.manage`] | `deliveries.scheduled_for` | `order.delivery_scheduled` |
+| Schedule delivery | `ready_for_delivery` | S [`production.manage`] | `deliveries.scheduled_for` / `scheduled_until` (window) | `order.delivery_scheduled` |
 | Create/edit quote draft | `in_review`, `negotiating` | S [`quotes.create`] | quote `draft` (only one draft per order at a time) | — |
-| Create/edit proposal draft | `in_review` | S [`orders.propose_changes`] | proposal `draft` (one at a time) | — |
+| Create/edit proposal draft (message, items, staff notes **and the item design drafts** via `PUT /api/change-proposal-items/{item}/draft`) | `in_review` | S [`orders.propose_changes`] | proposal `draft` (one at a time) | — |
 | Edit order items (add/remove/qty) | `draft` | C | — | — |
 | Edit item quantity / staff notes | `in_review` | S [`orders.review`] | quantity change recorded in activity log + Msg to customer | `order.items_changed` |
 | Post message | any except `cancelled` > 90 days, `closed` > 90 days | C, S [`messages.post`] | `messages` row | `message.posted` |
@@ -91,13 +93,13 @@ Additional non-transition actions (allowed only in listed states):
 - From T2 until the order reaches `draft` (T5), `closed` or `cancelled`, `furniture_designs.locked_by_order_id = order.id`. While locked:
   - Customer working-copy saves → 423.
   - Customer may **duplicate** the design (new design, unlocked, `working_document` copied from the pinned revision) to explore variants.
-  - Staff change designs **only** through change-proposal drafts (`change_proposal_items.staff_draft_document`). There is no way for staff to silently edit a locked design. Pricing-only adjustments are made on the quote, not on the design.
+  - Staff change designs **only** through change-proposal drafts (`change_proposal_items.staff_draft_document`, permission `orders.propose_changes`, which covers creating, editing, sending and withdrawing proposals including editing their item drafts; there is no separate design-editing permission). There is no way for staff to silently edit a locked design. Pricing-only adjustments are made on the quote, not on the design.
 - Placements of locked designs in plans remain movable (placements are plan data).
 
 ## 4. Change proposals in detail
 
 1. Staff opens order in `in_review` → "Propose changes" → creates proposal `draft` (number n).
-2. For each item staff wants to change: "Edit design in proposal" opens the furniture builder in **proposal mode** (route `admin.orders.proposals.items.edit`) loading `staff_draft_document ?? from_revision.document`. Autosave → `PUT /api/change-proposal-items/{item}/draft` (protocol 03 §5 with `staff_draft_version`). Builder shows a persistent banner "Proposal mode — the customer will review these changes".
+2. For each item staff wants to change: "Edit design in proposal" (`admin.orders.proposals.items.store`, which creates the proposal item with `from_revision_id` = the pinned revision) opens the furniture builder in **proposal mode** (route `admin.orders.proposals.items.edit`, GET `/admin/orders/{order}/proposals/{proposal}/items/{proposalItem}/edit`) loading `staff_draft_document ?? from_revision.document`. Autosave → `PUT /api/change-proposal-items/{item}/draft` (protocol 03 §5 with `staff_draft_version`). Builder shows a persistent banner "Proposal mode — the customer will review these changes".
 3. Staff writes `staff_note` per item and an overall `message`.
 4. Staff clicks **Preview** → server runs `diff-furniture` (engine CLI) for each item and returns `ChangeItem[]`; staff sees exactly what the customer will see (customer UI component rendered in preview).
 5. **Send** (T6). Items with no actual changes (empty diff) are dropped from the proposal automatically; if none remain → 422 `proposal_empty`.
@@ -115,7 +117,7 @@ Additional non-transition actions (allowed only in listed states):
 
 ## 6. Negotiation
 
-- Customer counter-offer form: message (required, ≤ 2000 chars) + optional target total (currency input) + optional per-item comments (free text list).
+- Customer counter-offer form: message (required, ≤ 2000 chars) + optional target total (currency input) + optional per-item comments (one per order item, ≤ 500 chars, stored in `quote_negotiations.item_comments`).
 - Only one `open` negotiation per quote at a time.
 - Staff options: **Keep price** (T12, message required, optional new validity date) or **Revise quote** (opens quote builder pre-filled from current quote; send = T13).
 - Round counter: number of negotiations on the order; when `max_negotiation_rounds` reached the customer's Negotiate button is replaced by "Contact us" (opens message thread).
@@ -150,7 +152,7 @@ Default `workflow.production_stages` (admin-editable list; keys immutable once u
 
 - Customer completion page: completion photos gallery (large), per-item list with thumbnails of the design for comparison (design 3D thumbnail beside photos), buttons **Looks good** (T21) / **Report an issue** (T22: modal with description, item select, up to 10 photos).
 - Rework: staff sees issues, posts production updates (stage free choice), resolves each issue (resolution note), then T20 again (new completion photos required).
-- Delivery: staff schedules (`order.delivery_scheduled` notification with date/time window), then records delivery (T24).
+- Delivery: staff schedules (`deliveries.scheduled_for` … `scheduled_until`; `order.delivery_scheduled` notification with the date/time window), then records delivery (T24).
 - Problems reported after delivery: the customer writes in the message thread (there is no customer "report issue" button after `delivered`). Staff with `orders.close` may move the order `delivered` → `rework` by creating an issue on the customer's behalf (T31 below).
 - Closing: T25.
 
@@ -176,9 +178,9 @@ ICU message format is supported by the i18n library chosen in `15`.
 
 ## 11. Domain events (PHP classes in `App\Domain\Orders\Events`)
 
-One event class per event key, all implementing `App\Domain\Shared\Contracts\NotifiableDomainEvent` with `eventKey(): string`, `order(): Order`, `actor(): ?User`, `payload(): array`. A single listener `RouteDomainEventToNotifications` (queued on `notify`) resolves recipients and dispatches the corresponding Notification class (`12`). A second listener `PostSystemMessage` (sync, after commit) writes the thread message. A third `BroadcastOrderStateChanged` broadcasts on `orders.{id}`.
+One event class per event key, all implementing `App\Domain\Shared\Contracts\NotifiableDomainEvent` with `eventId(): string` (a ULID generated in the event constructor, used for notification idempotency, 12 §4.3), `eventKey(): string`, `order(): Order`, `actor(): ?User`, `payload(): array` (required keys per 12 §3.4), `occurredAt(): CarbonImmutable`. A single listener `RouteDomainEventToNotifications` (queued on `notify`) resolves recipients and dispatches the corresponding Notification class (`12`). A second listener `PostSystemMessage` (sync, after commit) writes the thread message. A third `BroadcastOrderStateChanged` broadcasts on `orders.{id}`.
 
-Event keys (exhaustive for orders): `order.submitted`, `order.assigned`, `order.review_started`, `order.reopened`, `order.changes_proposed`, `order.changes_resolved`, `order.changes_withdrawn`, `order.items_changed`, `quote.sent`, `quote.negotiation_opened`, `quote.negotiation_answered`, `quote.accepted`, `quote.declined`, `quote.expiring_soon`, `quote.expired`, `order.reopened_after_call`, `order.confirmed`, `order.production_started`, `order.production_update`, `order.completed`, `order.customer_approved`, `order.issue_raised`, `order.issue_resolved`, `order.delivery_scheduled`, `order.delivered`, `order.closed`, `order.cancelled`, `order.on_hold`, `order.resumed`, `message.posted`, `call.callback_due`, `call.no_answer`, `reminder.action_required`.
+Event keys (exhaustive for orders; non-order events — imports, AI, account, staff, auth, system — are listed only in 12 §3.3): `order.submitted`, `order.assigned`, `order.review_started`, `order.reopened`, `order.changes_proposed`, `order.changes_resolved`, `order.changes_withdrawn`, `order.items_changed`, `quote.sent`, `quote.negotiation_opened`, `quote.negotiation_answered`, `quote.accepted`, `quote.declined`, `quote.expiring_soon`, `quote.expired`, `order.reopened_after_call`, `order.confirmed`, `order.production_started`, `order.production_update`, `order.completed`, `order.customer_approved`, `order.issue_raised`, `order.issue_resolved`, `order.delivery_scheduled`, `order.delivered`, `order.closed`, `order.cancelled`, `order.on_hold`, `order.resumed`, `message.posted`, `call.callback_due`, `call.no_answer`, `reminder.action_required`.
 
 ## 12. Timeline (customer and staff)
 

@@ -28,7 +28,7 @@ Precedence reminder: master > 02 > 03 > 09 > this file. If this file and 10/11 d
 | `@internationalized/date` | (peer of reka-ui) | Date values for `DateInput`/calendar |
 | dev: `culori` | `^4.0` | Contrast test of design tokens (§14.6) |
 
-Fonts are **self-hosted** (no Google Fonts request): no third-party request on page load, works for an installed PWA, no consent banner needed. Import them in `resources/css/app.css` (§3).
+Fonts are **self-hosted** (no Google Fonts request; CSP `font-src 'self' data:`, 13 §12.1): no third-party request on page load, works for an installed PWA, no consent banner needed. Import them in `resources/css/app.css` (§3). The UI uses **only** Inter and JetBrains Mono (via `@fontsource-variable`). Separately, client-side PDF export with jsPDF (plan PDF, 05 §14.3) embeds **Noto Sans** TTF files committed at `public/fonts/NotoSans-Regular.ttf` and `public/fonts/NotoSans-Bold.ttf` (SIL OFL 1.1; jsPDF needs TTF and the variable WOFF2 files cannot be embedded); they are never used by CSS.
 
 ---
 
@@ -473,7 +473,7 @@ SVG renderers (05) should prefer `fill="var(--wall)"` directly in templates (aut
 
 ## 4. shadcn-vue components to install
 
-Install with `npx shadcn-vue@latest add <names…>` into `resources/js/components/ui/` (configured `components.json`: style `new-york`, baseColor `stone`, cssVariables `true`, aliases `@/components`, `@/lib/utils`). After install, the generated components are owned by us and may be edited; they must keep using the semantic tokens.
+Install with `yarn dlx shadcn-vue@latest add <names…>` (one-time scaffolding; the generated files are committed, so the CLI version does not affect builds) into `resources/js/components/ui/` (configured `components.json`: style `new-york`, baseColor `stone`, cssVariables `true`, aliases `@/components`, `@/lib/utils`). After install, the generated components are owned by us and may be edited; they must keep using the semantic tokens.
 
 ```
 accordion alert alert-dialog aspect-ratio avatar badge breadcrumb button calendar card checkbox
@@ -605,7 +605,7 @@ Full-viewport (`h-dvh overflow-hidden`), **no page scroll**, no app header. Used
 | Tablet | Inspector becomes a right `Sheet` (non-modal, `w-80`) opened by a toggle button in `#topbar-end` or automatically on selection (05 decides); toolrail stays. Touch targets ≥ 44 px in toolrail. |
 | Phone | View-only: `#toolrail` and `#inspector` are not rendered; `#topbar` keeps back, title, 2D/3D toggle; details open in a bottom `Drawer` (`#inspector` content rendered in read-only mode inside it). |
 
-Props: `title: string`, `backHref: string`, `readOnly: boolean`, `saveStatus?: 'saved'|'saving'|'dirty'|'offline'|'error'|'conflict'` (renders `SaveStatusIndicator` in `#topbar-start`). The layout traps no focus; editors manage keyboard shortcuts (05/07). Theme toggle not shown (inherits app theme).
+Props: `title: string`, `backHref: string`, `readOnly: boolean`, `saveStatus?: 'saved'|'saving'|'dirty'|'offline'|'error'|'conflict'|'invalid'`, `saveStatusCount?: number`, emits `save-status-click` (renders `SaveStatusIndicator` in `#topbar-start`). The layout traps no focus; editors manage keyboard shortcuts (05/07). Theme toggle not shown (inherits app theme).
 
 ### 7.4 `AuthLayout` (`layouts/AuthLayout.vue`)
 
@@ -710,7 +710,7 @@ Tone → Badge variant: `neutral`→`neutral`, `info`→`info`, `success`→`suc
 ```ts
 type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'primary';
 // lib/statusTones.ts (complete)
-IMPORT_STATUS_TONE = { awaiting_upload:'neutral', uploaded:'info', queued:'info', preprocessing:'info', recognizing:'info', ready_for_review:'warning', accepted:'success', discarded:'neutral', failed:'danger', cancelled:'neutral' }
+IMPORT_STATUS_TONE = { uploaded:'info', queued:'info', preprocessing:'info', recognizing:'info', ready_for_review:'warning', accepted:'success', discarded:'neutral', failed:'danger', cancelled:'neutral' }
 QUOTE_STATUS_TONE = { draft:'neutral', sent:'warning', accepted:'success', declined:'danger', superseded:'neutral', expired:'neutral', withdrawn:'neutral' }
 PROPOSAL_STATUS_TONE = { draft:'neutral', sent:'warning', resolved:'success', withdrawn:'neutral' }
 PROPOSAL_DECISION_TONE = { pending:'warning', approved:'success', rejected:'danger' }
@@ -746,7 +746,7 @@ Emits: `update:modelValue(mm: number | null)`, `commit(mm: number)` (Enter/blur 
 Behaviour:
 - Displays `formatLength(mm, { system, unit })` (engine, `04` §1) when not focused; on focus selects all text.
 - Unit suffix (non-editable, `text-muted-foreground font-mono`) inside the input on the right: `mm` / `cm` / `m` / `ft-in` / `in`.
-- On Enter or blur: `parseLength(text, { defaultUnit: unit })` (engine, `04` §1). Accepts every format of master §6.1 regardless of unit. Valid → round to integer mm, check `min`/`max`; out of range → keep text, set `aria-invalid`, show inline message `units.errors.out_of_range` "Must be between {min} and {max}." (formatted lengths). Invalid → `units.errors.invalid_length` "Enter a length like 2400, 240cm or 7'10\"." Escape reverts to last valid value.
+- On Enter or blur: `parseLength(text, { unit })` (engine, `04` §1; `unit` is the default unit for bare numbers). Accepts every format of master §6.1 regardless of unit. Valid → round to integer mm, check `min`/`max`; out of range → keep text, set `aria-invalid`, show inline message `units.errors.out_of_range` "Must be between {min} and {max}." (formatted lengths). Invalid → `units.errors.invalid_length` "Enter a length like 2400, 240cm or 7'10\"." Escape reverts to last valid value.
 - ArrowUp/ArrowDown: ± `step`; with Shift ×10; with Alt ×0.1 (min 1 mm). PageUp/PageDown ×10. Values clamp to `min`/`max` for keyboard stepping only.
 - `inputmode="decimal"` is **not** used (it blocks `'` and `"` on iOS); use `inputmode="text"`, `autocomplete="off"`, `spellcheck="false"`, `font-mono`.
 - `role="spinbutton"` with `aria-valuenow` (mm), `aria-valuetext` (formatted), `aria-valuemin/max`.
@@ -758,13 +758,13 @@ Props: `mm2: number`, `system?: 'metric' | 'imperial'` (default user). Metric `m
 Props: `mm?: number`, `dims?: { width: number; height: number; depth?: number }`, `order?: 'WHD' | 'WDH'` (default `WHD`), `unit?: LengthUnit`, `labels?: boolean` (prefix W/H/D). Renders `font-mono tabular-nums`, e.g. `1800 × 2100 × 600 mm` (metric mm: single unit suffix at end; imperial: each value formatted `5' 10 7/8"`). `title` attribute shows the alternate system.
 
 ### 9.10 `FileDropzone` (`components/media/FileDropzone.vue`)
-Generic upload dropzone for every non-import upload, implementing the **upload-intent flow of `13` §11** (imports use `06`'s endpoints with the same `lib/upload.ts` XHR helper).
+Generic upload dropzone for **every** browser upload (including blueprint imports, purpose `blueprint_source`, 06 §1.1), implementing the **upload-intent flow of `13` §11**.
 Props: `purpose: UploadPurpose`, `target?: { type: string; id: string } | null` (authorisation target, e.g. the order for `message_attachment`), `accept: string[]` (MIME list), `maxSizeBytes: number`, `maxFiles: number`, `multiple?: boolean`, `modelValue: UploadedFileRef[]`, `disabled?`, `capture?: 'environment' | 'user'` (adds "Take photo" on touch devices via `<input type="file" accept="image/*" capture>`), `compressImages?: boolean` (§9.12), `label?: string`, `hint?: string`.
 Emits: `update:modelValue(files: UploadedFileRef[])`, `uploading(boolean)`.
 
 ```ts
-type UploadPurpose = 'message_attachment' | 'production_photo' | 'issue_photo' | 'delivery_photo' | 'avatar' | 'business_logo'
-  | 'material_texture' | 'finish_texture' | 'hardware_image' | 'plan_thumbnail' | 'design_thumbnail' | 'preset_thumbnail' | 'project_cover';   // 13 §11.1 (blueprint_source is used only by 06)
+type UploadPurpose = 'blueprint_source' | 'message_attachment' | 'production_photo' | 'issue_photo' | 'delivery_photo' | 'avatar' | 'business_logo'
+  | 'material_texture' | 'finish_texture' | 'hardware_image' | 'plan_thumbnail' | 'project_cover' | 'furniture_thumbnail' | 'preset_thumbnail';   // exactly the 14 values of 13 §11.1 (generated from the PHP enum)
 interface UploadedFileRef { uploadId: string; name: string; size: number; mime: string; previewUrl: string | null /* object URL or server previewUrl */ }
 ```
 
@@ -883,7 +883,7 @@ Hand-written inline SVG components; small, accessible, themeable. All render a v
 |---|---|---|
 | `ErrorState` | `title?`, `description?`, `retry?: () => void`, `status?: number` | Full-section load failure (deferred props, API widgets). Default title `errors.load_failed` "We couldn't load this." |
 | `LoadingState` | `rows?: number`, `variant: 'list' | 'cards' | 'detail' | 'table'` | Skeleton presets used as `<Deferred>` fallback |
-| `SaveStatusIndicator` | `status`, `savedAt?` | Editor top bar: "Saved · 2 min ago", "Saving…", "Offline — changes kept on this device", "Conflict" |
+| `SaveStatusIndicator` | `status`, `savedAt?`, `count?`, `onClick?` | Editor top bar: "Saved · 2 min ago", "Saving…", "Offline — changes kept on this device", "Conflict", `invalid` → "Fix {count, plural, one {# problem} other {# problems}} to save" (destructive tone; a button when `onClick` is given — the plan editor opens its Checks popover, 05) |
 | `ProductionProgress` | `progress: number`, `stageLabel?: string`, `compact?` | Progress bar (`Progress` component, `primary`) + stage chip + "%"; `aria-valuenow` |
 | `QuoteSummary` | `quote: QuoteData`, `audience` | Totals block: subtotal, discount, tax breakdown rows, total (xl), validity |
 | `QuoteLinesTable` | `lines: QuoteLineData[]`, `items: OrderItemData[]`, `audience`, `editable?: false` | Read-only grouped lines (per item, then order-level) |
@@ -1008,8 +1008,8 @@ If a pair fails, the implementer adjusts **only the lightness (L)** of the foreg
 
 ### 15.2 Source of truth: PHP lang files
 - Strings live in `resources/lang/en/{namespace}.php` returning nested arrays; **values are ICU messages** (`{name}`, `{count, plural, one {# item} other {# items}}`, `{reason, select, quote_declined {…} other {…}}`).
-- Exception — Laravel-format namespaces (consumed only by Laravel itself with `:attribute` placeholders): `validation`, `passwords`, `pagination`, `auth`. These are **not** exported to the frontend. Validation messages reach the browser already rendered (Inertia errors).
-- Namespaces (one file each): `common, a11y, auth_ui, legal, onboarding, account, dashboard, projects, plans, imports, designs, orders, quotes, proposals, production, messages, notifications, settings, credits, help, uploads, units, money, phone, errors, states, changes, parts, hardware, editor, builder, admin, catalog, presets, templates, reports, audit, system, staff, customers, emails, pdf`. (05/07/12 own the content of `editor`, `builder`, `parts`, `hardware`, `changes`, `emails`.)
+- Exception — Laravel-format namespaces (consumed only by Laravel itself with `:attribute` placeholders): `validation`, `passwords`, `pagination`, `auth`. These are **not** exported to the frontend. Validation messages reach the browser already rendered (Inertia errors). `13`'s auth messages (`auth.inactive`, `auth.session_expired`, `auth.errors.*`) live in `auth.php` with Laravel `:param` placeholders and are rendered server-side with `__()` (flash messages / validation errors); strings rendered in Vue on auth pages live in `auth_ui`.
+- Namespaces (one file each): `common, a11y, auth_ui, legal, onboarding, account, dashboard, projects, plans, imports, designs, orders, quotes, proposals, production, messages, notifications, settings, credits, help, uploads, units, money, phone, errors, states, changes, parts, hardware, plan_editor, engine, builder, admin, catalog, presets, templates, reports, audit, system, staff, customers, roles, ai, issues, calls, delivery, estimates, emails, pdf`. (05 owns `plan_editor`; 04 owns `engine` (every `engine.*` issue/command/label key); 07 owns `builder`, `parts`, `hardware`, `changes`; 12 owns `notifications` and `emails`; 18 owns `ai` (`ai.error.{code}`) and `credits`.)
 - Key naming: `{namespace}.{area}.{item}` with `snake_case` segments, max depth 4. Common areas: `actions.*` (button labels, imperative: "Save changes"), `fields.*` (labels), `hints.*`, `errors.*`, `empty.*` (`empty.title`, `empty.body`), `titles.*` (page titles), `toasts.*`, `confirm.*`. Example: `orders.actions.accept_quote` = "Accept quote".
 - **Dynamic keys** (enum labels) follow fixed patterns so the checker can enumerate them: `orders.states.{state}`, `orders.states_customer.{state}`, `orders.states_customer_short.{state}`, `orders.steps.{key}`, `orders.cancel_reasons.{reason}`, `orders.call_outcomes.{outcome}`, `imports.statuses.{status}`, `imports.stages.{stage}`, `imports.error.{code}` (06 §14), `quotes.statuses.{status}`, `quotes.line_kinds.{kind}`, `production.stages.{key}`, `projects.property_types.{type}`, `plans.room_types.{type}`, `catalog.board_types.{type}`, `catalog.hardware_categories.{category}`, `notifications.events.{event_key}.{title|body|label|description}`, `messages.system.{event_key}`.
 
@@ -1093,11 +1093,4 @@ Rules in `app.css`:
 
 ---
 
-## Appendix: Proposed additions to other documents
-
-1. **01 §1.2 (npm):** add `@fontsource-variable/inter ^5.2`, `@fontsource-variable/jetbrains-mono ^5.2`, `tw-animate-css ^1.3`, `intl-messageformat ^10.7`, `libphonenumber-js ^1.12`; dev `culori ^4.0`.
-2. **Master §6.6 / 01:** i18n library decision = custom layer on `intl-messageformat`; PHP helper `trans_icu()` in `app/Support/I18n/helpers.php` (composer `autoload.files`); artisan command `i18n:export`; generated `resources/js/lang/generated/{locale}.json` + `manifest.json` committed and CI-checked; config key `app.supported_locales` = `['en']`.
-3. **Uploads:** this file implements `13` §11 (upload intents, `api.uploads.presign|confirm|show`, `uploadIds`); no separate proposal.
-4. **Shared props (01 §6):** add `staffCounters` (`{ submitted: int, toCall: int }`, staff only, lazy via `Inertia::optional`, cached 30 s) and `healthBanners` (`11` B12); `features.captcha` (`13` B).
-5. **Shared prop fields (camelCase, `10` A7):** `auth.user` = `{ id, type, name, email, emailVerified, phoneE164, phoneVerified, avatarUrl, roles, permissions, abilities, unitSystem, lengthUnit, timezone, locale, onboarded, hasPassword, twoFactorEnabled }`; `business` = `{ name, currency, locale, timezone, phoneE164, email, workingHours, units: { defaultSystem, defaultLengthUnit }, defaultCountryCode }`; `app.logoUrl`.
-6. **Appearance cookie** `appearance` (`light|dark|system`) read by `app.blade.php` — add to `13`'s cookie inventory (functional, not HttpOnly, 1 year, `SameSite=Lax`).
+_Appendix merged into the target documents during reconciliation (see 19-reconciliation-log.md)._

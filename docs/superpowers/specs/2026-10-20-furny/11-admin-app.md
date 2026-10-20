@@ -10,7 +10,7 @@ Owned elsewhere: transition rules and side effects → `09` (this file says whic
 
 - **Routes:** names `admin.*`, prefix `/admin`, middleware group `['web', 'auth', 'active', 'staff', '2fa.enrolled', 'session.absolute']` (`13` §1). Controllers in `app/Http/Controllers/Admin/*`.
 - **Authorisation:** each route lists the permission (or owner gate) required; policies additionally enforce state rules (`09`). The UI hides controls via `usePermissions().can(name)`, which checks `auth.user.permissions` **and** `auth.user.abilities` (owner gates, `13` §7.4). Every action is enforced server-side.
-- **Permissions** (exhaustive list in `13` §7.1): `orders.view`, `orders.review`, `orders.assign`, `orders.propose_changes`, `orders.edit_designs`, `quotes.create`, `quotes.send`, `quotes.view_costs`, `orders.confirm`, `orders.cancel`, `orders.hold`, `orders.close`, `production.manage`, `messages.post`, `customers.view`, `customers.manage`, `catalog.manage`, `presets.manage`, `templates.manage`, `settings.manage`, `staff.manage`, `ai.manage`, `reports.view`, `plans.edit_any`, `audit.view`. **Owner gates** (`13` §7.3): `orders.cancel_late` (T30), `staff.manage_owners`, `settings.change_currency`, `settings.manage_restricted` (settings groups `ai` and `auth`), `data.delete`.
+- **Permissions** (exhaustive list in `13` §7.1): `orders.view`, `orders.review`, `orders.assign`, `orders.propose_changes`, `quotes.create`, `quotes.send`, `quotes.view_costs`, `orders.confirm`, `orders.cancel`, `orders.hold`, `orders.close`, `production.manage`, `messages.post`, `customers.view`, `customers.manage`, `catalog.manage`, `presets.manage`, `templates.manage`, `settings.manage`, `staff.manage`, `ai.manage`, `reports.view`, `plans.edit_any`, `audit.view`. **Owner gates** (`13` §7.3): `orders.cancel_late` (T30), `staff.manage_owners`, `settings.change_currency`, `settings.manage_restricted` (settings groups `ai` and `auth`), `data.delete`.
 - **Cost visibility:** `cost_snapshot`, cost lines of `PriceBreakdown`, margins and quote `internal_notes` are sent only to users with `quotes.view_costs` (server-side omission, tested).
 - **Props:** camelCase Data objects; lists use `Paginated<T>` and the query conventions of `15` §9.29.
 - **Density:** compact (h-9, `text-sm`) ≥ 768 px; comfortable below.
@@ -28,7 +28,7 @@ Owned elsewhere: transition rules and side effects → `09` (this file says whic
 | 2 | `admin.orders.index` | `/admin/orders` | `Admin/Orders/Index` | AdminLayout | `orders.view` |
 | 3 | `admin.orders.show` | `/admin/orders/{order}` | `Admin/Orders/Show` | AdminLayout | `orders.view` |
 | 4 | `admin.orders.items.show` | `/admin/orders/{order}/items/{item}` | `Admin/Orders/ItemDesign` | AdminLayout | `orders.view` |
-| 5 | `admin.orders.proposals.items.edit` (09, 07) | `/admin/orders/{order}/proposals/{proposal}/items/{proposalItem}/edit` | `Admin/Orders/ProposalItemEdit` | EditorLayout | `orders.edit_designs` |
+| 5 | `admin.orders.proposals.items.edit` (09, 07) | `/admin/orders/{order}/proposals/{proposal}/items/{proposalItem}/edit` | `Admin/Orders/ProposalItemEdit` | EditorLayout | `orders.propose_changes` |
 | 6 | `admin.orders.proposals.preview` | `/admin/orders/{order}/proposals/{proposal}/preview` | `Admin/Orders/ProposalPreview` | AdminLayout | `orders.propose_changes` |
 | 7 | `admin.orders.quotes.edit` | `/admin/orders/{order}/quotes/{quote}/edit` | `Admin/Orders/QuoteBuilder` | AdminLayout (full width) | `quotes.create` |
 | 8 | `admin.customers.index` | `/admin/customers` | `Admin/Customers/Index` | AdminLayout | `customers.view` |
@@ -88,8 +88,8 @@ All mutating routes redirect back with `flash.success` unless stated. 409 (trans
 | `admin.orders.proposals.store` | POST | `…/proposals` | — | create proposal draft | `orders.propose_changes` |
 | `admin.orders.proposals.update` | PATCH | `…/proposals/{proposal}` | `message?`, `items?: [{id, staffNote}]` | edit draft text | `orders.propose_changes` |
 | `admin.orders.proposals.destroy` | DELETE | `…/proposals/{proposal}` | — | delete draft | `orders.propose_changes` |
-| `admin.orders.proposals.items.store` | POST | `…/proposals/{proposal}/items` | `orderItemId` | add item (from = pinned revision) → redirect to item builder | `orders.edit_designs` |
-| `admin.orders.proposals.items.destroy` | DELETE | `…/proposals/{proposal}/items/{proposalItem}` | — | remove item from draft | `orders.edit_designs` |
+| `admin.orders.proposals.items.store` | POST | `…/proposals/{proposal}/items` | `orderItemId` | add item (from = pinned revision) → redirect to item builder | `orders.propose_changes` |
+| `admin.orders.proposals.items.destroy` | DELETE | `…/proposals/{proposal}/items/{proposalItem}` | — | remove item from draft | `orders.propose_changes` |
 | `admin.orders.proposals.send` | POST | `…/proposals/{proposal}/send` | — | **T6** | `orders.propose_changes` |
 | `admin.orders.proposals.withdraw` | POST | `…/proposals/{proposal}/withdraw` | — | **T8** | `orders.propose_changes` |
 | `admin.orders.quotes.store` | POST | `…/quotes` | `fromQuoteId?`, `negotiationId?` | `BuildQuoteDraft` / copy → redirect builder | `quotes.create` |
@@ -117,9 +117,9 @@ All mutating routes redirect back with `flash.success` unless stated. 409 (trans
 | `admin.orders.messages.store` | POST | `…/messages` | `body`, `kind` (`text`\|`internal_note`), `uploadIds[]` | post | `messages.post` |
 | `admin.orders.messages.update` | PATCH | `…/messages/{message}` | `body` | edit own within 10 min | `messages.post` |
 | `admin.orders.messages.read` | POST | `…/messages/read` | `lastMessageId` | mark read (204) | `orders.view` |
-| `admin.revisions.recompute-bom` | POST | `/admin/furniture-revisions/{revision}/recompute-bom` | — | re-dispatch `ComputeRevisionBom` (only if `failed`) | `quotes.create` |
+| `admin.furniture-revisions.recompute-bom` | POST | `/admin/furniture-revisions/{revision}/recompute-bom` | — | re-dispatch `ComputeRevisionBom` (only if `failed`) | `quotes.create` |
 
-Cut-list exports (CSV/PDF) use the routes of `08` §8 (Appendix B7).
+Cut-list exports (CSV/PDF) use the routes of `08` §8: `admin.furniture-revisions.cutlist.csv` (GET `/admin/furniture-revisions/{revision}/cutlist.csv`), `admin.furniture-revisions.cutlist.pdf.store` (POST `/admin/furniture-revisions/{revision}/cutlist-pdf`), `admin.furniture-revisions.cutlist.pdf.show` (GET same path) — permission `orders.view`; the item viewer passes the item's pinned revision.
 
 **Customers, projects, furniture, AI, imports**
 
@@ -136,7 +136,7 @@ Cut-list exports (CSV/PDF) use the routes of `08` §8 (Appendix B7).
 | `admin.customers.ai-credits.grant` / `.revoke` (18) | POST | `/admin/customers/{user}/ai-credits/grant`, `/revoke` | `amount` (1–1000), `note` (3–255) | `ai.manage` |
 | `admin.imports.refund` (18) | POST | `/admin/imports/{import}/refund` | `note` (3–255) | `ai.manage` |
 | `admin.furniture.store` (07) | POST | `/admin/furniture` | `projectId`, `name`, `templateKey`, `presetId?`, `document` | `plans.edit_any` |
-| `admin.furniture.save-as-preset` | POST | `/admin/furniture/{design}/save-as-preset` | `name`, `category`, `description?`, `source` (`working`\|`revision`), `revisionId?` | `presets.manage` |
+| `admin.furniture.save-as-preset` | POST | `/admin/furniture/{design}/save-as-preset` | `name`, `category`, `description?`, `source` (`working`\|`revision`), `revisionId?`, `thumbnailUploadId?` (upload intent, purpose `preset_thumbnail`) | `presets.manage` |
 | `admin.ai.usage.export` (18) | GET | `/admin/ai/usage/export?month=` | CSV | `ai.manage` |
 
 Import re-run uses `api.imports.rerun` `{ useAi }` (`06` A11; staff runs are free).
@@ -197,8 +197,8 @@ Import re-run uses `api.imports.rerun` `{ useAi }` (`06` A11; staff runs are fre
 |---|---|---|---|---|
 | `api.staff.search` | GET | `/api/staff?search=&permission=` | `{ data: UserRefData[] }` (active staff, optional permission filter) | `orders.view` |
 | `api.customers.search` | GET | `/api/customers?search=` | `{ data: { id, name, email, phoneE164 }[] }` (max 20) | `customers.view` |
-| `api.revisions.bom-status` | GET | `/api/furniture-revisions/{revision}/bom-status` | `{ bomStatus }` | `orders.view` |
-| `api.change-proposal-items.draft` (03, 09) | PUT | `/api/change-proposal-items/{item}/draft` | `03` §5 | `orders.edit_designs` |
+| `api.furniture-revisions.bom-status` | GET | `/api/furniture-revisions/{revision}/bom-status` | `{ bomStatus }` | `orders.view` |
+| `api.change-proposal-items.draft` (03, 09) | PUT | `/api/change-proposal-items/{item}/draft` | `03` §5 | `orders.propose_changes` |
 | `api.system.storage-check` | POST | `/api/admin/system/storage-check` | `{ ok, durationMs, error? }` | `settings.manage` |
 | shared: `api.uploads.*` (13), `api.notifications.*` (12), `api.push-subscriptions.*` (12), `api.imports.*` (06), `api.furniture-revisions.show` (10), `media.show` (13) | | | | |
 
@@ -226,7 +226,7 @@ interface OrderBoardCardData {
   assignee: UserRefData | null; productionAssignee: UserRefData | null;
   itemCount: number; quoteTotalMinor: number | null;
   productionProgress: number;
-  stateChangedAt: IsoDateTime;             // orders.state_changed_at (Appendix B1)
+  stateChangedAt: IsoDateTime;             // orders.state_changed_at (02 §8.1)
   attention: { reason: AttentionReason; since: IsoDateTime; overdue: boolean } | null;
   unreadMessages: number;                  // for the current staff user
   submittedAt: IsoDateTime | null; updatedAt: IsoDateTime;
@@ -289,7 +289,7 @@ interface AdminQuoteData extends Omit<QuoteData, 'status' | 'lines'> {
   costSnapshot: QuoteCostSnapshotData | null;   // quotes.view_costs only
   createdBy: UserRefData; catalogVersion: number; engineVersion: string;
   pdfStatus: 'none' | 'rendering' | 'ready' | 'failed';
-  updatedAt: IsoDateTime;                  // optimistic-lock token for drafts (Appendix B10)
+  updatedAt: IsoDateTime;                  // optimistic-lock token for drafts (`updated_at`; 409 `version_conflict` on mismatch, no extra column)
 }
 interface QuoteCostSnapshotData {          // camelCased view of quotes.cost_snapshot (shape owned by 08 §6)
   items: { orderItemId: Ulid; directCostMinor: number; priceMinor: number }[];
@@ -309,7 +309,7 @@ interface ProductionStageData { key: string; label: string; defaultProgress: num
 - Shared prop `staffCounters` (`{ submitted, toCall }`) feeds sidebar badges (lazy, cached 30 s), refreshed by `useStaffChannel` (`OrderSubmitted`, `OrderNeedsAttention`) via `router.reload({ only: ['staffCounters'] })` throttled 10 s.
 - **Global search** (top bar) → `admin.orders.index?view=list&search={q}`: matches order number (prefix, with or without `ORD-`), customer name/email/phone digits, order title.
 - **Breadcrumbs** via `#breadcrumbs` slot on every page.
-- **Health banners** (`12` §11, `13` §4.5): when cache keys `health:whatsapp`, `health:sms` or `health:otp` report problems, `AdminLayout` shows a dismissible warning bar to users with `settings.manage` linking to Settings → Notifications (shared prop `healthBanners: { key: string; messageKey: string }[]`, Appendix B12).
+- **Health banners** (`12` §11, `13` §4.5): when cache keys `health:whatsapp`, `health:sms` or `health:otp` report problems, `AdminLayout` shows a dismissible warning bar to users with `settings.manage` linking to Settings → Notifications (shared prop `healthBanners: { key: string; messageKey: string }[]`, 01 §6).
 
 ---
 
@@ -447,7 +447,7 @@ Per item: `Thumbnail3D` (interactive), name, template, `DimensionText`, quantity
 
 #### 5.3.6 Proposals tab
 - No draft & `can.createProposal` → card "Suggest design changes to the customer" + **Propose changes** (`admin.orders.proposals.store`).
-- **Draft card**: message textarea (≤ 5000, saved on blur → `admin.orders.proposals.update`, "Message to the customer"); every order item: "Not changed" + **Edit design** (`admin.orders.proposals.items.store` → builder) | "Edited" + **Continue editing** (`editHref`) + **Discard changes** (Confirm → `admin.orders.proposals.items.destroy`) + **Note to customer** (≤ 2000, saved on blur). Footer: **Preview** (≥ 1 edited) → preview page; **Send to customer** (T6; Confirm "Send proposal #{n} with {k} changed item(s)? The order will wait for the customer's decision."; 422 `proposal_empty` → `proposals.errors.empty` "None of the edited designs differ from the current version."; engine errors in a staff draft block sending per `07` Appendix 2); **Discard draft**.
+- **Draft card**: message textarea (≤ 5000, saved on blur → `admin.orders.proposals.update`, "Message to the customer"); every order item: "Not changed" + **Edit design** (`admin.orders.proposals.items.store` → builder) | "Edited" + **Continue editing** (`editHref`) + **Discard changes** (Confirm → `admin.orders.proposals.items.destroy`) + **Note to customer** (≤ 2000, saved on blur). Footer: **Preview** (≥ 1 edited) → preview page; **Send to customer** (T6; Confirm "Send proposal #{n} with {k} changed item(s)? The order will wait for the customer's decision."; 422 `proposal_empty` → `proposals.errors.empty` "None of the edited designs differ from the current version."; engine errors in a staff draft block sending per 09 T6); **Discard draft**.
 - **Sent/resolved/withdrawn** cards: status, sent date, message, per item `DiffList` (major; expand), price before/after, customer decisions + comments; **Withdraw** on the sent one (`can.withdrawProposal`).
 - Phone: read-only (no edit buttons).
 
@@ -526,7 +526,7 @@ interface ItemDesignProps {
 }
 ```
 - `PageHeader` "{item}" ("Order {number} · Revision #{n} ({reason}) · Qty {quantity}"), back → Items tab. Actions: **Export cut list** (CSV / PDF via `08` §8 routes), **Save as preset** (`can.saveAsPreset`; dialog name*, category*, description → `admin.furniture.save-as-preset` `source=revision`), revision `Select`.
-- BOM `pending`: BOM tabs show `LoadingState` + "Calculating materials… this usually takes a few seconds."; poll `api.revisions.bom-status` every 5 s then reload `revision`. `failed`: `ErrorState` + **Recompute** (`can.recompute`).
+- BOM `pending`: BOM tabs show `LoadingState` + "Calculating materials… this usually takes a few seconds."; poll `api.furniture-revisions.bom-status` every 5 s then reload `revision`. `failed`: `ErrorState` + **Recompute** (`can.recompute`).
 - Tabs: **Model** (read-only viewer from `07`, 3D + elevation, dims, materials per role via `catalogLabels`, notes); **Cut list** (`DataTable` of `bom.cutList`: #, Part `t(nameKey, nameParams)`, Material (name + mono code), T, Length, Width, Cut L, Cut W, Qty, Grain icon, Edges L1/L2/W1/W2 chips; totals; lengths always in **mm**); **Edge banding** (code, name, metres 2 dp); **Hardware** (code, name, category, qty, unit, reason); **Sheets & nesting** (per material: sheets billed/nested, utilisation, net area; `NestingSheetSvg` per sheet — fit-width scale, hatched trim, labelled parts, ↻ for rotated, dashed guillotine cuts `--dimension`; **Print sheets** one per page; unplaced parts → danger Alert `bom.part_exceeds_sheet`); **Costs** (`can.viewCosts` only — `PriceBreakdown` lines and totals: material, edge band, hardware, finishing, labour, direct cost, overhead, margin, unit price, installation, total before tax; note "Computed with catalog v{n}, engine {v} on {date}"; warning when the catalog changed since); **Issues** (BOM + model issues incl. `furniture.override_orphaned`); **Revisions** (list; `DiffList` vs previous).
 Phone: Model, Cut list (card rows), Hardware readable.
 Acceptance: production staff can export the cut list but never see the Costs tab.
@@ -634,7 +634,7 @@ Tabs: **Overview** (contact links, timezone/units, addresses, **Internal notes**
 Props `{ project: ProjectData & { owner: { id: Ulid; name: string } }; plans: PlanSummaryData[]; designs: FurnitureDesignSummaryData[]; orders: OrderBoardCardData[]; imports: ImportSummaryData[]; can: { editPlans: boolean; createDesign: boolean; startImport: boolean } }`. Same sections as `10` §7.3 without customer actions; plans → `admin.plans.edit`; designs → `admin.furniture.edit`; imports → `admin.imports.show`; **New design for customer** (`plans.edit_any` → `admin.furniture.create?project=`). Starting a blueprint import on a customer's behalf is allowed by policy (`13` §7.2) but has no admin page in v1 (staff ask the customer to upload, or trace in the plan editor's background tools per `05`).
 
 ### 6.4 Customer plan — `admin.plans.edit` · `Admin/Plans/Edit`
-Props as `10` §8.2 plus `customer: { id: Ulid; name: string }`; `readOnly = !can('plans.edit_any')` (and on phones). Banner when editing: `admin.plans.editing_banner` "You're editing {customer}'s plan. A backup revision is saved before your first change." (`03` §5 staff_edit). Back → `admin.projects.show`. No placement handoff.
+Props as `10` §8.2 plus `customer: { id: Ulid; name: string }`; `canLock = can('plans.edit_any')` (lock/unlock via `api.plans.lock.store|destroy`, 05 §1.4); `readOnly` = true with `readOnlyReason = 'no_permission'` without `plans.edit_any`, `'plan_locked'` while the plan is locked, `'archived'` for archived projects (and on phones). Banner when editing: `admin.plans.editing_banner` "You're editing {customer}'s plan. A backup revision is saved before your first change." (`03` §5 staff_edit). Back → `admin.projects.show`. No placement handoff.
 
 ### 6.5 Customer furniture — `admin.furniture.create`, `admin.furniture.edit`
 Owned by `07` (`Admin/Furniture/Create` with project picker; `Admin/Furniture/Edit` mode `staff` for unlocked designs with `plans.edit_any`, else `readonly`; banner "Editing {customer}'s design"). Page addition: **Save as preset** in `#topbar-end` (`presets.manage`, `source=working`); locked designs link to their order.
@@ -683,7 +683,7 @@ Help popover: **Hide** = not offered for new choices, existing designs keep work
 
 ### 8.2 Tables and form rules
 Money: `CurrencyInput` (minor units); percentages `PercentInput`; colours: colour input + hex.
-- **Materials** — columns: swatch/texture, Code, Name, Board type, Thickness, Sheet L × W, Grain, Price/sheet, Status; filters board type, surface. Form: `code`* (≤ 40, `^[A-Z0-9][A-Z0-9._-]*$`, unique incl. archived: "This code is already used."), `name`* ≤ 120, `boardType`*, `thicknessMm`* 1.0–100.0 (0.1), `sheetLengthMm`* 300–6000, `sheetWidthMm`* 300–3000, `hasGrain`, `decorName` ≤ 120, `colorHex` (`^#[0-9a-fA-F]{6}$`, stored lower-case), `surface`*, `pricePerSheetMinor`* ≥ 0, `wasteFactor`* 0–0.500 (shown %), `densityKgM3` 50–3000 or empty, `usage`* (≥ 1 of MaterialRole values plus `glass` per `07` Appendix 4: "Choose at least one use."), `defaultEdgeBandCode`, `isActive`, `sortOrder`, texture (`ImageUploader` single, purpose `material_texture`; "seamless 1024 × 1024").
+- **Materials** — columns: swatch/texture, Code, Name, Board type, Thickness, Sheet L × W, Grain, Price/sheet, Status; filters board type, surface. Form: `code`* (≤ 40, `^[A-Z0-9][A-Z0-9._-]*$`, unique incl. archived: "This code is already used."), `name`* ≤ 120, `boardType`*, `thicknessMm`* 1.0–100.0 (0.1), `sheetLengthMm`* 300–6000, `sheetWidthMm`* 300–3000, `hasGrain`, `decorName` ≤ 120, `colorHex` (`^#[0-9a-fA-F]{6}$`, stored lower-case), `surface`*, `pricePerSheetMinor`* ≥ 0, `wasteFactor`* 0–0.500 (shown %), `densityKgM3` 50–3000 or empty, `usage`* (≥ 1 of MaterialRole values plus `glass` per 02 §6.1: "Choose at least one use."), `defaultEdgeBandCode`, `isActive`, `sortOrder`, texture (`ImageUploader` single, purpose `material_texture`; "seamless 1024 × 1024").
 - **Edge bands** — Code, Name, Thickness × Width, Price/m, Status. Form: `code`*, `name`*, `thicknessMm`* 0.10–5.00, `widthMm`* 10–100, `colorHex`, `pricePerMeterMinor`* ≥ 0, `isActive`.
 - **Hardware** — image, Code, Name, Category, Unit, Price, Defaults, Status; filter category. Form: `code`*, `name`* ≤ 160, `category`*, `unit`*, `priceMinor`* ≥ 0, **specs** (category fields from `resources/js/lib/catalog/hardwareSpecFields.ts` mirroring `08` §2.3; fallback JSON textarea: `catalog.errors.specs_json` "Specs must be a valid JSON object."), `isDefaultFor` (`tags-input` of role keys from `07` §6.11: `catalog.errors.default_role_unknown` "Unknown role key {key}."; one item per key enforced by the Upsert action), image (`hardware_image`), `isActive`, `sortOrder`.
 - **Finishes** — swatch, Code, Name, Type, Price/m², Applies to, Status. Form: `code`*, `name`*, `finishType`*, `pricePerSqmMinor`* ≥ 0, `appliesTo`* (≥ 1 board type), `colorHex`, texture (`finish_texture`), `isActive`.
@@ -722,7 +722,7 @@ interface AdminPresetData {
 Grouped by category (accordion); rows sortable (drag handle + Alt+↑/↓; optimistic → `admin.presets.reorder`). Row: thumbnail, name, template ("Template disabled" warning pill → hidden from customers), dims, active `Switch`, actions **Edit details** (Sheet: name*, slug* `^[a-z0-9-]+$` unique, category*, description ≤ 2000, active), **Open builder**, Duplicate, Delete (soft; "Existing designs made from it are not affected."). Hint: "Use **Save as preset** on any design or order item." Empty `armchair` "No presets yet" + **New preset**.
 
 ### 9.2 New preset — `admin.presets.create` · `Admin/Presets/Create`
-Props `{ templates: { key: string; label: string; description: string; icon: string; isEnabled: boolean }[]; categories: { key: string; label: string }[] }`. Choose template (cards), name*, category*, description → `admin.presets.store` (document = template defaults with `default_overrides`, via engine CLI `template-default`, Appendix B8) → builder.
+Props `{ templates: { key: string; label: string; description: string; icon: string; isEnabled: boolean }[]; categories: { key: string; label: string }[] }`. Choose template (cards), name*, category*, description → `admin.presets.store` (document = template defaults with `default_overrides`, via engine CLI `template-default`, 01 §5.4) → builder.
 
 ### 9.3 Preset builder — `admin.presets.builder` · `Admin/Presets/Builder`
 EditorLayout, builder in preset mode (`07`; no lock/order logic, explicit save). Props `{ preset: AdminPresetData; document: FurnitureDocument; updatedAt: IsoDateTime; catalogVersion: number }`. **Save preset** → `api.presets.document.update` (`document`, `updatedAt`, thumbnail uploaded first with purpose `preset_thumbnail` → `thumbnailUploadId`); 409 → Reload / Overwrite; 422 → issues list. Unsaved-changes guard. Desktop/tablet only.
@@ -781,16 +781,16 @@ pricesIncludeTax (warning "Affects new quotes and estimates only."); defaultTaxR
 
 ### 12.4 Workflow — `settings.manage`
 Meta `{ usedStageKeys: string[] }`.
-quoteValidityDays* 1–90; autoCloseDays* 1–90; reminderAfterHours* 12–168; requireCompletionPhotos* 0–20; allowCustomerCounterOffer; maxNegotiationRounds* 1–20; minPreferredDeliveryDays* 0–90 (`10` Appendix A5); **productionStages** editor (desktop/tablet): ordered rows (drag), **Key** (editable only for new rows; `^[a-z][a-z0-9_]{1,31}$`, unique, not `completed`: `settings.errors.stage_key`), **Label** (built-in rows show `t(labelKey)` with optional custom `label` override; new rows require `label` ≤ 60), **Default progress*** 1–99 strictly increasing ("Each stage's progress must be higher than the previous one."); delete disabled for `usedStageKeys` ("Used by existing updates — can't be removed."); ≥ 1 stage. Shape: Appendix B6.
+quoteValidityDays* 1–90; autoCloseDays* 1–90; reminderAfterHours* 12–168; requireCompletionPhotos* 0–20; allowCustomerCounterOffer; maxNegotiationRounds* 1–20; minPreferredDeliveryDays* 0–90 (02 §13 `workflow.min_preferred_delivery_days`); **productionStages** editor (desktop/tablet): ordered rows (drag), **Key** (editable only for new rows; `^[a-z][a-z0-9_]{1,31}$`, unique, not `completed`: `settings.errors.stage_key`), **Label** (built-in rows show `t(labelKey)` with optional custom `label` override; new rows require `label` ≤ 60), **Default progress*** 1–99 strictly increasing ("Each stage's progress must be higher than the previous one."); delete disabled for `usedStageKeys` ("Used by existing updates — can't be removed."); ≥ 1 stage. Item shape: 02 §13 `workflow.production_stages`.
 
 ### 12.5 Notifications — `settings.manage`
-Content per `12` (Appendix F, §7.5, §8.1, §6.2, §11): **WhatsApp templates** table (per event × audience, pre-filled from config, fields name / language / components editor per `12` A.3 shape, status chips from `whatsapp:templates:check`, **Send test** per row); **SMS** driver (`twilio`\|`msg91`\|`log`) and per-event `textKey` / `dltTemplateId` / `providerTemplateId` (DLT id required for msg91: "DLT template ID is required for MSG91."); **Quiet hours** (enabled, start, end `HH:MM`); **OTP channel order** (sortable `whatsapp`, `sms`); **Staff digest hour** 0–23; **Health** (channel health from `health:whatsapp`/`health:sms`, 30-day counts by status and pricing category, inbound counter); **Recent deliveries** (last 50, masked) with link to the full log (§15). **Send a test** (channel, recipient) → `admin.settings.notifications.test`.
+Content per `12` (§7.5, §8.1, §6.2, §11): **WhatsApp templates** table (per event × audience, pre-filled from config, fields name / language / components editor per the `notifications.whatsapp_templates` shape of 02 §13, status chips from `whatsapp:templates:check`, **Send test** per row); **SMS** driver (`twilio`\|`msg91`\|`log`) and per-event `textKey` / `dltTemplateId` / `providerTemplateId` (DLT id required for msg91: "DLT template ID is required for MSG91."); **Quiet hours** (enabled, start, end `HH:MM`); **OTP channel order** (sortable `whatsapp`, `sms`); **Staff digest hour** 0–23; **Health** (channel health from `health:whatsapp`/`health:sms`, 30-day counts by status and pricing category, inbound counter); **Recent deliveries** (last 50, masked) with link to the full log (§15). **Send a test** (channel, recipient) → `admin.settings.notifications.test`.
 
 ### 12.6 AI — gate `settings.manage_restricted`
 Content per `18` §15.2 (provider cards with capability status, model, effort, agentic crops, fallback, credits, limits, budget + behaviour, price table, staff unlimited, **Test connection** → `admin.settings.ai.test`). Note "API keys are configured on the vision service."
 
 ### 12.7 Security (auth group) — gate `settings.manage_restricted`
-Fields (`13` A.4): allowCustomerRegistration; otpAllowedCountryCodes (multi-select ISO countries, ≥ 1); otpGlobalHourlyCap 10–10 000; staffSessionAbsoluteHours 1–72. Read-only status: `features.captcha`, OTP conversion monitor banner (`health:otp`).
+Fields (02 §13 `auth` group, 13 §4): allowCustomerRegistration; otpAllowedCountryCodes (multi-select ISO countries, ≥ 1); otpGlobalHourlyCap 10–10 000; staffSessionAbsoluteHours 1–72. Read-only status: `features.captcha`, OTP conversion monitor banner (`health:otp`).
 
 ---
 
@@ -841,7 +841,7 @@ Real-time: `useImportChannel` → reload on status change. Phone: overview, erro
 ---
 
 ## 15. Notifications log — `admin.notifications-log.index` · `Admin/NotificationsLog/Index` (`customers.view`)
-Binds to `notification_deliveries` (`12` Appendix A.1; WhatsApp and SMS only — mail, push and in-app are not recorded).
+Binds to `notification_deliveries` (02 §1.7; WhatsApp and SMS only — mail, push and in-app are not recorded).
 Query: `filter[channel]` (`whatsapp`\|`sms`), `filter[status]` (multi), `filter[event]`, `filter[from]`/`filter[to]`, `search` (customer name, order number).
 Props `{ deliveries: Paginated<NotificationDeliveryData>; filters: …; events: { key: string; label: string }[] }`.
 ```ts
@@ -880,14 +880,14 @@ Props (each card a separate deferred group):
 interface SystemIndexProps {
   app: { version: string; environment: string; php: string; laravel: string; engineVersion: string; catalogVersion: number; timezone: string; features: Record<string, boolean> };
   queues: Inertia.Deferred<{ horizonStatus: 'running' | 'paused' | 'inactive'; queues: { name: string; pending: number; waitSeconds: number | null }[]; failedLast24h: number; recentFailed: { id: string; job: string; queue: string; failedAt: IsoDateTime; exceptionHead: string }[] }>;
-  scheduler: Inertia.Deferred<{ lastHeartbeatAt: IsoDateTime | null; healthy: boolean }>;   // < 2 min old
+  scheduler: Inertia.Deferred<{ lastHeartbeatAt: IsoDateTime | null; healthy: boolean }>;   // healthy = heartbeat < 3 min old (same rule as /up/deep, 17)
   vision: Inertia.Deferred<{ reachable: boolean; stale: boolean; latencyMs: number | null; version: string | null; capabilities: unknown | null; error: string | null }>;   // VisionClient::capabilities (18 §5.2)
   gotenberg: Inertia.Deferred<{ reachable: boolean; latencyMs: number | null; error: string | null }>;
   channels: { mail: { driver: string; configured: boolean }; whatsapp: { configured: boolean; healthy: boolean | null }; sms: { driver: string; configured: boolean; healthy: boolean | null }; webpush: { configured: boolean } };
   links: { horizon: string | null; pulse: string | null };
 }
 ```
-Cards with status dots: **Application**; **Queues** (Horizon status, pending/wait per queue, failures with recent list, **Open Horizon**); **Scheduler** (heartbeat); **Real-time** (client Echo state + host); **Vision service** (reachable/stale, latency, version, providers/models, OCR, raw `JsonViewer`); **PDF (Gotenberg)**; **Storage** (**Run check** → `api.system.storage-check`); **Notification channels**; **Open Pulse**. **Refresh** reloads all groups.
+Cards with status dots: **Application**; **Queues** (Horizon status, pending/wait per queue, failures with recent list, **Open Horizon**); **Scheduler** (heartbeat cache key `health:scheduler:heartbeat`, written every minute, 01 §7); **Real-time** (client Echo state + host); **Vision service** (reachable/stale, latency, version, providers/models, OCR, raw `JsonViewer`); **PDF (Gotenberg)**; **Storage** (**Run check** → `api.system.storage-check`); **Notification channels**; **Open Pulse**. **Refresh** reloads all groups.
 Acceptance: with the vision service down the page loads in < 4 s and shows "Unreachable".
 
 ---
@@ -927,34 +927,4 @@ AdminLayout + `AccountNav` (Profile · Security · Two-factor · Preferences · 
 
 ---
 
-## Appendix: Proposed additions to other documents
-
-**B1 — 02 §8.1 `orders`:** `state_changed_at timestamptz not null default now()` (set by every transition incl. hold/resume; index (`state`, `state_changed_at`)).
-
-**B2 — 02 §8.11 `deliveries`:** `scheduled_until timestamptz null` (same as `10` A4).
-
-**B3 — Permission usage (13):** no new names. Imports monitor `customers.view`; import re-run/refund and AI usage/ledger/credit grants `ai.manage`; AI settings gate `settings.manage_restricted`; costs `quotes.view_costs`; cut-list export `orders.view`. Conflicts to reconcile in review: `06` proposes `imports.view_all`/`imports.manage`; `18` proposes `settings.ai.manage`/`ai.credits.manage`/`ai.usage.view`; `07` proposes `furniture.view_costs`/`furniture.export_cutlist` — this file follows `13`'s exhaustive list. System health `settings.manage`; production assignee `orders.assign`.
-
-**B4 — Notifications log** binds to `12`'s `notification_deliveries` (no new table).
-
-**B5 — Scheduler heartbeat (01 §7):** every minute `Cache::put('scheduler:heartbeat', now()->toIso8601String(), 600)`.
-
-**B6 — 02 §13 `workflow.production_stages` item:** `{ key: string, label_key: string | null, label: string | null, default_progress: int }` (built-ins use `label_key = production.stages.{key}`; custom stages `label`; key `completed` reserved). Plus `workflow.min_preferred_delivery_days` (`10` A5).
-
-**B7 — Cut-list exports:** the item viewer uses `08` §8's cut-list CSV/PDF routes; if `08` provides none for a pinned revision, add `admin.orders.items.cut-list` GET `/admin/orders/{order}/items/{item}/cut-list?format=csv|pdf` (CSV streamed; PDF via `RenderCutListPdf` cached at `exports/cut-lists/{revision_id}-c{catalog_version}.pdf`, status `api.revisions.cut-list-pdf`).
-
-**B8 — Engine CLI (01 §5.4):** command `template-default` — `{ templateKey, overrides, catalog }` → `{ document, issues }`.
-
-**B9 — Routes:** `admin.account.avatar.update`, `admin.account.preferences.update`, `admin.account.notifications.reset`, `admin.account.notifications.test-push`; `admin.settings.{group}` / `.update` for `business|units|pricing|workflow|notifications|ai|auth` (`18`'s `admin.settings.ai` fits this pattern); `admin.settings.notifications.test`; `api.staff.search`, `api.customers.search`, `api.revisions.bom-status`, `api.system.storage-check`; `admin.furniture.save-as-preset`; `admin.revisions.recompute-bom`.
-
-**B10 — Quote draft optimistic lock:** `updated_at` as lock token (`409 version_conflict`); no new column.
-
-**B11 — Presets document endpoint:** `api.presets.document.update` PUT `/api/furniture-presets/{preset}/document` `{ document, updatedAt, thumbnailUploadId? }` → `{ updatedAt }`; 409 `version_conflict`; 422 `invalid_document`. Save-as-preset creates `is_active = false`.
-
-**B12 — Shared prop** `healthBanners: { key: string; messageKey: string }[]` for staff with `settings.manage` (from `health:whatsapp`, `health:sms`, `health:otp`).
-
-**B13 — Activity properties:** T26 stores `reason` (→ `holdReason`); customer deactivation stores `reason`.
-
-**B14 — Component name:** `13` names `Admin/Account/Security.vue` as the 2FA page; this file splits it: `admin.account.security` → `Admin/Account/Security` (password, Google, sessions) and `admin.security.two-factor` → `Admin/Account/TwoFactor`.
-
-**B15 — Staff customer creation:** `admin.customers.store` creates `type = customer`, `onboarded_at = null`, `terms_accepted_at = null` (the customer accepts terms at first login: onboarding shows a required terms checkbox when `terms_accepted_at` is null); `sendPasswordLink` uses the Fortify reset broker.
+_Appendix merged into the target documents during reconciliation (see 19-reconciliation-log.md)._

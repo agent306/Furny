@@ -2,7 +2,7 @@
 
 Read the master document, `01-architecture.md`, `02-data-model.md`, `03-design-documents.md` first. This file is normative for: accepted upload formats, the `blueprint_imports` state machine, every Laravel class/route/job involved in importing, the Python vision service (layout, HTTP API, pipeline algorithms, prompts, schemas), the customer review/correction UX, trace mode, error codes, tests and acceptance criteria. AI provider plumbing (adapters, credentials, credits, budgets, usage metering) is in `18-ai-providers-and-quotas.md`; this file references it as **18**.
 
-Everything here is decided. Where something is needed that is not yet in `02`/`03`/`13`/`14`, it is used here and listed in the final **Appendix**.
+Everything here is decided. Tables and columns are defined in `02` (§4.1 `blueprint_imports`, §1.6 `upload_intents`), document types and engine commands in `03`/`04`, permissions and upload security in `13`, notifications in `12`, AI credits/providers in `18`; route names are registered in `14`.
 
 ---
 
@@ -30,7 +30,7 @@ Everything here is decided. Where something is needed that is not yet in `02`/`0
 ### 1.1 Auto import (recognition)
 
 1. Customer opens a project → **Import blueprint** (`customer.projects.imports.create`). Chooses **Analyze automatically** (default) or **Trace it myself (free)**. Optionally chooses "Replace plan: …" (dropdown of the project's plans) — default "Create a new plan".
-2. Drops/selects a file. Client validates extension, MIME and size (§2), calls `POST /api/projects/{project}/imports` → receives presigned PUT → uploads directly to S3 with a progress bar → calls `POST /api/imports/{import}/confirm`.
+2. Drops/selects a file. Client validates extension, MIME and size (§2) and uploads it with the shared upload-intent flow (13 §11, `FileDropzone` 15): `POST /api/uploads/presign` (`api.uploads.presign`, purpose `blueprint_source`, target = the project) → direct PUT to S3 with a progress bar → `POST /api/uploads/{upload}/confirm` → poll `GET /api/uploads/{upload}` until `ready` (a `rejected` intent shows the matching §2.1/§14 message, e.g. `dwg_not_supported`). Then the client calls `POST /api/projects/{project}/imports` (A1) with `{uploadId, mode, planId?}`, which creates the import directly in status `uploaded`.
 3. Page `customer.imports.show` shows "Checking your file…" while `PrepareImportPreview` runs (≤ 30 s, usually < 5 s).
 4. Options step (same page, state `uploaded` + `source_kind` set):
    - PDF with > 1 page: page picker grid of thumbnails (required choice; default page 1).
@@ -61,7 +61,7 @@ Same as auto import; no page/corner step. Charged as provider `none` (18 §8.3).
 
 ### 2.1 Formats
 
-| Kind (`source_kind`) | Extensions | Declared MIME accepted at presign | Magic bytes (sniffed on confirm by `PrepareImportPreview`) | Max size |
+| Kind (`source_kind`) | Extensions | Declared MIME accepted at presign | Magic bytes (sniffed by `ProcessUpload` (13 §11.3) and again by `PrepareImportPreview`) | Max size |
 |---|---|---|---|---|
 | `raster` | `.jpg .jpeg .png .webp` | `image/jpeg`, `image/png`, `image/webp` | JPEG `FF D8 FF`; PNG `89 50 4E 47 0D 0A 1A 0A`; WebP `RIFF????WEBP` | 25 MB |
 | `heic` | `.heic .heif` | `image/heic`, `image/heif`, `application/octet-stream` | bytes 4–11 = `ftypheic`, `ftypheix`, `ftyphevc`, `ftypheim`, `ftypheis`, `ftypmif1`, `ftypmsf1` | 25 MB |
@@ -82,15 +82,15 @@ Rejected with specific messages:
 
 | Limit | Value | Enforced where |
 |---|---|---|
-| File size | 25 MB (raster/PDF/HEIC), 15 MB (DXF) | presign (signed `Content-Length`), confirm (`HEAD` object), vision fetch (streaming cap) |
+| File size | 25 MB (raster/PDF/HEIC), 15 MB (DXF) | upload presign (13 §11.2, signed `Content-Length`), upload confirm (`HeadObject`, 13 §11.3), vision fetch (streaming cap) |
 | PDF pages | ≤ 20 | `/v1/inspect` → `pdf_too_many_pages` |
 | Decoded pixels | > 120 MP → reject `image_too_large`; 40–120 MP → downscale to 40 MP (INTER_AREA) with warning `image_downscaled` | vision decode (`PIL.Image.MAX_IMAGE_PIXELS = 120_000_000`) |
 | Min image size | short edge ≥ 300 px, else `image_too_small` | vision decode |
 | DXF entities | ≤ 200 000 after block explosion, else `dxf_too_complex` | vision DXF reader |
 | Result size | ≤ 2000 walls, 1000 openings (03 `plan.too_large`), else `too_complex` | vision validate |
 | Active imports per user | ≤ 2 in `queued`/`preprocessing`/`recognizing` | `StartBlueprintRecognition` → 429 `too_many_active_imports` |
-| Presign rate | 20 per hour per user | Laravel `RateLimiter` key `imports-presign:{userId}` |
-| Start rate | 10 per hour per user (plus daily limit in 18 §11) | Laravel `RateLimiter` key `imports-start:{userId}` |
+| Presign rate | limiter `uploads-presign` (13 §10; shared by all upload purposes) | `api.uploads.presign` |
+| Start rate | 10 per hour per user (plus daily limit in 18 §11) | limiter `imports-start` (13 §10) on A5 and A11 |
 
 ---
 
@@ -100,10 +100,8 @@ Rejected with specific messages:
 
 | From | To | Action / job | Notes |
 |---|---|---|---|
-| — | `awaiting_upload` | `CreateBlueprintImport` | Row + presigned PUT |
-| `awaiting_upload` | `uploaded` | `ConfirmImportUpload` | Object exists, size ≤ limit; moves object into media `source`; dispatches `PrepareImportPreview` |
-| `awaiting_upload` | `failed` | `ConfirmImportUpload` | `upload_missing` / `file_too_large` |
-| `awaiting_upload`, `uploaded`, `queued` | `cancelled` | `CancelImport` | User; or `imports:cleanup-stale` (`awaiting_upload` > 24 h, `uploaded` > 7 days). `queued` → releases reservation (18 §9.4) |
+| — | `uploaded` | `CreateBlueprintImport` | consumes a `ready` `blueprint_source` upload intent (13 §11.3 step 7); attaches media `source`; dispatches `PrepareImportPreview` |
+| `uploaded`, `queued` | `cancelled` | `CancelImport` | User; or `imports:cleanup-stale` (`uploaded` > 7 days). `queued` → releases reservation (18 §9.4) |
 | `uploaded` | `failed` | `PrepareImportPreview` | sniff/inspect errors (§14) |
 | `uploaded` | `queued` | `StartBlueprintRecognition` | requires `source_kind` not null; auto mode reserves credits; dispatches `RunBlueprintRecognition` |
 | `queued` | `preprocessing` | `RunBlueprintRecognition` (start) | sets `started_at`, `attempts + 1` |
@@ -134,12 +132,12 @@ app/Domain/Imports/
 ├─ Enums/ImportStatus.php  ImportMode.php  ImportSourceKind.php  ImportStage.php  ImportErrorCode.php
 ├─ Data/CreateImportData.php  ImportHintsData.php  ImportOptionsData.php  ImportTargetData.php
 │      ImportStatusData.php  ImportReviewSaveData.php  VisionRecognizeResultData.php
-├─ Actions/CreateBlueprintImport.php  ConfirmImportUpload.php  UpdateImportOptions.php
+├─ Actions/CreateBlueprintImport.php  UpdateImportOptions.php
 │         StartBlueprintRecognition.php  CancelImport.php  CompleteImportRecognition.php
 │         MarkImportFailed.php  SaveImportReviewDocument.php  AcceptImportIntoPlan.php
 │         DiscardImport.php  RerunBlueprintImport.php  ConvertImportToTrace.php
 ├─ Jobs/PrepareImportPreview.php  RunBlueprintRecognition.php
-├─ Events/ImportStatusChanged.php (ShouldBroadcast)  ImportReady.php  ImportFailed.php  ImportAccepted.php
+├─ Events/ImportStatusChanged.php (ShouldBroadcast)  ImportReadyForReview.php  ImportFailed.php  ImportAccepted.php
 ├─ Console/CleanupStaleImports.php           (signature imports:cleanup-stale)
 └─ Queries/ImportListQuery.php               (admin list)
 app/Support/Vision/VisionClient.php  VisionException.php  VisionBusyException.php  VisionErrorResponse.php
@@ -161,7 +159,7 @@ return [
     'max_bytes' => ['raster' => 25 * 1024 * 1024, 'pdf' => 25 * 1024 * 1024, 'heic' => 25 * 1024 * 1024, 'dxf' => 15 * 1024 * 1024],
     'max_pdf_pages' => 20,
     'max_active_per_user' => 2,
-    'presign_ttl_minutes' => 15,
+    'vision_presign_ttl_minutes' => 15,   // server-side presigns for the vision service only (§4.7); browser uploads use 13 §11
     'vision' => [
         'url' => env('VISION_SERVICE_URL', 'http://furny-vision:8000'),
         'token' => env('VISION_SERVICE_TOKEN'),
@@ -179,11 +177,11 @@ return [
 
 `final class BlueprintImport extends Model implements HasMedia` with `HasUlids`, `InteractsWithMedia`. Casts: `status` → `ImportStatus`, `mode` → `ImportMode`, `source_kind` → `ImportSourceKind`, `hints` → `array`, `result_document` → `AsJsonDocument`, `result_meta` → `array`, `started_at`/`finished_at` → `immutable_datetime`. Relations: `project()`, `plan()`, `user()`, `ledgerEntries()` (morphMany `AiCreditLedgerEntry` as `reference`), `usageEvents()` (morphMany `AiUsageEvent`).
 
-Media collections (`registerMediaCollections`): `source` (singleFile, disk `s3`), `normalized` (singleFile, `s3`, conversion `preview`: 1600 px wide WebP, `nonQueued()` false → queued on `default`), `debug` (`s3`, multiple), `pages` (`s3`, multiple; see Appendix).
+Media collections (`registerMediaCollections`): `source` (singleFile, disk `s3`), `normalized` (singleFile, `s3`, conversion `preview`: 1600 px wide WebP, `nonQueued()` false → queued on `default`), `debug` (`s3`, multiple), `pages` (`s3`, multiple; webp/jpeg ≤ 2 MB each; custom properties `page`, `kind` = `thumb|preview`, `width`, `height`; 02 §10).
 
 Helper methods: `isTerminal(): bool` (accepted, discarded, failed, cancelled), `isActiveRun(): bool` (queued, preprocessing, recognizing), `stage(): ImportStage`.
 
-### 4.3 HTTP API (JSON; all under `auth` + `verified-any` middleware as in 13; names prefixed `api.imports.`)
+### 4.3 HTTP API (JSON; API route group `['web', 'auth', 'active', 'throttle:api']` of 13 §1; names prefixed `api.imports.`; contact verification for auto mode is enforced by `BlueprintImportPolicy` at A5/A11, 13 §8.4)
 
 All responses use `ImportStatusData`:
 
@@ -216,32 +214,33 @@ interface ImportHints {
 
 | # | Method & path | Request | Success | Errors |
 |---|---|---|---|---|
-| A1 | `POST /api/projects/{project}/imports` (`api.imports.store`) | `{ filename: string ≤255, mimeType: string, sizeBytes: int, mode: 'auto'|'trace', planId?: ulid }` | 201 `{ import: ImportStatusData, upload: { url, method: 'PUT', headers: { 'Content-Type': string, 'Content-Length': string }, expiresAt } }` | 422 `file_too_large`, `unsupported_type`, `dwg_not_supported` (by extension); 429 `rate_limited`; 403 |
-| A2 | `POST /api/imports/{import}/confirm` | `{}` | 200 `ImportStatusData` (`uploaded`) | 409 state; 422 `upload_missing`, `file_too_large` (import → failed) |
-| A3 | `GET /api/imports/{import}` | — | 200 `ImportStatusData` | 403/404 |
-| A4 | `PATCH /api/imports/{import}` | `{ selectedPage?: int 1..pageCount, hints?: ImportHints }` | 200 `ImportStatusData` | 409 unless `uploaded` or `failed`; 422 validation |
-| A5 | `POST /api/imports/{import}/start` | `{ basic?: boolean }` — `true` forces provider `none` ("basic recognition", charged `credits_per_recognition_none`, 18 §8) | 202 `ImportStatusData` (`queued`) | 402 `insufficient_credits`; 409 `ai_budget_exhausted` (block mode), `invalid_import_state`, `source_not_ready`; 429 `daily_limit_reached`, `too_many_active_imports`, `rate_limited` |
-| A6 | `POST /api/imports/{import}/cancel` | `{}` | 200 | 409 |
-| A7 | `GET /api/imports/{import}/review` | — | 200 `{ document: PlanDocument, reviewVersion: int, meta: ImportResultMeta, backgroundUrl: string, backgroundPreviewUrl: string }` | 409 unless `ready_for_review` |
-| A8 | `PUT /api/imports/{import}/review-document` | `{ document: PlanDocument, baseVersion: int, review: ReviewState }` | 200 `{ version, savedAt }` | 409 `version_conflict` (03 §5 shape), 422 `invalid_document`, 409 state |
-| A9 | `POST /api/imports/{import}/accept` | `{ target: { kind: 'new', name: string ≤80, levelIndex: int -5..50 } \| { kind: 'replace', planId: ulid }, keepBackground: bool, document: PlanDocument, baseVersion: int }` | 200 `{ planId, redirectUrl }` | 422 `invalid_document` (+ `issues`), `scale_not_confirmed`; 409 `version_conflict`/state; 403 (replace target not in project) |
-| A10 | `POST /api/imports/{import}/discard` | `{}` | 200 | 409 |
-| A11 | `POST /api/imports/{import}/rerun` | `{ useAi: bool }` | 201 `ImportStatusData` of the **new** import (status `queued`) | same as A5 |
-| A12 | `POST /api/imports/{import}/convert-to-trace` | `{}` | 201 `ImportStatusData` of the new trace import (status `uploaded`) | 409 |
+| A1 | `POST /api/projects/{project}/imports` (`api.imports.store`) | `{ uploadId: ulid, mode: 'auto'|'trace', planId?: ulid }` | 201 `ImportStatusData` (`uploaded`) | 422 `upload_invalid` (intent not owned, not `ready`, wrong purpose/target or already consumed); 403 |
+| A2 | — (number kept free: upload confirmation is `api.uploads.confirm`, 13 §11.3) | | | |
+| A3 | `GET /api/imports/{import}` (`api.imports.show`) | — | 200 `ImportStatusData` | 403/404 |
+| A4 | `PATCH /api/imports/{import}` (`api.imports.update`) | `{ selectedPage?: int 1..pageCount, hints?: ImportHints }` | 200 `ImportStatusData` | 409 unless `uploaded` or `failed`; 422 validation |
+| A5 | `POST /api/imports/{import}/start` (`api.imports.start`) | `{ basic?: boolean }` — `true` forces provider `none` ("basic recognition", charged `credits_per_recognition_none`, 18 §8) | 202 `ImportStatusData` (`queued`) | 402 `insufficient_credits`; 409 `ai_budget_exhausted` (block mode), `invalid_import_state`, `source_not_ready`; 429 `daily_limit_reached`, `too_many_active_imports`, `rate_limited` |
+| A6 | `POST /api/imports/{import}/cancel` (`api.imports.cancel`) | `{}` | 200 | 409 |
+| A7 | `GET /api/imports/{import}/review` (`api.imports.review`) | — | 200 `{ document: PlanDocument, reviewVersion: int, meta: ImportResultMeta, backgroundUrl: string, backgroundPreviewUrl: string }` | 409 unless `ready_for_review` |
+| A8 | `PUT /api/imports/{import}/review-document` (`api.imports.review-document`) | `{ document: PlanDocument, baseVersion: int, review: ReviewState }` | 200 `{ version, savedAt }` | 409 `version_conflict` (03 §5 shape), 422 `invalid_document`, 409 state |
+| A9 | `POST /api/imports/{import}/accept` (`api.imports.accept`) | `{ target: { kind: 'new', name: string ≤80, levelIndex: int -5..50 } \| { kind: 'replace', planId: ulid }, keepBackground: bool, document: PlanDocument, baseVersion: int }` | 200 `{ planId, redirectUrl }` | 422 `invalid_document` (+ `issues`), `scale_not_confirmed`; 409 `version_conflict`/state; 403 (replace target not in project) |
+| A10 | `POST /api/imports/{import}/discard` (`api.imports.discard`) | `{}` | 200 | 409 |
+| A11 | `POST /api/imports/{import}/rerun` (`api.imports.rerun`) | `{ useAi: bool }` | 201 `ImportStatusData` of the **new** import (status `queued`) | same as A5 |
+| A12 | `POST /api/imports/{import}/convert-to-trace` (`api.imports.convert-to-trace`) | `{}` | 201 `ImportStatusData` of the new trace import (status `uploaded`) | 409 |
 
 Inertia pages: `GET /projects/{project}/imports/new` (`customer.projects.imports.create`, props `{ project, plans: [{id,name}], credits: CreditSummaryData, limits, features }`), `GET /imports/{import}` (`customer.imports.show`, props `{ import: ImportStatusData, credits }`), `GET /imports/{import}/review` (`customer.imports.review`, props A7 + `{ project, plans, user units }`; redirects to show page unless `ready_for_review`).
 
-Policy `BlueprintImportPolicy`: `view`/`update` — owner of the project (customer) **or** staff with `imports.view_all`/`imports.manage` (Appendix); `create` — `ProjectPolicy::update`. Staff acting on a customer's import: `user_id` remains the uploader.
+Policy `BlueprintImportPolicy` (13 §8.4, normative): `view`/`viewDebug` — uploader or project owner, or staff with `customers.view`; `update`/`cancel`/`retry`/`accept`/`convertToTrace` — uploader or project owner, or `plans.edit_any`; `discard` — uploader/owner or `ai.manage`; `rerun` — uploader/owner (charged) or `ai.manage` (free when `ai.staff_unlimited`); `refund` — `ai.manage`; `create` — own project and (trace mode or verified contact), or `plans.edit_any`. Staff acting on a customer's import: `user_id` remains the uploader.
 
-### 4.4 Presign and confirm details
+### 4.4 Creating an import from an upload
 
-`CreateBlueprintImport::handle(Project $project, User $user, CreateImportData $data): array{import: BlueprintImport, upload: array}`
-1. Validate extension ∈ §2.1 list; `.dwg` → 422 `dwg_not_supported`; size ≤ limit for the extension's kind.
-2. Insert row: `status awaiting_upload`, `mode`, `original_filename` (basename, max 255, control chars stripped), `file_size_bytes` = declared size, `plan_id` = `planId` if given and belongs to the project, `hints = {}`, `selected_page = 1`.
-3. Key `tmp/imports/{importId}/source` (no extension, no user filename in key). URL via `Storage::disk('s3')->temporaryUploadUrl($key, now()->addMinutes(15), ['ContentType' => $contentType, 'ContentLength' => $sizeBytes])` where `$contentType` = declared MIME if in the allow list else `application/octet-stream`.
-4. Return headers the browser must send exactly: `Content-Type`, and the browser sets `Content-Length` automatically (the client must upload the `File` object unchanged).
+The file itself is uploaded with the shared upload-intent mechanism (13 §11; purpose `blueprint_source`, target = the project; limits and extension rules from §2.1 enforced at presign; magic bytes incl. DWG detection checked by `ProcessUpload`; the processed object keeps the original bytes). There is no import-specific presign or confirm endpoint.
 
-`ConfirmImportUpload::handle(BlueprintImport $import)`: `Storage::disk('s3')->size($key)` (missing → failed `upload_missing`; size ≠ declared or > limit → failed `file_too_large` and object deleted). Then `$import->addMediaFromDisk($key, 's3')->usingFileName('source.'.$ext)->toMediaCollection('source')` (moves the object), status `uploaded`, dispatch `PrepareImportPreview` on queue `imports`, broadcast stage `checking_file`.
+`CreateBlueprintImport::handle(Project $project, User $user, CreateImportData $data): BlueprintImport` (A1, inside `DB::transaction`):
+1. Authorise `BlueprintImportPolicy::create` (mode-dependent, 13 §8.4).
+2. Load the upload intent `$data->uploadId` with `lockForUpdate`; it must belong to `$user`, have purpose `blueprint_source`, target = `$project`, status `ready`, `consumed_at` null — else 422 `upload_invalid`.
+3. Insert the row: `status uploaded`, `mode`, `original_filename` = intent `original_filename` (already sanitised, 13 §11.4), `file_size_bytes` = intent `declared_size`, `mime_type` = intent `sniffed_mime`, `plan_id` = `planId` if given and belongs to the project (else 422 validation error), `hints = {}`, `selected_page = 1`.
+4. `$import->addMediaFromDisk($intent->processed_key, 's3')->usingFileName('source.'.$ext)->toMediaCollection('source')` (moves the object); intent → `consumed`, `consumed_at = now()`.
+5. After commit: dispatch `PrepareImportPreview` on queue `imports`; broadcast stage `checking_file`.
 
 ### 4.5 Job `PrepareImportPreview` (queue `imports`, timeout 60 s, tries 2, backoff 15 s)
 
@@ -285,7 +284,7 @@ final class RunBlueprintRecognition implements ShouldQueue, ShouldBeUnique
 1. Load import `lockForUpdate`; if status is not `queued`/`preprocessing`/`recognizing` → return (idempotent: cancelled or already done).
 2. Status `preprocessing`, `started_at` (first attempt only), `attempts + 1`; broadcast `preparing`.
 3. Build presigned URLs: source GET (15 min); normalized PUT key `tmp/imports/{id}/normalized.png` (`ContentType image/png`, 15 min); for auto mode and `config('imports.vision.debug_outputs')` = 8 debug PUT keys `tmp/imports/{id}/debug/{0..7}` (content type `application/octet-stream`; vision sends `image/png` or `application/json` bodies; the stored content type is set when attaching from the artifact list).
-4. Trace mode: `VisionClient::normalize(...)` (§5.6) → attach normalized media → build the empty trace document (§12.1) → `result_document`, `result_meta` (with `pageImage`, `scale.method = default_guess` unless vector-PDF scale note found) → status `ready_for_review`, `finished_at` → broadcast `ready`, dispatch `ImportReady`. Return.
+4. Trace mode: `VisionClient::normalize(...)` (§5.6) → attach normalized media → build the empty trace document (§12.1) → `result_document`, `result_meta` (with `pageImage`, `scale.method = default_guess` unless vector-PDF scale note found) → status `ready_for_review`, `finished_at` → broadcast `ready`, dispatch `ImportReadyForReview`. Return.
 5. Auto mode: status `recognizing`, broadcast `analyzing`. `VisionClient::recognize($payload)` (§5.5) with HTTP timeout 600 s.
 6. On `VisionBusyException` (HTTP 503 `busy`): status back to `queued`, `$this->release($retryAfter ?? 20)`. Return.
 7. On vision error response: if `retryable` and `$this->attempts() < 2` → rethrow (job retry after 30 s); else `MarkImportFailed($code)` (refund per 18 §9.4) and return. Usage contained in the error body (`usage`, if any LLM calls happened) is recorded via `RecordUsage` with `status failed`.
@@ -297,7 +296,7 @@ final class RunBlueprintRecognition implements ShouldQueue, ShouldBeUnique
 2. Set `document.background.mediaUuid` = normalized media `uuid`, `document.background.importId` = import id.
 3. Run `EngineCli::run('validate-plan', ['document' => $doc])`. Error issues → treat as `vision_bad_response` (MarkImportFailed with refund) and log the issues in `error_message`. Warnings: append to `meta.warnings` as `{code: 'plan_validation_warning', params: {issue: code}, entityIds}`.
 4. In one transaction: `result_document` = `migratedDocument`, `result_meta` = response meta + preserved `inspect` key + `review: {reviewedIds: [], scaleConfirmed: false, unitConfirmed: false, rescaleFactor: 1}`, `review_version = 1`, `ai_provider` = `meta.providerUsed`, `ai_model` = `meta.model`, status `ready_for_review`, `finished_at = now()`; `RecordUsage` (18 §13); `CommitCredits::handle($import, $creditsUsed)` with `$creditsUsed = CreditPricing::creditsFor(meta.providerUsed, $import->user)` (18 §9.3: when the provider actually used is cheaper than reserved — fallback to `none` — only the lower amount is consumed).
-5. After commit: broadcast `ready`; dispatch `ImportReady` (notification `import.ready`, Appendix).
+5. After commit: broadcast `ready`; dispatch `ImportReadyForReview` (notification `import.ready_for_review`, 12 §3.3).
 
 ### 4.9 `MarkImportFailed::handle(BlueprintImport $import, ImportErrorCode $code, ?string $internalMessage = null)`
 
@@ -306,9 +305,9 @@ Sets status `failed`, `error_code`, `error_message` (internal text ≤ 2000 char
 ### 4.10 `imports:cleanup-stale` (hourly; extends 01 §7)
 
 1. `queued`/`preprocessing`/`recognizing` with `updated_at < now − 30 min` → `MarkImportFailed(stale_timeout)`.
-2. `awaiting_upload` older than 24 h → `cancelled`, delete `tmp/imports/{id}/*`.
-3. `uploaded` older than 7 days → `cancelled`.
-4. `ready_for_review` older than 60 days → `discarded` (no refund).
+2. `uploaded` older than 7 days → `cancelled`.
+3. `ready_for_review` older than 60 days → `discarded` (no refund).
+4. Delete leftover vision exchange objects `tmp/imports/{id}/*` of imports in a terminal status.
 5. `discarded`/`cancelled`/`failed` with `updated_at` older than 30 days → delete media `source`, `normalized`, `debug`, `pages` **unless** any plan's `working_document.background.importId` or any plan revision references this import id (query `plans.working_document->'background'->>'importId'` and `plan_revisions.document->'background'->>'importId'`).
 
 ### 4.11 `VisionClient` (`App\Support\Vision\VisionClient`)
@@ -335,7 +334,7 @@ All calls: `Http::baseUrl(config('imports.vision.url'))->withToken(config('impor
 
 ```
 vision/
-├─ pyproject.toml            project "furny-vision", python ">=3.12,<3.13", deps per 01 §1.3 (+ Appendix), uv-managed, uv.lock committed
+├─ pyproject.toml            project "furny-vision", python ">=3.12,<3.13", deps per 01 §1.3, uv-managed, uv.lock committed
 ├─ nixpacks.toml             start: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --timeout-keep-alive 650
 ├─ app/
 │  ├─ main.py                create_app(): FastAPI, routers, middleware (request id, auth, JSON logging), lifespan (warm OCR model)
@@ -373,7 +372,7 @@ vision/
 - Acquiring the heavy slot waits at most 2 s; otherwise respond **503** `{error: {code: 'busy', retryable: true}}` with header `Retry-After: 20`. Rationale: Horizon has 2 `imports` workers; a third concurrent call should queue in Laravel, not in uvicorn.
 - Heavy work runs in a worker thread (`await anyio.to_thread.run_sync(fn)`), so `/healthz` stays responsive.
 - `cv2.setNumThreads(2)`; onnxruntime `intra_op_num_threads = 2`; `OMP_NUM_THREADS=2` env.
-- Memory budget: container limit 4 GB (17); each run ≤ 1.5 GB by construction (≤ 40 MP working image, OCR in 1280 px tiles). After each heavy request call `gc.collect()`.
+- Memory budget: container limit 3.5 GB (17 §4.2); each run ≤ 1.5 GB by construction (≤ 40 MP working image, OCR in 1280 px tiles). After each heavy request call `gc.collect()`.
 - Every request carries a deadline: `/v1/recognize` 570 s from receipt (`VISION_RECOGNIZE_DEADLINE_S`), `/v1/normalize` 100 s, `/v1/inspect` 25 s. Stages check `ctx.remaining()`; exceeding a stage budget raises `VisionError('deadline_exceeded', 504, retryable=False)` except in labeling, which degrades (§9.6).
 
 ### 5.3 Authentication, logging
@@ -459,6 +458,16 @@ Response 200: `{ "pageImage": PageImage (§6), "scaleNote": { "mmPerPixel": 10.5
 
 - `/healthz` (no auth): `200 {"status":"ok","version":"<service version>","ocrLoaded":true}`; `503` until the OCR model is loaded at startup.
 - `/v1/capabilities` and `/v1/providers/test`: defined in 18 §5.
+
+### 5.8 `POST /v1/images/normalize` (photo normalisation for uploads)
+
+Used by Laravel's `ProcessUpload` for HEIC photos (13 §11.3); bearer auth; runs in the `light` slot; deadline 60 s.
+
+Request: `{ sourceUrl: string (presigned GET), targetUrl: string (presigned PUT), format: 'jpeg' | 'png' | 'webp', quality: int 1..100, maxEdge: int 64..8192, applyOrientation: bool }`.
+
+Behaviour: fetch (cap 25 MB) → decode with Pillow (+ `pi-heif` opener) → apply EXIF orientation when `applyOrientation` → drop all metadata (EXIF, XMP, ICC, comments) → downscale so the longer edge ≤ `maxEdge` (LANCZOS) → encode → PUT to `targetUrl` (`Content-Type` matching `format`; 3 attempts, 1/2/4 s backoff).
+
+Response 200: `{ width: int, height: int, bytes: int }`. Errors (`{error: {code, message, retryable}}`): 422 `decode_failed`, 413 `too_large` (> 25 MB or > 120 MP), 415 `unsupported`, 502 `upload_failed` (retryable).
 
 ---
 
@@ -1115,7 +1124,7 @@ Tabs: **Scale**, **Attention (n)**, **Rooms**.
 - Method sentence (`imports.scale.method.{method}` with params), e.g. "Scale read from 14 dimension labels (accuracy ±0.8 %)", "Scale estimated from room sizes (6 rooms)", "Scale taken from the CAD file", "We couldn't find any measurements — please check the scale".
 - Current scale "1 px = {mmPerPixel:.2f} mm" and overall plan size (bbox) formatted in user units.
 - "Measurements we used" collapsible list (from `scale.usedSamples`, ≤ 60; outliers struck through); hovering a row highlights its two points.
-- **Check a dimension** tool (button; also shortcut `K` in review mode): (1) prompt "Click a wall, or click two points" — clicking a wall selects its centreline length (or the face length when the user holds `Alt`); clicking empty space starts a two-point measure with a 4× loupe; (2) popover shows "Currently {len}" and input "Actual length" (`parseLength`, any unit, master §6.1); (3) live text "This will scale the whole plan by +3.2 %"; (4) **Apply** runs command `plan.rescale` (Appendix) with `factor = actual / current` (allowed range 0.2–5; outside → inline error "That's a very large change — please check the value"), sets `scaleConfirmed = true`, `rescaleFactor *= factor`. Undoable.
+- **Check a dimension** tool (button; also shortcut `K` in review mode): (1) prompt "Click a wall, or click two points" — clicking a wall selects its centreline length (or the face length when the user holds `Alt`); clicking empty space starts a two-point measure with a 4× loupe; (2) popover shows "Currently {len}" and input "Actual length" (`parseLength`, any unit, master §6.1); (3) live text "This will scale the whole plan by +3.2 %"; (4) **Apply** runs engine command `rescalePlan` (04 §6.6) with `factor = actual / current` (allowed range 0.2–5; outside → inline error "That's a very large change — please check the value"), sets `scaleConfirmed = true`, `rescaleFactor *= factor`. Undoable.
 - Button **The scale looks right** → `scaleConfirmed = true`.
 - When `scale.method = default_guess` or `scale.confidence < 0.5`: the panel opens by default, shows an amber callout, and **Accept** is disabled with tooltip "Check the scale first" until `scaleConfirmed`. The client flushes a pending autosave (A8) before calling A9; the server enforces the rule from the stored `result_meta.review.scaleConfirmed` (A9 → 422 `scale_not_confirmed`).
 
@@ -1163,7 +1172,7 @@ After `/v1/normalize`, Laravel builds the draft: empty `nodes/walls/openings/roo
 ### 12.2 Calibration UI (review page, trace variant)
 
 Full-canvas background, panel steps:
-1. **Set the scale** (required): "Click two points whose distance you know (for example both ends of a dimension line)". Placing a point shows a 4× loupe (160 px circle) following the pointer; points are draggable after placement; on touch, points are placed with a long-press and adjusted with drag. Input "Distance between the points" (`parseLength`). Live readout "1 px = {x} mm". **Apply** → command `plan.background.calibrate` (Appendix): `mmPerPixel = distanceMm / |AB|px` (A, B in image px); `background.position` stays (0,0). Sets `scaleConfirmed`.
+1. **Set the scale** (required): "Click two points whose distance you know (for example both ends of a dimension line)". Placing a point shows a 4× loupe (160 px circle) following the pointer; points are draggable after placement; on touch, points are placed with a long-press and adjusted with drag. Input "Distance between the points" (`parseLength`). Live readout "1 px = {x} mm". **Apply** → engine command `calibrateBackground { space: 'image', a, b, distanceMm }` (04 §6.6): `mmPerPixel = distanceMm / |AB|px` (A, B in image px); `background.position` stays (0,0). Sets `scaleConfirmed`.
 2. **Straighten (optional)**: rotation slider −10°…+10° step 0.1°, or "Draw along a wall" (two points → rotation = −angle mod 90 to the nearest axis). Updates `background.rotation` (about the image centre — 05 renders it; plan coordinates are unaffected because the plan is empty).
 3. Opacity slider (0–100 %, default 50).
 4. **Continue to editor** → accept dialog (§11.5, trace wording) → plan editor opens with `background.locked = true`, wall tool active, background panel open.
@@ -1197,10 +1206,9 @@ Admin import detail page (`admin.imports.show`, 11) shows source, normalized ima
 
 | Code | Raised by | Retryable ("Try again") | Credits | Counts toward daily limit | Customer message key `imports.error.{code}` (en) |
 |---|---|---|---|---|---|
-| `upload_missing` | confirm | no (re-upload) | none reserved | no | "The upload didn't finish. Please upload the file again." |
-| `file_too_large` | presign/confirm/vision | no | none | no | "This file is too large (max {max} MB)." |
-| `unsupported_type` | prepare | no | none | no | §2.1 text |
-| `dwg_not_supported` | presign/prepare | no | none | no | §2.1 text |
+| `file_too_large` | upload presign/confirm (as upload rejection) / vision | no | none | no | "This file is too large (max {max} MB)." |
+| `unsupported_type` | upload presign/processing (as upload rejection) / prepare | no | none | no | §2.1 text |
+| `dwg_not_supported` | upload presign/processing (as upload rejection) / prepare | no | none | no | §2.1 text |
 | `corrupt_file` | prepare/vision | no | refund | no | "We couldn't open this file. It may be damaged — try exporting it again." |
 | `pdf_encrypted` | prepare | no | none | no | §2.1 text |
 | `pdf_too_many_pages` | prepare | no | none | no | "This PDF has more than 20 pages. Please upload only the floor-plan page(s)." |
@@ -1247,7 +1255,7 @@ Laravel maps `provider_not_configured` (should not happen because Laravel checks
 
 - `ImportStatusChanged` (broadcast on private `imports.{importId}`, `broadcastAs` `ImportStatusChanged`): `{importId, status, stage, progress: null, error: {code, messageKey, retryable} | null, at}`. Dispatched by every Action that changes status and by the job at stage changes (`preparing`, `analyzing`, `finalizing`).
 - Client composable `useImportChannel(importId, onChange)` in `resources/js/composables/useImportChannel.ts`; falls back to polling A3 every 5 s while `echo.connector.pusher.connection.state !== 'connected'` and status is non-terminal.
-- Notifications (12): `import.ready` (in-app + email; email only if the user is not online on the import page — v1 simplification: always send in-app, send email when processing took > 60 s) and `import.failed` (in-app + email). See Appendix.
+- Notifications (12 §3.3, normative for channels and defaults): `import.ready_for_review` (in-app locked, email default off, web push default on; params `fileName`) and `import.failed` (in-app locked, email default on, web push default on; params `fileName`, `errorReason`). Domain events `ImportReadyForReview` / `ImportFailed` implement `UserNotifiableEvent` with payload `{importId, errorCode?}` (12 §3.4).
 
 ---
 
@@ -1313,14 +1321,14 @@ Both fixtures must also: finish in ≤ 60 s with provider `none` and ≤ 240 s w
 
 ### 16.4 Laravel (Pest)
 
-Feature tests with `Http::fake()` for the vision service and `Storage::fake('s3')`: presign validations and rate limit; confirm (missing object, size mismatch); `PrepareImportPreview` sniffing (DWG → failed), page thumbnails attached; start (credits reserved, 402/409/429 paths — detailed in 18 §17); job: busy release keeps status `queued`, retryable vs non-retryable errors, success stores media/document/meta and commits credits, fallback-to-none charges `none` credits; cancel rules; review autosave conflict 409; accept new vs replace (before_restore + import_accepted revisions, current_revision_id, source); scale-not-confirmed 422; discard; rerun copies media and charges again; convert-to-trace free; cleanup command all five rules (incl. media kept when referenced by a plan background); broadcasting payloads. Browser test (Pest browser plugin): upload a fixture PNG with a faked vision response → review page shows amber/red items and the attention count → "Looks right" decrements → Check a dimension rescales → accept → plan editor opens with walls.
+Feature tests with `Http::fake()` for the vision service and `Storage::fake('s3')`: A1 consumes only a `ready` `blueprint_source` intent of the same user/project (422 `upload_invalid` otherwise) and attaches `source`; `PrepareImportPreview` sniffing (DWG → failed), page thumbnails attached; start (credits reserved, 402/409/429 paths — detailed in 18 §17); job: busy release keeps status `queued`, retryable vs non-retryable errors, success stores media/document/meta and commits credits, fallback-to-none charges `none` credits; cancel rules; review autosave conflict 409; accept new vs replace (before_restore + import_accepted revisions, current_revision_id, source); scale-not-confirmed 422; discard; rerun copies media and charges again; convert-to-trace free; cleanup command all five rules (incl. media kept when referenced by a plan background); broadcasting payloads. Browser test (Pest browser plugin): upload a fixture PNG with a faked vision response → review page shows amber/red items and the attention count → "Looks right" decrements → Check a dimension rescales → accept → plan editor opens with walls.
 
 ---
 
 ## 17. Acceptance criteria
 
 1. Uploading each supported type (§2.1) of the reference blueprints (PNG, WebP, a PDF made from the PNG, a phone photo of a printout, an HEIC photo, a DXF exported from the hand-made fixture) reaches `ready_for_review` with provider `none` and with provider `anthropic`.
-2. A `.dwg` upload is rejected at presign with the §2.1 message; a renamed DWG (`.dxf` extension) fails in `PrepareImportPreview` with `dwg_not_supported`.
+2. A `.dwg` upload is rejected at presign with the §2.1 message; a renamed DWG (`.dxf` extension) is rejected by upload processing (13 §11.3, reason `dwg_not_supported`) with the same message, and no import row is created.
 3. A 21-page PDF fails with `pdf_too_many_pages`; a 3-page PDF shows a page picker with 3 thumbnails, and recognition uses the selected page.
 4. A perspective phone photo is rectified automatically (walls in the result within ±1° of axis-aligned) or, when corners are not found, the corner editor allows manual correction and the result is rectified.
 5. §16.3 targets are met on both fixtures (`evaluate.py --fail-under` passes in CI with `none` and `replay`).
@@ -1335,41 +1343,4 @@ Feature tests with `Http::fake()` for the vision service and `Storage::fake('s3'
 
 ---
 
-## Appendix: Proposed additions to other documents
-
-**A. `02-data-model.md`**
-
-1. §4.1 `blueprint_imports` — add column:
-   | review_version | integer | no | 1 | optimistic-lock counter for `result_document` edits during review (06 §11.4); reset to 1 when a recognition result is stored |
-2. §4.1 `blueprint_imports.hints` — extend the documented shape to `{unitSystem?: 'metric'|'imperial', knownDimension?: {label: string ≤ 80, mm: int 100..100000}, wallHeightMm?: int 2000..6000, isPhoto?: bool, corners?: [[x,y],[x,y],[x,y],[x,y]] (TL,TR,BR,BL; floats 0..1 relative to the inspect preview)}`.
-3. §4.1 media collections on BlueprintImport — add `pages` (disk `s3`, multiple, webp/jpeg, max 2 MB each, no conversions; custom properties `page`, `kind` = `thumb|preview`, `width`, `height`). §10 table — add the matching row.
-4. §4.1 `result_meta` — note: also holds Laravel-added keys `inspect` and `review` (06 §6).
-5. §3.2 `plans.source` — no change (values `imported`/`traced` reused on replace).
-
-**B. `01-architecture.md`**
-
-1. §1.3 Python packages — add `scikit-image` (Sauvola threshold, skeletonize; BSD-3-Clause), `onnxruntime` (RapidOCR backend; MIT), `pydantic-settings` (MIT), `anyio` (MIT, via FastAPI). Dev: `uv` for locking.
-2. §7 scheduler — `imports:cleanup-stale` performs the five rules of 06 §4.10 (not only the 30-min stuck rule).
-3. §8 — `ImportStatusChanged` payload is `{importId, status, stage, progress: null, error: {code, messageKey, retryable} | null, at}`.
-4. §3 — `config/imports.php` (06 §4.1) and `App\Support\Vision\VisionClient`.
-
-**C. `04-geometry-engine.md` / engine**
-
-1. Command `plan.rescale { factor: number }` — multiplies every node coordinate, wall `thickness` (rounded, clamped 50–1000), opening `offset`/`width` (rounded), room `anchor`, `labelOffset`, text label `position`, dimension annotation points/offset, placement and fixture positions (not sizes), and `background.mmPerPixel` by `factor` about the origin `(0,0)`; `background.position` scaled too. Heights, sills and furniture sizes unchanged. Undoable; one history entry.
-2. Command `plan.background.calibrate { a: {x,y}, b: {x,y} (image px), distanceMm: number }` → `background.mmPerPixel = distanceMm / |ab|`.
-3. Module `engine/plan/roomNames.ts` exporting `ROOM_NAMES` and `suggestRoomType(name: string): RoomType` mirroring `vision/app/utils/roomnames.py`.
-
-**D. `05-plan-editor.md`**
-
-1. Editor mode `'import-review'` (06 §11): review panel, confidence colouring layer, attention list, Check-a-dimension tool (shortcut `K`), 4× loupe component, autosave target `PUT /api/imports/{import}/review-document`.
-2. Background panel: "Calibrate scale" (two points + distance, 06 §12.2) and opacity slider using the commands in C.
-
-**E. `12-notifications.md`** — events:
-1. `import.ready` → importing user; channels in-app (always) + email (when processing took > 60 s); params `{projectName, filename, reviewUrl}`.
-2. `import.failed` → importing user; in-app + email; params `{filename, errorMessageKey, importUrl}`.
-
-**F. `13-auth-security.md`** — permissions (staff): `imports.view_all` (see all imports + debug artifacts; roles owner, admin, estimator, support), `imports.manage` (re-run free, refund credits, discard on behalf; roles owner, admin). Channel `imports.{importId}` authorisation: uploader, project owner, or `imports.view_all`. Rate limiters `imports-presign` (20/h/user) and `imports-start` (10/h/user).
-
-**G. `14-routes-and-api.md`** — routes A1–A12 (06 §4.3, names `api.imports.store|confirm|show|update|start|cancel|review|review-document|accept|discard|rerun|convert-to-trace`), Inertia `customer.projects.imports.create`, `customer.imports.show`, `customer.imports.review`, `admin.imports.index`, `admin.imports.show`.
-
-**H. `17-deployment-ops.md`** — Laravel env `VISION_SERVICE_URL` (default `http://furny-vision:8000`), `VISION_SERVICE_TOKEN` (shared secret, ≥ 32 random chars, also set on the vision resource); vision resource memory limit 4 GB, 2 vCPU; vision env vars per 18 §4.
+_Appendix merged into the target documents during reconciliation (see 19-reconciliation-log.md)._

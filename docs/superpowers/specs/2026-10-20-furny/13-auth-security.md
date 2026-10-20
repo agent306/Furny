@@ -2,7 +2,7 @@
 
 Read the master document, `01`, `02`, `03` and `09` first; `12` defines the messages (OTP, password reset, verification, invitation) that the flows below send. This file is normative for **authentication flows, sessions, roles & permissions, policies, rate limits, upload security, HTTP security, secrets, PII, audit logging and security testing**.
 
-Everything not in `02` that this file needs is listed in **Appendix: Proposed additions to other documents**.
+Tables, columns and settings used here (`staff_invitations`, `upload_intents`, `notification_deliveries`, `users.terms_accepted_at`, `users.anonymised_at`, settings group `auth`) are defined in `02`.
 
 ---
 
@@ -26,14 +26,15 @@ Middleware aliases (registered in `bootstrap/app.php`):
 |---|---|---|
 | `active` | `App\Http\Middleware\EnsureUserIsActive` | If authenticated user has `is_active = false` or is soft-deleted → logout, invalidate session, redirect `login` with error `auth.inactive`. |
 | `customer` | `App\Http\Middleware\EnsureUserType:customer` | Staff → redirect `admin.dashboard`. |
-| `staff` | `App\Http\Middleware\EnsureUserType:staff` | Customer → 403 page (Inertia `Errors/Forbidden`). |
+| `staff` | `App\Http\Middleware\EnsureUserType:staff` | Customer → 403 (Inertia page `Error` with `status: 403`, 10 §4.10). |
+| `onboarded` | `App\Http\Middleware\EnsureCustomerOnboarded` | Customers with `users.onboarded_at` null are redirected (GET only) to `customer.onboarding.show` (10 §5.1). |
 | `verified.contact` | `App\Http\Middleware\EnsureContactVerified` | Passes if `email_verified_at` or `phone_verified_at` non-null; else 403 JSON `{code:'contact_unverified'}` / Inertia redirect back with error banner. |
 | `2fa.enrolled` | `App\Http\Middleware\EnsureTwoFactorEnrolled` | §5.10. |
 | `session.absolute` | `App\Http\Middleware\EnforceAbsoluteSessionLifetime` | §6. |
 | `recent.auth` | `App\Http\Middleware\RequireRecentAuthentication` | §6.4. |
 | `track.session` | `App\Http\Middleware\TrackSession` | §6.3 (appended to `web` group). |
 
-Route groups: customer `['web', 'auth', 'active', 'customer']`; admin `['web', 'auth', 'active', 'staff', '2fa.enrolled', 'session.absolute']`; API (editor JSON) `['web', 'auth', 'active', 'throttle:api']` (session auth, CSRF-protected). Gated customer actions additionally use `verified.contact`: order submission (T2), starting an **auto** blueprint import, posting messages, account data export.
+Route groups: customer `['web', 'auth', 'active', 'customer', 'onboarded']` (`onboarded` skipped for `customer.onboarding.*`, `customer.account.*`, `customer.help`, `customer.notifications.index`); admin `['web', 'auth', 'active', 'staff', '2fa.enrolled', 'session.absolute']`; API (editor JSON) `['web', 'auth', 'active', 'throttle:api']` (session auth, CSRF-protected). Gated customer actions additionally use `verified.contact`: order submission (T2), starting an **auto** blueprint import, posting messages, account data export.
 
 ---
 
@@ -82,7 +83,7 @@ Route groups: customer `['web', 'auth', 'active', 'customer']`; admin `['web', '
 
 ## 3. Captcha (Cloudflare Turnstile)
 
-- Env `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`. `features.captcha` = both set (proposed flag). When false (local/tests), captcha checks pass.
+- Env `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`. Feature flag `features.captcha` (master §6.7) = both set. When false (local/tests), captcha checks pass.
 - Frontend component `resources/js/components/auth/TurnstileWidget.vue` loads `https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit` with the page CSP nonce, renders managed mode with `data-action` = the form name (`register`, `password_reset`, `otp_send`), emits the token; hidden input `cf_turnstile_response`.
 - Validation rule `App\Rules\TurnstileToken(string $action, bool $failOpen)`: `POST https://challenges.cloudflare.com/turnstile/v0/siteverify` form `{secret, response, remoteip, idempotency_key: Str::uuid()}`, timeout 5 s. Valid iff `success === true` AND `hostname` equals `parse_url(APP_URL, PHP_URL_HOST)` AND `action === $action`. Network error/timeout: `failOpen` true → pass + `Log::warning('captcha.unavailable')`; false → fail with `auth.captcha_unavailable`.
 - Where: **registration** (always, fail open), **password reset request** (always, fail open), **OTP send** (conditional §4.3, **fail closed** — SMS cost risk).
@@ -152,6 +153,8 @@ All auth pages live in `resources/js/pages/Auth/*` with `AuthLayout`. Error code
 3. Create user: `type = customer`, `timezone = business.timezone`, `unit_system = units.default_system`, `length_unit = units.default_length_unit`, `locale = 'en'`, `terms_accepted_at = now()`, `marketing_opt_in`. Fortify fires `Registered` → Laravel's `SendEmailVerificationNotification` → `auth.email_verification`. Dispatch `CustomerRegistered` (`UserNotifiableEvent`, key `account.welcome`).
 4. Logged in; redirect to `customer.dashboard` with a persistent banner "Verify your email to submit orders" + **Resend** (Fortify `POST /email/verification-notification`, throttle `verification-resend`). Unverified customers may create projects, draw plans, trace, and design furniture; they cannot submit orders, start auto imports, post messages or export data (`verified.contact`).
 
+**Staff-created customers** (`admin.customers.store`, 11 §6): `type = customer`, `onboarded_at = null`, `terms_accepted_at = null`, contacts unverified; the customer accepts the terms at first login (onboarding, 10 §5.1, shows a required terms checkbox while `terms_accepted_at` is null); `sendPasswordLink = true` sends a Fortify password-reset link (broker `users`). `ContactVerified` fires when the customer later verifies a contact.
+
 Decision: registration reveals that an email is taken (UX), mitigated by the `register` limiter and Turnstile; password reset and OTP never reveal existence.
 
 ### 5.2 Phone OTP sign-up / sign-in (customers)
@@ -220,7 +223,8 @@ Routes (`app/Http/Controllers/Auth/GoogleController.php`, throttle `oauth`):
 ### 5.6 Email verification
 
 - Signed temporary URL (`verification.verify`, 60 min) from `auth.email_verification`. Laravel's verify route requires authentication: logged-out clicks go to `login` and return to the URL after sign-in (intended URL).
-- On verify: `email_verified_at = now()`; event `Verified` → listener dispatches `ContactVerified` (consumed by `18` for credit grants, if it chooses) and audit `account.email_verified`.
+- On verify: `email_verified_at = now()`; event `Verified` → listener dispatches `ContactVerified` and audit `account.email_verified`.
+- **`App\Domain\Identity\Events\ContactVerified(User $user)`** is dispatched (after commit) exactly when a user's **first** verified contact is established, i.e. when `email_verified_at` or `phone_verified_at` becomes non-null while both were null before — including accounts created already verified (phone OTP sign-up §5.2, Google sign-up §5.3, staff invitations §5.9). Consumer: `GrantSignupCredits` (18 §10.1; customers only), which grants the `signup_grant` credits. Later verifications (second contact, re-verification after an email change) do not dispatch it.
 - Resend: `POST /email/verification-notification` (limiter `verification-resend`).
 
 ### 5.7 Phone verification / change (authenticated users)
@@ -238,7 +242,7 @@ Order submission (09 T2) requires a verified email **or** phone (unchanged). Bec
 
 ### 5.9 Staff invitation
 
-Actors: `staff.manage`. Inviting or assigning role `owner` requires the `owner` gate (§7.3).
+Actors: `staff.manage`. Inviting or assigning role `owner` requires the gate `staff.manage_owners` (§7.3).
 
 1. **Invite** (`admin.staff.invitations.store`, limiter `invitations`): `{email, name, role}` → `App\Domain\Identity\Actions\InviteStaff`: lower-case email; reject if any user (incl. soft-deleted) has the email → 422 `staff.email_in_use` (customers and staff are separate accounts; one email cannot be both); reject if a pending invitation exists → 422 `staff.invitation_pending` (use resend); role ∈ roles the actor may grant. Insert `staff_invitations` (`expires_at = now()+72h`). Send `staff.invited` (12) to the email with `URL::temporarySignedRoute('staff.invitations.show', $invitation->expires_at, ['invitation' => $invitation->id])`. Audit `staff.invited`.
 2. **Resend**: sets `expires_at = now()+72h`, sends a new signed link. **Revoke**: `revoked_at = now()`. Both audited.
@@ -251,7 +255,7 @@ Staff lifecycle: deactivate/reactivate (`staff.manage`; owners only by the `owne
 
 ### 5.10 Two-factor authentication (Fortify TOTP)
 
-- Page `admin.security.two-factor` (`Admin/Account/Security.vue`): enable (`POST /user/two-factor-authentication`, password-confirmed) → QR (`GET /user/two-factor-qr-code`, SVG) + secret key text → confirm with a code (`POST /user/confirmed-two-factor-authentication`) → show 8 recovery codes (`GET /user/two-factor-recovery-codes`) with Copy/Download (`{app-name}-recovery-codes.txt`) and a required checkbox "I saved these codes". Regenerate codes (`POST /user/two-factor-recovery-codes`).
+- Page `admin.security.two-factor` (`Admin/Account/TwoFactor.vue`; password, Google link and sessions live on `admin.account.security` → `Admin/Account/Security.vue`, 11 §18): enable (`POST /user/two-factor-authentication`, password-confirmed) → QR (`GET /user/two-factor-qr-code`, SVG) + secret key text → confirm with a code (`POST /user/confirmed-two-factor-authentication`) → show 8 recovery codes (`GET /user/two-factor-recovery-codes`) with Copy/Download (`{app-name}-recovery-codes.txt`) and a required checkbox "I saved these codes". Regenerate codes (`POST /user/two-factor-recovery-codes`).
 - `EnsureTwoFactorEnrolled`: for staff with role `owner` or `admin` and `two_factor_confirmed_at` null, every admin route except `admin.security.two-factor`, Fortify `two-factor.*`, `password.confirm*`, `logout` redirects to `admin.security.two-factor` with banner `auth.2fa_required`. Applies immediately when a role change makes 2FA required.
 - Disabling: `DELETE /user/two-factor-authentication` is blocked for owner/admin by middleware `PreventRequiredTwoFactorDisable` (applied in the `web` group; matches route name `two-factor.disable`) → 403 `auth.errors.2fa_required`.
 - Challenge (`/two-factor-challenge`): code or recovery code; limiter `two-factor`. Recovery code use → audit `auth.recovery_code_used` (Fortify `RecoveryCodeReplaced` event).
@@ -304,19 +308,18 @@ Passes if `session('auth.password_confirmed_at')` is within 10 min **or** `sessi
 
 ### 7.1 Permissions (exhaustive; guard `web`)
 
-`orders.view`, `orders.review`, `orders.assign`, `orders.propose_changes`, `orders.edit_designs`, `quotes.create`, `quotes.send`, `quotes.view_costs`, `orders.confirm`, `orders.cancel`, `orders.hold`, `orders.close`, `production.manage`, `messages.post`, `customers.view`, `customers.manage`, `catalog.manage`, `presets.manage`, `templates.manage`, `settings.manage`, `staff.manage`, `ai.manage`, `reports.view`, `plans.edit_any`, `audit.view`.
+`orders.view`, `orders.review`, `orders.assign`, `orders.propose_changes`, `quotes.create`, `quotes.send`, `quotes.view_costs`, `orders.confirm`, `orders.cancel`, `orders.hold`, `orders.close`, `production.manage`, `messages.post`, `customers.view`, `customers.manage`, `catalog.manage`, `presets.manage`, `templates.manage`, `settings.manage`, `staff.manage`, `ai.manage`, `reports.view`, `plans.edit_any`, `audit.view` (**24 permissions**).
 
-(`orders.edit_designs` is referenced by `03 §5`; `quotes.view_costs` protects `quotes.cost_snapshot` / `internal_notes`.)
+`quotes.view_costs` protects `quotes.cost_snapshot`, `internal_notes`, `PriceBreakdown` cost lines and margins everywhere (quote builder, item viewer, furniture builder estimate panel). There is no separate design-editing permission for orders: editing staff proposal drafts is part of `orders.propose_changes` (reconciliation decision D18, master §7). No other permission names exist; features of other files map onto this list (imports monitor and debug artifacts → `customers.view`; staff free re-run, refund and discard-on-behalf of imports, AI usage report, credit ledger and grants → `ai.manage`; AI settings and provider test → gate `settings.manage_restricted`; cut-list exports → `orders.view`; cost visibility → `quotes.view_costs`).
 
 ### 7.2 Role × permission matrix (seeded by `RolesAndPermissionsSeeder`, idempotent `findOrCreate` + `syncPermissions`)
 
 | Permission | owner | admin | estimator | production | support | Grants |
 |---|:-:|:-:|:-:|:-:|:-:|---|
-| `orders.view` | ✓ | ✓ | ✓ | ✓ | ✓ | Admin order list/board/detail, timeline incl. internal entries, `orders.{id}` channel |
+| `orders.view` | ✓ | ✓ | ✓ | ✓ | ✓ | Admin order list/board/detail, timeline incl. internal entries, `orders.{id}` and `orders.{id}.internal` channels, quote PDFs, item design viewer, cut-list CSV/PDF exports (08 §8) |
 | `orders.review` | ✓ | ✓ | ✓ | | | T4; edit item quantity/staff notes in `in_review` |
 | `orders.assign` | ✓ | ✓ | ✓ | | | Assign/reassign estimator; set production assignee |
-| `orders.propose_changes` | ✓ | ✓ | ✓ | | | Create/send/withdraw proposals (T6, T8) |
-| `orders.edit_designs` | ✓ | ✓ | ✓ | | | Edit proposal item drafts (`PUT /api/change-proposal-items/{item}/draft`) |
+| `orders.propose_changes` | ✓ | ✓ | ✓ | | | Create/edit/send/withdraw proposals (T6, T8), add/remove proposal items, edit proposal item design drafts (`PUT /api/change-proposal-items/{item}/draft`, proposal builder page) |
 | `quotes.create` | ✓ | ✓ | ✓ | | | Create/edit quote drafts |
 | `quotes.send` | ✓ | ✓ | ✓ | | | T9, T12, T13 |
 | `quotes.view_costs` | ✓ | ✓ | ✓ | | | See `cost_snapshot`, margins, `internal_notes` |
@@ -326,14 +329,14 @@ Passes if `session('auth.password_confirmed_at')` is within 10 min **or** `sessi
 | `orders.close` | ✓ | ✓ | | | | T25, T31 |
 | `production.manage` | ✓ | ✓ | | ✓ | | T19, T20, production updates, issues, delivery (schedule, T24) |
 | `messages.post` | ✓ | ✓ | ✓ | ✓ | ✓ | Post messages and internal notes |
-| `customers.view` | ✓ | ✓ | ✓ | ✓ | ✓ | Customer list/profile, their projects/plans/designs/imports (read-only) |
+| `customers.view` | ✓ | ✓ | ✓ | ✓ | ✓ | Customer list/profile, their projects/plans/designs/imports (read-only), imports monitor incl. debug artifacts, notifications log |
 | `customers.manage` | ✓ | ✓ | | | | Edit customer profile/contact, deactivate/reactivate, restore deleted (≤ 30 days), create projects on a customer's behalf |
 | `catalog.manage` | ✓ | ✓ | | | | Materials, edge bands, hardware, finishes, labour rates, tax rates |
 | `presets.manage` | ✓ | ✓ | ✓ | | | Furniture presets (incl. "save as preset") |
 | `templates.manage` | ✓ | ✓ | | | | Enable/order templates, default overrides |
 | `settings.manage` | ✓ | ✓ | | | | Settings groups `business` (except currency), `units`, `pricing`, `workflow`, `notifications` |
 | `staff.manage` | ✓ | ✓ | | | | Invite, resend, revoke, change roles, deactivate, reset 2FA (non-owners) |
-| `ai.manage` | ✓ | ✓ | | | | Grant/revoke customer credits, view AI usage report |
+| `ai.manage` | ✓ | ✓ | | | | Grant/revoke customer credits, refund import credits, AI usage report (USD costs) and CSV export, AI credit ledger, free staff re-run and discard of a customer's import |
 | `reports.view` | ✓ | ✓ | | | | Reports/dashboards with financial aggregates |
 | `plans.edit_any` | ✓ | ✓ | ✓ | | | Edit customers' plans and unlocked designs; start imports on their behalf |
 | `audit.view` | ✓ | ✓ | | | | Audit log page |
@@ -384,6 +387,9 @@ Notation: **own** = the authenticated user is the customer who owns the record (
 | `create` / `duplicate` | own project, or S[`plans.edit_any`] |
 | `update` (working copy, revisions, restore) | own project, or S[`plans.edit_any`] (staff saves create the `staff_edit` revision per `03 §5`) |
 | `delete` | own project only |
+| `lock` / `unlock` | S[`plans.edit_any`] (`api.plans.lock.store` / `api.plans.lock.destroy`; audit `plan.locked` / `plan.unlocked`) |
+
+While `plans.locked_at` is set, `update` still authorises but the save/restore/checkpoint actions return **423** `{code: 'locked', reason: 'plan_locked', lockedBy, lockedAt}` (03 §5) for everyone, including staff, until the plan is unlocked.
 
 ### 8.3 `FurnitureDesignPolicy`
 
@@ -405,7 +411,10 @@ Staff edits of locked designs happen **only** through `ChangeProposalPolicy::upd
 | `create` | own project AND (mode `trace` OR contact verified), or S[`plans.edit_any`] |
 | `view` | `user_id` = user, or own project, or S[`customers.view`] |
 | `viewDebug` (media `debug`, `error_message`, `result_meta` timings) | S[`customers.view`] |
-| `cancel` / `retry` / `accept` / `discard` | `user_id` = user or own project, or S[`plans.edit_any`] |
+| `update` (options, review document) / `cancel` / `retry` / `accept` / `convertToTrace` | `user_id` = user or own project, or S[`plans.edit_any`] |
+| `discard` | `user_id` = user or own project, or S[`ai.manage`] |
+| `rerun` | `user_id` = user or own project (charged), or S[`ai.manage`] (free when `ai.staff_unlimited`, 06 §11.7) |
+| `refund` | S[`ai.manage`] (18 §9.5) |
 
 ### 8.5 `OrderPolicy`
 
@@ -444,8 +453,7 @@ Customer-facing serialisation (`QuoteData` customer variant) never includes `cos
 | Ability | Rule |
 |---|---|
 | `view` | (own order AND `status ≠ draft`) or S[`orders.view`] |
-| `create` / `update` / `send` / `withdraw` | S[`orders.propose_changes`] |
-| `updateItemDraft` | S[`orders.edit_designs`] |
+| `create` / `update` / `send` / `withdraw` / `addItem` / `removeItem` / `updateItemDraft` | S[`orders.propose_changes`] |
 | `decide` (T7) | own order |
 
 ### 8.8 `MessagePolicy`
@@ -464,14 +472,15 @@ Auth required. Resolve `$media->model` and authorise by model + collection; unkn
 | Model / collection | Rule |
 |---|---|
 | `Plan.thumbnail` | `PlanPolicy::view` |
-| `BlueprintImport.source`, `.normalized` | `BlueprintImportPolicy::view` |
+| `BlueprintImport.source`, `.normalized`, `.pages` | `BlueprintImportPolicy::view` |
+| `FurnitureRevision.cutlist_pdf` | S[`orders.view`] |
 | `BlueprintImport.debug` | `viewDebug` |
 | `FurnitureDesign.thumbnail` | `FurnitureDesignPolicy::view` |
 | `Quote.pdf` | `QuotePolicy::downloadPdf` |
 | `ProductionUpdate.photos` | `OrderPolicy::view` AND (`visibility = customer` OR `viewInternal`) |
 | `OrderIssue.photos`, `Delivery.photos` | `OrderPolicy::view` |
 | `Message.attachments` | `MessagePolicy::viewThread` AND (message not `internal_note` OR staff) |
-| public-disk collections (avatar, cover, textures, hardware images, preset thumbnails, logo) | not served by this route (public URLs) |
+| public-disk collections (`User.avatar`, `Project.cover`, `Material/Finish.texture`, `HardwareItem.image`, `FurniturePreset.thumbnail`, `BusinessProfile.logo`) | not served by this route (public URLs) |
 
 Response: `302` to `$media->getTemporaryUrl(now()->addMinutes(15), $conversion ?? '', $headers)`; for PDFs and any non-image file `$headers = ['ResponseContentDisposition' => 'attachment; filename="'.$safeName.'"', 'ResponseContentType' => $media->mime_type]`; images `inline`. `Cache-Control: private, no-store` on the redirect. Inertia pages may embed temporary URLs directly when the controller has already authorised the parent model (galleries), generated per request with the same 15-minute expiry.
 
@@ -482,7 +491,7 @@ Response: `302` to `$media->getTemporaryUrl(now()->addMinutes(15), $conversion ?
 | `users.{userId}` | `$user->id === $userId` |
 | `orders.{orderId}` | `OrderPolicy::view` — **customer-safe payloads only** |
 | `orders.{orderId}.internal` | `OrderPolicy::viewInternal` — internal notes, internal production updates, call logs |
-| `imports.{importId}` | `BlueprintImportPolicy::view` |
+| `imports.{importId}` | `BlueprintImportPolicy::view` (uploader, project owner, or staff with `customers.view`) |
 | `furniture-designs.{designId}` | `FurnitureDesignPolicy::view` |
 | `staff` | `$user->type === 'staff' && $user->can('orders.view')` |
 
@@ -503,7 +512,7 @@ Page `customer.account.delete` (`recent.auth`): explanation, list of what is kep
    3. Send `account.deletion_scheduled` (12) **before** the soft delete, with `date = now()+30d`.
    4. `users.deleted_at = now()` (soft delete). Delete `push_subscriptions`.
    5. Destroy all sessions (registry) and rotate `remember_token`.
-3. Audit `account.deletion_requested`. Logout, `Inertia::clearHistory()`, redirect to a public "Your account is scheduled for deletion" page.
+3. Audit `account.deletion_requested`. Logout, `Inertia::clearHistory()`, redirect to the public page `account.deletion-scheduled` (GET `/account-deleted`, page `Auth/AccountDeletionScheduled`, AuthLayout; shows the anonymisation date and the support email).
 
 Restore within 30 days: staff with `customers.manage` (`admin.customers.restore`) → `restore()`; audit `account.deletion_cancelled`. The customer cannot log in while soft-deleted (default scope; OTP/Google show `account_pending_deletion`).
 
@@ -557,9 +566,12 @@ Named limiters in `App\Providers\RateLimitServiceProvider::boot()` (`RateLimiter
 | `otp-verify` | 10/min | ip | `auth.otp.verify`, `account.phone.verify` |
 | | 20/hour | phone | |
 | `oauth` | 20/min | ip | Google redirect/callback |
-| `uploads-presign` | 30/min and 300/day | user id | `POST /api/uploads/presign`, import presign (06) |
+| `uploads-presign` | 30/min and 300/day | user id | `POST /api/uploads/presign` (all purposes, including `blueprint_source`) |
 | `uploads-confirm` | 60/min | user id | `POST /api/uploads/{upload}/confirm` |
-| `imports-start` | 10/hour | user id | start recognition (plus `ai.max_recognitions_per_day` enforced in the action per 02) |
+| `imports-start` | 10/hour | user id | `api.imports.start`, `api.imports.rerun` (plus `ai.max_recognitions_per_day` enforced in the action, 18 §11.1) |
+| `ai-provider-test` | 10/min | user id | `admin.settings.ai.test` |
+| `thumbnails` | 6/min | user id | `api.plans.thumbnail.store`, `api.projects.cover.store`, `api.furniture-designs.thumbnail.store` |
+| `test-push` | 3/min | user id | `customer.account.notifications.test-push`, `admin.account.notifications.test-push` |
 | `messages-post` | 20/min and 300/day | user id | post message / internal note |
 | `autosave` | 60/min | `user id|document type|document id` | `PUT …/working-copy`, `PUT …/draft` (03 §5) |
 | `api` | 120/min | user id (guests: ip, 60/min) | all `/api/*` routes not listed |
@@ -579,26 +591,34 @@ Exceeded → `ThrottleRequestsException` rendered in `bootstrap/app.php`: JSON/X
 
 ### 11.1 Purposes and limits
 
-Enum `App\Domain\Shared\Enums\UploadPurpose` (limits from 02 §10):
+Enum `App\Domain\Shared\Enums\UploadPurpose` (limits from 02 §10). The enum has exactly these **14** values (the list is exhaustive; every browser upload in the system uses one of them):
 
-| Purpose | Target collection | Accepted (sniffed) types | Max bytes | Re-encode |
-|---|---|---|---|---|
-| `blueprint_source` | `BlueprintImport.source` (flow in 06) | jpeg, png, webp, heic, pdf, dxf | 25 MB (dxf 15 MB) | **no** (vision needs the original) |
-| `message_attachment` | `Message.attachments` | jpeg, png, webp, pdf | 15 MB | images yes; pdf no |
-| `production_photo`, `issue_photo`, `delivery_photo` | `*.photos` | jpeg, png, webp, heic | 15 MB | yes (heic → jpeg) |
-| `avatar` | `User.avatar` | jpeg, png, webp | 5 MB | yes, max 512 px |
-| `business_logo` | `BusinessProfile.logo` | png, webp, jpeg | 2 MB | yes, max 1024 px |
-| `material_texture`, `finish_texture` | `texture` | jpeg, webp | 4 MB | yes, square, resized to 1024² |
-| `hardware_image` | `HardwareItem.image` | jpeg, png, webp | 4 MB | yes, max 1600 px |
-| `plan_thumbnail`, `design_thumbnail`, `preset_thumbnail`, `project_cover` | thumbnails | png (webp for cover) | 5 MB | yes |
+| Purpose | Target collection (02 §10) | Authorisation target (`target`) and check at presign | Accepted (sniffed) types | Max bytes | Re-encode | Consumed by |
+|---|---|---|---|---|---|---|
+| `blueprint_source` | `BlueprintImport.source` | project → `BlueprintImportPolicy::create` (trace semantics; the contact-verification rule for auto mode is enforced at `api.imports.start`) | jpeg, png, webp, heic, pdf, dxf | 25 MB (dxf 15 MB) | **no** (vision needs the original) | `api.imports.store` (06 §4.4) |
+| `message_attachment` | `Message.attachments` | order → `MessagePolicy::create` | jpeg, png, webp, pdf | 15 MB | images yes; pdf no | `customer.orders.messages.store`, `admin.orders.messages.store` |
+| `production_photo` | `ProductionUpdate.photos` | order → `OrderPolicy::manageProduction` | jpeg, png, webp, heic | 15 MB | yes (heic → jpeg) | `admin.orders.production-updates.store`, `admin.orders.complete` |
+| `issue_photo` | `OrderIssue.photos` | order → `OrderPolicy::reportIssue` (customer) or `raiseIssueOnBehalf` (staff) | jpeg, png, webp, heic | 15 MB | yes (heic → jpeg) | `customer.orders.issues.store`, `admin.orders.issues.store` |
+| `delivery_photo` | `Delivery.photos` | order → `OrderPolicy::manageProduction` | jpeg, png, webp, heic | 15 MB | yes (heic → jpeg) | `admin.orders.deliver` |
+| `avatar` | `User.avatar` | none (own account) | jpeg, png, webp | 5 MB | yes, max 512 px | `customer.account.avatar.update`, `admin.account.avatar.update` |
+| `business_logo` | `BusinessProfile.logo` | none → S[`settings.manage`] | png, webp, jpeg | 2 MB | yes, max 1024 px | `admin.settings.business.update` |
+| `material_texture` | `Material.texture` | none → S[`catalog.manage`] | jpeg, webp | 4 MB | yes, square, resized to 1024² | `admin.catalog.materials.store/update` |
+| `finish_texture` | `Finish.texture` | none → S[`catalog.manage`] | jpeg, webp | 4 MB | yes, square, resized to 1024² | `admin.catalog.finishes.store/update` |
+| `hardware_image` | `HardwareItem.image` | none → S[`catalog.manage`] | jpeg, png, webp | 4 MB | yes, max 1600 px | `admin.catalog.hardware.store/update` |
+| `plan_thumbnail` | `Plan.thumbnail` | plan → `PlanPolicy::update` | png | 5 MB | yes | `api.plans.thumbnail.store` |
+| `project_cover` | `Project.cover` | project → `ProjectPolicy::update` | png, webp | 5 MB | yes | `api.projects.cover.store` |
+| `furniture_thumbnail` | `FurnitureDesign.thumbnail` | furniture design → `FurnitureDesignPolicy::update` | png | 5 MB | yes | `api.furniture-designs.thumbnail.store` |
+| `preset_thumbnail` | `FurniturePreset.thumbnail` | preset → S[`presets.manage`] | png | 5 MB | yes | `api.presets.document.update`, `admin.furniture.save-as-preset` |
+
+Server-generated files (quote PDFs, cut-list PDFs, normalized import images, debug artifacts, import page thumbnails) are **not** uploads and never use upload intents. In particular, the **vision service file exchange** (presigned GET of the source and presigned PUTs of the normalized image and debug artifacts, 06 §4.7, 15-minute expiry) uses server-side presigned URLs created by `RunBlueprintRecognition` / `PrepareImportPreview` for the vision service only; these are not upload intents and are never handed to browsers.
 
 **SVG, GIF, TIFF, BMP, HTML, XML, Office documents, archives and executables are never accepted** (SVG can carry script; others are unnecessary).
 
 ### 11.2 Presign
 
-`POST /api/uploads/presign` (limiter `uploads-presign`) `{purpose, filename, size, contentType, target: {type, id}|null}` → `App\Domain\Shared\Actions\CreateUploadIntent`:
-1. Authorise the target (e.g. `message_attachment` → `MessagePolicy::create` on the order; photos → `OrderPolicy::manageProduction`/`reportIssue`; textures → S[`catalog.manage`]; thumbnails → `update` on the plan/design).
-2. Validate `contentType` ∈ purpose allowlist (declared), `1 ≤ size ≤ max`.
+`POST /api/uploads/presign` (`api.uploads.presign`, limiter `uploads-presign`) `{purpose, filename, size, contentType, target: {type, id}|null}` → `App\Domain\Shared\Actions\CreateUploadIntent`:
+1. Authorise the target per the table in §11.1.
+2. Validate `contentType` ∈ purpose allowlist (declared), `1 ≤ size ≤ max`. For `blueprint_source` additionally: extension ∈ 06 §2.1 list (`.dwg` → 422 `dwg_not_supported`; other → 422 `unsupported_type`); `application/octet-stream`/`text/plain` accepted only with the matching `.dxf`/`.heic` extension; size limit by extension kind (DXF 15 MB) → 422 `file_too_large`.
 3. Insert `upload_intents` (`object_key = tmp/{purpose}/{Y}/{m}/{ulid}`, `expires_at = now()+15min`, `status = pending`).
 4. `Storage::disk('s3')->temporaryUploadUrl($key, now()->addMinutes(15), ['ContentType' => $contentType, 'ContentLength' => $size])` → returns `{url, headers}`; respond `{uploadId, url, headers}`.
 
@@ -606,24 +626,24 @@ Enum `App\Domain\Shared\Enums\UploadPurpose` (limits from 02 §10):
 
 ### 11.3 Confirm & processing
 
-`POST /api/uploads/{upload}/confirm` (limiter `uploads-confirm`): owner of the intent, `status = pending`, not expired → `HeadObject`: must exist and `ContentLength === declared size ≤ max` (else delete object, `status = rejected`, 422 `upload_size_mismatch`) → `status = uploaded`, dispatch `ProcessUpload` (queue `default`, timeout 60 s, tries 2), respond `202 {uploadId, status: 'processing'}`. The client polls `GET /api/uploads/{upload}` every 1 s (max 60 s) until `ready` or `rejected` (`{status, reasonCode, previewUrl?}`).
+`POST /api/uploads/{upload}/confirm` (`api.uploads.confirm`, limiter `uploads-confirm`): owner of the intent, `status = pending`, not expired → `HeadObject`: must exist and `ContentLength === declared size ≤ max` (else delete object, `status = rejected`, 422 `upload_size_mismatch`) → `status = uploaded`, dispatch `ProcessUpload` (queue `default`, timeout 60 s, tries 2), respond `202 {uploadId, status: 'processing'}`. The client polls `GET /api/uploads/{upload}` (`api.uploads.show`) every 1 s (max 60 s) until `ready` or `rejected` (`{status, reasonCode, previewUrl?}`).
 
 `ProcessUpload`:
 1. Stream the object to a temp file (`storage/app/tmp/{ulid}`; deleted in `finally`).
 2. **Magic-byte sniffing** (`App\Support\Uploads\MagicBytes::detect(string $path): ?string`) on the first 64 bytes:
-   - JPEG `FF D8 FF`; PNG `89 50 4E 47 0D 0A 1A 0A`; WebP `RIFF????WEBP`; HEIC/HEIF bytes 4–11 `ftypheic|ftypheix|ftyphevc|ftypmif1|ftypmsf1`; PDF `%PDF-`; DXF ASCII: first non-blank lines `0` then `SECTION`, or binary sentinel `AutoCAD Binary DXF\r\n\x1a\x00`.
+   - JPEG `FF D8 FF`; PNG `89 50 4E 47 0D 0A 1A 0A`; WebP `RIFF????WEBP`; HEIC/HEIF bytes 4–11 `ftypheic|ftypheix|ftyphevc|ftypheim|ftypheis|ftypmif1|ftypmsf1`; PDF `%PDF-` within the first 1024 bytes; DXF ASCII: first non-blank lines `0` then `SECTION`, or binary sentinel `AutoCAD Binary DXF\r\n\x1a\x00`; DWG magic `AC10…`/`AC1012`…`AC1032` → `rejected` with `reason_code = dwg_not_supported` (06 §2.1).
    - Additionally `finfo(FILEINFO_MIME_TYPE)` must agree for jpeg/png/webp/pdf.
    - Sniffed type must be in the purpose allowlist and in the same family as the declared type → else `rejected` (`upload_type_not_allowed` / `upload_type_mismatch`).
 3. Images (except `blueprint_source`): `getimagesize()` → width × height ≤ 40 MP and each side ≤ 12 000 px (decompression-bomb guard) → else `upload_image_too_large`. Then `App\Support\Uploads\ImageSanitizer::sanitize($path, $type, $maxEdge)`:
    - JPEG: read EXIF `Orientation` with `exif_read_data`; decode with GD; **apply the orientation to the pixels** (rotate/flip) so photos stay upright everywhere; re-encode progressive JPEG quality 85.
    - PNG: decode, preserve alpha, re-encode (compression 6). WebP: decode, re-encode quality 85 (animated WebP: first frame only).
-   - HEIC (photos): `POST {VISION_SERVICE_URL}/v1/images/normalize` with bearer token, body `{sourceUrl: presigned GET 15 min, targetUrl: presigned PUT 15 min, format: 'jpeg', quality: 85, maxEdge: 4096, applyOrientation: true}` (Pillow + pi-heif in vision; proposed addition to 06) → then run the JPEG path on the result.
+   - HEIC (photos): `POST {VISION_SERVICE_URL}/v1/images/normalize` with bearer token, body `{sourceUrl: presigned GET 15 min, targetUrl: presigned PUT 15 min, format: 'jpeg', quality: 85, maxEdge: 4096, applyOrientation: true}` (Pillow + pi-heif in vision, 06 §5.8; these are server-side vision presigns, not upload intents) → then run the JPEG path on the result.
    - Downscale to the purpose's max edge (photos 4096 px).
    - Re-encoding with GD writes **no metadata**: EXIF (incl. GPS), XMP, IPTC, ICC and comments are all stripped. A test asserts no `GPS` EXIF tag remains.
 4. PDF (`message_attachment`): not parsed, rendered, or re-encoded by the app (the app has no PDF parser; only the vision service parses PDFs, and only for blueprint imports). Stored as-is and only ever served from the storage origin with `Content-Disposition: attachment`.
-5. `blueprint_source`: steps 1–2 only (magic bytes vs declared, size); everything else is the vision service's job (06).
+5. `blueprint_source`: steps 1–2 only (magic bytes vs declared, size, DWG detection); everything else is the vision service's job (06). The processed copy keeps the original bytes.
 6. Upload the processed file to `uploads/{purpose}/{Y}/{m}/{ulid}.{ext}` (extension from the **sniffed** type), delete the tmp object, `status = ready`, `processed_key`, `sniffed_mime`, `width`, `height`.
-7. The consuming Action (e.g. `PostMessage` with `uploadIds[]`) verifies each intent belongs to the user, is `ready`, matches the purpose, and not yet consumed; then `addMediaFromDisk($processedKey, 's3')->usingName($displayName)->usingFileName(basename($processedKey))->toMediaCollection(...)`; marks the intent `consumed`.
+7. The consuming Action (e.g. `PostMessage` with `uploadIds[]`) verifies each intent belongs to the user, is `ready`, matches the purpose (and, when the intent has a target, the same target), and not yet consumed — otherwise 422 `{code: 'upload_invalid', uploadId}`; then `addMediaFromDisk($processedKey, 's3')->usingName($displayName)->usingFileName(basename($processedKey))->toMediaCollection(...)`; marks the intent `consumed`.
 
 ### 11.4 Filename sanitisation (`App\Support\Uploads\FileName::sanitize(string $name): string`)
 
@@ -647,7 +667,7 @@ Private files only via 15-minute signed URLs after a policy check (§8.9). Stora
 
 ### 12.1 Security headers middleware
 
-`App\Http\Middleware\SecurityHeaders` (appended to the `web` group; also applied to error pages). Per request it creates a nonce (`base64_encode(random_bytes(16))`), calls `Vite::useCspNonce($nonce)` (so `@vite` tags carry it), shares it with Blade (`csp_nonce`) for the Turnstile script tag, and sets on HTML responses:
+`App\Http\Middleware\SecurityHeaders` (appended to the `web` group; also applied to error pages). **Header ownership:** this middleware sets every security header on responses produced by Laravel (CSP, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `X-Content-Type-Options`, HSTS, and `X-Robots-Tag: noindex, nofollow` when `APP_ENV ≠ production`); nginx (17 §5.2) adds only `X-Content-Type-Options` and HSTS for the static files it serves itself (`/build/*`, `/sw.js`, other files under `public/`). Per request it creates a nonce (`base64_encode(random_bytes(16))`), calls `Vite::useCspNonce($nonce)` (so `@vite` tags carry it), shares it with Blade (`csp_nonce`) for the Turnstile script tag, and sets on HTML responses:
 
 ```
 Content-Security-Policy:
@@ -686,11 +706,11 @@ Other headers (all responses from Laravel):
 | `Cross-Origin-Opener-Policy` | `same-origin` |
 | `X-Frame-Options` | `DENY` (legacy companion to `frame-ancestors`) |
 
-`public/sw.js` responses add `Service-Worker-Allowed: /`. nginx (`nginx.template.conf`) sets `server_tokens off`, `X-Content-Type-Options` and HSTS for static assets; PHP `expose_php = Off`.
+`public/sw.js` responses add `Service-Worker-Allowed: /`. nginx (the `nginx.conf` static asset of `nixpacks.toml`, 17 §5.2) sets `server_tokens off`, `X-Content-Type-Options` and HSTS (`max-age=31536000; includeSubDomains` when the request arrived over HTTPS) for static assets; PHP `expose_php = Off`.
 
 ### 12.2 Cookies
 
-Session cookie per §6.1 (`__Host-session`, Secure, HttpOnly, SameSite=Lax). Remember cookie inherits Secure/HttpOnly/SameSite. `XSRF-TOKEN` cookie: Secure, SameSite=Lax, **not** HttpOnly (read by the frontend to send `X-XSRF-TOKEN`). All cookies encrypted by `EncryptCookies` except `XSRF-TOKEN` per Laravel default.
+Session cookie per §6.1 (`__Host-session`, Secure, HttpOnly, SameSite=Lax). Remember cookie inherits Secure/HttpOnly/SameSite. `XSRF-TOKEN` cookie: Secure, SameSite=Lax, **not** HttpOnly (read by the frontend to send `X-XSRF-TOKEN`). All cookies encrypted by `EncryptCookies` except `XSRF-TOKEN` per Laravel default and `appearance` (`light|dark|system`, set by the theme toggle, read by `app.blade.php` to avoid a theme flash; functional, not HttpOnly, Secure, 1 year, SameSite=Lax; listed in `encryptCookies(except: ['appearance'])`, 15 §11).
 
 ### 12.3 CSRF
 
@@ -729,7 +749,7 @@ Post-login redirects use only same-origin paths (`url.intended` checked with `St
 
 ### 12.9 Outbound
 
-Gotenberg (internal, no auth): HTML for PDFs is rendered from escaped Blade; images embedded as data URIs or 15-minute signed storage URLs; Gotenberg runs with `--chromium-disable-javascript=true` and `--chromium-allow-list` restricted to the storage origins (prevents SSRF from HTML). Vision service (internal only) is called with `Authorization: Bearer {VISION_SERVICE_TOKEN}`. `Http::preventStrayRequests()` in tests.
+Gotenberg (internal, no auth): HTML for PDFs is rendered from escaped Blade; **all images (logo, thumbnails, photos) and fonts are embedded as data URIs** (17 §5.11), so Gotenberg never fetches a URL; it runs with `--chromium-disable-javascript=true` and `--chromium-allow-list=^file:///tmp/.*` (no network fetches from HTML; prevents SSRF). Vision service (internal only) is called with `Authorization: Bearer {VISION_SERVICE_TOKEN}`. `Http::preventStrayRequests()` in tests.
 
 ---
 
@@ -739,7 +759,7 @@ Gotenberg (internal, no auth): HTML for PDFs is rendered from escaped Blade; ima
 |---|---|---|
 | Private media (S3) | `getTemporaryUrl` after policy check | 15 min |
 | Presigned PUT uploads | `temporaryUploadUrl` with signed Content-Type/Length | 15 min |
-| Vision file exchange | presigned GET/PUT (01 §9) | 15 min |
+| Vision file exchange (server-side presigns, not upload intents) | presigned GET/PUT (01 §9) | 15 min |
 | Email verification | `URL::temporarySignedRoute('verification.verify')` | 60 min |
 | Password reset | broker token (hashed in `password_reset_tokens`) | 60 min |
 | Staff invitation | `URL::temporarySignedRoute('staff.invitations.show')` | 72 h |
@@ -766,7 +786,7 @@ Webhook routes live in `routes/webhooks.php` (stateless: no session, no cookies,
 
 ## 15. Secrets management & encryption at rest
 
-- All secrets are **Coolify environment variables** marked as secret (not build-time where not needed); never committed; `.env.example` lists names with empty values. Secrets: `APP_KEY`, `APP_PREVIOUS_KEYS`, `DB_PASSWORD`, `REDIS_PASSWORD`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, `VISION_SERVICE_TOKEN`, `REVERB_APP_SECRET`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `TWILIO_AUTH_TOKEN`, `MSG91_AUTH_KEY`, `MSG91_WEBHOOK_TOKEN`, `GOOGLE_CLIENT_SECRET`, `TURNSTILE_SECRET_KEY`, `VAPID_PRIVATE_KEY`, mail provider keys, `SEED_OWNER_PASSWORD` (removed after first deploy). AI provider keys exist **only** in the vision service's environment (01).
+- All secrets are **Coolify environment variables** marked as secret (not build-time where not needed); never committed; `.env.example` lists names with empty values (complete variable list: 17 §6). Secrets: `APP_KEY`, `APP_PREVIOUS_KEYS`, `DB_PASSWORD`, `REDIS_PASSWORD`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, `VISION_SERVICE_TOKEN`, `REVERB_APP_SECRET`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `TWILIO_AUTH_TOKEN`, `MSG91_AUTH_KEY`, `MSG91_WEBHOOK_TOKEN`, `GOOGLE_CLIENT_SECRET`, `TURNSTILE_SECRET_KEY`, `VAPID_PRIVATE_KEY`, `POSTMARK_TOKEN` (and `RESEND_KEY` when used), `HEALTH_CHECK_TOKEN`, `OBJECT_BACKUP_B2_APP_KEY`, `SENTRY_*` DSNs, `SEED_OWNER_PASSWORD` (removed after first deploy). AI provider keys exist **only** in the vision service's environment (01).
 - Least privilege: the app's storage key is scoped to the app's two buckets; the vision service has **no** storage credentials (presigned URLs only); the backup bucket uses separate credentials not present in the app container.
 - `APP_KEY` rotation: generate new key, move old to `APP_PREVIOUS_KEYS` (Laravel decrypts with previous keys), redeploy; sessions are invalidated (acceptable); 2FA secrets and encrypted columns remain readable via previous keys and are re-encrypted lazily on next save; rotate `APP_PREVIOUS_KEYS` out after 90 days only after running `php artisan furny:reencrypt` (re-saves encrypted columns). Unsubscribe links signed with the old key break (acceptable).
 - Encrypted columns: Fortify `two_factor_secret`, `two_factor_recovery_codes` (encrypted by Fortify). Settings: any settings Data property annotated `#[Encrypted]` is stored encrypted inside `app_settings.value` via a custom cast `App\Support\Settings\Casts\EncryptedStringCast` and redacted in audit logs; **v1 stores no secrets in settings** (all secrets are env), the mechanism exists for future use and is unit-tested. Sessions encrypted (`SESSION_ENCRYPT=true`).
@@ -816,8 +836,11 @@ Written in Actions/listeners via `activity($logName)->performedOn($subject)->cau
 | `catalog` | `presets.*`, `templates.updated` | model | staff | changed fields |
 | `orders` | every order event key in 09 §11 (state transitions and non-transition actions) | order | actor / null (system) | `from`, `to`, related ids (`quoteId`, `proposalId`, …), `total_minor` for quote events, `ip` (masked) for `quote.accepted` |
 | `orders` | `order.design_staff_edit` (staff saves on customer plans/designs) | plan / design | staff | `version` |
-| `ai` | `ai.credits_granted` / `ai.credits_revoked` | user | staff | `delta`, `note` |
-| `ai` | `ai.settings_updated` | — | owner | changed fields |
+| `ai` | `ai.credits_granted` / `ai.credits_revoked` / `ai.credits_refunded` | user (refund: the import) | staff | `delta`, `note` (refund: `importId`) |
+| `ai` | `ai.settings_updated` | `AppSetting` (`ai`) | owner | changed fields (18 §15.2; in addition to `settings.updated`) |
+| `orders` | `quote.draft_created`, `furniture.revision_bom_refreshed` (08 §6.1) | quote / revision | staff | `quoteId` / `revisionId`, `catalogVersion` |
+| `projects` | `plan.locked` / `plan.unlocked` (05 §15.3) | plan | staff | — |
+| `imports` | `imports.accepted` (06 §11.5) | import | user / staff | `importId`, `planId`, `target`, `providerUsed` |
 
 Additionally, 403 responses on `admin.*` routes and webhook signature failures are written to `Log::channel('security')` (warning, rate-limited to 1 entry per user/IP per minute), not to the activity log.
 
@@ -825,18 +848,18 @@ Additionally, 403 responses on `admin.*` routes and webhook signature failures a
 
 ## 18. Backups (requirements; mechanism in `17`)
 
-1. PostgreSQL: daily full logical backup + retention 30 daily, 12 monthly; stored in a **dedicated** bucket with credentials not present in app containers.
-2. **Encrypted**: backups are encrypted before upload with `age` to a public key (`BACKUP_AGE_RECIPIENT`); the private key is held offline by the owner (password manager + printed copy). Provider SSE is on as well.
-3. Object storage: bucket versioning (or R2 object lock rules) on the private bucket with 30-day retention of deleted versions.
-4. Restore test quarterly (documented in `17`), including decrypting a backup on a clean machine.
+1. PostgreSQL: daily full logical backup + retention 30 daily, 12 monthly; stored in a **dedicated** bucket at a different provider (Backblaze B2, 17 §1 O11) with credentials not present in app containers (Coolify's S3 storage credentials live only in Coolify).
+2. **Encrypted at rest**: B2 server-side encryption (SSE-B2) is enabled as the default on both backup buckets (17 §7.4); dumps are produced by Coolify's managed backups, which cannot encrypt client-side, so client-side `age` encryption is not used in v1 (reconciliation decision D32, master §7).
+3. Object storage: nightly `rclone sync` of both buckets into the versioned B2 bucket `furny-object-backups`, which keeps overwritten/deleted versions for 30 days (17 §12.3).
+4. Restore test quarterly (documented in `17 §12.5`), including restoring a backup on a machine that is not the production server.
 5. Redis is not backed up (sessions, cache, queues are reconstructible; failed jobs are in Postgres).
 
 ---
 
 ## 19. Dependency & vulnerability management
 
-- Dependabot (`.github/dependabot.yml`): weekly for `composer`, `npm`, `pip` (`/vision`), `github-actions`; minor/patch grouped per ecosystem; security updates immediately.
-- CI gates: `composer audit --locked`, `npm audit --omit=dev --audit-level=high`, `pip-audit -r vision/requirements.lock` — fail on high/critical unless listed in `security/audit-allowlist.json` (`{id, reason, expires_on}`; expired entries fail CI).
+- Dependabot (`.github/dependabot.yml`): weekly for `composer`, `npm` (Dependabot's ecosystem name, which handles the project's Yarn 4 lockfile), `pip` (`/vision`), `github-actions`; minor/patch grouped per ecosystem; security updates immediately.
+- CI gates: `composer audit --locked`, `yarn npm audit --environment production --severity high`, `pip-audit -r vision/requirements.txt` — fail on high/critical unless listed in `security/audit-allowlist.json` (`{id, reason, expires_on}`; expired entries fail CI).
 - Patch SLA: critical 48 h, high 7 days, medium 30 days. Exact-pinned packages (01 §1) reviewed monthly.
 - Base images (Gotenberg, Postgres, Redis) updated monthly via Coolify; Nixpacks PHP/Node versions per `17`.
 
@@ -848,7 +871,7 @@ Automated (Pest, `tests/Feature/Security/*`), all required:
 
 1. **Authorization matrix**: a dataset over every admin route × each role (+ customer, guest) asserts allowed/denied per §7.2/§8; generated from `php artisan route:list --json` so new routes without a test fail CI (`tests/Feature/Security/RouteCoverageTest.php` requires every route to be in an allowlist map).
 2. **IDOR**: customer A cannot view/update customer B's project, plan, design, import, order, quote, proposal, message, media (404).
-3. **Locks**: saving a locked design → 423; staff working-copy save on locked design → 423; proposal draft endpoint requires `orders.edit_designs`.
+3. **Locks**: saving a locked design → 423; staff working-copy save on locked design → 423; saving a locked plan → 423 `plan_locked`; proposal draft endpoint requires `orders.propose_changes`.
 4. **Owner gates**: admin cannot T30, cannot grant owner, cannot change currency or `ai`/`auth` settings; last-owner protections.
 5. **Login**: throttling after 5 attempts; inactive user message only after correct password; staff never receive remember cookie; session id changes on login (fixation).
 6. **OTP**: 6 digits; expiry 10 min; 5 wrong attempts kill the code; cooldown 60 s; 5/phone/hour; 10/IP/hour; captcha required on 3rd send; disallowed country rejected; non-mobile rejected; new code expires old; code never appears in logs (log fake asserts) or queued payloads (`Queue::fake` asserts nothing queued); identical responses for existing/non-existing numbers; staff phone → `staff_use_email`.
@@ -884,119 +907,4 @@ Manual pre-release (owner/staging): OWASP ZAP baseline scan against staging (no 
 
 ---
 
-## Appendix: Proposed additions to other documents
-
-### A. `02-data-model.md`
-
-**A.1 `users`** — add columns:
-
-| Column | Type | Null | Default | Notes |
-|---|---|---|---|---|
-| terms_accepted_at | timestamptz | yes | | set at registration (all methods) and invitation acceptance |
-| anonymised_at | timestamptz | yes | | set by `AnonymiseUser` (13 §9.2) |
-
-**A.2 New table `staff_invitations`** (§1 Identity, migration group 1)
-
-| Column | Type | Null | Default | Notes |
-|---|---|---|---|---|
-| id | ulid PK | | | |
-| email | string(254) | no | | lower-cased |
-| name | string(120) | no | | prefill |
-| role | string(32) | no | | spatie role name (`owner`\|`admin`\|`estimator`\|`production`\|`support`) |
-| invited_by | ulid FK users **N** | yes | | |
-| expires_at | timestamptz | no | | now + 72 h (extended on resend) |
-| accepted_at | timestamptz | yes | | |
-| revoked_at | timestamptz | yes | | |
-| user_id | ulid FK users **N** | yes | | created staff user |
-| timestamps | | | | |
-
-Indexes: partial unique (`email`) where `accepted_at IS NULL AND revoked_at IS NULL`; (`created_at`).
-
-**A.3 New table `upload_intents`** (§1, migration group 2)
-
-| Column | Type | Null | Default | Notes |
-|---|---|---|---|---|
-| id | ulid PK | | | |
-| user_id | ulid FK users **C** | no | | |
-| purpose | string(32) | no | | `UploadPurpose` enum (13 §11.1) |
-| target_type | string(64) | yes | | morph alias of the target model |
-| target_id | char(26) | yes | | |
-| object_key | string(255) | no | | `tmp/{purpose}/{Y}/{m}/{ulid}` |
-| processed_key | string(255) | yes | | final key after processing |
-| original_filename | string(255) | no | | sanitised display name |
-| declared_mime | string(100) | no | | |
-| declared_size | bigint | no | | |
-| sniffed_mime | string(100) | yes | | |
-| width, height | integer | yes | | images |
-| status | string(16) | no | `'pending'` | `pending` \| `uploaded` \| `ready` \| `rejected` \| `consumed` \| `expired` |
-| reason_code | string(48) | yes | | rejection code |
-| expires_at | timestamptz | no | | presign expiry (now + 15 min) |
-| consumed_at | timestamptz | yes | | |
-| timestamps | | | | |
-
-Indexes: (`user_id`, `created_at`), (`status`, `created_at`).
-
-**A.4 New settings group `auth`** (owner-only, `settings.manage_restricted`):
-
-| Field | Type | Default |
-|---|---|---|
-| allow_customer_registration | bool | true |
-| otp_allowed_country_codes | array of ISO-3166 alpha-2 | `["IN"]` (seeder: `[business.address.country_code ?? 'IN']`) |
-| otp_global_hourly_cap | int | 200 |
-| staff_session_absolute_hours | int | 12 |
-
-**A.5** Seeder `RolesAndPermissionsSeeder` content = 13 §7.1–§7.2 (25 permissions incl. `orders.edit_designs` and `quotes.view_costs`).
-
-### B. Master §6.7 feature flags
-
-Add `features.captcha` — default `true` when `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set, else `false`. Exposed to the frontend with `turnstileSiteKey` (auth pages only).
-
-### C. `01-architecture.md`
-
-- §7 scheduler additions: every 5 min `otp:monitor`; daily 03:15 `users:anonymise-deleted`; monthly (day 1, 04:30) `activitylog:clean`.
-- §8 real-time: add private channel `orders.{orderId}.internal` (staff with `orders.view`) for internal notes, internal production updates and call logs; `orders.{orderId}` must carry customer-safe payloads only.
-- §3 layout: `routes/webhooks.php` (stateless group) and `config/security.php` (rate limits, CSP origins).
-- §1.1: `twilio/sdk ^8.0` declared explicitly (used by the Twilio webhook validator and WhatsApp driver).
-
-### D. `06-blueprint-import.md` (vision service)
-
-New internal endpoint `POST /v1/images/normalize` (bearer `VISION_SERVICE_TOKEN`): body `{sourceUrl, targetUrl, format: 'jpeg'|'png'|'webp', quality: 1..100, maxEdge: int, applyOrientation: bool}`; decodes (Pillow + pi-heif), applies EXIF orientation, strips all metadata, resizes to `maxEdge`, encodes, PUTs to `targetUrl`; returns `{width, height, bytes}`; errors `{code: 'decode_failed'|'too_large'|'unsupported'}`. Used for HEIC photos (13 §11.3).
-
-### E. `14-routes-and-api.md` — routes this file depends on (exact names)
-
-| Name | Method + path | Middleware |
-|---|---|---|
-| `auth.otp.create` | GET `/login/phone` | guest |
-| `auth.otp.send` | POST `/auth/otp/send` | guest, throttle:otp-send |
-| `auth.otp.verify.show` / `auth.otp.verify` | GET/POST `/auth/otp/verify` | guest, throttle:otp-verify (POST) |
-| `auth.otp.resend` | POST `/auth/otp/resend` | guest, throttle:otp-send |
-| `auth.otp.status` | GET `/auth/otp/status` | web |
-| `auth.otp.complete.show` / `auth.otp.complete` | GET/POST `/auth/otp/complete` | guest, throttle:register (POST) |
-| `auth.google.redirect` / `auth.google.callback` | GET `/auth/google/redirect`, `/auth/google/callback` | throttle:oauth |
-| `account.google.unlink` | DELETE `/account/google` | auth, recent.auth |
-| `account.phone.send` / `account.phone.verify` | POST `/account/phone/otp`, `/account/phone/verify` | auth, throttle |
-| `customer.account.security` / `admin.account.security` | GET `/account/security`, `/admin/account/security` | |
-| `account.sessions.destroy` / `account.sessions.destroy-others` | DELETE `/account/sessions/{sessionKey}`, `/account/sessions` | auth, recent.auth |
-| `admin.security.two-factor` | GET `/admin/account/two-factor` | staff (exempt from 2fa.enrolled) |
-| `auth.reauthenticate` | GET/POST `/auth/reauthenticate` | auth |
-| `customer.account.delete` / `customer.account.destroy` | GET/DELETE `/account` | customer, recent.auth |
-| `customer.account.export` | GET `/account/export` | customer, recent.auth, verified.contact, throttle:data-export |
-| `staff.invitations.show` / `staff.invitations.accept` | GET/POST `/staff/invitations/{invitation}` | signed |
-| `admin.staff.invitations.store` / `.resend` / `.revoke` | POST `/admin/staff/invitations`, POST `/admin/staff/invitations/{invitation}/resend`, DELETE `/admin/staff/invitations/{invitation}` | staff, throttle:invitations |
-| `admin.staff.two-factor.reset` | DELETE `/admin/staff/{user}/two-factor` | staff |
-| `admin.customers.restore` / `admin.customers.anonymise` | POST `/admin/customers/{user}/restore`, `/admin/customers/{user}/anonymise` | staff |
-| `media.show` | GET `/media/{media:uuid}` | auth, active |
-| `api.uploads.presign` / `api.uploads.confirm` / `api.uploads.show` | POST `/api/uploads/presign`, POST `/api/uploads/{upload}/confirm`, GET `/api/uploads/{upload}` | throttle:uploads-* |
-| `csp.report` | POST `/csp-report` | throttle:csp-report (CSRF-exempt) |
-
-### F. `10-customer-app.md` / `11-admin-app.md`
-
-Customer: account security page (sessions, Google link/unlink, phone), delete-account page, data export button, optional phone step in the order submit dialog (13 §5.7). Admin: security page with 2FA enrolment, staff invitations UI, customer restore/anonymise actions, audit log page, OTP/WhatsApp health banners.
-
-### G. `15-ui-design-system.md`
-
-Fonts must be self-hosted (CSP `font-src 'self' data:`); only `MessageBody.vue` may use `v-html`.
-
-### H. `18-ai-providers-and-quotas.md`
-
-Event `App\Domain\Identity\Events\ContactVerified` (fired on first email or phone verification) is available for granting `signup_grant` credits on verification rather than at registration (recommended to deter throwaway-account credit farming).
+_Appendix merged into the target documents during reconciliation (see 19-reconciliation-log.md)._

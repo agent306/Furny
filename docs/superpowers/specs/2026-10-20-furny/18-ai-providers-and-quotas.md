@@ -2,7 +2,7 @@
 
 Read the master document, `01-architecture.md`, `02-data-model.md`, `03-design-documents.md` and `06-blueprint-import.md` (referenced here as **06**) first. This file is normative for: the AI provider abstraction inside the Python vision service (Anthropic, OpenAI, OpenAI-compatible local, none), provider configuration and capability discovery, how Laravel chooses a provider for a run, the AI credit ledger semantics, grants, limits, the global USD budget, cost computation, usage metering, and every related UI, command, event and error.
 
-Where something is needed that is not yet in `02`/`12`/`13`/`14`/`17`, it is used here and listed in the final **Appendix**.
+Tables, settings and enums used here are defined in `02` (§7 AI tables, §13 `ai` group); permissions in `13 §7` (`ai.manage`, gate `settings.manage_restricted`); notifications in `12 §3.3`; environment variables in `17 §6` (vision service) — this file is normative for their semantics.
 
 ---
 
@@ -27,8 +27,8 @@ Where something is needed that is not yet in `02`/`12`/`13`/`14`/`17`, it is use
 
 ## 1. Scope and principles
 
-1. The **feature** metered in v1 is `blueprint_recognition` (plus `provider_test` for the admin connection test, Appendix). The ledger and usage tables are generic (`feature`, `reference`) so the phase-2 furniture assistant can reuse them.
-2. Customers see **credits** only, never USD. Staff with `ai.usage.view` see USD costs.
+1. The **feature** metered in v1 is `blueprint_recognition` (plus `provider_test` for the admin connection test, 02 §7.2). The ledger and usage tables are generic (`feature`, `reference`) so the phase-2 furniture assistant can reuse them.
+2. Customers see **credits** only, never USD. Staff with `ai.manage` see USD costs.
 3. Every LLM call is made inside one `/v1/recognize` (or `/v1/providers/test`) request; the vision service returns token usage; Laravel prices it and stores one `ai_usage_events` row per run.
 4. Effort setting values are `low|medium|high` (02 §13); higher levels (`xhigh`, `max`) are not exposed in v1.
 
@@ -83,6 +83,7 @@ Rules that apply to all providers:
 | `VISION_MAX_SOURCE_BYTES` | 26214400 | Fetch cap (DXF uses 15728640) |
 | `VISION_MAX_PIXELS` | 40000000 | Downscale threshold |
 | `VISION_HEAVY_SLOT_WAIT_S` | 2 | Wait before answering 503 busy |
+| `SENTRY_DSN` | optional | Error reporting via `sentry-sdk[fastapi]` (01 §1.3); unset = disabled |
 | `ANTHROPIC_API_KEY` | str, optional | Enables `anthropic` |
 | `ANTHROPIC_MODEL` | `claude-opus-5-5` | Default when Laravel sends `model: null` |
 | `ANTHROPIC_BASE_URL` | optional | Proxy/gateway |
@@ -474,7 +475,7 @@ Called from `MarkImportFailed` (system failures, 06 §4.9) and `CancelImport` (f
 
 ### 9.5 `RefundCredits::refundConsumption(BlueprintImport $import, User $staff, string $note): void`
 
-Staff action "Refund credits" on an import (admin import detail or customer AI card), permission `ai.credits.manage`. Requires `charged(i) > 0`. Lock user; insert `refund` (+charged(i)), `created_by = staff`, `note` (3–255 chars); `credits_charged = 0`; activity `ai.credits_refunded`; notification `ai.credits_refunded` to the customer. Not available to customers: discarding an accepted-able result never refunds (06 §11.6).
+Staff action "Refund credits" on an import (admin import detail or customer AI card), permission `ai.manage`. Requires `charged(i) > 0`. Lock user; insert `refund` (+charged(i)), `created_by = staff`, `note` (3–255 chars); `credits_charged = 0`; activity `ai.credits_refunded`; notification `ai.credits_refunded` to the customer. Not available to customers: discarding an accepted-able result never refunds (06 §11.6).
 
 ### 9.6 Balance reads
 
@@ -493,7 +494,7 @@ public function summary(User $user): CreditSummaryData;
 
 ### 10.1 Signup grant
 
-Listener `App\Domain\Ai\Listeners\GrantSignupCredits` on the Identity domain event `CustomerRegistered` (dispatched by `RegisterCustomer` and by staff-created customer accounts; Appendix). `GrantCredits::signup(User $user)`: if `ai.signup_credits > 0` and the user has no `signup_grant` row → insert `signup_grant` (+signup_credits). Staff users get nothing.
+Listener `App\Domain\Ai\Listeners\GrantSignupCredits` on the Identity domain event `ContactVerified` (13 §5.6: dispatched after commit the first time a customer gets a verified email **or** phone — including accounts created already verified via Google or phone OTP; never dispatched again for that user). Granting on verification rather than registration deters throwaway-account credit farming. `GrantCredits::signup(User $user)`: if `ai.signup_credits > 0` and the user has no `signup_grant` row → insert `signup_grant` (+signup_credits). Staff users get nothing.
 
 ### 10.2 Monthly top-up — `ai:grant-monthly-credits`
 
@@ -508,7 +509,7 @@ Effect: a customer with 0 credits on the 1st gets +3; one with 2 gets +1; one wi
 
 ### 10.3 Admin grant / revoke
 
-`GrantCredits::admin(User $customer, int $amount, string $reason, User $staff)` — amount 1..1000; `GrantCredits::revoke(User $customer, int $amount, string $reason, User $staff)` — amount 1..`balance(u)` (cannot go negative; 422 `revoke_exceeds_balance`). Reason 3–255 chars stored in `note`. Activity log events `ai.credits_granted` / `ai.credits_revoked` with `{amount, reason}`. Grants notify the customer (`ai.credits_granted`); revokes do not. Permission `ai.credits.manage`. Staff users cannot be granted credits (422 `not_a_customer`).
+`GrantCredits::admin(User $customer, int $amount, string $reason, User $staff)` — amount 1..1000; `GrantCredits::revoke(User $customer, int $amount, string $reason, User $staff)` — amount 1..`balance(u)` (cannot go negative; 422 `revoke_exceeds_balance`). Reason 3–255 chars stored in `note`. Activity log events `ai.credits_granted` / `ai.credits_revoked` with `{amount, reason}`. Grants notify the customer (`ai.credits_granted`); revokes do not. Permission `ai.manage`. Staff users cannot be granted credits (422 `not_a_customer`).
 
 ---
 
@@ -528,7 +529,7 @@ Effect: a customer with 0 credits on the 1st gets +3; one with 2 gets +1; one wi
 |---|---|---|
 | Active runs per user | 2 (`imports.max_active_per_user`) | 429 `too_many_active_imports` |
 | Start rate | 10 / hour / user (`RateLimiter::for('imports-start')`) | 429 `rate_limited` (`Retry-After`) |
-| Presign rate | 20 / hour / user | 429 `rate_limited` |
+| Presign rate | `uploads-presign` limiter (13 §10: 30/min and 300/day per user, all upload purposes) | 429 `rate_limited` |
 | Provider test | 10 / minute / staff user (`ai-provider-test`) | 429 `rate_limited` |
 | File size / pages / pixels | 06 §2.2 | 06 §14 |
 | Re-run on the same upload | charged again (non-staff); staff free when `staff_unlimited` | — |
@@ -619,7 +620,7 @@ Vision-side provider codes (appear in `meta.fallbackReason`, vision error bodies
 - **Account → AI credits** page (`customer.account.ai-credits`, Inertia `Customer/Account/AiCredits.vue`): large balance, "Pending: {pending} (analysis running)" when > 0, top-up explanation, and a paginated history (20/page) from `CustomerLedgerQuery`: rows `signup_grant`, `monthly_grant` (delta > 0 only), `admin_grant`, `admin_revoke`, `consumption`, `refund`; reservation/release rows are hidden (net effects are visible via consumption). Columns: date (user TZ), description (`ai.ledger.{kind}` with params: filename for import-linked rows, admin reason for grants/revokes/refunds), change (+green/−), link "View import" when referenced.
 - Real-time: `AiCreditsChanged` on `users.{id}` updates the chip and page without reload.
 
-### 15.2 Admin — Settings → AI (`admin.settings.ai`, permission `settings.ai.manage`)
+### 15.2 Admin — Settings → AI (`admin.settings.ai`, gate `settings.manage_restricted` — owners only)
 
 Form (FormRequest `UpdateAiSettingsRequest`, saved through the Settings domain's `UpdateSettings` action, activity-logged):
 
@@ -639,11 +640,11 @@ Form (FormRequest `UpdateAiSettingsRequest`, saved through the Settings domain's
 
 Buttons: **Save**, **Test connection** (`POST admin.settings.ai.test` → `VisionClient::testProvider(provider, model)`; shows ✓/✗, latency, served model, vision/JSON verification, error text; records usage). Warnings: selected (provider, model) has no price row (non-`none`, non-`openai_compatible` default 0/0 rows count as present); vision service unreachable (capabilities stale) banner.
 
-### 15.3 Admin — customer detail "AI credits" card (`admin.customers.show`, permission `ai.credits.manage` to act, `ai.usage.view` to see costs)
+### 15.3 Admin — customer detail "AI credits" card (`admin.customers.show`; card visible with `customers.view`, actions and USD costs require `ai.manage`)
 
 Balance, pending, this month's runs and credits consumed, buttons **Grant credits** / **Revoke credits** (dialog: amount, reason required), full ledger table (all kinds incl. reservations, with `created_by` name and note), per-import **Refund** action on consumption rows.
 
-### 15.4 Admin — AI usage report (`admin.ai.usage`, permission `ai.usage.view`)
+### 15.4 Admin — AI usage report (`admin.ai.usage`, permission `ai.manage`)
 
 `App\Domain\Ai\Queries\AiUsageReportQuery::forMonth(CarbonImmutable $month)` returns: totals (cost USD, runs, AI runs (provider ≠ none), fallbacks (status failed), tests, input/output tokens, images), budget (spent, limit, %), daily series `[{date, costMicroUsd, runs}]`, by provider/model `[{provider, model, runs, inputTokens, outputTokens, costMicroUsd, avgCostMicroUsd, avgDurationMs}]`, top 20 users by cost, latest 50 runs (time, user, provider, model, status, tokens, cost, duration, link to the import). UI: month picker (default current, business TZ), KPI tiles, daily cost bar chart, tables. **Export CSV** (`admin.ai.usage.export?month=YYYY-MM`, streamed, one row per `ai_usage_events` row with cost in USD to 6 dp).
 
@@ -658,10 +659,10 @@ Admin dashboard widget (11): "AI budget: $x of $y this month" progress bar (ambe
 | `AiCreditsChanged` (broadcast, `users.{userId}`) | `{balance, pending, delta, kind, at}`; dispatched after commit by every ledger write |
 | `AiBudgetThresholdReached` | → notification `ai.budget_threshold_reached` (owners; in-app + email) `{percent, spentUsd, limitUsd, month}` |
 | `AiProviderUnavailable` | dispatched by `ResolveRecognitionPlan` when it downgrades because the configured provider is unconfigured/erroring; throttled `Cache::add("ai:provider_unavailable:notified", …, 6 h)`; → `ai.provider_unavailable` (owners; in-app + email) `{provider, reason}` |
-| `ai.credits_granted` | customer; in-app + email `{amount, balance}` |
-| `ai.credits_refunded` | customer; in-app `{amount, filename}` |
+| `ai.credits_granted` | customer; in-app + email; payload/params per 12 §3.4 (`credits`, `balance`) |
+| `ai.credits_refunded` | customer; in-app (+ web push); payload/params per 12 §3.4 (`credits`, `balance`, `fileName`) |
 | `ai:grant-monthly-credits` | §10.2 |
-| Activity log events | `ai.credits_granted`, `ai.credits_revoked`, `ai.credits_refunded`, `settings.ai_updated` |
+| Activity log events | `ai.credits_granted`, `ai.credits_revoked`, `ai.credits_refunded`, `ai.settings_updated` (13 §17) |
 
 Files (`app/Domain/Ai/`): `Models/AiCreditLedgerEntry.php` (`const UPDATED_AT = null`, immutable: `updating`/`deleting` model events throw), `Models/AiUsageEvent.php` (`const UPDATED_AT = null`), `Enums/AiProvider.php`, `Enums/LedgerKind.php`, `Enums/AiFeature.php`, `Data/RecognitionPlanData.php`, `Data/CreditSummaryData.php`, `Data/VisionCapabilitiesData.php` (in `App\Support\Vision`), `Actions/ResolveRecognitionPlan.php`, `ReserveCredits.php`, `CommitCredits.php`, `RefundCredits.php`, `GrantCredits.php`, `RecordUsage.php`, `Services/CreditBalance.php`, `Services/BudgetGuard.php`, `Support/CostCalculator.php`, `Support/CreditPricing.php`, `Exceptions/AiQuotaException.php` (renders the §14 JSON), `Events/AiCreditsChanged.php`, `AiBudgetThresholdReached.php`, `AiProviderUnavailable.php`, `Listeners/GrantSignupCredits.php`, `Console/GrantMonthlyCredits.php`, `Queries/AiUsageReportQuery.php`, `Queries/CustomerLedgerQuery.php`; controllers `Admin/AiSettingsController`, `Admin/AiUsageController`, `Admin/CustomerAiCreditsController`, `Customer/AiCreditsController`.
 
@@ -720,25 +721,4 @@ SDK clients are constructed with an injected `http_client=httpx.Client(transport
 
 ---
 
-## Appendix: Proposed additions to other documents
-
-**A. `02-data-model.md`**
-
-1. §7.2 `ai_usage_events.feature` — add value `provider_test` (admin connection test; `reference_*` null).
-2. §7.1 `ai_credit_ledger` — note: `monthly_grant` rows may have `delta = 0` (period marker for top-up semantics, 18 §10.2).
-3. §13 `ai` group — clarify semantics (no new fields): `model` blank = vision default model for the provider; `provider` seeded as `anthropic`, and at run time a provider that the vision service does not report as configured is treated as `none` (18 §8.2 step 3) — this realises the documented default "anthropic if vision reports it configured, else none"; `effort` maps per 18 §3; `credits_per_recognition_none` also prices DXF imports (18 §8.3); `max_recognitions_per_day = 0` means unlimited.
-
-**B. `01-architecture.md`**
-
-1. §4 `Ai` domain key actions — `RefundCredits` has two methods `releaseReservation` and `refundConsumption`; add `ResolveRecognitionPlan`; services `CreditBalance`, `BudgetGuard`.
-2. §4 `Identity` — domain event `CustomerRegistered(User $user)` dispatched after commit by `RegisterCustomer` and by staff-created customer accounts (consumed by `GrantSignupCredits`).
-3. §8 — `AiCreditsChanged` payload `{balance, pending, delta, kind, at}`.
-
-**C. `12-notifications.md`** — events: `ai.budget_threshold_reached` (owners; in-app + email; params `percent, spentUsd, limitUsd, month`), `ai.provider_unavailable` (owners; in-app + email; `provider, reason`; throttled 6 h), `ai.credits_granted` (customer; in-app + email; `amount, balance`), `ai.credits_refunded` (customer; in-app; `amount, filename`).
-
-**D. `13-auth-security.md`** — permissions: `ai.credits.manage` (grant/revoke/refund; owner, admin), `ai.usage.view` (usage report and USD costs; owner, admin), `settings.ai.manage` (AI settings + test connection; owner only, or reuse an existing settings permission if 13 defines one). Rate limiters `imports-start` (10/h/user), `ai-provider-test` (10/min/user).
-
-**E. `14-routes-and-api.md`** — `customer.account.ai-credits` (GET page), `admin.settings.ai` (GET/PUT), `admin.settings.ai.test` (POST JSON), `admin.ai.usage` (GET), `admin.ai.usage.export` (GET CSV), `admin.customers.ai-credits.grant` / `.revoke` (POST), `admin.imports.refund` (POST `{note}`); JSON `GET /api/me/ai-credits` (`api.ai.credits`, returns `CreditSummaryData`).
-
-**F. `17-deployment-ops.md`** — vision service env vars exactly as 18 §4 (secrets only on `furny-vision`); Laravel needs only `VISION_SERVICE_URL` and `VISION_SERVICE_TOKEN`.
-
+_Appendix merged into the target documents during reconciliation (see 19-reconciliation-log.md)._

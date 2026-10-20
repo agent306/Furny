@@ -4,7 +4,9 @@
 
 This is the **master document**. It defines the product, the global conventions every part of the system must obey, and the index of the detailed section specs. **Every implementing agent must read this file in full, plus `01-architecture.md`, `02-data-model.md` and `03-design-documents.md`, before reading the section file for its assigned work.**
 
-Rule of precedence when two documents disagree: this file > `02-data-model.md` > `03-design-documents.md` > `09-order-workflow.md` > any other section file. If you find a contradiction, follow the higher-precedence document and record the contradiction in your PR description; do not invent a third behaviour.
+Rule of precedence when two documents disagree: this file > `02-data-model.md` > `03-design-documents.md` > `09-order-workflow.md` > `13-auth-security.md` > any other section file (for UI behaviour, route names and page names, `10`/`11` are preferred among the other section files). If you find a contradiction, follow the higher-precedence document and record the contradiction in your PR description; do not invent a third behaviour.
+
+`19-reconciliation-log.md` is **informational**: it records how the section documents were reconciled (merged proposals, mapped/rejected proposals, fixed inconsistencies) and lists canonical registries (permissions, event keys, settings keys, upload purposes, routes, queues, scheduled commands) compiled from the normative documents. The merged section documents are normative; if `19` and a section document ever differ, the section document wins.
 
 ---
 
@@ -26,11 +28,12 @@ Rule of precedence when two documents disagree: this file > `02-data-model.md` >
 | 11 | `…/11-admin-app.md` | Every staff-facing page, component and state |
 | 12 | `…/12-notifications.md` | Event catalogue, channels (in-app, email, WhatsApp, SMS, web push), templates, preferences |
 | 13 | `…/13-auth-security.md` | Authentication flows, roles & permissions matrix, policies, rate limiting, upload security, privacy |
-| 14 | `…/14-routes-and-api.md` | Every route, controller, form request, Inertia page props and JSON endpoint shape |
+| 14 | `…/14-routes-and-api.md` | Every route, controller, form request, Inertia page props and JSON endpoint shape (written from the route registry in `19` §8.5) |
 | 15 | `…/15-ui-design-system.md` | Design tokens, components, layouts, accessibility, i18n |
 | 16 | `…/16-testing-quality.md` | Test strategy, required test suites, fixtures, CI |
 | 17 | `…/17-deployment-ops.md` | Coolify resources, nixpacks.toml, env vars, backups, monitoring, runbooks |
 | 18 | `…/18-ai-providers-and-quotas.md` | AI provider abstraction (Anthropic / OpenAI / OpenAI-compatible local / none), credits, budgets, usage metering |
+| 19 | `…/19-reconciliation-log.md` | Informational: reconciliation log and canonical registries (see precedence rule above) |
 
 ---
 
@@ -140,9 +143,10 @@ In this spec "**admin**" in lower case means "any staff user with the permission
 | Production update | Staff progress post during production. | `ProductionUpdate` |
 | Completion review | Customer's decision on completion photos. | (state transition + `order_issues`) |
 | Blueprint import | One upload + recognition run producing a draft plan document. | `BlueprintImport` |
+| Upload intent | A server-approved browser upload (presign → PUT → confirm → processing) with an exhaustive purpose; the only way any browser upload enters the system (`13 §11`). | `UploadIntent` / `upload_intents` |
 | Vision service | Python FastAPI service that performs recognition. | `vision/` |
 | AI credit | Unit of customer AI allowance. | `ai_credit_ledger` |
-| Catalog | Materials, edge bands, hardware, finishes, labour rates with prices. | `catalog_*` tables |
+| Catalog | Materials, edge bands, hardware, finishes, labour rates, tax rates with prices. | `materials`, `edge_bands`, `hardware_items`, `finishes`, `labour_rates`, `tax_rates` |
 
 ---
 
@@ -187,22 +191,25 @@ In this spec "**admin**" in lower case means "any staff user with the permission
 - Domain code under `app/Domain/{Area}/…` (Actions, Data, Enums, Events, Models live where `01-architecture.md §4` says).
 - TS: `strict: true`, no `any` (use `unknown` + zod), ESLint + Prettier (configs from starter kit). Vue SFCs `<script setup lang="ts">`. Component file names PascalCase. Composables `useXxx.ts`.
 - Database: snake_case, plural table names, `*_id` FKs, `*_at` timestamps, `*_on` dates, `is_*`/`has_*` booleans, enums stored as `string` columns (not PG enums) with PHP backed enums for validation.
-- Routes: named, dot-separated, prefixed `customer.` / `admin.` / `api.` (see `14-routes-and-api.md`).
-- Translation keys: `resources/lang/en/*.php` + JSON for frontend via `laravel-vue-i18n`-style loader described in `15-ui-design-system.md`. **No user-visible literal strings in Vue templates or PHP notifications** — always a translation key.
+- Routes: named, dot-separated, prefixed `customer.` / `admin.` / `api.` (plus the framework/auth, `webhooks.`, `links.`, `legal.`, `media.`, `health.` groups listed in `14`). Every route has exactly one name, one method and one path.
+- **Wire format:** Inertia props and JSON responses are **camelCase** (exceptions: `features` flag keys and Laravel paginator `meta` keys); request bodies are camelCase except Fortify/auth forms (Fortify field names); query strings use Laravel snake_case conventions (`01 §6`).
+- **Translations (i18n):** strings live in `resources/lang/en/{namespace}.php` as **ICU MessageFormat** messages (except the Laravel-format namespaces `validation`, `passwords`, `pagination`, `auth`). The frontend uses a thin layer on `intl-messageformat`; PHP renders ICU strings with the helper `trans_icu()`; `php artisan i18n:export` writes `resources/js/lang/generated/{locale}.json` (committed, CI-checked). Details in `15 §15`. **No user-visible literal strings in Vue templates or PHP notifications** — always a translation key.
+- **Package manager:** yarn 4 via corepack (`01 §1.2`); never npm/pnpm lockfiles.
 
 ### 6.7 Feature flags
 
-Config file `config/features.php` reading env vars, exposed to the frontend as shared Inertia prop `features`:
+Config file `config/features.php` reading env vars, exposed to the frontend as shared Inertia prop `features` whose keys are the flag names below without the `features.` prefix (snake_case, the one deliberate exception to the camelCase wire format, `01 §6`, `15 §8`):
 
-| Flag | Default | Meaning |
-|---|---|---|
-| `features.payments` | `false` | Phase 2 payments UI |
-| `features.whatsapp` | `false` until configured | WhatsApp channel available |
-| `features.sms` | `false` until configured | SMS channel available |
-| `features.web_push` | `true` | Web push available |
-| `features.google_login` | `false` until configured | Google OAuth button |
-| `features.dxf_import` | `true` | Accept DXF uploads |
-| `features.walkthrough_camera` | `true` | First-person camera in 3D |
+| Flag | Env var | Default | Meaning |
+|---|---|---|---|
+| `features.payments` | `FEATURE_PAYMENTS` | `false` | Phase 2 payments UI |
+| `features.whatsapp` | `FEATURE_WHATSAPP` | `false` until configured | WhatsApp channel available (also requires the WhatsApp env vars of `17 §6.1`) |
+| `features.sms` | `FEATURE_SMS` | `false` until configured | SMS channel available |
+| `features.web_push` | `FEATURE_WEB_PUSH` | `true` | Web push available (forced `false` when the VAPID keys are missing) |
+| `features.google_login` | `FEATURE_GOOGLE_LOGIN` | `false` until configured | Google OAuth button (also requires the Google env vars) |
+| `features.dxf_import` | `FEATURE_DXF_IMPORT` | `true` | Accept DXF uploads |
+| `features.walkthrough_camera` | `FEATURE_WALKTHROUGH_CAMERA` | `true` | First-person camera in 3D |
+| `features.captcha` | — (derived) | `true` when `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set, else `false` | Cloudflare Turnstile on auth forms (`13 §3`); the site key itself is a page prop of auth pages only |
 
 ### 6.8 Error handling principles
 
@@ -232,3 +239,24 @@ Config file `config/features.php` reading env vars, exposed to the frontend as s
 | D14 | Order workflow via `spatie/laravel-model-states` | Explicit, testable transitions. |
 | D15 | DWG not supported | Licensing (see §4.3). |
 | D16 | Payments table migrated in v1 but unused | Schema stability for phase 2. |
+| D17 | `13 §7.1`'s permission list (24 permissions) and owner gates are authoritative; section docs map their needs onto it: imports monitor/view-all/debug → `customers.view`; import re-run free / refund / discard on behalf, AI usage report, credit grant/revoke/refund → `ai.manage`; AI settings + provider test → owner gate `settings.manage_restricted`; cut-list export → `orders.view`; cost visibility → `quotes.view_costs`. No `imports.*`, `ai.credits.manage`, `ai.usage.view`, `settings.ai.manage`, `furniture.*` permissions exist. | One small, auditable permission model; the proposed extra permissions duplicated existing role sets. |
+| D18 | `orders.edit_designs` removed; `orders.propose_changes` covers creating/sending/withdrawing proposals **and** editing their item design drafts | Both were granted to exactly the same roles; two names for one capability invite inconsistent checks. |
+| D19 | Import notification key is `import.ready_for_review`; order event keys are listed in `09 §11` and `12 §3.2`, non-order keys (imports, AI, account, staff, auth, system) only in `12 §3.3` (adds `ai.credits_refunded`, `ai.budget_threshold_reached`, `ai.provider_unavailable`, `system.test_push`) | One catalogue per event family; key matches the import status. |
+| D20 | Exactly one browser upload mechanism: upload intents (`13 §11`, purposes exhaustive incl. `blueprint_source`); blueprint imports are created from a `ready` intent (`06` A1 `{uploadId, mode, planId?}`), so status `awaiting_upload` and an import-specific confirm endpoint do not exist; vision-service presigned URLs remain a separate server-only mechanism | One audited code path for size/type/magic-byte checks. |
+| D21 | Signup AI credits are granted on the customer's first verified contact (`ContactVerified`), not at registration | Deters throwaway-account credit farming. |
+| D22 | Wire format camelCase for props/JSON/request bodies (auth forms excepted), snake_case query strings | Matches generated TS types; one convention for agents. |
+| D23 | i18n = ICU MessageFormat via `intl-messageformat`, PHP `trans_icu()`, `php artisan i18n:export` | Same strings render server-side (mail/SMS/push/PDF) and client-side; `select`/plural needed. |
+| D24 | UI fonts Inter + JetBrains Mono via `@fontsource-variable` (self-hosted); Noto Sans TTF only for client-side jsPDF export | CSP `font-src 'self'`; jsPDF cannot embed variable WOFF2. |
+| D25 | Plans can be locked by staff (`plans.locked_at/locked_by`, permission `plans.edit_any`); writes to a locked plan return 423 `plan_locked` | Protects reference plans during production without new permissions. |
+| D26 | Plan editor canvas colours follow the theme-aware editor tokens of `15 §3`; exports always use the light `EXPORT_PALETTE` | One token source; exports independent of viewer theme. |
+| D27 | Vision service health endpoint is `GET /healthz`; its environment variables are those of `18 §4`; container memory limit 3.5 GB | `06`/`18` own the service contract; `17` deploys it. |
+| D28 | Security headers on PHP responses are owned by Laravel (`13 §12.1`); nginx adds only `nosniff` + HSTS on static files; trusted proxies = private Docker CIDRs (`TRUSTED_PROXIES`) | Avoid duplicate/conflicting headers; never trust spoofable forwarded headers from arbitrary peers. |
+| D29 | Session config per `13 §6.1` (`__Host-session`, encrypted payloads, dedicated Redis DB 2) | Security baseline; global logout = flush session DB. |
+| D30 | Quote "Regenerate from designs" is route `admin.orders.quotes.regenerate` and keeps custom/discount lines (`08 §6`) | UI/route names follow `11`; behaviour follows `08`. |
+| D31 | Import notifications use `12`'s channel defaults (`import.ready_for_review`: in-app + push, email off by default; `import.failed`: email on) | `12` owns channel policy. |
+| D32 | Database/object backups to Backblaze B2 with SSE-B2 default encryption; no client-side `age` encryption; Postgres retention 30 daily + 12 monthly | Coolify-managed backups cannot encrypt client-side; separate provider + SSE keeps the requirement realistic. |
+| D33 | PDF templates embed all images and fonts as data URIs; Gotenberg runs with JavaScript disabled and a `file:///tmp` allow-list | No network access from Chromium (SSRF-safe, works offline). |
+| D34 | `nixpacks.toml` follows the owner's proven Coolify baseline (`docs/ops/owner-reference-nixpacks.toml`): explicit `nixPkgs` (php84 + extensions, nodejs_22, nginx, curl, supervisor, rclone), owner's `[variables]` (200M uploads, 512M memory, 600 s execution), build-time `php artisan optimize` (re-run at container start), nginx config as `[staticAssets]`; **yarn 4 via corepack** is the package manager everywhere | Owner decision; one proven deployment pattern across the owner's apps. |
+| D35 | Feature flags read `FEATURE_*` env vars (§6.7); `features.captcha` derived from Turnstile keys | Env-only operation in Coolify. |
+| D36 | Queue connections `redis` (retry_after 180) and `redis-long` (720, `imports`); one scheduler table in `01 §7`; scheduler heartbeat cache key `health:scheduler:heartbeat` | `retry_after` must exceed job timeouts; one list prevents drift. |
+| D37 | Pricing setting `pricing.sheet_billing_mode` defaults to `used_area` (`edge_premill_mm` default 0) | Matches how estimates were specified in `08`; whole-sheet billing remains a setting. |

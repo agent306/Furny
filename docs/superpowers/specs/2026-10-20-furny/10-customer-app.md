@@ -76,6 +76,8 @@ When `auth.user.emailVerified === false && auth.user.phoneVerified === false`:
 | 42 | `customer.help` | `/help` | `Customer/Help` | CustomerLayout | 14 |
 | 43 | `links.order` (12) | `/o/{number}` | (redirect, `12` §3.6) | — | — |
 | 44 | `manifest` (12) | `/manifest.webmanifest` | (JSON) | — | 15 |
+| 45 | `notifications.unsubscribe` (12, signed) | `/notifications/unsubscribe/{user}/{event}/{channel}` | `Auth/Unsubscribe` | AuthLayout | `12` §8.2 |
+| 46 | `account.deletion-scheduled` (13) | `/account-deleted` | `Auth/AccountDeletionScheduled` | AuthLayout | `13` §9.1 |
 
 `/` for an authenticated customer redirects to `customer.dashboard` (or onboarding); for staff to `admin.dashboard`. Fortify `home` = `/dashboard`; staff visiting customer pages are redirected to `admin.dashboard` by the `customer` middleware (`13` §1).
 
@@ -85,7 +87,7 @@ Unless stated, actions redirect back (Inertia) with a translated `flash.success`
 
 | Route name | Method | Path | Body | Effect / transition | Redirect |
 |---|---|---|---|---|---|
-| Fortify `login`, `logout`, `register`, `password.email`, `password.update`, `verification.send`, `two-factor.login`, `password.confirm`, `user-password.update`, `user-profile-information.update` | POST/PUT | Fortify defaults | Fortify fields (`13`) | `13` | per `13` |
+| Fortify `login.store`, `logout`, `register.store`, `password.email`, `password.update`, `verification.send`, `two-factor.login.store`, `password.confirm.store`, `user-password.update`, `user-profile-information.update` | POST/PUT | Fortify defaults (19 §8.5) | Fortify fields (`13`) | `13` | per `13` |
 | `auth.otp.send` [13] | POST | `/auth/otp/send` | `phone`, `intent` (`login`\|`register`), `name?`, `cf_turnstile_response?` | send OTP | `auth.otp.verify.show` |
 | `auth.otp.verify` [13] | POST | `/auth/otp/verify` | `code` | login / register | intended / dashboard |
 | `auth.otp.resend` [13] | POST | `/auth/otp/resend` | `channel?`, `cf_turnstile_response?` | resend | back |
@@ -131,7 +133,7 @@ Unless stated, actions redirect back (Inertia) with a translated `flash.success`
 | `customer.account.notifications.update` [12] | PUT | `/account/notifications` | `preferences[]: {eventKey, channel, enabled}` | `UpdatePreferences` | back |
 | `customer.account.notifications.reset` | DELETE | `/account/notifications` | — | delete all preference rows (`12` §10.2 "Reset to defaults") | back |
 | `customer.account.notifications.test-push` | POST | `/account/notifications/test-push` | — | test web push to own subscriptions (throttle 3/min) | back |
-| `customer.account.destroy` [13] | DELETE | `/account` | `confirmation` | `RequestAccountDeletion` (`recent.auth`) | public "deletion scheduled" page (`13` §9.1) |
+| `customer.account.destroy` [13] | DELETE | `/account` | `confirmation` | `RequestAccountDeletion` (`recent.auth`) | `account.deletion-scheduled` (`13` §9.1) |
 | `customer.account.export` [13] | GET | `/account/export` | — | JSON download (`recent.auth`, `verified.contact`) | — |
 
 ### 2.3 JSON endpoints used by customer pages
@@ -145,7 +147,7 @@ Unless stated, actions redirect back (Inertia) with a translated `flash.success`
 | `api.push-subscriptions.store` / `.destroy` | POST/DELETE | `/api/push-subscriptions` | `12` §8.3 | `PushOptIn` |
 | `api.ai.credits` | GET | `/api/me/ai-credits` | `18` | `CreditBadge` refresh |
 | `api.furniture-designs.duplicate` | POST | `/api/furniture-designs/{design}/duplicate` | `07` | design card menu, builder |
-| `api.furniture-revisions.show` | GET | `/api/furniture-revisions/{revision}` | this file (Appendix A8) | `Thumbnail3D`, proposal viewer |
+| `api.furniture-revisions.show` | GET | `/api/furniture-revisions/{revision}` | this file: `{ id, number, document: FurnitureDocument, bomStatus, catalogVersion }`; policy `FurnitureDesignPolicy::view` on the revision's design (staff `orders.view`) | `Thumbnail3D`, proposal viewer |
 | `media.show` | GET | `/media/{media:uuid}?conversion=` | `13` §8.9 | every `MediaData.url` |
 | Editors: `/api/plans/{plan}/working-copy`, `/api/furniture-designs/{design}/working-copy`, revisions, `/api/catalog/snapshot` | — | — | `03`, `05`, `07` | editors |
 
@@ -213,6 +215,7 @@ interface FurnitureDesignSummaryData {
   templateKey: string; templateLabel: string;     // translated (07)
   thumbnailUrl: string | null;
   widthMm: number; heightMm: number; depthMm: number;
+  mounting: 'floor' | 'wall' | 'loft' | null;   // working_document.carcass.mounting; null for tables (05 §10.2 default elevation)
   estimate: FurnitureEstimateJson | null;
   estimateStale: boolean;           // estimate.catalogVersion < current catalog.version
   lockedByOrder: OrderRefData | null;
@@ -318,13 +321,13 @@ Props `{ status: 403 | 404 | 419 | 429 | 500 | 503 }`. Layout by audience (custo
 ## 5. Onboarding (first-login wizard)
 
 ### 5.1 Gate
-Middleware `EnsureCustomerOnboarded` (alias `onboarded`) on all `customer.*` routes except `customer.onboarding.*`, `customer.account.*`, `customer.help`, `customer.notifications.index`: for `type = customer` with `users.onboarded_at` null, GET requests redirect to `customer.onboarding.show` (column: Appendix A1). Customers created by staff also see it on first login.
+Middleware `EnsureCustomerOnboarded` (alias `onboarded`) on all `customer.*` routes except `customer.onboarding.*`, `customer.account.*`, `customer.help`, `customer.notifications.index`: for `type = customer` with `users.onboarded_at` null, GET requests redirect to `customer.onboarding.show` (column `users.onboarded_at`, 02 §1.1). Customers created by staff also see it on first login.
 
 ### 5.2 Page — `customer.onboarding.show` · `/onboarding` · `Customer/Onboarding/Wizard`
 Props:
 ```ts
 interface OnboardingProps {
-  user: { name: string; email: string | null; phoneE164: string | null; phoneVerified: boolean; termsAccepted: boolean };   // termsAccepted = users.terms_accepted_at !== null (13 A.1)
+  user: { name: string; email: string | null; phoneE164: string | null; phoneVerified: boolean; termsAccepted: boolean };   // termsAccepted = users.terms_accepted_at !== null (02 §1.1)
   defaults: { unitSystem: 'metric' | 'imperial'; lengthUnit: string; timezone: string };   // business settings
   propertyTypes: PropertyType[];
   starters: PlanStarterData[];                 // §8.3
@@ -334,7 +337,7 @@ interface OnboardingProps {
 AuthLayout `wide` (card `max-w-2xl`). Header "Step {n} of 4" + `Progress`. Footer: **Back** (hidden on step 1), **Continue**, link **Skip for now** (ConfirmDialog "You can set this up later from your dashboard." → `customer.onboarding.skip`; when terms are still required the dialog contains the required terms checkbox).
 
 Steps (client-side; one final POST):
-1. **About you** — Name* (prefilled, 2–120). When `user.termsAccepted` is false (account created by staff, `11` B15): required checkbox `terms` "I accept the [Terms] and [Privacy Policy]" (`onboarding.errors.terms_required` "Please accept the terms to continue."). Phone is **not** collected here (phone changes require OTP verification, `13` §5.7); instead, when no verified phone: card "Add a phone number for our confirmation calls" with **Verify phone** (opens `PhoneVerifyDialog`, §13.2.3) and "Later".
+1. **About you** — Name* (prefilled, 2–120). When `user.termsAccepted` is false (account created by staff, `13` §5.1): required checkbox `terms` "I accept the [Terms] and [Privacy Policy]" (`onboarding.errors.terms_required` "Please accept the terms to continue."). Phone is **not** collected here (phone changes require OTP verification, `13` §5.7); instead, when no verified phone: card "Add a phone number for our confirmation calls" with **Verify phone** (opens `PhoneVerifyDialog`, §13.2.3) and "Later".
 2. **Units** — radio cards **Metric** (example "2400 mm") / **Imperial** (example `7' 10 1/2"`); length unit `Select` (metric: mm/cm/m; imperial: ft-in/in); time zone `Combobox` (default browser `Intl.DateTimeFormat().resolvedOptions().timeZone` if in `Intl.supportedValuesOf('timeZone')`, else business default).
 3. **Your first project** — name (default `onboarding.default_project_name` "My home", ≤ 120), property type (radio cards: apartment `building`, independent_house `house`, villa `building-2`, office `briefcase`, other `shapes`).
 4. **How do you want to start?** — `StartPlanChooser` (§8.1, mode `select`): **Upload a blueprint** ("Photo, scan, PDF or DXF — we'll turn it into an editable plan." + "Uses {cost} credit · you have {balance}" when `creditsPerRecognition > 0`), **Draw from scratch**, **Start from a template room** (opens starter gallery). On phones Draw/Template are disabled ("Drawing needs a tablet or computer."); Upload works (camera).
@@ -412,7 +415,7 @@ interface ImportSummaryData {
   sourceKind: string | null; creditsCharged: number; plan: { id: Ulid; name: string } | null;
   createdAt: IsoDateTime; finishedAt: IsoDateTime | null; href: string;   // customer.imports.show or .review
 }
-type ImportStatus = 'awaiting_upload' | 'uploaded' | 'queued' | 'preprocessing' | 'recognizing' | 'ready_for_review' | 'accepted' | 'discarded' | 'failed' | 'cancelled';
+type ImportStatus = 'uploaded' | 'queued' | 'preprocessing' | 'recognizing' | 'ready_for_review' | 'accepted' | 'discarded' | 'failed' | 'cancelled';
 ```
 
 #### 7.3.1 Header
@@ -444,7 +447,7 @@ Empty: icon `armchair` "No furniture designs yet" / "Design a wardrobe, shelves,
 Phone: scrollable tabs; panels stack. Acceptance: tab switches don't reload; an archived project shows no create/edit controls.
 
 ### 7.4 Edit — `customer.projects.edit` · `Customer/Projects/Edit`
-Props `{ project: ProjectData; propertyTypes: PropertyType[]; addresses: AddressData[] }`; same form as create → `customer.projects.update`. Editing an address that an Active order references creates a new address row (Appendix A6).
+Props `{ project: ProjectData; propertyTypes: PropertyType[]; addresses: AddressData[] }`; same form as create → `customer.projects.update`. Editing an address that an Active order references creates a new address row instead of mutating it (`UpdateProject` action rule; the order keeps pointing at the old row).
 
 ---
 
@@ -467,8 +470,10 @@ interface PlanEditPageProps {
   designs: FurnitureDesignSummaryData[];   // placeable designs of the project
   placeDesignId: Ulid | null;              // ?place= (handoff §10.4), validated to belong to the project
   backgroundUrl: string | null;            // signed URL (15 min) of BackgroundImage.mediaUuid; refreshed via partial reload `only: ['backgroundUrl']` before expiry
-  readOnly: boolean;                       // archived project (phones are forced read-only client-side)
-  readOnlyReason: 'archived' | null;
+  readOnly: boolean;                       // archived project or locked plan (phones are forced read-only client-side)
+  readOnlyReason: 'archived' | 'plan_locked' | null;
+  lock: { lockedAt: IsoDateTime; lockedBy: { id: Ulid; name: string } } | null;   // plans.locked_at / locked_by (02 §3.2)
+  canLock: false;                          // customers never lock plans
   defaults: { wallHeightMm: number; exteriorWallThicknessMm: number; interiorWallThicknessMm: number; doorWidthMm: number; doorHeightMm: number; windowWidthMm: number; windowHeightMm: number; windowSillMm: number };   // units settings
 }
 ```
@@ -480,7 +485,7 @@ Acceptance: `?place={designId}` starts placement mode for that design (`05`); th
 ```ts
 interface PlanStarterData { key: string; label: string; description: string; thumbnailUrl: string; totalAreaMm2: number; roomCount: number }
 ```
-Registry `config/plan_starters.php` (Appendix A3): `single_room` (4000 × 3000 mm, one door, one window), `l_shaped_room`, `studio`, `one_bhk`, `two_bhk` (= `database/fixtures/plans/brochure-2bhk.json`), `three_room_hdb` (= `database/fixtures/plans/hdb-3room.json`). Picker dialog: cards (thumbnail, label, "{rooms} rooms · {area}") → **Use this layout**. If `05` defines a starter registry, `05` wins.
+Registry `config/plan_starters.php` (this file is normative for it): `[key => ['label_key' => 'plans.starters.{key}.label', 'description_key' => 'plans.starters.{key}.description', 'document' => <path>, 'thumbnail' => 'images/plan-starters/{key}.svg']]` for `single_room` (4000 × 3000 mm, one door, one window), `l_shaped_room`, `studio`, `one_bhk` (documents `database/fixtures/plan-starters/{key}.json`), `two_bhk` (document `database/fixtures/plans/brochure-2bhk.json`), `three_room_hdb` (document `database/fixtures/plans/hdb-3room.json`). `customer.projects.plans.store` with `start = starter` copies the document with fresh entity ids (`newId`), `plans.source = 'drawn'`, `meta.createdWith = 'editor'`. Picker dialog: cards (thumbnail, label, "{rooms} rooms · {area}") → **Use this layout**.
 
 ---
 
@@ -494,10 +499,10 @@ Props (06): `{ project: ProjectRefData; plans: { id: Ulid; name: string }[]; cre
 Layout: `PageHeader` "Import a floor plan" (back → project).
 1. **Mode** radio cards: **Analyze automatically** (default; "We recognise walls, doors, windows and rooms." + `CreditBadge` cost "{n} credit(s) · you have {balance}" or "Free") / **Trace it myself (free)** ("Use the drawing as a background and draw over it.").
 2. **Target**: "Create a new floor" (name ≤ 80, level) / "Replace a floor" (`Select` of `plans`; warning "The current drawing of this floor is replaced only after you accept the result. A backup revision is kept.").
-3. **Dropzone** (`FileDropzone` visuals, single file, implemented with `lib/upload.ts` against `api.imports.store` → presigned PUT → `api.imports.confirm`), **Take a photo** on touch devices (`capture=environment`).
+3. **Dropzone** (`FileDropzone`, single file, purpose `blueprint_source`, target = the project: `api.uploads.presign` → presigned PUT → `api.uploads.confirm` → poll `api.uploads.show` until `ready`, 13 §11), then `api.imports.store` `{ uploadId, mode, planId? }` (06 §4.3 A1) creates the import; **Take a photo** on touch devices (`capture=environment`).
 4. **File type guidance** (`Accordion`, open on desktop): ✓ Photos & scans JPG, PNG, WebP, HEIC — "Take the photo straight on, in good light, with the whole plan visible."; ✓ PDF — "Brochures and architect drawings. Vector PDFs work best."; ✓ DXF (if `features.dxfImport`) — "CAD export. Choose millimetres if asked."; ✗ **DWG** — `imports.guidance.dwg` "DWG files can't be opened directly. In your CAD program use **Save As → DXF** (or export to PDF) and upload that file instead."; limits "Up to 25 MB (DXF up to 15 MB)."
-Client checks before upload: extension/MIME → `imports.error.unsupported_type`; `.dwg` → `imports.error.dwg_not_supported` (no network request); size → `imports.error.file_too_large` (texts per `06` §14). Upload progress bar + **Cancel** (abort + `api.imports.cancel`). On upload failure: `Alert` "The upload didn't finish. Check your connection and try again." + **Retry** (cancels the unfinished import, restarts with the same `File`).
-On confirm success → `router.visit(customer.imports.show)`.
+Client checks before upload: extension/MIME → `imports.error.unsupported_type`; `.dwg` → `imports.error.dwg_not_supported` (no network request); size → `imports.error.file_too_large` (texts per `06` §14). Upload progress bar + **Cancel** (aborts the PUT; no import exists yet, the unused upload intent expires, 13 §11.5). On upload failure: `Alert` "The upload didn't finish. Check your connection and try again." + **Retry** (restarts with the same `File` and a new intent). A `rejected` intent shows `imports.error.{reasonCode}` when such a key exists (`dwg_not_supported`, `unsupported_type`, `file_too_large`), else `uploads.errors.{reasonCode}`.
+On `api.imports.store` success → `router.visit(customer.imports.show)`.
 Phone: fully supported (camera upload is a primary use case).
 
 ### 9.2 Import page — `customer.imports.show` · `/imports/{import}` · `Customer/Imports/Show`
@@ -571,13 +576,13 @@ interface CustomerOrderAbilities {         // OrderPolicy (13 §8.5) + state (09
   acceptQuote: boolean; negotiate: boolean; declineQuote: boolean;   // T10 / T11 / T14
   approveCompletion: boolean; reportIssue: boolean;                  // T21 / T22
   requestCallback: boolean;                // accepted + ≥ 1 no_answer call
-  postMessage: boolean;                    // 09 §2 rule AND verified contact
+  postMessage: boolean;                    // MessagePolicy::create (13 §8.8: thread open incl. 90-day rule, verified contact)
   postMessageBlockedReason: 'thread_closed' | 'contact_unverified' | null;
 }
 
 interface OrderData {
   id: Ulid; number: string; isDraftNumber: boolean; title: string;
-  state: OrderStateKey; stateBeforeHold: OrderStateKey | null; holdReason: string | null;
+  state: OrderStateKey; stateBeforeHold: OrderStateKey | null; holdReason: string | null;   // reason from the activity-log properties of the latest order.on_hold entry (09 T26)
   project: ProjectRefData;
   siteAddress: AddressData | null; needsInstallation: boolean;
   preferredDeliveryOn: IsoDate | null; expectedDeliveryOn: IsoDate | null;
@@ -671,7 +676,7 @@ interface OrderDraftProps {
   addresses: AddressData[];
   projectSiteAddressId: Ulid | null;
   roomSuggestions: string[];               // distinct room names from the project's plan summaries
-  minPreferredDate: IsoDate;               // today + workflow.min_preferred_delivery_days (Appendix A5)
+  minPreferredDate: IsoDate;               // today + workflow.min_preferred_delivery_days (02 §13)
   contact: { email: string | null; emailVerified: boolean; phoneE164: string | null; phoneVerified: boolean };
   estimateDisclaimer: string;              // trans_icu(pricing.estimate_disclaimer_key)
   currency: string;
@@ -956,30 +961,4 @@ Sections: **Contact us** (call, WhatsApp, email, hours, address) + "Questions ab
 
 ---
 
-## Appendix: Proposed additions to other documents
-
-**A1 — 02 §1.1 `users`:** `onboarded_at timestamptz null` (set by onboarding store/skip; staff are created with `onboarded_at = now()`). Middleware alias `onboarded` → `App\Http\Middleware\EnsureCustomerOnboarded`.
-
-**A2 — 02 §8.7 `quote_negotiations`:** `item_comments jsonb not null default '[]'` — array of `{ order_item_id: ulid, comment: string(≤ 500) }` (09 §6 per-item comments).
-
-**A3 — Plan starters:** `config/plan_starters.php` → `[key => ['label_key' => 'plans.starters.{key}.label', 'description_key' => 'plans.starters.{key}.description', 'document' => 'database/fixtures/plan-starters/{key}.json', 'thumbnail' => 'images/plan-starters/{key}.svg']]` for `single_room`, `l_shaped_room`, `studio`, `one_bhk`, `two_bhk`, `three_room_hdb`; `customer.projects.plans.store` with `start=starter` copies the document with fresh entity ids (`newId`), `plans.source = 'drawn'`, `meta.createdWith = 'editor'`. (05 wins if it defines a registry.)
-
-**A4 — 02 §8.11 `deliveries`:** `scheduled_until timestamptz null` (end of the delivery window; 09 §9 "date/time window").
-
-**A5 — 02 §13 `workflow`:** `min_preferred_delivery_days int default 7`.
-
-**A6 — `UpdateProject` rule:** editing an address referenced by an Active order creates a new `addresses` row instead of mutating it.
-
-**A7 — Wire-format convention (01 §6 / 14):** Inertia props and JSON are camelCase (01's `auth.user` field list is serialised as `unitSystem`, `lengthUnit`, …); request bodies camelCase except Fortify/`13` auth forms; query strings Laravel-style snake_case.
-
-**A8 — Route:** `api.furniture-revisions.show` GET `/api/furniture-revisions/{revision}` → `{ id, number, document: FurnitureDocument, bomStatus, catalogVersion }` (policy: `FurnitureDesignPolicy::view` on the revision's design; staff `orders.view`).
-
-**A9 — Routes:** `customer.account.notifications.reset` DELETE `/account/notifications`; `customer.account.notifications.test-push` POST `/account/notifications/test-push` (throttle 3/min) and staff `admin.account.notifications.test-push`; event key `system.test_push` (12: webpush only, not configurable).
-
-**A10 — Public legal pages:** `legal.terms` GET `/terms`, `legal.privacy` GET `/privacy` (pages `Legal/Terms`, `Legal/Privacy`; text keys `legal.terms.body`, `legal.privacy.body`) — targets of the `terms` checkbox links required by `13` §5.1.
-
-**A11 — Customer route names (14):** furniture list `customer.furniture.index` GET `/furniture`, `customer.furniture.update` PATCH `/furniture/{design}`, `customer.furniture.destroy` DELETE `/furniture/{design}`; plans `customer.projects.plans.store`, `customer.plans.edit` GET `/plans/{plan}/edit`, `customer.plans.update|duplicate|destroy`; orders `customer.projects.orders.create|store`; `customer.account.profile|preferences` (+ `.update`), `customer.account.avatar.update`. `07`'s `customer.projects.furniture.store` body gains optional `returnPlanId`.
-
-**A12 — Hold reason:** `OrderData.holdReason` = `reason` stored in the activity-log properties of the latest `order.on_hold` entry (T26).
-
-**A13 — Customer `can.postMessage`** combines `MessagePolicy::create` (13 §8.8, incl. `verified.contact` and the 90-day rule) with `postMessageBlockedReason`.
+_Appendix merged into the target documents during reconciliation (see 19-reconciliation-log.md)._

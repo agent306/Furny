@@ -7,7 +7,7 @@ The editor is a Vue layer **on top of** the engine. It never computes geometry i
 Conventions used below:
 - "px" = CSS pixels; "mm" = plan millimetres.
 - "Desktop" = viewport width ≥ 1024 px; "tablet" = 768–1023 px; "phone" = < 768 px (master §4.1: full editing ≥ 768 px).
-- Translation keys live in `resources/lang/en/plan_editor.php` (namespace `plan_editor.`); engine keys in `engine.php` (`04` appendix). No literal user-visible strings in templates.
+- Translation keys live in `resources/lang/en/plan_editor.php` (namespace `plan_editor.`); engine keys in `resources/lang/en/engine.php` (namespace `engine.`, owned by `04`; 15 §15.2). No literal user-visible strings in templates.
 - `t(key, params)` is the i18n function from `15`.
 
 ---
@@ -44,8 +44,8 @@ resources/js/editor/plan/
 │  ├─ layers/ BackgroundLayer.vue GridLayer.vue ContentLayer.vue SelectionLayer.vue
 │  │          HandlesLayer.vue SnapLayer.vue ToolPreviewLayer.vue ClearanceLayer.vue
 │  ├─ viewport2d.ts               Pan/zoom math (§4.2)
-│  ├─ styles.ts                   PLAN_STYLES: single source for CSS variables and SVG export styles (§4.3)
-│  ├─ plan-theme.css              --plan-* CSS custom properties
+│  ├─ styles.ts                   PLAN_STYLES: widths/dashes/fonts + colour token per StyleKey; builds SVG export styles from EXPORT_PALETTE (§4.3)
+│  ├─ plan-theme.css              StyleKey classes mapping to the 15 §3 editor tokens (var(--wall) …); no colour literals
 │  ├─ handles.ts                  Handle definitions per selection (§4.10)
 │  ├─ InlineLengthEditor.vue      Inline dimension editing (§4.8)
 │  ├─ Loupe.vue                   Touch magnifier (§7.13)
@@ -111,8 +111,8 @@ interface PlanEditorProps {
   defaults: { wallHeightMm: number; exteriorWallThicknessMm: number; interiorWallThicknessMm: number; doorWidthMm: number; doorHeightMm: number; windowWidthMm: number; windowHeightMm: number; windowSillMm: number };
   readOnly: boolean;
   readOnlyReason: 'archived' | 'no_permission' | 'plan_locked' | null;  // phone is detected client-side (§2.3)
-  lock: { lockedAt: string; lockedBy: { id: string; name: string } } | null;   // Appendix A3
-  canLock: boolean;                         // staff with plans.edit_any (Appendix A2)
+  lock: { lockedAt: string; lockedBy: { id: string; name: string } } | null;   // plans.locked_at / locked_by (02 §3.2)
+  canLock: boolean;                         // staff with plans.edit_any (13 §7.1); always false for customers
   canCreateDesign: boolean;                 // customer context and not read-only
   saveAdapter?: PlanSaveAdapter;            // replaces the working-copy endpoint (06 review mode, §15.4)
   extensions?: PlanEditorExtensions;        // 06 review mode hooks (§15.4)
@@ -121,27 +121,27 @@ interface PlanEditorProps {
 interface EditorDesign {                    // mapped by the host from FurnitureDesignSummaryData (10 §3)
   id: string; name: string; templateLabel: string; thumbnailUrl: string | null;
   widthMm: number; heightMm: number; depthMm: number;
-  mounting: 'floor' | 'wall' | 'loft' | null;   // carcass.mounting of the working document; null for tables (Appendix A6)
+  mounting: 'floor' | 'wall' | 'loft' | null;   // carcass.mounting of the working document; null for tables (10 §3 `FurnitureDesignSummaryData.mounting`)
   lockedByOrderNumber: string | null; updatedAt: string;
 }
 ```
 
 `PlanDefaults` (`04` §6.4) = `{ wallHeight: doc.meta.defaultWallHeight, interiorThickness: doc.meta.defaultWallThickness, exteriorThickness: defaults.exteriorWallThicknessMm, doorWidth/doorHeight/windowWidth/windowHeight/windowSill: from defaults, openingWidth: defaults.doorWidthMm, openingHeight: defaults.doorHeightMm }`. User unit preferences come from the shared prop `auth.user` (`unit_system`, `length_unit`, `locale`, `timezone`).
 
-### 1.4 JSON endpoints used (Wayfinder helpers; endpoints not defined in `03`/`01` are proposed in Appendix A1)
+### 1.4 JSON endpoints used (Wayfinder helpers; names registered in `14`)
 
 | Purpose | Endpoint |
 |---|---|
 | Autosave | PUT `/api/plans/{plan}/working-copy` (`03` §5) — or `saveAdapter` |
-| Revisions list | GET `/api/plans/{plan}/revisions?before={number}` → `{ data: RevisionRow[], hasMore }` (50 per page, newest first) |
-| Revision document | GET `/api/plans/{plan}/revisions/{revision}` → `{ id, number, document, schemaVersion, reason, label, createdAt }` |
+| Revisions list | `api.plans.revisions.index` GET `/api/plans/{plan}/revisions?before={number}` → `{ data: Array<{ id, number, reason, label, author: {id, name} \| null, createdAt }>, hasMore }` (50 per page, newest first; policy `view`) |
+| Revision document | `api.plans.revisions.show` GET `/api/plans/{plan}/revisions/{revision}` → `{ id, number, document, schemaVersion, reason, label, createdAt }` |
 | Checkpoint | POST `/api/plans/{plan}/revisions` `{ label? }` (`03` §5) |
 | Restore | POST `/api/plans/{plan}/revisions/{revision}/restore` → `{ workingDocument, workingVersion }` (`03` §5) |
-| Conflict "save mine as copy" | POST `/api/plans/{plan}/duplicate-with-document` `{ document, name }` → `{ planId, editUrl }` |
-| Thumbnail | presign (upload flow of `14`, purpose `plan_thumbnail`) → PUT → POST `/api/plans/{plan}/thumbnail` `{ uploadKey }` |
-| Project cover | presign (purpose `project_cover`) → PUT → POST `/api/projects/{project}/cover` `{ uploadKey }` |
-| Lock / unlock | POST / DELETE `/api/plans/{plan}/lock` |
-| Furniture document (3D) | GET `/api/furniture-designs/{design}/working-copy` → `{ document, version, updatedAt }` |
+| Conflict "save mine as copy" | `api.plans.duplicate-with-document` POST `/api/plans/{plan}/duplicate-with-document` `{ document, name: string(1..80) }` → `{ planId, editUrl }`; document validated with engine CLI `validate-plan`; creates a plan in the same project with `source = 'duplicated'`, same `level_index`; policy `duplicate` |
+| Thumbnail | upload intent (13 §11, purpose `plan_thumbnail`, target = the plan: presign → PUT → confirm → poll) → `api.plans.thumbnail.store` POST `/api/plans/{plan}/thumbnail` `{ uploadId }` → replaces media collection `thumbnail`; 204; policy `update`; limiter `thumbnails` (6/min/user, 13 §10) |
+| Project cover | upload intent (purpose `project_cover`, target = the project) → `api.projects.cover.store` POST `/api/projects/{project}/cover` `{ uploadId }` → replaces collection `cover`; 204; policy `update` |
+| Lock / unlock | `api.plans.lock.store` / `api.plans.lock.destroy` POST / DELETE `/api/plans/{plan}/lock` → `{ lockedAt, lockedBy: {id, name} }` / 204; permission `plans.edit_any`; activity `plan.locked` / `plan.unlocked`; while locked every write to the plan (working copy, checkpoint, restore) returns 423 `plan_locked` (03 §5) |
+| Furniture document (3D) | `api.furniture-designs.working-copy.show` GET `/api/furniture-designs/{design}/working-copy` → `{ document, version, updatedAt }`; policy `view` |
 | Catalog snapshot (3D colours) | GET `/api/catalog/snapshot` (`01` §5.3) |
 | Client errors | POST `/api/client-errors` (`03` §5) |
 
@@ -396,9 +396,9 @@ Zoom is clamped to `[ZOOM_MIN, ZOOM_MAX]`. Camera changes are applied with `requ
 
 Initial camera: `doc.view.mode2d` if present and the plan bbox intersects that viewport, else `fit`.
 
-### 4.3 Styles (`styles.ts`, `plan-theme.css`)
+### 4.3 Styles (`styles.ts`, `plan-theme.css`; colours from 15 §3)
 
-The canvas is "paper": identical colours in light and dark UI themes (rationale: plans read like drawings and exports match the screen). `PLAN_STYLES` defines, per `StyleKey` (`04` §8.1), the screen stroke width (px, non-scaling), colours, dash and font; it generates both the CSS variables and `SvgExportOptions.styles` (exports convert px to paper mm with `px × 0.2646 × N`, §14.3).
+Colours come from the editor tokens of `15` §3 (CSS variables such as `--canvas-bg`, `--wall`, `--dimension`; TypeScript access via `readEditorColors()` / `EditorColorKey`, 15 §3.5), so the canvas **follows the UI theme** (light/dark). Every export (PNG/SVG/PDF/print) uses the constant light `EXPORT_PALETTE` (15 §3.5), so exports never depend on the viewer's theme. `PLAN_STYLES` defines, per `StyleKey` (`04` §8.1), the screen stroke width (px, non-scaling), the colour **token**, dash and font; it generates `SvgExportOptions.styles` from `EXPORT_PALETTE` (exports convert px to paper mm with `px × 0.2646 × N`, §14.3). The hex values in the table below are the light-theme values for orientation only; the normative colour values are the tokens in `resources/css/app.css` (15 §3.1).
 
 | Style | Stroke | Width px | Fill | Other |
 |---|---|---|---|---|
@@ -446,7 +446,7 @@ Symbols exactly as `04` §8.2 via `drawOpening`. Door swing arcs follow `view.la
 
 ### 4.6 Rooms
 
-- Fill colour by `RoomMeta.type` (rooms without a meta use `#F7F7F7`):
+- Fill colour by `RoomMeta.type` via the room tokens of `15` §3.4 (`roomTypeToColorKey`; rooms without a meta use `--room-other`). Indicative light values (normative: 15 §3.1/§3.4, whose grouping wins where it differs from this table):
 
 | Types | Fill |
 |---|---|
@@ -1064,7 +1064,7 @@ Implements `03` §5 client steps 1–7 **exactly** (debounce 1500 ms, max wait 1
 3. **Pre-validation:** before sending, run `validatePlan`; if it has errors → status `invalid`, no request; autosave resumes automatically when the errors are fixed (next bus event).
 4. **Responses:** `200` → `baseVersion = version`, status `saved`, schedule thumbnail (§11.6). `409` → status `conflict`, ConflictDialog (§11.2). `423 { reason: 'plan_locked' }` → read-only reason `plan_locked` (§15.3), status `readonly`, keep the local draft, show the banner with **Save as copy**. `422` → status `error` (`03` §5). Network/5xx → `offline` with retry.
 
-The status is shown by the layout's `SaveStatusIndicator` (`15`): the editor emits `saveStatus` to the host, which passes it to `EditorLayout`. `invalid` is an addition to the indicator's statuses (Appendix A9); `readonly` is not passed (the host sets the layout's `readOnly` instead).
+The status is shown by the layout's `SaveStatusIndicator` (`15`): the editor emits `saveStatus` to the host, which passes it to `EditorLayout`. `invalid` ("Fix {count} problem(s) to save", clickable — opens the Checks popover) is one of the indicator's statuses (15 §7.3, §9.31); `readonly` is not passed (the host sets the layout's `readOnly` instead).
 
 | Status | Icon | Text key | Notes |
 |---|---|---|---|
@@ -1228,7 +1228,7 @@ The same SVG string with `width="{bboxWidthMm/100}mm"` and `height="{bboxHeightM
 - Layout (mm): margins 10; title block 22 mm high across the bottom; drawing area = page − margins − title block. Auto scale = the smallest denominator `N` in the list such that the drawing bbox / N fits the drawing area; a fixed scale that does not fit shows an inline error and disables Export.
 - Styles: stroke widths in paper mm (wall outline 0.35, door leaf 0.25, swing 0.13, glass 0.18, dims 0.13, furniture 0.25, fixtures 0.18), text heights in paper mm (room name 3.0, area/size 2.5, dims 2.0, furniture label 2.0); `textSizeMm(style) = paperMm × N`; `TextLabel` keeps its model size.
 - Build the SVG string, parse it with `DOMParser` into an `SVGElement`, then `await pdf.svg(el, { x, y, width, height })` (svg2pdf.js) into the drawing area.
-- Fonts: Noto Sans Regular/Bold TTF loaded lazily from `/fonts/NotoSans-Regular.ttf` and `/fonts/NotoSans-Bold.ttf` (self-hosted, Appendix A8) and registered with `addFileToVFS` + `addFont`; used for all text (Latin, Greek, Cyrillic coverage).
+- Fonts: Noto Sans Regular/Bold TTF loaded lazily from `/fonts/NotoSans-Regular.ttf` and `/fonts/NotoSans-Bold.ttf` (self-hosted, SIL OFL; committed in `public/fonts/`, 15 §2) and registered with `addFileToVFS` + `addFont`; used for all text (Latin, Greek, Cyrillic coverage).
 - **Title block** (left → right): business name (`app.name`) bold + project name + plan name; `t('plan_editor.export.pdf.scale', { n })` + a scale bar (metric 0–1–2–5 m; imperial 0–5–10–20 ft) + north arrow when `meta.northAngle !== null`; date (`Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone })`), `t('plan_editor.export.pdf.units', { unit })` ("Dimensions in mm" / "Dimensions in feet and inches"), page size.
 - `pdf.save(fileName)`.
 
@@ -1373,39 +1373,4 @@ Key groups (every key used in this file must exist; a test enumerates them, §18
 
 ---
 
-## Appendix: Proposed additions to other documents
-
-**A1. `14-routes-and-api.md` — JSON endpoints used by the editor** (host page routes are owned by `10` §8.2 / `11` §6.4 and are not proposed here)
-
-| Name | Method + path | Controller → action | Request / response |
-|---|---|---|---|
-| `api.plans.revisions.index` | GET `/api/plans/{plan}/revisions?before={number}` | `Api\PlanRevisionController@index` | → `{ data: Array<{ id, number, reason, label, author: {id, name} \| null, createdAt }>, hasMore: boolean }`, 50 per page, newest first; policy `view` |
-| `api.plans.revisions.show` | GET `/api/plans/{plan}/revisions/{revision}` | `Api\PlanRevisionController@show` | → `{ id, number, document, schemaVersion, reason, label, createdAt }`; policy `view` |
-| `api.plans.duplicate-with-document` | POST `/api/plans/{plan}/duplicate-with-document` | `Api\PlanController@duplicateWithDocument` → `DuplicatePlan` | `{ document, name: string(1..80) }`; document validated with engine CLI `validate-plan`; creates a plan in the same project with `source = 'duplicated'`, `level_index` = original, working copy = the given document → `{ planId, editUrl }`; policy `duplicate` |
-| `api.plans.thumbnail.store` | POST `/api/plans/{plan}/thumbnail` | `Api\PlanThumbnailController@store` | `{ uploadKey }` from the presign flow with purpose `plan_thumbnail` (`image/png`, ≤ 5 MB) → replaces media collection `thumbnail`; 204; policy `update`; rate limit 6/min/user |
-| `api.projects.cover.store` | POST `/api/projects/{project}/cover` | `Api\ProjectCoverController@store` | `{ uploadKey }` purpose `project_cover` (`image/png`, ≤ 5 MB) → replaces collection `cover`; 204; policy `update` |
-| `api.plans.lock.store` / `api.plans.lock.destroy` | POST / DELETE `/api/plans/{plan}/lock` | `Api\PlanLockController` → `LockPlan` / `UnlockPlan` | → `{ lockedAt, lockedBy: {id, name} }` / 204; permission `plans.edit_any`; activity log events `plan.locked` / `plan.unlocked` |
-| `api.furniture-designs.working-copy.show` | GET `/api/furniture-designs/{design}/working-copy` | `Api\FurnitureWorkingCopyController@show` | → `{ document, version, updatedAt }`; policy `view` |
-
-The presign endpoint of `14` must accept the purposes `plan_thumbnail` and `project_cover` (content type `image/png`, max 5 MB).
-
-**A2. `13-auth-security.md`** — no new permission: locking/unlocking plans requires the existing `plans.edit_any`. Plan policy `update` (working copy, revisions, restore) additionally returns 423 when the plan is locked (A4).
-
-**A3. `02-data-model.md` §3.2 `plans` — new columns**
-
-| Column | Type | Null | Default | Notes |
-|---|---|---|---|---|
-| locked_at | timestamptz | yes | | non-null ⇒ the plan is read-only for everyone; staff with `plans.edit_any` may unlock |
-| locked_by | ulid FK users **N** | yes | | staff member who locked |
-
-**A4. `03-design-documents.md` §5 — server step 1 for plans**: "Plans: if `locked_at` is not null → `423 { code: 'locked', reason: 'plan_locked', lockedBy: {id, name}, lockedAt }`." (Analogous to the furniture `in_order` lock.)
-
-**A5. `10-customer-app.md` §8.2 and `11-admin-app.md` §6.4 — host props** needed to build `PlanEditorProps` (§1.3): `lock: { lockedAt, lockedBy: {id, name} } | null`; `canLock: boolean` (admin host: `can('plans.edit_any')`; customer host: false); `readOnlyReason` gains `'no_permission'` (admin without `plans.edit_any`) and `'plan_locked'`; `levels: {id, levelIndex}[]` (already derivable from `floors`); `plan.thumbnailUrl` (already in `PlanSummaryData`).
-
-**A6. `10-customer-app.md` §3 — `FurnitureDesignSummaryData`** (or the plan host's `designs` prop only): add `mounting: 'floor' | 'wall' | 'loft' | null` (= `working_document.carcass.mounting`, null for tables) so placements get the right default elevation (§10.2).
-
-**A7. `08-bom-and-costing.md` §2 — catalog snapshot**: the 3D plan view requires `materials[].colorHex` (from `materials.color_hex`) and `materials[].boardType` in `CatalogSnapshot`.
-
-**A8. `15-ui-design-system.md` / `17-deployment-ops.md` — assets**: self-hosted fonts `public/fonts/NotoSans-Regular.ttf` and `public/fonts/NotoSans-Bold.ttf` (SIL OFL) for client-side PDF export; translation files `resources/lang/en/plan_editor.php` (keys of §17) and `resources/lang/en/engine.php` (keys of the `04` appendix).
-
-**A9. `15-ui-design-system.md` §7.3 / `SaveStatusIndicator`** — add the status `'invalid'` ("Fix {count} problem(s) to save", destructive tone, clickable) and an optional `onClick` used by the plan editor to open the checkpoint popover / Checks popover.
+_Appendix merged into the target documents during reconciliation (see 19-reconciliation-log.md)._

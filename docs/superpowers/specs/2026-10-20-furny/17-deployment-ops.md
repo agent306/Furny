@@ -16,8 +16,8 @@ Conventions used below:
 |---|---|---|
 | O1 | Build pack **Nixpacks** for `furny-app`, `furny-reverb`, `furny-vision` | Owner's choice (master D2). Nixpacks is in maintenance mode upstream but fully supported by Coolify and used in Coolify's Laravel guide. Railpack migration path in Appendix A. |
 | O2 | One container runs nginx + php-fpm + Horizon + scheduler + `pulse:check` under supervisord (`CONTAINER_ROLE=all`) | Coolify's documented Laravel pattern; cheapest at v1 scale. `start.sh` already supports `web`/`worker` roles for the later split (§15). |
-| O3 | Supervisor confs, `php.ini`, `php-fpm.conf`, `start.sh` live as **real files in `docker/`** (not `[staticAssets]` in `nixpacks.toml`) | Lintable, diffable, testable locally; matches the repository layout in `01 §3`. |
-| O4 | PHP ini overrides via `PHPRC=/app/docker/php.ini` set as an image variable | Nix PHP loads extensions through its own scan dir; `PHPRC` adds a main `php.ini` without touching that scan dir, and applies to every PHP process (php-fpm, Horizon, Reverb's start command, Coolify terminal). |
+| O3 | `nixpacks.toml` follows the **owner's proven baseline** (`docs/ops/owner-reference-nixpacks.toml`, master D34): explicit `nixPkgs`, yarn via corepack, build-time `php artisan optimize`, nginx config as the `[staticAssets] "nginx.conf"` entry, owner's `[variables]`. Supervisor confs, `php.ini`, `php-fpm.conf` and `start.sh` stay **real files in `docker/`** | Owner decision (keeps one proven pattern across the owner's Coolify apps); the files in `docker/` remain lintable and testable locally (`01 §3`). |
+| O4 | PHP ini overrides via `PHPRC=/app/docker/php.ini` set as an image variable; the numeric limits come from the owner's `[variables]` (`PHP_MEMORY_LIMIT`, `PHP_UPLOAD_MAX_FILESIZE`, `PHP_POST_MAX_SIZE`, `PHP_MAX_EXECUTION_TIME`) through php.ini environment substitution | Nix PHP loads extensions through its own scan dir; `PHPRC` adds a main `php.ini` without touching that scan dir, and applies to every PHP process (php-fpm, Horizon, Reverb's start command, Coolify terminal). |
 | O5 | **Migrations run in `start.sh` of the new container** (`php artisan migrate --force --isolated`) before nginx starts, only where `RUN_MIGRATIONS=true` (`furny-app`). No pre-/post-deployment commands. | Coolify's pre-deployment command runs in the **old** container (old code, skipped on first deploy); its post-deployment command cannot fail a deploy. In `start.sh` a failed migration exits the container → health check never passes → Coolify keeps the old container (rolling update) and marks the deploy failed. `--isolated` takes a Redis lock so two containers never migrate concurrently. |
 | O6 | Health check = Laravel `/up` (shallow: framework boots), excluded from maintenance mode. A separate token-protected `/up/deep` reports dependencies for external monitoring. | A dependency blip (DB/S3) must not make Traefik drop the container (users would get a proxy error instead of Laravel's error page). |
 | O7 | Internal services (`furny-vision`, `furny-gotenberg`) are Coolify applications **without domains and without port mappings**, with **"Consistent Container Names" ON**; reached at `http://<resource-uuid>:<port>` on the `coolify` Docker network | Stable hostname across deploys; never internet-exposed (`01 §9`). Cost: no rolling updates for these two (seconds of downtime per deploy; jobs retry). |
@@ -25,9 +25,9 @@ Conventions used below:
 | O9 | `REVERB_SCALING_ENABLED=true` (Redis pub/sub) even with one Reverb container | During a rolling deploy two Reverb containers overlap; scaling mode delivers events to clients on both. |
 | O10 | Object storage: **Cloudflare R2** (production + staging). MinIO only for local dev or air-gapped installs. | Zero egress fees, S3 API, custom domain for the public bucket. MinIO's community edition has been in maintenance mode since late 2025 (no new official images). |
 | O11 | Backups to **Backblaze B2** (a different provider from R2): Postgres via Coolify scheduled backups (daily 14 days + monthly 12 months); objects via nightly `rclone sync` into a versioned bucket (deleted/overwritten versions kept 30 days) | A provider or account compromise must not take primary data and backups together. R2 has no object versioning we rely on. |
-| O12 | Mail transport **Postmark** (`MAIL_MAILER=postmark`, per `12 §8`) | Best transactional deliverability; message streams; env-only switch to Resend/SES/SMTP. |
+| O12 | Mail transport **Postmark** (`MAIL_MAILER=postmark`, per `12 §8`) | Best transactional deliverability; message streams; env-only switch to Resend/SMTP (no SES: `AWS_*` are the R2 keys). |
 | O13 | DNS on Cloudflare, **DNS-only (grey cloud)** records for app, ws and Coolify; TLS by Coolify's Traefik (Let's Encrypt HTTP-01) | Correct client IPs for rate limiting/OTP abuse protection, no proxy timeouts on WebSockets/imports, R2 custom domain requires the zone on Cloudflare anyway. |
-| O14 | Local dev = **native PHP 8.4 / Node 22 / Python 3.12 + `compose.dev.yaml` for backing services** (not Sail) | Sail's single PHP container cannot host the vision service and slows Vite HMR; native processes match CI; backing services are pinned to production versions. Windows developers use WSL2 (Horizon needs `pcntl`). |
+| O14 | Local dev = **native PHP 8.4 / Node 22 (yarn 4 via corepack) / Python 3.12 + `compose.dev.yaml` for backing services** (not Sail) | Sail's single PHP container cannot host the vision service and slows Vite HMR; native processes match CI; backing services are pinned to production versions. Windows developers use WSL2 (Horizon needs `pcntl`). |
 | O15 | Branches: `develop` → staging, `main` → production; deploys triggered by GitHub Actions **after CI passes** via the Coolify API; Coolify auto-deploy OFF | Maps 1:1 to Coolify's branch-tracking resources; nothing reaches an environment without green CI. |
 | O16 | Error tracking: **Sentry SaaS (optional)**, enabled only when DSNs are set | One tool for PHP, Vue and Python; self-hosted Sentry needs ≥ 16 GB RAM. |
 | O17 | Uptime: **Better Stack Uptime (free tier)**, external to the server | A monitor on the same server cannot report the server being down. |
@@ -52,7 +52,7 @@ Rules: production data is never copied to staging or local (privacy, `13`). Rest
 
 ### 3.1 Prerequisites
 
-PHP 8.4 with extensions `pdo_pgsql redis gd exif intl bcmath pcntl posix zip fileinfo sodium` (macOS: Laravel Herd or `brew install php@8.4` + `pecl install redis`; Linux: `ppa:ondrej/php`; Windows: WSL2 Ubuntu), Composer 2, Node 22.12+ (`nvm install 22`), Python 3.12 + `uv` (`curl -LsSf https://astral.sh/uv/install.sh | sh`), Docker with Compose v2.
+PHP 8.4 with extensions `pdo_pgsql redis gd exif intl bcmath pcntl posix zip fileinfo sodium` (macOS: Laravel Herd or `brew install php@8.4` + `pecl install redis`; Linux: `ppa:ondrej/php`; Windows: WSL2 Ubuntu), Composer 2, Node 22.12+ (`nvm install 22`) with **yarn 4 via corepack** (`corepack enable`; the version is pinned by `package.json` `packageManager`), Python 3.12 + `uv` (`curl -LsSf https://astral.sh/uv/install.sh | sh`), Docker with Compose v2.
 
 ### 3.2 `compose.dev.yaml` (repository root)
 
@@ -130,7 +130,7 @@ CREATE DATABASE furny_test OWNER furny;
 ```json
 "dev": [
     "Composer\\Config::disableProcessTimeout",
-    "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74,#86efac,#fde047\" \"php artisan serve --port=8000\" \"php artisan horizon\" \"php artisan reverb:start --debug\" \"php artisan schedule:work\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,horizon,reverb,schedule,logs,vite --kill-others"
+    "yarn concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74,#86efac,#fde047\" \"php artisan serve --port=8000\" \"php artisan horizon\" \"php artisan reverb:start --debug\" \"php artisan schedule:work\" \"php artisan pail --timeout=0\" \"yarn dev\" --names=server,horizon,reverb,schedule,logs,vite --kill-others"
 ]
 ```
 
@@ -139,7 +139,7 @@ First run:
 ```bash
 docker compose -f compose.dev.yaml up -d
 cp .env.example .env && php artisan key:generate
-composer install && npm ci && npm run build:engine-cli
+composer install && corepack enable && yarn install && yarn build:engine-cli
 php artisan migrate --seed && php artisan db:seed --class=DemoSeeder
 php artisan webpush:vapid                      # writes VAPID_* into .env
 composer dev                                   # http://localhost:8000, Mailpit http://localhost:8025, MinIO console http://localhost:9001
@@ -159,8 +159,8 @@ cd vision && uv sync && uv run uvicorn app.main:app --reload --port 8001
 |---|---|---|---|---|---|---|---|
 | `furny-app` | Application, Nixpacks | repo, base dir `/`, branch `main` | 80 | `https://furny.example.com` | HTTP `GET /up` :80 | 2560m | none (stateless) |
 | `furny-reverb` | Application, Nixpacks | same repo/branch, start command `php artisan reverb:start --host=0.0.0.0 --port=8080` | 8080 | `https://ws.furny.example.com` | CMD TCP probe :8080 | 384m | none |
-| `furny-vision` | Application, Nixpacks (Python) | same repo, base dir `/vision` | 8000 | **none** | HTTP `GET /health` :8000 | 3584m | none (OCR models baked into image) |
-| `furny-gotenberg` | Application, Docker Image | `gotenberg/gotenberg:8` | 3000 | **none** | HTTP `GET /health` :3000 | 1024m | none |
+| `furny-vision` | Application, Nixpacks (Python) | same repo, base dir `/vision` | 8000 | **none** | HTTP `GET /healthz` :8000 | 3584m | none (OCR models baked into image) |
+| `furny-gotenberg` | Application, Dockerfile (without Git) | `FROM gotenberg/gotenberg:8` + hardened `CMD` (§7.9) | 3000 | **none** | HTTP `GET /health` :3000 | 1024m | none |
 | `furny-postgres` | Database, PostgreSQL | `postgres:18-alpine` | 5432 | none (not public) | Coolify built-in | 2048m | Coolify volume |
 | `furny-redis` | Database, Redis | `redis:7.4-alpine` | 6379 | none (not public) | Coolify built-in | 1024m | Coolify volume |
 | `furny-mailpit` (staging only) | Service (one-click Mailpit) | — | 8025 | `https://mail-staging.furny.example.com` (Basic Auth) | — | 128m | none |
@@ -209,44 +209,202 @@ compose.dev.yaml
 
 ### 5.2 `nixpacks.toml` (repository root)
 
-```toml
-# Nixpacks plan for furny-app and furny-reverb (PHP provider, Laravel detected via ./artisan).
-# Spec: docs/superpowers/specs/2026-10-20-furny/17-deployment-ops.md §5.2
+**Baseline (owner decision, 19 / master D34):** this file is the owner's proven Coolify/Traefik Nixpacks file (`docs/ops/owner-reference-nixpacks.toml`) with its structure and conventions kept — explicit `nixPkgs` (no `"..."` provider defaults), `corepack enable` + **yarn**, `php artisan optimize` in the build phase, the nginx configuration as a `[staticAssets]` entry copied to `/etc/nginx/nginx.conf`, and the owner's `[variables]` — extended with the PHP extensions, supervisor and rclone Furny needs, the engine-CLI build checks, and Furny's nginx locations.
 
-[variables]
-NIXPACKS_NODE_VERSION = "22"          # Vite 8 needs Node >= 22.12; engine CLI needs Node 22 at RUNTIME
-PHPRC = "/app/docker/php.ini"         # main php.ini for every PHP process (17 §1 O4)
-NIXPACKS_PHP_ROOT_DIR = "/app/public"
+```toml
+# Nixpacks plan for furny-app and furny-reverb (same image; furny-reverb overrides the start command, 17 §4.1).
+# Baseline: docs/ops/owner-reference-nixpacks.toml (owner's proven file). Spec: 17-deployment-ops.md §5.2.
 
 [phases.setup]
-# "..." keeps the provider defaults (php84 + composer ext-* extensions, nginx, nodejs_22).
-nixPkgs = ["...", "python311Packages.supervisor", "curl", "rclone"]
+nixPkgs = [
+    "php84", "php84Packages.composer",
+    "php84Extensions.exif", "php84Extensions.pcntl", "php84Extensions.pdo_pgsql",
+    "php84Extensions.redis", "php84Extensions.intl", "php84Extensions.gd", "php84Extensions.bcmath",
+    "php84Extensions.zip", "php84Extensions.sodium", "php84Extensions.posix", "php84Extensions.opcache",
+    "php84Extensions.fileinfo",
+    "nodejs_22", "nginx", "curl",
+    "python311Packages.supervisor", "rclone"
+]
+
+cmds = [
+    "mkdir -p /var/log/nginx && chown -R www-data:www-data /var/log/nginx",
+    "mkdir -p /tmp/nginx /var/cache/nginx",
+    "mkdir -p storage/framework/{sessions,views,cache/data,testing} storage/logs storage/app/private storage/media-library/temp bootstrap/cache",
+    "chmod -R 775 storage bootstrap/cache",
+    "chown -R www-data:www-data storage bootstrap/cache"
+]
 
 [phases.install]
 cmds = [
-  "mkdir -p /var/log/nginx /var/cache/nginx /tmp/nginx",
-  "composer install --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs",
-  "npm ci --no-audit --no-fund",
+    "composer install --no-interaction --prefer-dist --optimize-autoloader",
+    "corepack enable",
+    "yarn install --immutable"
 ]
 
 [phases.build]
 cmds = [
-  "bash docker/check-runtime.sh",
-  "npm run build",                      # app bundle + engine-cli/dist/cli.mjs (01 §5.4)
-  "test -f engine-cli/dist/cli.mjs",
-  "echo '{}' | node engine-cli/dist/cli.mjs version",
-  "rm -rf node_modules",                # runtime needs no node_modules: the engine CLI is fully bundled
-  "chmod +x docker/start.sh docker/check-runtime.sh docker/backup-objects.sh",
+    "bash docker/check-runtime.sh",
+    "php artisan config:clear",
+    "php artisan route:clear",
+    "php artisan view:clear",
+    "php artisan storage:link",
+    "yarn build",                                    # app bundle + engine-cli/dist/cli.mjs (01 §5.4)
+    "test -f engine-cli/dist/cli.mjs",
+    "echo '{}' | node engine-cli/dist/cli.mjs version",
+    "php artisan optimize",                          # build-time cache; start.sh re-runs it with the runtime env
+    "rm -rf node_modules",                           # runtime needs no node_modules: the engine CLI is fully bundled
+    "chmod +x docker/start.sh docker/check-runtime.sh docker/backup-objects.sh",
+    # Creating necessary directories for config overrides
+    "mkdir -p /etc/nginx",
+    "cp /assets/nginx.conf /etc/nginx/nginx.conf"
 ]
 
 [start]
 cmd = "bash /app/docker/start.sh"
+
+[variables]
+PHP_UPLOAD_MAX_FILESIZE = "200M"
+PHP_POST_MAX_SIZE = "210M"
+PHP_MEMORY_LIMIT = "512M"
+PHP_MAX_EXECUTION_TIME = "600"
+NGINX_CLIENT_MAX_BODY_SIZE = "200M"
+NIXPACKS_PHP_ROOT_DIR = "/app/public"
+PHPRC = "/app/docker/php.ini"                        # main php.ini for every PHP process (17 §1 O4); reads the PHP_* values above
+
+[staticAssets]
+"nginx.conf" = '''
+user www-data;
+worker_processes auto;
+daemon off;
+pid /tmp/nginx.pid;
+error_log /dev/stderr warn;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include mime.types;
+    types {
+        application/javascript  mjs;
+        application/manifest+json  webmanifest;
+    }
+    default_type application/octet-stream;
+
+    # Overrides the 1 MB default (413 errors); same value as NGINX_CLIENT_MAX_BODY_SIZE.
+    client_max_body_size 200M;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    server_tokens off;
+
+    client_body_temp_path /tmp/nginx/client_body;
+    proxy_temp_path       /tmp/nginx/proxy;
+    fastcgi_temp_path     /tmp/nginx/fastcgi;
+    uwsgi_temp_path       /tmp/nginx/uwsgi;
+    scgi_temp_path        /tmp/nginx/scgi;
+
+    # Health checks are not logged.
+    map $request_uri $furny_loggable {
+        ~^/up(\?|$) 0;
+        default     1;
+    }
+    log_format furny '$http_x_forwarded_for [$time_local] "$request" $status $body_bytes_sent '
+                     '"$http_referer" "$http_user_agent" rt=$request_time';
+    access_log /dev/stdout furny if=$furny_loggable;
+
+    # HSTS for static files only when the browser reached Traefik over HTTPS (13 §12.1).
+    map $http_x_forwarded_proto $furny_hsts {
+        https   "max-age=31536000; includeSubDomains";
+        default "";
+    }
+
+    gzip            on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_proxied    any;
+    gzip_vary       on;
+    gzip_types text/plain text/css text/xml text/javascript application/javascript application/json
+               application/xml application/manifest+json image/svg+xml font/ttf font/otf;
+
+    server {
+        listen ${PORT};
+        listen [::]:${PORT};
+        server_name localhost;
+        root /app/public;
+
+        # Security headers: Laravel's SecurityHeaders middleware owns every header on PHP responses
+        # (13 §12.1). nginx adds only X-Content-Type-Options and HSTS, and only on static files below.
+
+        index index.php;
+
+        charset utf-8;
+
+        # Vite build output: content-hashed file names -> cache forever.
+        location /build/ {
+            access_log off;
+            expires max;
+            add_header Cache-Control "public, max-age=31536000, immutable" always;
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header Strict-Transport-Security $furny_hsts always;
+            try_files $uri =404;
+        }
+
+        # Web push service worker (12 §8.3): never cached, scope "/".
+        location = /sw.js {
+            add_header Cache-Control "no-cache" always;
+            add_header Service-Worker-Allowed "/" always;
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header Strict-Transport-Security $furny_hsts always;
+            try_files $uri =404;
+        }
+
+        # Health check (Laravel /up, Coolify + Traefik): always handled by PHP; not logged (map above).
+        location = /up {
+            rewrite ^ /index.php last;
+        }
+
+        location / {
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header Strict-Transport-Security $furny_hsts always;
+            try_files $uri $uri/ /index.php?$query_string;
+        }
+
+        location = /favicon.ico { access_log off; log_not_found off; }
+        location = /robots.txt  { access_log off; log_not_found off; }
+
+        error_page 404 /index.php;
+
+        location ~ \.php$ {
+            fastcgi_pass 127.0.0.1:9000;
+            fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+            include fastcgi_params;
+            # Inertia responses carry large headers (X-Inertia, page JSON in redirects).
+            fastcgi_buffer_size       8k;
+            fastcgi_buffers           16 16k;
+            fastcgi_busy_buffers_size 32k;
+            fastcgi_read_timeout      600s;
+            fastcgi_hide_header X-Powered-By;
+        }
+
+        location ~ /\.(?!well-known).* {
+            deny all;
+        }
+    }
+}
+'''
 ```
 
 Notes:
-- `composer install` honours the build variable `COMPOSER_NO_DEV` (`1` in production, `0` in staging so Telescope is installed).
-- `--ignore-platform-reqs` matches the Nixpacks default; extensions are asserted explicitly by `docker/check-runtime.sh` instead (clear error message).
-- Do **not** add `nodejs_22` to `nixPkgs` while `"..."` is present: the provider already adds the Node package selected by `NIXPACKS_NODE_VERSION`, and two Node packages collide in the Nix environment. If the build fails with `Node 22 required`, see Appendix B.
+- **Package manager: yarn 4 via corepack** (owner decision). `package.json` declares `"packageManager": "yarn@4.<minor>.<patch>"` (the exact version written by `corepack use yarn@4` when the repository is created, committed together with `yarn.lock`), and `.yarnrc.yml` contains `nodeLinker: node-modules` (Vite, Wayfinder and the engine CLI build expect a classic `node_modules` tree; no Plug'n'Play). `corepack enable` makes the pinned yarn available; `yarn install --immutable` fails the build when `yarn.lock` is out of date. Never commit `package-lock.json`.
+- `composer install` honours the build variable `COMPOSER_NO_DEV` (`1` in production, `0` in staging so Telescope is installed). PHP extensions are declared twice on purpose: as `php84Extensions.*` in `nixPkgs` (so they are installed) and as `ext-*` in `composer.json` `require` (so Composer's platform check catches a missing one); `docker/check-runtime.sh` asserts them again with a clear error message.
+- **Build-time `php artisan optimize`** (owner convention) caches config/routes/views/events with the build environment. Because Coolify injects most variables only at runtime, `docker/start.sh` **re-runs `php artisan optimize` at every container start** (it overwrites the caches with the runtime environment). Consequently service providers and config files must not touch the database, Redis or HTTP while booting (§5.11 item 3).
+- **nginx config**: the `[staticAssets]` entry is written by Nixpacks to `/assets/nginx.conf`; the build copies it to `/etc/nginx/nginx.conf`. The only `${…}` placeholder in it is `${PORT}`; `docker/start.sh` renders it at start (`${PORT:-80}`) and copies `mime.types` and `fastcgi_params` from the Nix nginx package into `/etc/nginx/` (relative `include`s resolve against `/etc/nginx/`). nginx variables (`$uri`, `$realpath_root`, …) are written without braces so they are never mistaken for placeholders.
+- Header ownership follows `13 §12.1`: the owner's baseline `add_header X-Frame-Options "SAMEORIGIN"` at server level is **not** used (Laravel sends `X-Frame-Options: DENY` and `frame-ancestors 'none'` on every PHP response; a second value from nginx would conflict).
+- `furny-reverb` uses the same build; only its start command differs (`php artisan reverb:start --host=0.0.0.0 --port=8080`, §4.1).
 
 ### 5.3 `docker/check-runtime.sh`
 
@@ -269,8 +427,9 @@ $missing = array_values(array_filter($need, fn ($e) => !extension_loaded($e)));
 if ($missing) { fwrite(STDERR, "missing PHP extensions: ".implode(", ", $missing)."\n"); exit(1); }
 ' || fail "required PHP extensions missing (declare them as ext-* in composer.json require)"
 
-[ "$(php -r 'echo ini_get("memory_limit");')" = "512M" ] \
+[ "$(php -r 'echo ini_get("memory_limit");')" = "${PHP_MEMORY_LIMIT:-512M}" ] \
   || fail "docker/php.ini not loaded (PHPRC=${PHPRC:-unset}); see 17 Appendix B"
+command -v yarn >/dev/null || fail "yarn not on PATH (corepack enable did not run)"
 
 for bin in nginx php-fpm supervisord supervisorctl curl rclone; do
   command -v "$bin" >/dev/null || fail "$bin not on PATH"
@@ -331,7 +490,7 @@ wait_for redis php -r '
 # 4. Writable dirs + framework caches (env is only known at runtime, so caches are built here).
 mkdir -p storage/framework/{cache/data,sessions,views,testing} storage/logs storage/app/private \
          storage/media-library/temp bootstrap/cache /tmp/nginx /var/log/nginx
-php artisan optimize --no-interaction          # config, events, routes, views
+php artisan optimize --no-interaction          # re-cache config/events/routes/views with the RUNTIME env (the build-time cache, §5.2, used build env)
 
 # 5. Migrations (new code, new container, before traffic). Failure => container exits => deploy fails, old container keeps serving.
 if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
@@ -345,11 +504,16 @@ CONF_DIR=/etc/supervisor/conf.d
 rm -rf "$CONF_DIR" && mkdir -p "$CONF_DIR"
 for p in "${PROGRAMS[@]}"; do cp "/app/docker/supervisor/$p.conf" "$CONF_DIR/"; done
 
-# 7. Render nginx config: replace $!{nginx} with the Nix store path of the nginx package.
+# 7. Render nginx config from the [staticAssets] copy (17 §5.2/§5.8): ${PORT} -> runtime port,
+#    plus the include files the Nix nginx package ships in its own conf dir.
 if [[ " ${PROGRAMS[*]} " == *" nginx "* ]]; then
   NGINX_PREFIX="$(dirname "$(dirname "$(readlink -f "$(command -v nginx)")")")"
-  sed -e 's|\$!{nginx}|'"$NGINX_PREFIX"'|g' /app/nginx.template.conf > /etc/nginx.conf
-  nginx -t -c /etc/nginx.conf
+  mkdir -p /etc/nginx /tmp/nginx
+  for f in mime.types fastcgi_params; do
+    [ -f "/etc/nginx/$f" ] || cp "$NGINX_PREFIX/conf/$f" "/etc/nginx/$f"
+  done
+  sed -e 's/\$[{]PORT[}]/'"${PORT:-80}"'/g' /assets/nginx.conf > /etc/nginx/nginx.conf
+  nginx -t -c /etc/nginx/nginx.conf
 fi
 
 log "Starting supervisord (role=$ROLE, programs=${PROGRAMS[*]})"
@@ -360,12 +524,13 @@ exec supervisord -n -c /app/docker/supervisor/supervisord.conf
 
 ```ini
 ; Main php.ini for all PHP processes (loaded via PHPRC, 17 §1 O4). Extensions are loaded by Nix's scan dir.
-memory_limit = 512M
-max_execution_time = 60          ; web requests (CLI is unlimited; job timeouts come from Horizon, 01 §7)
-max_input_time = 60
+; Limits come from the owner's nixpacks.toml [variables] (php.ini ${ENV} substitution; owner decision, 17 §5.2).
+memory_limit = ${PHP_MEMORY_LIMIT}                ; 512M
+max_execution_time = ${PHP_MAX_EXECUTION_TIME}    ; 600 (web requests; CLI is unlimited; job timeouts come from Horizon, 01 §7)
+max_input_time = ${PHP_MAX_EXECUTION_TIME}
 max_input_vars = 5000
-post_max_size = 55M
-upload_max_filesize = 50M        ; browser uploads go to S3 via presigned PUT; this covers JSON autosave bodies and fallbacks
+post_max_size = ${PHP_POST_MAX_SIZE}              ; 210M
+upload_max_filesize = ${PHP_UPLOAD_MAX_FILESIZE}  ; 200M (browser uploads go to S3 via presigned PUT, 13 §11; this covers JSON bodies)
 max_file_uploads = 20
 expose_php = Off
 date.timezone = UTC
@@ -407,7 +572,7 @@ pm.start_servers = 4
 pm.min_spare_servers = 2
 pm.max_spare_servers = 6
 pm.max_requests = 1000
-request_terminate_timeout = 120s
+request_terminate_timeout = 600s  ; = PHP_MAX_EXECUTION_TIME and nginx fastcgi_read_timeout
 clear_env = no                   ; Coolify env vars must reach PHP
 catch_workers_output = yes
 decorate_workers_output = no
@@ -460,7 +625,7 @@ redirect_stderr=true
 
 ```ini
 [program:nginx]
-command=nginx -c /etc/nginx.conf
+command=nginx -c /etc/nginx/nginx.conf
 priority=20
 autostart=true
 autorestart=true
@@ -530,135 +695,14 @@ redirect_stderr=true
 
 There is **no** `queue:work` program: Horizon manages all queue workers (`01 §7`). Inspect processes in the Coolify terminal with `supervisorctl -c /app/docker/supervisor/supervisord.conf status`.
 
-### 5.8 `nginx.template.conf` (repository root)
+### 5.8 nginx configuration
 
-`docker/start.sh` renders it to `/etc/nginx.conf`, replacing `$!{nginx}` with the Nix nginx package path. Do not use `${…}` syntax anywhere in this file.
+There is no separate nginx file in the repository: the configuration is the `[staticAssets] "nginx.conf"` entry of `nixpacks.toml` (§5.2), following the owner's baseline. Nixpacks writes it to `/assets/nginx.conf`; the build copies it to `/etc/nginx/nginx.conf`; `docker/start.sh` step 7 re-renders it at container start (replacing `${PORT}`, default `80`) and installs `mime.types` / `fastcgi_params` next to it. Changing nginx behaviour = editing `nixpacks.toml` (a rebuild is required). Rules for that file:
 
-```nginx
-user www-data www-data;
-worker_processes auto;
-daemon off;
-pid /tmp/nginx.pid;
-error_log /dev/stderr warn;
-worker_rlimit_nofile 8192;
-
-events {
-    worker_connections 2048;
-}
-
-http {
-    include       $!{nginx}/conf/mime.types;
-    types {
-        application/manifest+json webmanifest;
-    }
-    default_type  application/octet-stream;
-
-    # Health checks are not logged.
-    map $request_uri $furny_loggable {
-        ~^/up(\?|$) 0;
-        default     1;
-    }
-    log_format furny '$http_x_forwarded_for [$time_local] "$request" $status $body_bytes_sent '
-                     '"$http_referer" "$http_user_agent" rt=$request_time';
-    access_log /dev/stdout furny if=$furny_loggable;
-
-    # HSTS only when the browser reached Traefik over HTTPS.
-    map $http_x_forwarded_proto $furny_hsts {
-        https   "max-age=31536000";
-        default "";
-    }
-    map $http_x_forwarded_proto $furny_https {
-        https   on;
-        default "";
-    }
-
-    sendfile           on;
-    tcp_nopush         on;
-    tcp_nodelay        on;
-    keepalive_timeout  65;
-    server_tokens      off;
-    types_hash_max_size 2048;
-    server_names_hash_bucket_size 128;
-
-    client_max_body_size    50m;
-    client_body_buffer_size 1m;
-    client_body_temp_path   /tmp/nginx/client_body;
-    proxy_temp_path         /tmp/nginx/proxy;
-    fastcgi_temp_path       /tmp/nginx/fastcgi;
-    uwsgi_temp_path         /tmp/nginx/uwsgi;
-    scgi_temp_path          /tmp/nginx/scgi;
-
-    gzip              on;
-    gzip_comp_level   5;
-    gzip_min_length   1024;
-    gzip_proxied      any;
-    gzip_vary         on;
-    gzip_types text/plain text/css text/xml text/javascript application/javascript application/json
-               application/xml application/manifest+json image/svg+xml font/ttf font/otf;
-
-    server {
-        listen 80 default_server;
-        server_name _;
-        root /app/public;
-        index index.php;
-        charset utf-8;
-
-        # Static security headers are owned by nginx. CSP (with the Vite nonce) and X-Robots-Tag
-        # are owned by Laravel middleware (13). Never set the same header in both places.
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header X-Frame-Options "SAMEORIGIN" always;
-        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
-        add_header Strict-Transport-Security $furny_hsts always;
-
-        # Vite build output: content-hashed file names → cache forever.
-        location /build/ {
-            access_log off;
-            expires max;
-            add_header Cache-Control "public, max-age=31536000, immutable" always;
-            add_header X-Content-Type-Options "nosniff" always;
-            try_files $uri =404;
-        }
-
-        # Web push service worker (12 §8.3): never cached, scope "/".
-        location = /sw.js {
-            add_header Cache-Control "no-cache" always;
-            add_header Service-Worker-Allowed "/" always;
-            add_header X-Content-Type-Options "nosniff" always;
-            try_files $uri =404;
-        }
-
-        location = /favicon.ico { access_log off; log_not_found off; }
-        location = /robots.txt  { access_log off; log_not_found off; }
-
-        location / {
-            try_files $uri $uri/ /index.php?$query_string;
-        }
-
-        error_page 404 /index.php;
-
-        location ~ ^/index\.php(/|$) {
-            fastcgi_pass 127.0.0.1:9000;
-            fastcgi_split_path_info ^(.+\.php)(/.*)$;
-            include $!{nginx}/conf/fastcgi_params;
-            fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
-            fastcgi_param DOCUMENT_ROOT   $realpath_root;
-            fastcgi_param PATH_INFO       $fastcgi_path_info;
-            fastcgi_param HTTPS           $furny_https if_not_empty;
-            # Inertia responses carry large headers/bodies.
-            fastcgi_buffer_size       32k;
-            fastcgi_buffers           16 32k;
-            fastcgi_busy_buffers_size 64k;
-            fastcgi_read_timeout      120s;
-            fastcgi_hide_header X-Powered-By;
-        }
-
-        location ~ \.php$ { return 404; }
-
-        location ~ /\.(?!well-known).* { deny all; }
-    }
-}
-```
+- Only `${PORT}` may use `${…}` syntax; nginx variables are written as `$name`.
+- Security headers on PHP responses are owned by Laravel (`13 §12.1`); nginx adds only `X-Content-Type-Options: nosniff` and HSTS on files it serves itself (`/build/*`, `/sw.js`, other files in `public/`).
+- `client_max_body_size` equals `NGINX_CLIENT_MAX_BODY_SIZE` (200M), `fastcgi_read_timeout` equals `PHP_MAX_EXECUTION_TIME` (600 s).
+- Furny locations: `/build/` (immutable cache), `= /sw.js` (no-cache + `Service-Worker-Allowed`), `= /up` (health check, always PHP, not logged), `~ \.php$` with Inertia-sized FastCGI buffers (`fastcgi_buffer_size 8k`).
 
 ### 5.9 `vision/nixpacks.toml`
 
@@ -732,11 +776,11 @@ echo "object backup finished"
 
 ### 5.11 Laravel configuration required by deployment
 
-These are code requirements the implementing agents must satisfy (also listed in the appendix for the owning documents):
+These are code requirements the implementing agents must satisfy (each is also stated in its owning document: `01`, `13`):
 
-1. **Trusted proxies** — `bootstrap/app.php`: `$middleware->trustProxies(at: '*');` Safe because containers are reachable only through Traefik (no port mappings).
+1. **Trusted proxies** — exactly as `13 §12.8`: `$middleware->trustProxies(at: env('TRUSTED_PROXIES', '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1'), headers: …)` (the Docker networks Traefik connects from; containers are reachable only through Traefik).
 2. **Maintenance mode must not break health checks** — `$middleware->preventRequestsDuringMaintenance(except: ['up', 'up/deep']);` and `APP_MAINTENANCE_DRIVER=cache`, `APP_MAINTENANCE_STORE=redis` so `php artisan down` affects every container.
-3. **No DB/Redis/HTTP access while booting** (service providers, config files): the image build runs `artisan` (Wayfinder generation in `npm run build`) without databases, and `/up` must answer while Postgres is down.
+3. **No DB/Redis/HTTP access while booting** (service providers, config files): the image build runs `artisan` (Wayfinder generation in `yarn build`, and `php artisan optimize`) without databases, and `/up` must answer while Postgres is down.
 4. **Queue connections** — `config/queue.php`: connection `redis` (`retry_after` 180) for `default`, `engine`, `pdf`, `notify`; connection `redis-long` (same Redis, `retry_after` 720) for `imports` (timeout 660 s, `01 §7`). `retry_after` must always exceed the longest job timeout on the connection or jobs run twice. Horizon supervisors reference these connections; `config/horizon.php` has an `environments.staging` block with 1 process per queue.
 5. **Scheduler** — every task in `routes/console.php` uses `->onOneServer()->withoutOverlapping()` (during a rolling deploy two schedulers overlap for up to a minute).
 6. **Filesystems** — `config/filesystems.php`:
@@ -777,7 +821,7 @@ These are code requirements the implementing agents must satisfy (also listed in
 10. **Telescope** — `composer.json` `extra.laravel.dont-discover: ["laravel/telescope"]`; `AppServiceProvider::register()` registers `TelescopeServiceProvider` only when `class_exists(\Laravel\Telescope\TelescopeServiceProvider::class) && config('telescope.enabled')` (`TELESCOPE_ENABLED`).
 11. **Stale chunk recovery** — `resources/js/app.ts`: `window.addEventListener('vite:preloadError', () => window.location.reload())` (a lazy editor chunk can 404 for a user whose page was rendered by the previous release).
 12. **Dashboards** — gates `viewHorizon`, `viewPulse`, `viewTelescope` allow only staff with role `owner` or `admin`.
-13. **Health endpoints** — `/up` (framework default, shallow). `GET /up/deep` (route name `health.deep`, controller `App\Http\Controllers\HealthController`) requires header `X-Health-Token` or query `?token=` equal to `HEALTH_CHECK_TOKEN` (else 404); returns JSON `{status: "ok"|"degraded"|"down", version, checks: {database, redis, horizon, scheduler, storage, vision, gotenberg, reverb}}` where each check is `{ok: bool, ms: int, error?: string}`. HTTP 200 when `database`, `redis`, `horizon`, `scheduler` are ok (status `ok` or `degraded`), else 503. `scheduler` is ok when the cache key `health:scheduler:heartbeat` (written every minute by a scheduled closure) is younger than 3 minutes; `horizon` uses `MasterSupervisorRepository::all()` non-empty and not paused; `storage` = `Storage::disk('s3')->exists('health/probe.txt')` (file written by the first-deploy runbook); `vision` = `GET {VISION_SERVICE_URL}/health`; `gotenberg` = `GET {GOTENBERG_URL}/health`; `reverb` = `Broadcast::connection('reverb')->getPusher()->get('/channels')`. Each external check has a 3-second timeout.
+13. **Health endpoints** — `/up` (framework default, shallow). `GET /up/deep` (route name `health.deep`, controller `App\Http\Controllers\HealthController`) requires header `X-Health-Token` or query `?token=` equal to `HEALTH_CHECK_TOKEN` (else 404); returns JSON `{status: "ok"|"degraded"|"down", version, checks: {database, redis, horizon, scheduler, storage, vision, gotenberg, reverb}}` where each check is `{ok: bool, ms: int, error?: string}`. HTTP 200 when `database`, `redis`, `horizon`, `scheduler` are ok (status `ok` or `degraded`), else 503. `scheduler` is ok when the cache key `health:scheduler:heartbeat` (written every minute by a scheduled closure) is younger than 3 minutes; `horizon` uses `MasterSupervisorRepository::all()` non-empty and not paused; `storage` = `Storage::disk('s3')->exists('health/probe.txt')` (file written by the first-deploy runbook); `vision` = `GET {VISION_SERVICE_URL}/healthz` (06 §5.7); `gotenberg` = `GET {GOTENBERG_URL}/health`; `reverb` = `Broadcast::connection('reverb')->getPusher()->get('/channels')`. Each external check has a 3-second timeout.
 
 ---
 
@@ -817,18 +861,20 @@ These are code requirements the implementing agents must satisfy (also listed in
 | `REDIS_HOST` | `<furny-redis UUID>` | `127.0.0.1` | ✔ | |
 | `REDIS_PASSWORD` | Coolify-generated | empty | ✔ | |
 | `REDIS_PORT` | `6379` | `6379` | ✔ | |
-| `REDIS_DB` / `REDIS_CACHE_DB` | `0` / `1` | same | ✔ | |
+| `REDIS_DB` / `REDIS_CACHE_DB` / `REDIS_SESSION_DB` | `0` / `1` / `2` | same | ✔ | sessions use their own DB (13 §6.1) |
 | `REDIS_PREFIX` | `furny_` | `furny_` | ✔ | fixed so renaming `APP_NAME` never orphans keys |
 | `CACHE_STORE` | `redis` | `redis` | ✔ | |
 | `CACHE_PREFIX` | `furny_cache_` | same | ✔ | |
 | `QUEUE_CONNECTION` | `redis` | `redis` | ✔ | |
 | `SESSION_DRIVER` | `redis` | `redis` | ✔ | |
 | `SESSION_LIFETIME` | `120` | `120` | ✔ | |
-| `SESSION_ENCRYPT` | `false` | `false` | | |
+| `SESSION_CONNECTION` | `sessions` | `sessions` | ✔ | Redis connection using `REDIS_SESSION_DB` (13 §6.1) |
+| `SESSION_ENCRYPT` | `true` | `true` | ✔ | 13 §6.1 |
 | `SESSION_SECURE_COOKIE` | `true` | `false` | ✔ | |
+| `SESSION_HTTP_ONLY` / `SESSION_EXPIRE_ON_CLOSE` | `true` / `false` | same | | Laravel defaults, listed for completeness (13 §6.1) |
 | `SESSION_SAME_SITE` | `lax` | `lax` | | |
 | `SESSION_DOMAIN` | `null` | `null` | | host-only cookie |
-| `SESSION_COOKIE` | `furny_session` | `furny_session` | ✔ | fixed name (independent of `APP_NAME`); change only to force global logout (§16.9) |
+| `SESSION_COOKIE` | `__Host-session` | `furny_session` | ✔ | 13 §6.1 (`__Host-` requires HTTPS, so local http uses a plain name); to force a global logout flush Redis DB `REDIS_SESSION_DB` (§16.9) |
 | `HORIZON_PREFIX` | `furny_horizon:` | same | ✔ | |
 | `HORIZON_NOTIFY_EMAIL` | owner's email | empty | ✔ | Horizon long-wait/failure mails |
 | `BROADCAST_CONNECTION` | `reverb` | `reverb` | ✔ | |
@@ -861,9 +907,10 @@ These are code requirements the implementing agents must satisfy (also listed in
 | `AWS_USE_PATH_STYLE_ENDPOINT` | `true` | `true` | ✔ | |
 | `AWS_PUBLIC_BUCKET` | `furny-prod-public` | `furny-public` | ✔ | disk `s3-public` |
 | `AWS_PUBLIC_URL` | `https://cdn.furny.example.com` | `http://localhost:9000/furny-public` | ✔ | |
-| `MAIL_MAILER` | `postmark` | `smtp` | ✔ | `12 §8` |
+| `MAIL_MAILER` | `postmark` | `smtp` | ✔ | `12 §8.2`: `postmark` \| `resend` \| `smtp` \| `log` (no `ses`: `AWS_*` are the R2 keys) |
 | `POSTMARK_TOKEN` | Postmark Server API token | empty | ✔ | |
 | `POSTMARK_MESSAGE_STREAM_ID` | `outbound` | — | ✔ | |
+| `RESEND_KEY` | only when `MAIL_MAILER=resend` | empty | | alternative transport (`12 §8.2`) |
 | `MAIL_HOST` / `MAIL_PORT` / `MAIL_SCHEME` | unused in prod | `127.0.0.1` / `1025` / `smtp` | | Mailpit locally; staging uses Mailpit (§6.4) |
 | `MAIL_USERNAME` / `MAIL_PASSWORD` | unused in prod | empty | | |
 | `MAIL_FROM_ADDRESS` | `no-reply@furny.example.com` | `no-reply@furny.test` | ✔ | domain verified in Postmark |
@@ -871,7 +918,7 @@ These are code requirements the implementing agents must satisfy (also listed in
 | `LARAVEL_PDF_DRIVER` | `gotenberg` | `gotenberg` | ✔ | spatie/laravel-pdf |
 | `GOTENBERG_URL` | `http://<furny-gotenberg UUID>:3000` | `http://127.0.0.1:3000` | ✔ | |
 | `VISION_SERVICE_URL` | `http://<furny-vision UUID>:8000` | `http://127.0.0.1:8001` | ✔ | |
-| `VISION_SERVICE_TOKEN` | `openssl rand -hex 32` (same value in `furny-vision`) | `local-vision-token` | ✔ | |
+| `VISION_SERVICE_TOKEN` | `openssl rand -hex 32` (same value in `furny-vision`) | `local-vision-token-local-vision-token` | ✔ | ≥ 32 chars (the vision service refuses to start otherwise, 18 §4) |
 | `ENGINE_NODE_BINARY` | empty (set by `start.sh`) | `node` | | |
 | `WHATSAPP_DRIVER` | `meta` | `meta` | | `12 §7` |
 | `WHATSAPP_GRAPH_VERSION` | `v24.0` (newest supported in Meta's changelog on setup day) | same | | |
@@ -914,6 +961,8 @@ These are code requirements the implementing agents must satisfy (also listed in
 | `PULSE_SLOW_JOBS_THRESHOLD` | `60000` | `60000` | | ms (imports are legitimately slow) |
 | `TELESCOPE_ENABLED` | `false` | `true` | ✔ | staging: `true` |
 | `HEALTH_CHECK_TOKEN` | `openssl rand -hex 24` | `local` | ✔ | `/up/deep` |
+| `TRUSTED_PROXIES` | `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1` | same | ✔ | 13 §12.8 |
+| `CSP_REPORT_ONLY` | `true` for the first 7 days after go-live, then `false` | `false` | ✔ | 13 §12.1 |
 | `SENTRY_LARAVEL_DSN` | Sentry project DSN (optional) | empty | | empty = disabled |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.05` | `0` | | |
 | `SENTRY_SEND_DEFAULT_PII` | `false` | `false` | | |
@@ -924,38 +973,33 @@ These are code requirements the implementing agents must satisfy (also listed in
 | `OBJECT_BACKUP_B2_KEY_ID` / `OBJECT_BACKUP_B2_APP_KEY` | B2 application key (§7.4) | — | ✔ | |
 | `OBJECT_BACKUP_B2_BUCKET` | `furny-object-backups` | — | ✔ | |
 | `COMPOSER_NO_DEV` | `1` | — | ✔ B | staging `0` (Telescope) |
-| `NIXPACKS_NODE_VERSION` | `22` | — | B | also in `nixpacks.toml` |
+| `PHP_UPLOAD_MAX_FILESIZE`, `PHP_POST_MAX_SIZE`, `PHP_MEMORY_LIMIT`, `PHP_MAX_EXECUTION_TIME`, `NGINX_CLIENT_MAX_BODY_SIZE`, `NIXPACKS_PHP_ROOT_DIR`, `PHPRC` | set in `nixpacks.toml` `[variables]` (§5.2) | — | | do not set in Coolify |
 
 App timezone is hard-coded `UTC` in `config/app.php` (master §6.5); there is no `APP_TIMEZONE` variable.
 
 ### 6.2 `furny-vision`
 
-Semantics of provider variables are owned by `18-ai-providers-and-quotas.md`; this table is the deployment contract.
+Names, types, defaults and semantics are owned by `18 §4` (normative); this table is the deployment contract — the variables an operator sets. Every other variable of `18 §4` keeps its default.
 
 | Variable | Production value | Local | Req | Notes |
 |---|---|---|---|---|
-| `VISION_SERVICE_TOKEN` | same as the app's | `local-vision-token` | ✔ | bearer token required on every endpoint except `/health` |
+| `VISION_SERVICE_TOKEN` | same as the app's (≥ 32 chars) | `local-vision-token-local-vision-token` | ✔ | bearer token required on every endpoint except `GET /healthz` |
+| `VISION_LOG_LEVEL` | `info` | `debug` | | |
+| `VISION_RECOGNIZE_DEADLINE_S` | `570` | `570` | | must stay below Laravel's HTTP timeout (600 s) and the `imports` job timeout (660 s, `01 §7`) |
 | `ANTHROPIC_API_KEY` | Anthropic console key | owner's or empty | | provider `anthropic` available when set |
-| `OPENAI_API_KEY` | OpenAI key | empty | | provider `openai` available when set |
-| `OPENAI_MODEL` | model id the owner chose (used when a request names none) | empty | | |
-| `OPENAI_COMPAT_BASE_URL` | e.g. `http://<ollama UUID>:11434/v1` | empty | | provider `openai_compatible` available when set |
-| `OPENAI_COMPAT_API_KEY` | `ollama` (Ollama ignores it) or the server's key | empty | | |
-| `OPENAI_COMPAT_MODEL` | e.g. `qwen2.5vl:7b` | empty | | |
-| `OPENAI_COMPAT_SUPPORTS_VISION` | `true` | `true` | | |
-| `OPENAI_COMPAT_SUPPORTS_TOOLS` | `false` | `false` | | crop/zoom tool loop disabled when false |
-| `OPENAI_COMPAT_SUPPORTS_JSON_SCHEMA` | `true` | `true` | | |
-| `OPENAI_COMPAT_MAX_IMAGE_PX` | `1536` | `1536` | | longest image side sent |
-| `LOG_LEVEL` | `INFO` | `DEBUG` | ✔ | |
-| `MAX_CONCURRENT_JOBS` | `1` | `1` | ✔ | per uvicorn worker; 2 workers → 2 concurrent recognitions = Horizon `imports` workers |
-| `REQUEST_TIMEOUT_SECONDS` | `600` | `600` | ✔ | must stay below the `imports` job timeout (660 s) |
-| `SENTRY_DSN` | optional | empty | | |
+| `ANTHROPIC_MODEL` | `claude-opus-5-5` | same | | default model (18 §4) |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | OpenAI key / model id the owner chose | empty | | `OPENAI_MODEL` is required when the key is set |
+| `OPENAI_COMPAT_BASE_URL` | e.g. `http://<private-ip>:11434/v1` (§7.13) | empty | | provider `openai_compatible` available when set together with `OPENAI_COMPAT_MODEL` |
+| `OPENAI_COMPAT_API_KEY` | `not-needed` or the server's key | `not-needed` | | |
+| `OPENAI_COMPAT_MODEL` | e.g. `qwen2.5vl:7b` | empty | | capability flags (`OPENAI_COMPAT_SUPPORTS_*`, `OPENAI_COMPAT_MAX_IMAGE_PX` …) keep the 18 §4 defaults unless the local model is known to support more |
+| `SENTRY_DSN` | optional | empty | | empty = disabled |
 | `OMP_NUM_THREADS` | `2` (in `vision/nixpacks.toml`) | — | | |
 
-No S3 credentials: the vision service only uses presigned URLs supplied per request (`01 §9`).
+Concurrency is fixed by the service itself (2 uvicorn workers × 1 heavy slot, `06 §5.2`); there is no concurrency variable. No S3 credentials: the vision service only uses presigned URLs supplied per request (`01 §9`).
 
 ### 6.3 Production bulk-paste block (Coolify → `furny-app` → Environment Variables → "Developer view")
 
-Paste, replace every `<…>`, save. Then mark `VITE_*`, `COMPOSER_NO_DEV`, `NIXPACKS_NODE_VERSION` as build-time. Paste the same block into `furny-reverb` with `RUN_MIGRATIONS=false`.
+Paste, replace every `<…>`, save. Then mark `VITE_*` and `COMPOSER_NO_DEV` as build-time. Paste the same block into `furny-reverb` with `RUN_MIGRATIONS=false`.
 
 ```dotenv
 APP_NAME=Furny
@@ -991,16 +1035,18 @@ REDIS_PASSWORD=<from furny-redis>
 REDIS_PORT=6379
 REDIS_DB=0
 REDIS_CACHE_DB=1
+REDIS_SESSION_DB=2
 REDIS_PREFIX=furny_
 CACHE_STORE=redis
 CACHE_PREFIX=furny_cache_
 QUEUE_CONNECTION=redis
 SESSION_DRIVER=redis
 SESSION_LIFETIME=120
-SESSION_ENCRYPT=false
+SESSION_CONNECTION=sessions
+SESSION_ENCRYPT=true
 SESSION_SECURE_COOKIE=true
 SESSION_SAME_SITE=lax
-SESSION_COOKIE=furny_session
+SESSION_COOKIE=__Host-session
 HORIZON_PREFIX=furny_horizon:
 HORIZON_NOTIFY_EMAIL=<owner email>
 
@@ -1097,6 +1143,8 @@ PULSE_SLOW_REQUESTS_THRESHOLD=1500
 PULSE_SLOW_JOBS_THRESHOLD=60000
 TELESCOPE_ENABLED=false
 HEALTH_CHECK_TOKEN=<openssl rand -hex 24>
+TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1
+CSP_REPORT_ONLY=true
 
 SENTRY_LARAVEL_DSN=
 SENTRY_TRACES_SAMPLE_RATE=0.05
@@ -1111,26 +1159,21 @@ OBJECT_BACKUP_B2_APP_KEY=<b2 application key>
 OBJECT_BACKUP_B2_BUCKET=furny-object-backups
 
 COMPOSER_NO_DEV=1
-NIXPACKS_NODE_VERSION=22
 ```
 
 `furny-vision` block:
 
 ```dotenv
 VISION_SERVICE_TOKEN=<same as app>
+VISION_LOG_LEVEL=info
+VISION_RECOGNIZE_DEADLINE_S=570
 ANTHROPIC_API_KEY=<anthropic key>
+ANTHROPIC_MODEL=claude-opus-5-5
 OPENAI_API_KEY=
 OPENAI_MODEL=
 OPENAI_COMPAT_BASE_URL=
-OPENAI_COMPAT_API_KEY=
+OPENAI_COMPAT_API_KEY=not-needed
 OPENAI_COMPAT_MODEL=
-OPENAI_COMPAT_SUPPORTS_VISION=true
-OPENAI_COMPAT_SUPPORTS_TOOLS=false
-OPENAI_COMPAT_SUPPORTS_JSON_SCHEMA=true
-OPENAI_COMPAT_MAX_IMAGE_PX=1536
-LOG_LEVEL=INFO
-MAX_CONCURRENT_JOBS=1
-REQUEST_TIMEOUT_SECONDS=600
 SENTRY_DSN=
 ```
 
@@ -1236,8 +1279,8 @@ No AAAA records (avoids IPv6 paths that are not tested). TLS: Coolify's Traefik 
 
 **Backblaze B2 (backups):**
 
-1. Create bucket `furny-db-backups` (private) → Lifecycle Settings → custom rule: prefix empty, "days from hiding to deleting" **1** (Coolify's own retention deletes old dumps; hidden versions disappear a day later).
-2. Create bucket `furny-object-backups` (private) → Lifecycle: prefix empty, "days from hiding to deleting" **30** (overwritten/deleted objects recoverable for 30 days).
+1. Create bucket `furny-db-backups` (private, **Default Encryption: Enabled (SSE-B2)**, 13 §18) → Lifecycle Settings → custom rule: prefix empty, "days from hiding to deleting" **1** (Coolify's own retention deletes old dumps; hidden versions disappear a day later).
+2. Create bucket `furny-object-backups` (private, **Default Encryption: Enabled (SSE-B2)**) → Lifecycle: prefix empty, "days from hiding to deleting" **30** (overwritten/deleted objects recoverable for 30 days).
 3. App Keys → create `coolify-db-backups` (read/write, bucket `furny-db-backups`) and `rclone-object-backups` (read/write, bucket `furny-object-backups`). Note the S3 endpoint of the bucket region (`https://s3.<region>.backblazeb2.com`).
 
 **MinIO alternative (air-gapped installs only):** Coolify → + New → Service → MinIO; domains `https://s3.<domain>` (API) and `https://minio.<domain>` (console); env `MINIO_API_CORS_ALLOW_ORIGIN=https://furny.example.com`; create buckets in the console, run `mc anonymous set download <alias>/furny-prod-public` and `mc version enable <alias>/furny-prod-private`; set `AWS_ENDPOINT=https://s3.<domain>`, `AWS_PUBLIC_URL=https://s3.<domain>/furny-prod-public`, `OBJECT_BACKUP_SRC_PROVIDER=Minio`.
@@ -1280,7 +1323,7 @@ Projects → + Add → `Furny`. Inside it, environment `production` exists; + Ad
 5. Persistent Storage: PostgreSQL 18 images store data in `/var/lib/postgresql/18/docker`. The volume destination must be `/var/lib/postgresql`. If Coolify shows `/var/lib/postgresql/data`, change it to `/var/lib/postgresql` **before the first start**.
 6. Start. In the resource's Terminal: `psql -U furny -d furny -c 'select version();'` must print 18.x. Copy the hostname from "Postgres URL (internal)" (the resource UUID) into `DB_HOST`.
 7. **Backups** tab → + Add scheduled backup:
-   - Schedule A "daily": frequency `30 20 * * *` (02:00 IST), Databases `furny`, Save to S3 ON → `b2-db-backups`, retention: keep **14** backups locally and **14** days in S3.
+   - Schedule A "daily": frequency `30 20 * * *` (02:00 IST), Databases `furny`, Save to S3 ON → `b2-db-backups`, retention: keep **7** backups locally and **30** days in S3 (13 §18).
    - Schedule B "monthly": frequency `0 21 1 * *`, Databases `furny`, Save to S3 ON → `b2-db-backups`, retention: keep **2** locally, **12** backups / 400 days in S3.
    - Click "Backup now" once and confirm a `.dmp` (pg_dump custom format) object appears in B2.
 
@@ -1301,7 +1344,14 @@ Projects → + Add → `Furny`. Inside it, environment `production` exists; + Ad
 
 ### 7.9 `furny-gotenberg`
 
-1. + New → Docker Image → `gotenberg/gotenberg:8` → name `furny-gotenberg`.
+1. + New → **Dockerfile** (without Git) → name `furny-gotenberg`, content:
+
+   ```dockerfile
+   FROM gotenberg/gotenberg:8
+   # PDFs embed every image/font as data URIs (13 §12.9): no JavaScript, no network fetches from HTML.
+   CMD ["gotenberg", "--chromium-disable-javascript=true", "--chromium-allow-list=^file:///tmp/.*", "--api-timeout=60s"]
+   ```
+
 2. Ports Exposes `3000`. **Domains: clear the field** (Coolify may pre-fill an sslip.io URL). Ports Mappings: empty.
 3. Advanced → **Consistent Container Names: ON**.
 4. Health Check: enabled, GET, scheme http, host `localhost`, port `3000`, path `/health`, return code 200, interval 30, timeout 5, retries 3, start period 20.
@@ -1312,9 +1362,9 @@ Projects → + Add → `Furny`. Inside it, environment `production` exists; + Ad
 1. + New → Private Repository (with GitHub App) → `furny-github` → repository → branch `main` → Build Pack **Nixpacks** → **Base Directory `/vision`** → Port `8000`.
 2. General: name `furny-vision`; **Domains: empty**; Start/Install/Build commands empty (`vision/nixpacks.toml` governs).
 3. Advanced: **Auto Deploy: OFF**; **Consistent Container Names: ON**; Include Source Commit in Build: ON.
-4. Health Check: GET http `localhost` port `8000` path `/health`, 200, interval 15, timeout 5, retries 5, start period 60.
+4. Health Check: GET http `localhost` port `8000` path `/healthz`, 200, interval 15, timeout 5, retries 5, start period 60.
 5. Resource Limits: memory 3584m.
-6. Environment Variables: paste the vision block (§6.3). Deploy. Verify from `furny-app`'s terminal later: `curl -fsS http://<vision-uuid>:8000/health`.
+6. Environment Variables: paste the vision block (§6.3). Deploy. Verify from `furny-app`'s terminal later: `curl -fsS http://<vision-uuid>:8000/healthz`.
 
 ### 7.11 `furny-app`
 
@@ -1371,7 +1421,7 @@ Prerequisites: §7.1–§7.12 done, DNS resolving, all `<…>` values filled exc
    php artisan db:seed --force                         # roles, settings, tax rates, catalog, owner (02 §14); idempotent
    php artisan horizon:status                          # "Horizon is running."
    supervisorctl -c /app/docker/supervisor/supervisord.conf status   # 5 programs RUNNING
-   php -r 'echo file_get_contents(getenv("VISION_SERVICE_URL")."/health"), PHP_EOL;'
+   php -r 'echo file_get_contents(getenv("VISION_SERVICE_URL")."/healthz"), PHP_EOL;'
    curl -fsS "$GOTENBERG_URL/health"
    php artisan tinker --execute="Storage::disk('s3')->put('health/probe.txt', 'ok'); echo Storage::disk('s3')->get('health/probe.txt');"
    php artisan tinker --execute="Storage::disk('s3-public')->put('health/probe.txt', 'ok');"
@@ -1466,16 +1516,17 @@ jobs:
       - uses: actions/checkout@v5
       - uses: shivammathur/setup-php@v2
         with: { php-version: "8.4", extensions: "${{ env.PHP_EXTENSIONS }}", coverage: none, tools: "composer:v2" }
+      - run: corepack enable                       # before setup-node so its yarn cache detection uses the pinned yarn 4
       - uses: actions/setup-node@v5
-        with: { node-version: "22", cache: npm }
+        with: { node-version: "22", cache: yarn }
       - name: Composer cache
         uses: actions/cache@v4
         with:
           path: ~/.composer/cache/files
           key: composer-${{ hashFiles('composer.lock') }}
       - run: composer install --no-interaction --prefer-dist --no-progress
-      - run: npm ci --no-audit --no-fund
-      - run: npm run build:engine-cli
+      - run: yarn install --immutable
+      - run: yarn build:engine-cli
       - run: cp .env.example .env && php artisan key:generate
       - name: Pint
         run: vendor/bin/pint --test
@@ -1492,21 +1543,22 @@ jobs:
       - uses: actions/checkout@v5
       - uses: shivammathur/setup-php@v2          # Wayfinder's Vite plugin runs artisan during the build
         with: { php-version: "8.4", extensions: "${{ env.PHP_EXTENSIONS }}", coverage: none, tools: "composer:v2" }
+      - run: corepack enable
       - uses: actions/setup-node@v5
-        with: { node-version: "22", cache: npm }
+        with: { node-version: "22", cache: yarn }
       - run: composer install --no-interaction --prefer-dist --no-progress
-      - run: npm ci --no-audit --no-fund
+      - run: yarn install --immutable
       - run: cp .env.example .env && php artisan key:generate
       - name: ESLint
-        run: npx eslint . --max-warnings=0
+        run: yarn eslint . --max-warnings=0
       - name: Prettier
-        run: npx prettier --check resources/ engine-cli/
+        run: yarn prettier --check resources/ engine-cli/
       - name: vue-tsc
-        run: npx vue-tsc --noEmit
+        run: yarn vue-tsc --noEmit
       - name: Vitest
-        run: npx vitest run
+        run: yarn vitest run
       - name: Build (app + engine CLI)
-        run: npm run build
+        run: yarn build
       - name: Engine CLI smoke test
         run: echo '{}' | node engine-cli/dist/cli.mjs version | grep -q '"ok":true'
 
@@ -1521,9 +1573,11 @@ jobs:
         working-directory: .
       - uses: astral-sh/setup-uv@v6
         with: { enable-cache: true }
+      - run: corepack enable
+        working-directory: .
       - uses: actions/setup-node@v5                # contract tests validate output with the engine CLI (03)
-        with: { node-version: "22", cache: npm }
-      - run: npm ci --no-audit --no-fund && npm run build:engine-cli
+        with: { node-version: "22", cache: yarn }
+      - run: yarn install --immutable && yarn build:engine-cli
         working-directory: .
       - run: uv python install 3.12
       - run: uv sync --frozen
@@ -1560,13 +1614,14 @@ jobs:
       - uses: actions/checkout@v5
       - uses: shivammathur/setup-php@v2
         with: { php-version: "8.4", extensions: "${{ env.PHP_EXTENSIONS }}", coverage: none, tools: "composer:v2" }
+      - run: corepack enable                       # before setup-node so its yarn cache detection uses the pinned yarn 4
       - uses: actions/setup-node@v5
-        with: { node-version: "22", cache: npm }
+        with: { node-version: "22", cache: yarn }
       - run: composer install --no-interaction --prefer-dist --no-progress
-      - run: npm ci --no-audit --no-fund
+      - run: yarn install --immutable
       - run: cp .env.example .env && php artisan key:generate
-      - run: npm run build
-      - run: npx playwright install --with-deps chromium
+      - run: yarn build
+      - run: yarn playwright install --with-deps chromium
       - name: Pest browser tests (suite contents per 16)
         run: vendor/bin/pest tests/Browser --ci
       - uses: actions/upload-artifact@v4
@@ -1697,7 +1752,7 @@ Settings → Environments: `production` (deployment branches: `main` only) and `
 
 | Data | Mechanism | Frequency | Retention | Location | RPO |
 |---|---|---|---|---|---|
-| PostgreSQL `furny` | Coolify scheduled backup (`pg_dump` custom format) | daily 20:30 UTC | 14 days | B2 `furny-db-backups` (+ local copies) | 24 h |
+| PostgreSQL `furny` | Coolify scheduled backup (`pg_dump` custom format) | daily 20:30 UTC | 30 days | B2 `furny-db-backups` (+ local copies) | 24 h |
 | PostgreSQL `furny` | Coolify scheduled backup | monthly, 1st 21:00 UTC | 12 months | B2 `furny-db-backups` | — |
 | Object storage (both buckets) | `docker/backup-objects.sh` (rclone sync) via Coolify Scheduled Task | daily 21:15 UTC | current + 30 days of overwritten/deleted versions | B2 `furny-object-backups` | 24 h |
 | Coolify instance (resources, env vars, settings) | Coolify Settings → Backup | daily | 14 | B2 `furny-db-backups` | 24 h |
@@ -1742,7 +1797,7 @@ The `object-backup` scheduled task on `furny-app` runs `docker/backup-objects.sh
    docker exec -i "$PG" psql -U furny -d postgres -c 'ALTER DATABASE furny_restore RENAME TO furny;'
    ```
 
-6. Clear derived state that no longer matches the DB: `furny-redis` terminal → `redis-cli -a "$REDIS_PASSWORD" -n 1 FLUSHDB` (cache DB only; sessions/queues in DB 0 stay). After restart, jobs that reference rows newer than the dump fail with `ModelNotFoundException`; delete them from Horizon → Failed (do not retry).
+6. Clear derived state that no longer matches the DB: `furny-redis` terminal → `redis-cli -a "$REDIS_PASSWORD" -n 1 FLUSHDB` (cache DB only; queues in DB 0 and sessions in DB 2 stay). After restart, jobs that reference rows newer than the dump fail with `ModelNotFoundException`; delete them from Horizon → Failed (do not retry).
 7. Start `furny-app` (its `start.sh` runs `migrate` — no-op unless the dump predates a migration), then `furny-reverb`. `php artisan up`.
 8. Verify `/up/deep`, log in, open recent orders. Inform affected customers of any data entered after the dump time (the dump timestamp is the RPO).
 9. After 14 days, drop `furny_broken_<date>`.
@@ -1795,7 +1850,7 @@ All processes log to stdout/stderr (Laravel `LOG_STACK=stderr`, nginx, php-fpm, 
 
 ### 13.5 Error tracking (optional, decided: Sentry SaaS)
 
-When enabled: composer `sentry/sentry-laravel ^4`, npm `@sentry/vue ^10`, python `sentry-sdk[fastapi] ^2`. Release = `app.version`; environment = `APP_ENV`; `send_default_pii=false`; before-send scrubbers drop `phone_e164`, `email`, presigned URLs. Disabled (no DSN) by default.
+When enabled: composer `sentry/sentry-laravel ^4`, yarn package `@sentry/vue ^10`, python `sentry-sdk[fastapi] ^2`. Release = `app.version`; environment = `APP_ENV`; `send_default_pii=false`; before-send scrubbers drop `phone_e164`, `email`, presigned URLs. Disabled (no DSN) by default.
 
 ---
 
@@ -1841,9 +1896,9 @@ Format: **Symptoms → Diagnose → Fix → Verify**. All commands run in Coolif
 
 - **Symptoms**: imports end `failed`; `/up/deep` `vision: false`; Horizon `imports` failures with connection errors.
 - **Behaviour by design**: `RunBlueprintRecognition` retries (2 tries, 30 s backoff); on final failure the import becomes `failed` with the service-unavailable error code (`06 §8`) and reserved credits are **refunded** (`RefundCredits`); the customer sees the failure state with "Try again" and the manual trace option. `imports:cleanup-stale` (hourly) fails and refunds anything stuck > 30 min. Provider-side errors fall back to the `none` pipeline when `ai.fallback_to_none_on_error` is true.
-- **Diagnose**: `furny-vision` → Logs (OOM = exit code 137 / "Killed"); from `furny-app`: `curl -fsS http://<vision-uuid>:8000/health`; provider status pages; check `ANTHROPIC_API_KEY` validity/spend limit.
+- **Diagnose**: `furny-vision` → Logs (OOM = exit code 137 / "Killed"); from `furny-app`: `curl -fsS http://<vision-uuid>:8000/healthz`; provider status pages; check `ANTHROPIC_API_KEY` validity/spend limit.
 - **Fix**: OOM → raise memory limit or set `MAX_CONCURRENT_JOBS=1` and Horizon `imports` processes 1; restart `furny-vision`. Provider outage → Admin → Settings → AI → provider `none` until resolved. Bad deploy → Rollback.
-- **Verify**: `/health` ok; re-run one import; refund audit — every recently failed import nets zero credits:
+- **Verify**: `/healthz` ok; re-run one import; refund audit — every recently failed import nets zero credits:
 
   ```sql
   select bi.id, bi.credits_reserved, bi.credits_charged, coalesce(sum(l.delta), 0) as net
@@ -1891,7 +1946,7 @@ Format: **Symptoms → Diagnose → Fix → Verify**. All commands run in Coolif
 
 ### 16.9 Leaked secret
 
-- Rotate per §6.5 immediately; for leaked provider keys revoke at the provider first. Leaked `APP_KEY`: rotate with `APP_PREVIOUS_KEYS` (keeps encrypted data readable), then force every user to log in again: set `SESSION_COOKIE=furny_session_v2` (any new name; orphaned Redis sessions expire by TTL) on `furny-app` and `furny-reverb`, run `php artisan tinker --execute="DB::table('users')->update(['remember_token' => null]);"`, redeploy. Afterwards re-encrypt data with the new key (`13`) and remove the old key from `APP_PREVIOUS_KEYS`.
+- Rotate per §6.5 immediately; for leaked provider keys revoke at the provider first. Leaked `APP_KEY`: rotate with `APP_PREVIOUS_KEYS` (keeps encrypted data readable), then force every user to log in again: flush the session database (`furny-redis` terminal: `redis-cli -a "$REDIS_PASSWORD" -n 2 FLUSHDB`; the cookie name stays `__Host-session`, 13 §6.1), run `php artisan tinker --execute="DB::table('users')->update(['remember_token' => null]);"`, redeploy. Afterwards re-encrypt data with the new key (`13`) and remove the old key from `APP_PREVIOUS_KEYS`.
 
 ---
 
@@ -1939,9 +1994,9 @@ Plan:
 2. Topology changes: FrankenPHP replaces nginx/php-fpm/supervisor, so split into **three** resources from the start: `furny-app` (web, Railpack default start), `furny-worker` (start command `php artisan horizon`, plus a second worker resource or Coolify Scheduled Task for `php artisan schedule:run` every minute — prefer a separate `furny-scheduler` resource with start command `php artisan schedule:work`), `furny-reverb` (unchanged start command).
 3. Migrations: keep Railpack's migrate-on-start **only** on `furny-app`; set `RAILPACK_SKIP_MIGRATIONS=true` on worker/scheduler/reverb. Verify it uses `--force` and fails the container on error (else keep our rule O5 by a custom start command running `php artisan migrate --force --isolated && <railpack default start>`).
 4. Node at runtime: confirm `node -v` = 22 inside the **final** image (Railpack may keep Node only in the build layer) — the engine CLI requires it. Run `docker/check-runtime.sh` adapted for FrankenPHP (drop nginx/php-fpm/supervisord checks).
-5. Port nginx behaviours to Caddy/FrankenPHP: 50 MB body limit, `/build` immutable caching, `/sw.js` headers, static security headers, gzip/zstd; `/up` health path unchanged.
+5. Port nginx behaviours to Caddy/FrankenPHP: 200 MB body limit (`NGINX_CLIENT_MAX_BODY_SIZE`), `/build` immutable caching, `/sw.js` headers, static security headers, gzip/zstd; `/up` health path unchanged.
 6. Coolify: switch Build Pack to Railpack per resource on **staging**, run the release checklist smoke test plus a 24-hour soak (Pulse latency, memory), then production in a low-traffic window. Rollback = switch build pack back and redeploy.
-7. Delete `nixpacks.toml`, `nginx.template.conf`, `docker/supervisor/`, `docker/php-fpm.conf` after one stable production week; update this file.
+7. Delete `nixpacks.toml` (incl. its `[staticAssets]` nginx config), `docker/supervisor/`, `docker/php-fpm.conf` after one stable production week; update this file and record the deviation from the owner's Nixpacks baseline (master D34) in the decision log.
 
 ---
 
@@ -1949,30 +2004,16 @@ Plan:
 
 | Error in Coolify build/deploy log | Fix |
 |---|---|
-| `[check-runtime] FAIL: Node 22 required` | Ensure `NIXPACKS_NODE_VERSION=22` is set (toml `[variables]` and build-time env) and `package.json` has `"engines": {"node": ">=22.12 <23"}`. If the provider still installs another Node, replace `"..."` in `nixPkgs` with the explicit provider list plus `nodejs_22`: `["php84", "php84Packages.composer", "nginx", "nodejs_22", "python311Packages.supervisor", "curl", "rclone"]` (the PHP extensions come from `composer.json` and are added by the provider independently of `nixPkgs`). |
-| `missing PHP extensions: …` | Add `"ext-<name>": "*"` to `composer.json` `require`, commit `composer.lock`. |
+| `[check-runtime] FAIL: Node 22 required` | `nixPkgs` must list exactly one Node package, `nodejs_22` (§5.2); `package.json` has `"engines": {"node": ">=22.12 <23"}`. Do not add `NIXPACKS_NODE_VERSION` or `"..."` (the explicit list replaces the provider defaults). |
+| `yarn not on PATH` / `Usage Error: This project is configured to use yarn` | `corepack enable` must run in the install phase before `yarn install`; `package.json` must contain `"packageManager": "yarn@4.x.y"`. |
+| `missing PHP extensions: …` | Add the matching `php84Extensions.<name>` to `nixPkgs` (§5.2) **and** `"ext-<name>": "*"` to `composer.json` `require`; commit `composer.lock`. |
 | `docker/php.ini not loaded` | The Nix PHP wrapper ignored `PHPRC`. Fallback: copy every directive of `docker/php.ini` into `docker/php-fpm.conf` as `php_admin_value[...]` lines (web), add `-d memory_limit=512M` to the `horizon`, `scheduler` and `pulse-check` supervisor commands and to the Reverb start command (`php -d memory_limit=512M artisan reverb:start …`), and change the check in `check-runtime.sh` to `php -d memory_limit=512M`-independent assertions (`opcache` loaded). Record the deviation in the PR and in this file. |
 | `ImportError: libGL.so.1` (vision) | Confirm `nixLibs` contains `libGL` and `glib`; as last resort pin `opencv-python-headless` and install `rapidocr` with `--no-deps` plus its other dependencies explicitly in `requirements.txt` (generated by `uv` with an override). |
-| `nginx: [emerg] open() "…/conf/mime.types" failed` | The nginx package path detection in `start.sh` resolved a wrapper; print `readlink -f $(command -v nginx)` in the terminal and adjust the `NGINX_PREFIX` derivation. |
+| `nginx: [emerg] open() "/etc/nginx/mime.types" failed` | `start.sh` step 7 copies `mime.types`/`fastcgi_params` from the Nix nginx package; if the package path detection resolved a wrapper, print `readlink -f $(command -v nginx)` in the terminal and adjust the `NGINX_PREFIX` derivation. |
+| `nginx: [emerg] invalid port in "${PORT}"` | `/etc/nginx/nginx.conf` was not rendered: nginx must be started by `start.sh` (supervisor), never directly from the build copy. |
 | Health check never passes, logs show migrations finished | Check `curl -fsS localhost/up` in the container terminal; 503 = maintenance mode without the `up` exception (§5.11 item 2); 500 = read `storage/logs` is empty because logs go to stderr — read Coolify Logs. |
-| Build OOM during `npm run build` | Set build-time env `NODE_OPTIONS=--max-old-space-size=3072` on `furny-app`/`furny-reverb`. |
+| Build OOM during `yarn build` | Set build-time env `NODE_OPTIONS=--max-old-space-size=3072` on `furny-app`/`furny-reverb`. |
 
 ---
 
-## Appendix: Proposed additions to other documents
-
-1. **`01-architecture.md` §1.1** — optional packages for error tracking (enabled only with DSNs): `sentry/sentry-laravel ^4`, `@sentry/vue ^10`, `sentry-sdk[fastapi] ^2` (vision). `package.json` `"engines": {"node": ">=22.12 <23"}`. `composer.json` `extra.laravel.dont-discover: ["laravel/telescope"]` with conditional registration of `TelescopeServiceProvider` when installed and `TELESCOPE_ENABLED=true`.
-2. **`01-architecture.md` §3 layout** — deployment files: `.dockerignore`, `compose.dev.yaml`, `docker/dev/pg-init.sql`, `docker/start.sh`, `docker/check-runtime.sh`, `docker/backup-objects.sh`, `docker/php.ini`, `docker/php-fpm.conf`, `docker/supervisor/{supervisord,php-fpm,nginx,horizon,scheduler,pulse-check}.conf`, `.github/workflows/ci.yml`, `.github/scripts/{changed-since-last-deploy,coolify-deploy}.sh`, `vision/nixpacks.toml`, `vision/requirements.txt` (generated by `uv export` from `vision/pyproject.toml` + `vision/uv.lock`), `docs/ops-log.md`.
-3. **`01-architecture.md` §5.4** — `EngineCli` resolves the Node binary from `config('engine.node_binary')` (`config/engine.php`: `env('ENGINE_NODE_BINARY', 'node')`) instead of the literal `'node'`.
-4. **`01-architecture.md` §7** — queue connections: `redis` (`retry_after` 180) for `default`, `engine`, `pdf`, `notify`; `redis-long` (same Redis, `retry_after` 720) for `imports`. Horizon `environments.staging` = 1 process per queue. Horizon `waits`: `redis:default` 60, `redis:notify` 120, `redis:engine` 300, `redis:pdf` 300, `redis-long:imports` 900; `Horizon::routeMailNotificationsTo(env('HORIZON_NOTIFY_EMAIL'))`. Supervisor also runs `php artisan pulse:check` (not a scheduler entry).
-5. **`01-architecture.md` §7 scheduler** — every task uses `->onOneServer()->withoutOverlapping()`; add: every minute `health:scheduler-heartbeat` closure (`Cache::put('health:scheduler:heartbeat', now()->timestamp, 600)`); daily 03:40 `queue:prune-failed --hours=720`; daily 03:45 `queue:prune-batches --hours=48`; daily 03:50 `telescope:prune --hours=48` (only when Telescope is enabled).
-6. **`01-architecture.md` §6 shared props** — `app.version` = `config('app.version')` = `env('APP_VERSION') ?: substr(env('SOURCE_COMMIT', 'dev'), 0, 7)`. `resources/js/app.ts` registers `window.addEventListener('vite:preloadError', () => window.location.reload())`.
-7. **`01-architecture.md` §8 / `config/reverb.php`** — `allowed_origins` from `REVERB_ALLOWED_ORIGINS` (comma-separated hosts, default `*`); production runs with `REVERB_SCALING_ENABLED=true`. Laravel publishes to Reverb via the public host `REVERB_HOST:443`.
-8. **`01-architecture.md` (cross-cutting rule)** — service providers and config files must not access the database, Redis or HTTP during boot (image build runs artisan without services; `/up` must answer while dependencies are down).
-9. **Master §6.7** — env names for all flags: `FEATURE_PAYMENTS`, `FEATURE_WHATSAPP`, `FEATURE_SMS`, `FEATURE_WEB_PUSH`, `FEATURE_GOOGLE_LOGIN`, `FEATURE_DXF_IMPORT`, `FEATURE_WALKTHROUGH_CAMERA` (the first four as already proposed in `12` appendix D).
-10. **`02-data-model.md` §14** — all production seeders (`RolesAndPermissionsSeeder`, `SettingsSeeder`, `TaxRatesSeeder`, `CatalogSeeder`, `OwnerSeeder`) are idempotent (`updateOrCreate`/`firstOrCreate`; settings only insert missing keys) so `php artisan db:seed --force` is safe to re-run; `OwnerSeeder` also reads `SEED_OWNER_NAME` (default `Owner`) and does nothing if a user with `SEED_OWNER_EMAIL` exists.
-11. **`06-blueprint-import.md` / `18-ai-providers-and-quotas.md`** — vision service exposes unauthenticated `GET /health` → `200 {"status":"ok","version":"<semver>"}` (no provider calls); env `REQUEST_TIMEOUT_SECONDS` (default 600, must stay below the `imports` job timeout of 660 s) and optional `SENTRY_DSN`; RapidOCR models are downloaded at image build time; vision Python dependencies managed with `uv` (`pyproject.toml` + `uv.lock`), `requirements.txt` exported for Nixpacks.
-12. **`13-auth-security.md`** — `bootstrap/app.php`: `trustProxies(at: '*')`; `preventRequestsDuringMaintenance(except: ['up', 'up/deep'])`. Header ownership: nginx sets `X-Content-Type-Options`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`, `Strict-Transport-Security: max-age=31536000`; Laravel middleware sets only `Content-Security-Policy` (Vite nonce) and, when `APP_ENV != production`, `X-Robots-Tag: noindex, nofollow`. Gates `viewHorizon`, `viewPulse`, `viewTelescope` = staff with role `owner` or `admin`. Google OAuth callback path `/auth/google/callback`. Turnstile site key is passed to the browser as a page prop (not a `VITE_*` variable).
-13. **`14-routes-and-api.md`** — route `health.deep`: `GET /up/deep`, controller `App\Http\Controllers\HealthController`, no session/auth, requires `X-Health-Token` header or `token` query equal to `HEALTH_CHECK_TOKEN` (404 otherwise), response and checks as defined in `17 §5.11` item 13. Framework route `/up` (Laravel `health:` in `bootstrap/app.php`).
-14. **PDF templates (`resources/views/pdf/*`, owners `08`/`09`)** — images (logo, thumbnails, photos) are embedded as data URIs; Gotenberg must never need to fetch URLs.
-15. **`16-testing-quality.md`** — CI job names `php`, `frontend`, `vision`, `browser` are required status checks; browser tests live in `tests/Browser` and run with `vendor/bin/pest tests/Browser`; unit/feature with `vendor/bin/pest tests/Unit tests/Feature --parallel`; vision tests receive the engine CLI path via env `ENGINE_CLI`.
+_Appendix merged into the target documents during reconciliation (see 19-reconciliation-log.md)._

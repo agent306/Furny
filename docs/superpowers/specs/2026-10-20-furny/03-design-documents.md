@@ -94,6 +94,7 @@ interface FurniturePlacement {
   wallAttachment: { wallId: string; side: 'left' | 'right' } | null; // set when snapped flush to a wall face
 }
 
+// At rotation = 0 a fixture's front faces +y, the same convention as placements (master §6.2); (x, y) is the footprint centre.
 interface Fixture {
   id: string;                     // x_…
   libraryKey: FixtureKey;         // static library in 05 §9 (bed_double, sofa_3, wc, basin, kitchen_counter, fridge, …)
@@ -158,6 +159,8 @@ interface ViewState {
 
 ### 1.2 Derived plan geometry (not stored; computed by `derivePlanGeometry(doc)` in the engine)
 
+Derived coordinates are floats (`number`), not integer mm; `areaMm2` and `perimeterMm` are rounded integers. `derivePlanGeometry` returns `DerivedPlan` (04 §7.1), a structural superset of `PlanGeometry`.
+
 ```ts
 interface PlanGeometry {
   walls: Record<string, {
@@ -169,7 +172,8 @@ interface PlanGeometry {
   }>;
   rooms: Array<{
     faceKey: string;                // stable hash of sorted wall ids bounding the face
-    polygon: Point[];               // inner (net) polygon after offsetting by half wall thickness
+    polygon: Point[];               // inner (net) polygon = face minus the union of wall outlines (04 §4.5)
+    holes: Point[][];               // CCW hole rings of the net polygon; [] when none
     areaMm2: number;
     perimeterMm: Mm;
     centroid: Point;
@@ -328,7 +332,7 @@ type EdgeId = 'L1' | 'L2' | 'W1' | 'W2';   // L1/L2 = the two long edges (along 
 
 ### 2.4 Furniture invariants (validated by `validateFurniture`)
 
-Detailed rules (including construction warnings like shelf sag) are in `07` §7. Hard errors that block saving:
+Detailed rules (including construction warnings like shelf sag) are in `07` §7. Hard errors that block saving (= `SAVE_BLOCKING_CODES`, 07 §7.1; the engine CLI `validate-furniture` returns `valid = !issues.some(i => SAVE_BLOCKING_CODES.has(i.code))`). Every other `error` issue of 07 §7.3 does **not** block autosave but blocks order submission (09 T2) and proposal sending (09 T6):
 
 | Code | Rule |
 |---|---|
@@ -402,6 +406,8 @@ interface Issue {
 
 ### 3.2 `Bom` — `computeBom(model, catalog, options)`
 
+`options: { nesting: boolean; allowRotation?: boolean; finishByRole: Record<MaterialRole, string | null> }`, built by `bomOptionsFor(doc, nesting)` (08 §3).
+
 ```ts
 interface Bom {
   engineVersion: string;
@@ -416,7 +422,7 @@ interface Bom {
     sheetsBilled: number;                // = sheetsNested ?? sheetsEstimated
     utilization: number | null;          // 0..1 from nesting
   }>;
-  edgeBanding: Array<{ edgeBandCode: string; lengthMm: number }>;  // includes per-edge allowance (08 §3.3)
+  edgeBanding: Array<{ edgeBandCode: string; lengthMm: number }>;  // includes the 50 mm per-edge allowance AND 5 % waste (08 §3.3)
   hardware: Array<{ code: string; qty: number }>;                  // merged, after overrides
   finishing: Array<{ finishCode: string; areaMm2: number }>;
   operations: { hingeCups: number; shelfPinHoles: number; dowels: number; camLocks: number; slideScrewSets: number; handleHoles: number };
@@ -441,7 +447,7 @@ interface NestingResult {
   sheets: Array<{
     materialCode: string;
     sheetLength: Mm; sheetWidth: Mm;
-    placements: Array<{ rowKey: string; partKey: PartKey; x: Mm; y: Mm; length: Mm; width: Mm; rotated: boolean }>;
+    placements: Array<{ rowKey: string; partKey: PartKey; x: Mm; y: Mm; length: Mm; width: Mm; rotated: boolean }>; // partKey = instance key: `key` for the first instance, `key#k` for k ≥ 2
     utilization: number;
     cuts: Array<{ x1: Mm; y1: Mm; x2: Mm; y2: Mm }>;   // guillotine cut lines for drawing
   }>;
@@ -513,17 +519,23 @@ Keys are dot-paths derived from document structure so that overrides keep pointi
 | Carcass sides | `carcass.side.left`, `carcass.side.right` |
 | Carcass top/bottom | `carcass.top`, `carcass.bottom` |
 | Back panel | `carcass.back` (or `carcass.back.{n}` when split for size > sheet) |
+| Glass frame door parts of leaf i of front F | `front.{F}.leaf.{i}.stile.left`, `.stile.right`, `.rail.top`, `.rail.bottom`, `.glass` |
 | Plinth front/back/returns | `plinth.front`, `plinth.back`, `plinth.return.{n}` |
 | Countertop | `countertop` |
 | Partition between children i and i+1 of section S (columns) | `section.{S}.partition.{i}` |
 | Fixed shelf between rows i and i+1 of S | `section.{S}.fixed_shelf.{i}` |
 | Loose shelves in leaf S | `section.{S}.shelf.{i}` (i = 1..count) |
-| Drawer j in S: front, sides, back, bottom | `section.{S}.drawer.{j}.front` / `.side.left` / `.side.right` / `.back` / `.bottom` |
-| Door leaves of front F | `front.{F}.leaf.{i}` (glass: `front.{F}.leaf.{i}.stile.left` …) |
-| Table top / legs / aprons | `table.top`, `table.leg.{fl|fr|bl|br}`, `table.apron.{front|back|left|right}` |
+| Drawer j in S: front, sides, back, bottom | `section.{S}.drawer.{j}.front` / `.side.left` / `.side.right` / `.back` / `.bottom` (for drawers behind doors, `.front` is the inner front in `drawer_box` material) |
+| Door leaves of front F | `front.{F}.leaf.{i}` (glass doors: see the glass frame row) |
+| Table top / layers / legs / aprons | `table.top`, `table.top.layer.{m}`, `table.leg.{fl|fr|bl|br}`, `table.apron.{front|back|left|right}` |
+| Table stretchers, ends, shelf | `table.stretcher.{left|right|center|back}`, `table.end.{left|right}`, `table.shelf` |
+| Trestle base | `table.trestle.{left|right}.{upright|foot|cleat}` |
+| Pedestal base | `table.pedestal.side.{1..4}`, `table.pedestal.base`, `table.pedestal.top` |
+| Desk end cabinet | `table.cabinet.{side.left|side.right|bottom|back|door}`, `table.cabinet.shelf.{i}`, `table.cabinet.drawer.{j}.{front|side.left|side.right|back|bottom}` |
+| Under-top table drawer j | `table.drawer.{j}.{front|runner.left|runner.right|side.left|side.right|back|bottom}` |
 | Extra part | `extra.{id}` |
 
-Hardware keys follow the same scheme with a suffix: `front.{F}.hinges`, `front.{F}.handles`, `section.{S}.drawer.{j}.slides`, `section.{S}.drawer.{j}.handle`, `section.{S}.rod`, `section.{S}.shelf_supports`, `carcass.connectors`, `plinth.legs`, `table.legs`, `extra.{id}`.
+Hardware keys follow the same scheme with a suffix (exhaustive): `front.{F}.hinges`, `front.{F}.hinges.shared`, `front.{F}.hinge_plates`, `front.{F}.handles`, `front.{F}.track`, `front.{F}.rollers`, `front.{F}.gas_struts`, `front.{F}.stays`, `section.{S}.drawer.{j}.slides`, `section.{S}.drawer.{j}.handle`, `section.{S}.rod`, `section.{S}.rod_supports`, `section.{S}.shelf_supports`, `section.{S}.baskets`, `carcass.connectors.cam`, `carcass.connectors.dowel`, `carcass.screws`, `carcass.wall_brackets`, `carcass.anti_tip`, `plinth.legs`, `table.legs`, `table.connectors.cam`, `table.connectors.dowel`, `table.connectors.corner`, `table.screws`, `table.drawer.{j}.slides`, `table.drawer.{j}.handle`, `table.cabinet.drawer.{j}.slides`, `table.cabinet.drawer.{j}.handle`, `table.cabinet.door.hinges`, `table.cabinet.door.hinge_plates`, `table.cabinet.door.handle`, `table.cabinet.shelf_supports`, `extra.{id}`.
 
 Section ids are random but stable (created once), so keys survive dimension edits. If a section is deleted, overrides pointing at its keys become **orphaned**: the engine drops them and emits `info` issue `furniture.override_orphaned` (shown to staff).
 
@@ -550,14 +562,15 @@ Applies identically to plans (`/api/plans/{plan}/working-copy`), furniture desig
    - `200 { version, savedAt, summary? , estimate? }` → set `baseVersion = version`, clear localStorage draft, status "Saved".
    - `409 { code: 'version_conflict', currentVersion, savedBy: {id, name}, savedAt }` → editor stops autosaving and shows the conflict dialog: **Reload theirs** (discard local), **Keep mine** (re-send with `baseVersion = currentVersion`, overwriting), **Save mine as copy** (plans: duplicate plan; furniture: duplicate design).
    - `423 { code: 'locked', reason: 'in_order', orderNumber }` → furniture design locked by an order; editor switches to read-only and shows banner with "Duplicate to edit".
-   - `422 { code: 'invalid_document', issues: Issue[] }` → should not happen (client validates first); show error toast, keep local draft, stop autosave, report to Sentry-equivalent log (`console.error` + `POST /api/client-errors`).
+   - `423 { code: 'locked', reason: 'plan_locked', lockedBy: {id, name}, lockedAt }` → plan locked by staff (02 §3.2 `plans.locked_at`); editor switches to read-only reason `plan_locked` (05 §15.3).
+   - `422 { code: 'invalid_document', issues: Issue[] }` → should not happen (client validates first); show error toast, keep local draft, stop autosave, report via `console.error` + `POST /api/client-errors` (route `api.client-errors.store`; forwarded to Sentry when enabled, 17 §13.5).
    - network/5xx → retry with backoff 2, 4, 8, 16, 30 s (cap), status "Offline — changes kept on this device".
 6. On page load, if `localStorage` has a draft with `baseVersion === workingVersion` and content differs, offer **Restore unsaved changes**. If `baseVersion < workingVersion`, offer restore as a conflict (same dialog as 409).
 7. `beforeunload` warns when dirty and unsaved; a final `fetch(…, { keepalive: true, method: 'PUT' })` is attempted.
 
 **Server**
-1. Authorise (policy `update`), check lock (furniture: `locked_by_order_id` null, or staff with `orders.edit_designs` editing via a proposal draft endpoint only).
-2. Validate size (≤ 2 MB) then run engine CLI `validate-plan` / `validate-furniture` (furniture with catalog snapshot). Errors → 422.
+1. Authorise (policy `update`), check lock: furniture → `locked_by_order_id` null (staff change locked designs only through the proposal draft endpoint, which requires `orders.propose_changes`, 13 §8.7); plans → `locked_at` null, else `423 { code: 'locked', reason: 'plan_locked', lockedBy, lockedAt }`.
+2. Validate size (≤ 2 MB) then run engine CLI `validate-plan` / `validate-furniture` (furniture with catalog snapshot). Save-blocking errors (plans: every `error` issue of §1.1; furniture: `SAVE_BLOCKING_CODES` of §2.4) → 422.
 3. `UPDATE … SET working_document = ?, working_version = working_version + 1, working_saved_by = ?, working_saved_at = now() WHERE id = ? AND working_version = ?` — 0 rows → 409.
 4. Plans: recompute and store `summary` via `plan-summary` (same CLI process call batch: implement `validate-plan` to also return summary to avoid a second spawn). Furniture: update denormalised `width_mm/height_mm/depth_mm` from `validate-furniture` result (`bbox`) and `estimate` from the request header-less body field `estimate` sent by the client (display-only, trusted only for display).
 5. If this is the first save by a **staff** user on a customer's plan since the last revision, create a `staff_edit` revision of the previous document first.

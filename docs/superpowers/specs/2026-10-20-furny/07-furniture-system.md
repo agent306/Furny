@@ -1,6 +1,6 @@
 # 07 — Furniture System (templates, construction, hardware, builder)
 
-Read the master document, `01`, `02`, `03` and `09` first. Those documents are binding; this file never overrides them. Where this file needs something that is not in `02`/`03` (a column, a setting, a key pattern, a route, a permission), it is listed in the **Appendix** at the end and must be merged into the owning document during review.
+Read the master document, `01`, `02`, `03` and `09` first. Those documents are binding; this file never overrides them. Columns and settings are defined in `02`, key patterns in `03 §3.6`, permissions in `13 §7`, upload purposes in `13 §11.1`, engine CLI/worker RPC in `01 §5`; route names are registered in `14`.
 
 This file is normative for:
 
@@ -1231,7 +1231,7 @@ The admin catalog UI (11) shows these keys as a multi-select on hardware items, 
 
 - `validateFurniture(doc, catalog): Issue[]` = structural checks of `03 §2.4` + `generateFurniture(doc, catalog).issues` (deduplicated by `code + entityIds`).
 - `SAVE_BLOCKING_CODES` = exactly the codes of `03 §2.4` (`furniture.dims_range`, `furniture.family_mismatch`, `furniture.section_tree_invalid`, `furniture.section_too_small`, `furniture.fixed_sizes_exceed`, `furniture.front_not_rectangle`, `furniture.front_overlap`, `furniture.unknown_code`, `furniture.too_many_parts`). The engine CLI `validate-furniture` returns `valid = !issues.some(i => SAVE_BLOCKING_CODES.has(i.code))`; only those make an autosave fail with 422 (`03 §5`).
-- Every other `error` issue (manufacturing errors) **does not block saving** but blocks order submission (T2: "no error issues") and proposal sending (T6 additionally requires no error issues in each `staff_draft_document`, Appendix).
+- Every other `error` issue (manufacturing errors) **does not block saving** but blocks order submission (T2: "no error issues") and proposal sending (T6 additionally requires no error issues in each `staff_draft_document`, 09 T6).
 - `warning` never blocks. `CRITICAL_WARNING_CODES = ['furniture.shelf_sag_critical', 'furniture.door_heavy', 'furniture.sliding_leaf_heavy', 'furniture.part_exceeds_sheet_back']` are rendered with the danger colour and listed first.
 - `info` issues are shown only in advanced mode (§8.8).
 
@@ -1352,7 +1352,7 @@ Layout:
 3. Category chips: All, Wardrobes, Kitchen, Storage, Shelving, TV units, Tables, Desks, Other (from `TemplateCategory`, hidden when empty). Search box (matches translated names).
 4. Card grid (responsive: 2 columns ≥ 768 px, 3 ≥ 1024, 4 ≥ 1440): thumbnail (4:3), name, description (2 lines), dims for presets (`1800 × 2100 × 600`).
 5. Selecting a card opens a side sheet: name input (default `t(nameKey) + ' ' + (count of designs of that template in the project + 1)`, max 120), for templates the `TemplateParamsForm` (§2.2), a live mini 3D preview (`Preview3D` in `compact` mode, generated client-side with the catalog snapshot), and **Create**.
-6. Create: client generates the document (`getTemplate(key).generate(params, ctx)` or `reidentify(preset.document)`), runs `validateFurniture`; POST `{ name, templateKey, presetId?, document }` to `customer.projects.furniture.store` (Appendix); server validates via engine CLI and creates the design (`CreateFurnitureDesign`), then redirects to the editor.
+6. Create: client generates the document (`getTemplate(key).generate(params, ctx)` or `reidentify(preset.document)`), runs `validateFurniture`; POST `{ name, templateKey, presetId?, document, returnPlanId? }` to `customer.projects.furniture.store` (POST `/projects/{project}/furniture`; `returnPlanId` = plan to return to after editing when the builder was opened from the plan editor, 05); server validates via engine CLI and creates the design (`CreateFurnitureDesign`), then redirects to the editor.
 
 The catalog snapshot is loaded with `useCatalogSnapshot()` (`resources/js/composables/useCatalogSnapshot.ts`): fetches `GET /api/catalog/snapshot` with `If-None-Match`, caches in memory and IndexedDB key `fs:catalog:{version}`.
 
@@ -1362,7 +1362,7 @@ The catalog snapshot is loaded with `useCatalogSnapshot()` (`resources/js/compos
 |---|---|---|---|---|
 | `customer` | `Customer/Furniture/Edit` | owner customer | `PUT /api/furniture-designs/{design}/working-copy` | default **simple** UI |
 | `staff` | `Admin/Furniture/Edit` | staff with `plans.edit_any` (13) on an unlocked design | same | default **advanced** UI; staff banner "Editing {customer}'s design" |
-| `proposal` | `Admin/Orders/ProposalItemEdit` (route `admin.orders.proposals.items.edit`, 09 §4) | staff `orders.propose_changes` (saving the draft requires `orders.edit_designs`, 13) | `PUT /api/change-proposal-items/{item}/draft` (version field `staff_draft_version`) | advanced UI; persistent amber banner "Proposal mode — the customer will review these changes" (`t('builder.proposal_banner')`) with buttons **Preview changes** (opens the diff dialog: `diffFurniture(fromRevision.document, current, catalog)` rendered with `ChangeList` exactly as the customer will see it) and **Back to order** |
+| `proposal` | `Admin/Orders/ProposalItemEdit` (route `admin.orders.proposals.items.edit`, 09 §4) | staff `orders.propose_changes` (also required to save the draft, 13 §8.7) | `PUT /api/change-proposal-items/{item}/draft` (version field `staff_draft_version`) | advanced UI; persistent amber banner "Proposal mode — the customer will review these changes" (`t('builder.proposal_banner')`) with buttons **Preview changes** (opens the diff dialog: `diffFurniture(fromRevision.document, current, catalog)` rendered with `ChangeList` exactly as the customer will see it) and **Back to order** |
 | `readonly` | any | design locked (`locked_by_order_id`) for customers, or no `update` permission | none | all commands disabled, panels read-only; banner "This design is part of order {number} and can't be changed." + **Duplicate to edit** (POST duplicate → redirect to the copy's editor) |
 
 The mode is passed as a prop; a `423` autosave response (`03 §5`) switches a running editor to `readonly`.
@@ -1601,13 +1601,13 @@ Used by the customer proposal page (10) and the staff preview (§8.2). Props: `b
 ### 11.1 Thumbnails (`composables/useThumbnailCapture.ts`)
 
 - Trigger: 60 s after the last successful working-copy save (timer reset by each save); immediately on editor open when the design has no thumbnail; on unmount when a capture is pending (fire-and-forget). Never in `proposal` or `readonly` mode.
-- Render: offscreen `THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: false })`, size **800 × 600**, pixel ratio 1, background `#ffffff`, the same lights as the main view, camera FOV 35°, azimuth 30°, elevation 20°, fit to bbox with 10% padding; doors closed, not exploded, no highlight, edges on. `canvas.toBlob('image/png')` → `POST /api/furniture-designs/{design}/thumbnail` (multipart field `file`); renderer disposed afterwards.
-- Server (`StoreFurnitureThumbnail` action): policy `update` (staff on locked designs are refused), validates PNG, ≤ 5 MB, exactly 800 × 600, stores in media collection `thumbnail` (single file, replaces; conversion `small` 320w per `02 §10`), returns 204.
-- `SaveAsPreset` uploads the current capture with the preset request.
+- Render: offscreen `THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: false })`, size **800 × 600**, pixel ratio 1, background `#ffffff`, the same lights as the main view, camera FOV 35°, azimuth 30°, elevation 20°, fit to bbox with 10% padding; doors closed, not exploded, no highlight, edges on. `canvas.toBlob('image/png')` → upload intent (13 §11, purpose `furniture_thumbnail`, target = the design: presign → PUT → confirm → poll until `ready`) → `POST /api/furniture-designs/{design}/thumbnail` (`api.furniture-designs.thumbnail.store`) with `{ uploadId }`; renderer disposed afterwards.
+- Server (`StoreFurnitureThumbnail` action): policy `update` (staff on locked designs are refused), consumes the intent (13 §11.3 step 7; sniffed PNG, ≤ 5 MB, intent `width × height` exactly 800 × 600 else 422 `upload_invalid`), stores in media collection `thumbnail` (single file, replaces; conversion `small` 320w per `02 §10`), returns 204.
+- `SaveAsPreset` uploads the current capture as an upload intent with purpose `preset_thumbnail` and sends its id as `thumbnailUploadId` with the preset request (`admin.furniture.save-as-preset`, 11).
 
 ### 11.2 Cut list exports
 
-CSV and PDF formats, routes and generation are specified in `08 §8`. In the builder, the **Export** menu shows "Cut list (CSV)" and "Cut list (PDF)" only to users with permission `furniture.export_cutlist` (Appendix). CSV is produced client-side from the live estimate BOM with `cutListCsv(bom, catalog, doc)` (engine) and downloaded as `cutlist-{slug}-working.csv`. PDF requires a revision: if the working copy differs from `current_revision` (or there is none), the menu first creates a `manual_checkpoint` revision (label prompt), then calls the PDF endpoint and shows a toast "Preparing PDF…" until the file is ready (`08 §8.2`).
+CSV and PDF formats, routes and generation are specified in `08 §8`. In the builder, the **Export** menu shows "Cut list (CSV)" and "Cut list (PDF)" to staff with permission `orders.view` (13 §7.1; customers never see cut-list exports). CSV is produced client-side from the live estimate BOM with `cutListCsv(bom, catalog, doc)` (engine) and downloaded as `cutlist-{slug}-working.csv`. PDF requires a revision: if the working copy differs from `current_revision` (or there is none), the menu first creates a `manual_checkpoint` revision (label prompt), then calls the PDF endpoint and shows a toast "Preparing PDF…" until the file is ready (`08 §8.2`).
 
 ### 11.3 GLB export (`export/exportGlb.ts`)
 
@@ -1760,15 +1760,4 @@ Undermount variant (`slideCode: 'SLD-UM-500'`): kept (500 ≤ 519); `Win = 564 �
 
 ---
 
-## Appendix: Proposed additions to other documents
-
-1. **03 §2.4 / §5 (clarification)** — `validate-furniture` `valid` is computed from `SAVE_BLOCKING_CODES` (= the §2.4 codes) only; other `error` issues (07 §7.3) do not block autosave but block order submission (T2) and proposal sending (T6).
-2. **09 T6 (precondition)** — add: "every item's `staff_draft_document` validates with no `error` issues (engine CLI)".
-3. **03 §3.6 key table (additions; existing patterns unchanged)**:
-   - Parts: `front.{F}.leaf.{i}.stile.left|stile.right|rail.top|rail.bottom|glass`; `section.{S}.drawer.{j}.front` is the inner front (role `drawer_box`) for drawers behind doors; `table.top.layer.{m}`; `table.stretcher.left|right|center|back`; `table.end.left|right`; `table.shelf`; `table.trestle.{left|right}.upright|foot|cleat`; `table.pedestal.side.{1..4}`, `table.pedestal.base`, `table.pedestal.top`; `table.cabinet.side.left|side.right|bottom|back|door`; `table.cabinet.shelf.{i}`; `table.cabinet.drawer.{j}.front|side.left|side.right|back|bottom`; `table.drawer.{j}.front|runner.left|runner.right|side.left|side.right|back|bottom`.
-   - Hardware: `front.{F}.hinges.shared`, `front.{F}.hinge_plates`, `front.{F}.track`, `front.{F}.rollers`, `front.{F}.gas_struts`, `front.{F}.stays`, `section.{S}.rod_supports`, `section.{S}.baskets`, `carcass.connectors.cam`, `carcass.connectors.dowel` (replacing the single `carcass.connectors` example), `carcass.screws`, `carcass.wall_brackets`, `carcass.anti_tip`, `table.connectors.cam|dowel|corner`, `table.screws`, `table.drawer.{j}.slides|handle`, `table.cabinet.drawer.{j}.slides|handle`, `table.cabinet.door.hinges|hinge_plates|handle`, `table.cabinet.shelf_supports`.
-4. **02 §6.1 `materials.usage` (note)** — allowed tokens = `MaterialRole` values plus `glass` (UI filter only; glass panels use the first active material with `board_type = 'glass'`).
-5. **02 §6.3 `hardware_items.is_default_for`** — exhaustive role keys are listed in 07 §6.11; the Upsert action enforces one item per key.
-6. **13 permissions (new)** — `furniture.export_cutlist` (cut list CSV/PDF exports; default roles owner, admin, estimator, production). (Cost visibility in the builder reuses the existing `quotes.view_costs`; staff editing of unlocked designs reuses `plans.edit_any`; Save as preset reuses `presets.manage`.)
-7. **14 routes (new, names)** — `customer.projects.furniture.create` (GET `/projects/{project}/furniture/create`, page `Customer/Furniture/Create`), `customer.projects.furniture.store` (POST `/projects/{project}/furniture`, body `{ name, templateKey, presetId?, document }`), `customer.furniture.edit` (GET `/furniture/{design}/edit`), `admin.furniture.create` / `admin.furniture.store` / `admin.furniture.edit` (same under `/admin`), `api.furniture-designs.duplicate` (POST `/api/furniture-designs/{design}/duplicate` → `{ id, editUrl }`), `api.furniture-designs.thumbnail.store` (POST `/api/furniture-designs/{design}/thumbnail`, multipart `file`, 204).
-8. **01 §5.5 worker RPC (addition)** — method `estimateFurniture(doc, catalog) → { bom, price }` (07 §8.10).
+_Appendix merged into the target documents during reconciliation (see 19-reconciliation-log.md)._

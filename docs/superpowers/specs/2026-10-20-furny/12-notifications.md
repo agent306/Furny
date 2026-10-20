@@ -2,7 +2,7 @@
 
 Read the master document, `01`, `02`, `03` and `09` first. This file is normative for **which events notify whom, on which channels, with which content**, and for the channel implementations (in-app, email, WhatsApp, SMS, web push), preferences, throttling and quiet hours. Auth-specific flows that *use* these channels (OTP, password reset, verification) are specified in `13`; this file only defines the messages themselves.
 
-Everything not listed in `02` that this file needs is defined in the final **Appendix: Proposed additions to other documents**.
+Tables and settings this file relies on are defined in `02` (`notifications`, `notification_deliveries` §1.7, `push_subscriptions`, settings group `notifications` incl. `quiet_hours`); queues, scheduler entries, `routes/webhooks.php` and the event contracts are in `01`. Route names are registered in `14` (canonical list in `19-reconciliation-log.md` §8.5).
 
 ---
 
@@ -11,7 +11,7 @@ Everything not listed in `02` that this file needs is defined in the final **App
 1. **Notifications are never sent from controllers or Actions.** Domain events (dispatched after commit, see `01 §4`, `09 §11`) are routed by one queued listener to Notification classes. Only exceptions: the four transactional auth messages (`13`) and the staff digest (scheduler).
 2. **One Notification class per event key**, sharing one abstract base class. Content is data-driven from `config/notification_events.php` + translation keys; subclasses only build parameters and optional extras (attachments).
 3. **In-app (`database` + `broadcast`) is the record of truth.** Every non-transactional event that notifies a user creates exactly one in-app notification per recipient; it cannot be disabled. External channels (mail, WhatsApp, SMS, web push) are preference-controlled except where marked **locked**.
-4. **All user-visible strings are translation keys** (master §6.6). Notification strings use **ICU MessageFormat** (`{param}` placeholders, `select`, `plural`) in `resources/lang/en/notifications.php`, rendered in PHP with `App\Support\I18n\Icu::trans()` (wraps `MessageFormatter`, ext-intl) and in Vue by the i18n library from `15`. Rationale: the same string is rendered server-side (mail/SMS/WhatsApp/push) and client-side (bell); one placeholder syntax avoids drift. Never use Laravel `:param` placeholders in `notifications.php`.
+4. **All user-visible strings are translation keys** (master §6.6). Notification strings use **ICU MessageFormat** (`{param}` placeholders, `select`, `plural`) in `resources/lang/en/notifications.php`, rendered in PHP with the helper `trans_icu()` (15 §15.3; wraps `MessageFormatter`, ext-intl) and in Vue by the i18n library from `15`. Rationale: the same string is rendered server-side (mail/SMS/WhatsApp/push) and client-side (bell); one placeholder syntax avoids drift. Never use Laravel `:param` placeholders in `notifications.php`.
 5. **Cost-bearing channels (WhatsApp, SMS) are used sparingly**: only "action needed" or high-value milestones default on; quiet hours delay them; throttling collapses bursts.
 6. **Idempotent**: re-running the routing listener (queue retry) must not double-notify (see §4.3).
 
@@ -40,7 +40,7 @@ The availability check is implemented once in `App\Notifications\Routing\Channel
 - **D** = database/in-app (always `LOCK` unless `—`), **M** = mail, **W** = WhatsApp, **S** = SMS, **P** = web push.
 - **Q** = quiet hours apply to W/S (§6.2). **X** = `ensure_external` (if no external channel resolves, force the first available of WhatsApp, SMS — §5.3).
 - **Recipient resolvers** are defined in §4.2. The **actor** of the event is always excluded unless the rule says `include_actor`.
-- **CTA**: route name (defined in `14`, listed in the appendix) + route params from the event. Paths are stored **relative** in the payload.
+- **CTA**: route name (registered in `14`) + route params from the event. Paths are stored **relative** in the payload.
 
 ### 3.2 Order events (keys exhaustive per `09 §11`)
 
@@ -85,10 +85,10 @@ The availability check is implemented once in `App\Notifications\Routing\Channel
 | `order.on_hold` | `OrderOnHold` | 1 | `customer` | C | LOCK | on | — | — | on | | `customer.orders.show` |
 | | | 2 | `assignee` | S | LOCK | off | — | — | on | | `admin.orders.show` |
 | `order.resumed` | `OrderResumed` | 1 | `customer` | C | LOCK | on | — | — | on | | `customer.orders.show` |
-| `message.posted` | `MessagePosted` | 1 | `customer` (condition `author_is_staff`; `kind = text` only) — **collapse 300 s**, **read-suppression** | C | LOCK | on | off | — | on | Q | `customer.orders.messages` |
-| | | 2 | `assignee_or_permission:orders.review` (condition `author_is_customer`) — collapse, read-suppression | S | LOCK | on | off | — | on | Q | `admin.orders.messages` |
+| `message.posted` | `MessagePosted` | 1 | `customer` (condition `author_is_staff`; `kind = text` only) — **collapse 300 s**, **read-suppression** | C | LOCK | on | off | — | on | Q | `customer.orders.show` `#messages` |
+| | | 2 | `assignee_or_permission:orders.review` (condition `author_is_customer`) — collapse, read-suppression | S | LOCK | on | off | — | on | Q | `admin.orders.show` `#messages` |
 | `call.callback_due` | `CallbackReminder` (name fixed by `09 §2`) | 1 | `call_logger` | S | LOCK | on | off | — | on | | `admin.orders.show` |
-| `call.no_answer` | `CallNoAnswer` | 1 | `customer` | C | LOCK | on | on | fb | on | Q | `customer.orders.messages` |
+| `call.no_answer` | `CallNoAnswer` | 1 | `customer` | C | LOCK | on | on | fb | on | Q | `customer.orders.show` `#messages` |
 | `reminder.action_required` | `ActionRequiredReminder` | 1 | `customer` | C | LOCK | on | on | fb | on | Q | depends on `payload.action` (§3.6) |
 
 Rules for staff recipients of order events: a resolved staff user must hold `orders.view` (otherwise skipped) and `is_active = true`.
@@ -100,7 +100,11 @@ Rules for staff recipients of order events: a resolved staff user must hold `ord
 | `import.ready_for_review` | `App\Notifications\Imports\ImportReadyForReview` | `subject_user` (uploader) | by user type | LOCK | off | — | — | on | | `customer.imports.show` (C) / `admin.imports.show` (S) |
 | `import.failed` | `App\Notifications\Imports\ImportFailed` | `subject_user` | by user type | LOCK | on | — | — | on | | same |
 | `ai.credits_granted` | `App\Notifications\Ai\AiCreditsGranted` | `subject_user` — fired **only** for ledger kind `admin_grant` (monthly/signup grants are predictable; notifying them is noise) | C | LOCK | on | — | — | off | | `customer.account.ai-credits` |
+| `ai.credits_refunded` | `App\Notifications\Ai\AiCreditsRefunded` | `subject_user` — fired by a staff refund of an import's credits (`18 §9.5`) | C | LOCK | off | — | — | on | | `customer.account.ai-credits` |
 | `ai.credits_low` | `App\Notifications\Ai\AiCreditsLow` | `subject_user` — fired when a ledger insert moves the balance from > 0 to ≤ 0; at most once per user per calendar month (cache key `notify:ai-low:{userId}:{YYYY-MM}`, TTL 32 d) | C | LOCK | on | — | — | on | | `customer.account.ai-credits` |
+| `ai.budget_threshold_reached` | `App\Notifications\Ai\AiBudgetThresholdReached` | `role:owner` — fired at most once per month per threshold (80 %, 100 %; `18 §12`) | S | LOCK | on | — | — | on | | `admin.ai.usage` |
+| `ai.provider_unavailable` | `App\Notifications\Ai\AiProviderUnavailable` | `role:owner` — throttled to once per 6 h (`18 §8.2`) | S | LOCK | on | — | — | on | | `admin.settings.ai` |
+| `system.test_push` | `App\Notifications\System\TestPush` | `subject_user` (the user who pressed **Send test notification**, `10`/`11` notification preferences) | by user type | — | — | — | — | LOCK | transactional; web push only; not stored in `notifications` | `customer.account.notifications` (C) / `admin.account.notifications` (S) |
 | `account.welcome` | `App\Notifications\Account\Welcome` | `subject_user` (new customer) | C | LOCK | LOCK | — | — | — | bypasses preferences (no prefs exist yet) | `customer.dashboard` |
 | `account.deletion_scheduled` | `App\Notifications\Account\DeletionScheduled` | `subject_user` (sent **before** soft delete, see `13 §9`) | C | — | LOCK | — | — | — | transactional; WhatsApp not used | none (support email in body) |
 | `staff.invited` | `App\Notifications\Staff\StaffInvited` | on-demand `Notification::route('mail', $invitation->email)` | S | — | LOCK | — | — | — | transactional | `staff.invitations.show` (temporary signed, 72 h) |
@@ -109,11 +113,11 @@ Rules for staff recipients of order events: a resolved staff user must hold `ord
 | `auth.password_reset` | `App\Notifications\Auth\ResetPassword` | user | — | — | LOCK | — | — | — | transactional | Fortify `password.reset` |
 | `auth.email_verification` | `App\Notifications\Auth\VerifyEmail` | user | — | — | LOCK | — | — | — | transactional; temporary signed URL 60 min | Fortify `verification.verify` |
 
-**Transactional** events (`account.welcome`, `account.deletion_scheduled`, `staff.invited`, `auth.*`) never appear in the preferences UI, have no unsubscribe link and are never collapsed. They are **not** stored in `notifications` (except `account.welcome`, which is also an in-app greeting).
+**Transactional** events (`account.welcome`, `account.deletion_scheduled`, `staff.invited`, `system.test_push`, `auth.*`) never appear in the preferences UI, have no unsubscribe link and are never collapsed. They are **not** stored in `notifications` (except `account.welcome`, which is also an in-app greeting).
 
 ### 3.4 Event payload contract
 
-Every `NotifiableDomainEvent` (`09 §11`) exposes `eventKey()`, `order()`, `actor()`, `payload()`, and (proposed addition, see appendix) `eventId(): string` (a ULID generated in the event constructor) and `occurredAt(): CarbonImmutable`. Non-order events implement `App\Domain\Shared\Contracts\UserNotifiableEvent` with `eventId()`, `eventKey()`, `subjectUser(): User`, `subject(): ?Model`, `actor(): ?User`, `payload(): array`, `occurredAt()`.
+Every `NotifiableDomainEvent` (`09 §11`) exposes `eventKey()`, `order()`, `actor()`, `payload()`, `eventId(): string` (a ULID generated in the event constructor, used for idempotency §4.3) and `occurredAt(): CarbonImmutable` (contract in `09 §11`). Non-order events implement `App\Domain\Shared\Contracts\UserNotifiableEvent` with `eventId()`, `eventKey()`, `subjectUser(): User`, `subject(): ?Model`, `actor(): ?User`, `payload(): array`, `occurredAt()`.
 
 Required `payload()` keys (all scalar or arrays of scalars; IDs are ULID strings):
 
@@ -145,7 +149,11 @@ Required `payload()` keys (all scalar or arrays of scalars; IDs are ULID strings
 | `reminder.action_required` | `action` (`proposal` \| `quote` \| `completion`), `targetId` (proposal/quote id, null for completion) |
 | `import.*` | `importId`, `errorCode` (failed only) |
 | `ai.credits_granted` | `credits`, `balance`, `ledgerEntryId` |
+| `ai.credits_refunded` | `credits`, `balance`, `importId`, `fileName` |
 | `ai.credits_low` | `balance` |
+| `ai.budget_threshold_reached` | `percent` (80 \| 100), `spentUsd`, `limitUsd` (decimal strings, 2 places), `month` (`YYYY-MM`) |
+| `ai.provider_unavailable` | `provider`, `reason` (vision provider code, `18 §14`) |
+| `system.test_push` | (none) |
 
 ### 3.5 Notification parameters
 
@@ -188,6 +196,8 @@ Each Notification subclass implements `protected function params(): array<string
 | `fileName` | sanitized original filename (13 §11), max 60 chars |
 | `errorReason` | translated `imports.errors.{errorCode}` |
 | `credits`, `balance` | integers |
+| `percent`, `spentUsd`, `limitUsd`, `month` | AI budget: integer percent; USD amounts formatted `$12.34`; month formatted `MMMM yyyy` in business locale |
+| `provider` | provider label (`Anthropic`, `OpenAI`, `OpenAI-compatible`, `None`) |
 | `resetDate` | first day of next month, `d M Y` |
 | `ctaPath` | CTA path **without leading slash** for the short-link route (e.g. `o/ORD-2026-00042`) — used as WhatsApp URL-button suffix |
 | `shortUrl` | absolute URL of the short link (`route('links.order', $order->number)`) — used in SMS |
@@ -252,6 +262,10 @@ Key convention: `notifications.{eventKey}.{audience}.{field}` where `field` ∈ 
 | `import.ready_for_review.customer` / `.staff` | `Your plan is ready to review` | `We finished reading {fileName}. Check and correct the result.` |
 | `import.failed.customer` / `.staff` | `We couldn't read your blueprint` | `{fileName}: {errorReason} Your AI credit was refunded.` |
 | `ai.credits_granted.customer` | `You received {credits} AI credits` | `Your balance is now {balance}.` |
+| `ai.credits_refunded.customer` | `{credits, plural, one {# AI credit} other {# AI credits}} refunded` | `We refunded the credits for {fileName}. Your balance is now {balance}.` |
+| `ai.budget_threshold_reached.staff` | `AI budget {percent}% used` | `{spentUsd} of {limitUsd} spent in {month}.` |
+| `ai.provider_unavailable.staff` | `AI provider unavailable` | `{provider} is not available ({reason}). Blueprint imports run without AI until it is fixed.` |
+| `system.test_push.customer` / `.staff` | `Test notification` | `Notifications work on this device.` |
 | `ai.credits_low.customer` | `You've used all your AI credits` | `New credits arrive on {resetDate}. You can still draw or trace your plan manually.` |
 | `account.welcome.customer` | `Welcome to {appName}` | `Start by uploading your floor plan or drawing it yourself.` |
 | `account.deletion_scheduled.customer` (mail only) | `Your account will be deleted` | `We received a request to delete your account. It will be permanently anonymised on {date}. If this wasn't you, contact us at {businessEmail} immediately.` |
@@ -336,6 +350,7 @@ resources/js/pages/Customer/Notifications/Index.vue    resources/js/pages/Admin/
 | `production_assignee_or_permission:{perm}` | production assignee if set and active, else `permission:{perm}` |
 | `call_logger` | `User::find(payload.staffId)` |
 | `subject_user` | `$event->subjectUser()` |
+| `role:{role}` | `User::query()->where('type','staff')->where('is_active',true)->role($role)->get()` (spatie scope; used with `owner`) |
 
 Rule `condition` values (evaluated before resolving): `author_is_staff` (payload `authorType = staff`), `author_is_customer`, `actor_is_staff` (actor non-null and `type = staff`), `actor_is_customer`. Rule 1 of `order.issue_raised` has condition `actor_is_staff`.
 
@@ -463,8 +478,8 @@ return [
         'quotes'     => ['quote.sent', 'quote.negotiation_opened', 'quote.negotiation_answered', 'quote.accepted', 'quote.declined', 'quote.expiring_soon', 'quote.expired', 'order.reopened_after_call'],
         'production' => ['order.confirmed', 'order.production_started', 'order.production_update', 'order.completed', 'order.customer_approved', 'order.issue_raised', 'order.issue_resolved', 'order.delivery_scheduled', 'order.delivered'],
         'messages'   => ['message.posted', 'call.no_answer', 'call.callback_due'],
-        'imports_ai' => ['import.ready_for_review', 'import.failed', 'ai.credits_granted', 'ai.credits_low'],
-        'staff'      => ['staff.daily_digest'],
+        'imports_ai' => ['import.ready_for_review', 'import.failed', 'ai.credits_granted', 'ai.credits_refunded', 'ai.credits_low'],
+        'staff'      => ['staff.daily_digest', 'ai.budget_threshold_reached', 'ai.provider_unavailable'],
     ],
 
     'events' => [
@@ -549,7 +564,7 @@ return [
 ];
 ```
 
-Every other event entry is written out in full in the same shape, taking recipients/channels/flags from the §3.2/§3.3 tables (`LOCK`→`$LOCK`, `on`→`$ON`, `off`→`$OFF`, `fb`→`$FB`, `—`→ key omitted), `quiet_hours = true` where the table shows **Q**, `ensure_external = true` where it shows **X**, `collapse` for `message.posted` and `order.production_update` (`channels: ['mail','whatsapp','webpush']` for the latter), `read_suppression` only for `message.posted`. Icons (lucide): `order.submitted` `package`, `order.assigned` `user-check`, `order.review_started` `search`, `order.reopened` `rotate-ccw`, `order.changes_*` `git-compare`, `order.items_changed` `list-checks`, `quote.*` `file-text`, `order.reopened_after_call` `phone`, `order.confirmed` `badge-check`, `order.production_*` `hammer`, `order.completed` `camera`, `order.customer_approved` `thumbs-up`, `order.issue_*` `alert-triangle`, `order.delivery_scheduled` `calendar`, `order.delivered` `truck`, `order.closed` `archive`, `order.cancelled` `x-circle`, `order.on_hold` `pause-circle`, `order.resumed` `play-circle`, `message.posted` `message-square`, `call.*` `phone`, `reminder.action_required` `bell-ring`, `import.ready_for_review` `scan`, `import.failed` `file-warning`, `ai.*` `sparkles`, `account.welcome` `smile`. WhatsApp template names: `{event_key with dots→underscores}_v1` for customers (e.g. `order_changes_proposed_v1`) and `staff_{…}_v1` for staff; exceptions: `quote_sent_v1`, `message_posted_v1`, `auth_otp`. Body variable lists are given in §7.4.
+Every other event entry is written out in full in the same shape, taking recipients/channels/flags from the §3.2/§3.3 tables (`LOCK`→`$LOCK`, `on`→`$ON`, `off`→`$OFF`, `fb`→`$FB`, `—`→ key omitted), `quiet_hours = true` where the table shows **Q**, `ensure_external = true` where it shows **X**, `collapse` for `message.posted` and `order.production_update` (`channels: ['mail','whatsapp','webpush']` for the latter), `read_suppression` only for `message.posted`. Icons (lucide): `system.test_push` `bell`, `order.submitted` `package`, `order.assigned` `user-check`, `order.review_started` `search`, `order.reopened` `rotate-ccw`, `order.changes_*` `git-compare`, `order.items_changed` `list-checks`, `quote.*` `file-text`, `order.reopened_after_call` `phone`, `order.confirmed` `badge-check`, `order.production_*` `hammer`, `order.completed` `camera`, `order.customer_approved` `thumbs-up`, `order.issue_*` `alert-triangle`, `order.delivery_scheduled` `calendar`, `order.delivered` `truck`, `order.closed` `archive`, `order.cancelled` `x-circle`, `order.on_hold` `pause-circle`, `order.resumed` `play-circle`, `message.posted` `message-square`, `call.*` `phone`, `reminder.action_required` `bell-ring`, `import.ready_for_review` `scan`, `import.failed` `file-warning`, `ai.*` `sparkles`, `account.welcome` `smile`. WhatsApp template names: `{event_key with dots→underscores}_v1` for customers (e.g. `order_changes_proposed_v1`) and `staff_{…}_v1` for staff; exceptions: `quote_sent_v1`, `message_posted_v1`, `auth_otp`. Body variable lists are given in §7.4.
 
 A unit test (`tests/Unit/Notifications/EventCatalogueTest.php`) asserts: every key in `09 §11` plus every key in §3.3 is present; every `notification` class exists, extends `EventNotification` (or is a transactional class) and its `eventKey()` equals the array key; every non-transactional event has `database` = `$LOCK` in each rule; every `fb` entry has a `whatsapp` entry in the same rule; every translation key implied by §3.7 exists in `resources/lang/en/notifications.php`; every CTA route name exists (`Route::has`); every SMS text renders ≤ 160 chars and is GSM-7 with the fixture values in `tests/fixtures/notifications/params.php`.
 
@@ -605,7 +620,7 @@ Scope `order` means the window is per order; two different orders never collapse
 
 ### 6.2 Quiet hours
 
-Setting `notifications.quiet_hours` = `{enabled: true, start: "21:00", end: "08:00"}` (business timezone `business.timezone`; proposed addition). For events with `quiet_hours = true`, `withDelay()` returns for `whatsapp` and `sms`: if the current business-local time is within `[start, end)` (window may cross midnight), a delay until the next `end` time **plus a deterministic jitter** of `crc32(userId) % 600` seconds (spreads the 08:00 burst). Mail, web push and in-app are never delayed by quiet hours. Transactional events never use quiet hours. If a delayed WhatsApp/SMS job runs and the order has since moved such that the message is obsolete, it is still sent (simplicity; content is factual and timestamped).
+Setting `notifications.quiet_hours` = `{enabled: true, start: "21:00", end: "08:00"}` (02 §13; business timezone `business.timezone`). For events with `quiet_hours = true`, `withDelay()` returns for `whatsapp` and `sms`: if the current business-local time is within `[start, end)` (window may cross midnight), a delay until the next `end` time **plus a deterministic jitter** of `crc32(userId) % 600` seconds (spreads the 08:00 burst). Mail, web push and in-app are never delayed by quiet hours. Transactional events never use quiet hours. If a delayed WhatsApp/SMS job runs and the order has since moved such that the message is obsolete, it is still sent (simplicity; content is factual and timestamped).
 
 ### 6.3 Read-suppression (`message.posted`)
 
@@ -692,7 +707,7 @@ Staff templates beginning with a variable must be adjusted by prefixing a word i
 
 ### 7.5 Settings mapping
 
-`notifications.whatsapp_templates` (02 §13) — map `key → {name, language, components}` where `key` is the bare `event_key` for customer-audience templates and `event_key@staff` for staff-audience templates (proposed refinement; e.g. `message.posted` and `message.posted@staff`). Shape:
+`notifications.whatsapp_templates` (02 §13) — map `key → {name, language, components}` where `key` is the bare `event_key` for customer-audience templates and `event_key@staff` for staff-audience templates (02 §13; e.g. `message.posted` and `message.posted@staff`). Shape:
 
 ```json
 {
@@ -750,9 +765,9 @@ A phone is "WhatsApp-unreachable" when its most recent WhatsApp delivery within 
 
 When a WhatsApp delivery fails permanently (sync error or `failed` status webhook received **within 60 minutes** of `accepted_at`), and the event's rule has `sms.fallback_for = whatsapp`, and the user has not explicitly disabled SMS for the event, and SMS is available, and no SMS delivery exists yet for the same `notification_id`: dispatch `SendSmsFallback($deliveryId)` on `notify`, which rebuilds the notification from `notification_deliveries.context` and sends it on the `sms` channel only (`Notification::sendNow($user, $notification, ['sms'])`). The SMS delivery row sets `fallback_of_id`. Quiet hours still apply to the fallback.
 
-### 7.9 Webhook `GET|POST /webhooks/whatsapp` (`webhooks.whatsapp`)
+### 7.9 Webhook `/webhooks/whatsapp` (GET `webhooks.whatsapp.verify`, POST `webhooks.whatsapp`)
 
-- Excluded from CSRF; rate limiter `webhooks` (13). No session middleware (route in `routes/webhooks.php` loaded with the `api`-like stateless group; proposed addition).
+- Excluded from CSRF; rate limiter `webhooks` (13). No session middleware (route in `routes/webhooks.php` loaded with the `api`-like stateless group, `01 §3`).
 - **GET** verification: if `hub_mode === 'subscribe'` and `hash_equals(WHATSAPP_WEBHOOK_VERIFY_TOKEN, hub_verify_token)` → `200` with `hub_challenge` as `text/plain`; else `403`. (PHP converts `hub.mode` query keys to `hub_mode`.)
 - **POST**: read raw body; compute `'sha256='.hash_hmac('sha256', $raw, WHATSAPP_APP_SECRET)`; compare with header `X-Hub-Signature-256` via `hash_equals`; mismatch/missing → `403` and `Log::warning('webhooks.whatsapp.bad_signature')`. Then dispatch `ProcessWhatsAppWebhook($payload)` (queue `notify`) and return `200` immediately (Meta retries non-2xx).
 - `ProcessWhatsAppWebhook`: iterate `entry[].changes[]` where `field = messages`; for each `value.statuses[]`: find delivery by (`driver = meta`, `provider_message_id = status.id`); unknown → ignore. Map `status`: `sent` → `sent_at`, `delivered` → `delivered_at`, `read` → `read_at`, `failed` → `failed_at` + `errors[0].code/title` (+ §7.6/§7.8 handling). Never move status backwards (`read` > `delivered` > `sent` > `accepted`; `failed` terminal unless a later `delivered` arrives). Store `pricing.category`, `pricing.billable` (and `pricing.type` if present) into `pricing_category`, `billable`. Inbound `value.messages[]` (customer replies) are **not processed in v1**: increment Redis counter `whatsapp:inbound:{Y-m-d}` (shown on admin settings page) and ignore; the template footer tells customers to reply in the app. Rationale: no free-form outbound in v1, and the in-app thread is the single conversation record.
@@ -775,7 +790,7 @@ interface SmsDriver
 final class SmsMessage { public string $text; public ?string $dltTemplateId; public ?string $providerTemplateId; /** @var list<string> */ public array $vars; public string $eventKey; }
 ```
 
-`toSms()` renders `text` = `Icu::trans("notifications.{event}.{aud}.sms", params)` and `vars` = values of `content.*.sms.vars` in order; `dltTemplateId`/`providerTemplateId` from settings `notifications.sms_templates[event_key]` = `{text_key, dlt_template_id, provider_template_id}`. `SmsChannel` writes a `notification_deliveries` row (`channel = sms`) like §7.6.
+`toSms()` renders `text` = `trans_icu("notifications.{event}.{aud}.sms", params)` and `vars` = values of `content.*.sms.vars` in order; `dltTemplateId`/`providerTemplateId` from settings `notifications.sms_templates[event_key]` = `{text_key, dlt_template_id, provider_template_id}`. `SmsChannel` writes a `notification_deliveries` row (`channel = sms`) like §7.6.
 
 | Driver | Package / API | Env | Notes |
 |---|---|---|---|
@@ -792,10 +807,10 @@ final class SmsMessage { public string $text; public ?string $dltTemplateId; pub
 
 ### 8.2 Email
 
-- Transport via env `MAIL_MAILER` = `postmark` (recommended) \| `resend` \| `ses` \| `smtp` \| `log`. Install `symfony/postmark-mailer`, `symfony/http-client` and `resend/resend-php` so switching is env-only (`aws/aws-sdk-php` already present via S3). Envs: `POSTMARK_TOKEN` (+ `POSTMARK_MESSAGE_STREAM_ID=outbound`), `RESEND_KEY`, `AWS_*`/`SES_REGION`, `MAIL_HOST/PORT/USERNAME/PASSWORD/SCHEME`, `MAIL_FROM_ADDRESS`. From name = settings `business.name`; `Reply-To` = settings `business.email`.
+- Transport via env `MAIL_MAILER` = `postmark` (recommended) \| `resend` \| `smtp` \| `log`. Install `symfony/postmark-mailer`, `symfony/http-client` and `resend/resend-php` so switching is env-only. Envs: `POSTMARK_TOKEN` (+ `POSTMARK_MESSAGE_STREAM_ID=outbound`), `RESEND_KEY`, `MAIL_HOST/PORT/USERNAME/PASSWORD/SCHEME`, `MAIL_FROM_ADDRESS` (`17 §6.1`). Amazon SES is not offered in v1: its default credentials (`AWS_*`) are the object-storage (R2) keys. From name = settings `business.name`; `Reply-To` = settings `business.email`.
 - Template: every event uses `resources/views/mail/notification.blade.php` (Markdown, `<x-mail::message>`): heading = title, paragraph = body, optional detail table (event-specific `mailLines()` hook — `QuoteSent` shows quote number, total, valid until, items count; `DeliveryScheduled` shows date/time and site address city), button `<x-mail::button :url="$absoluteCtaUrl">` with CTA label, sign-off `notifications.mail.signoff` (`— The {businessName} team`). Markdown mail automatically produces the **plain-text alternative**; additionally publish `resources/views/vendor/mail/text/*` and verify text output in tests.
 - Branding: publish mail components (`php artisan vendor:publish --tag=laravel-mail`); `header.blade.php` renders the business logo (public URL of the logo media, max-height 48 px, `alt` = business name) or the business name text; `footer.blade.php` renders `business.legal_name ?? business.name`, address one-liner, phone, `working_hours`, and for non-transactional mails: `notifications.mail.manage_preferences` link to the preferences page + `notifications.mail.unsubscribe_event` link. Theme CSS `resources/views/vendor/mail/html/themes/furny.css` (`config/mail.php` `markdown.theme = 'furny'`), colours from `15` tokens.
-- **Unsubscribe** (non-transactional, non-locked mail only): link and headers point to `URL::signedRoute('notifications.unsubscribe', ['user' => $id, 'event' => $eventKey, 'channel' => 'mail'])`. Add headers `List-Unsubscribe: <{url}>` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` via `withSymfonyMessage`. `GET` shows a confirmation page (`Auth/Unsubscribe.vue`, no login required) with a button; `POST` (also accepted directly for RFC 8058 one-click) upserts `notification_preferences(enabled=false)` for that event+mail and shows "Unsubscribed" with a link to all preferences. Invalid signature → 403 page.
+- **Unsubscribe** (non-transactional, non-locked mail only): link and headers point to `URL::signedRoute('notifications.unsubscribe', ['user' => $id, 'event' => $eventKey, 'channel' => 'mail'])`. Add headers `List-Unsubscribe: <{url}>` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` via `withSymfonyMessage`. Routes on the same signed path `/notifications/unsubscribe/{user}/{event}/{channel}`: GET `notifications.unsubscribe` and POST `notifications.unsubscribe.store` (one-click; the URL is generated with the GET name). `GET` shows a confirmation page (`Auth/Unsubscribe.vue`, no login required) with a button; `POST` (also accepted directly for RFC 8058 one-click) upserts `notification_preferences(enabled=false)` for that event+mail and shows "Unsubscribed" with a link to all preferences. Invalid signature → 403 page.
 - **Attachments**: `QuoteSent::mailAttachments()` returns `Attachment::fromStorageDisk('s3', $media->getPathRelativeToRoot())->as("Quote-{$quote->number}.pdf")->withMime('application/pdf')` when the quote PDF exists and is ≤ 10 MB; otherwise none (the body always contains the CTA link). No other event attaches files (photos are linked, never attached).
 - Mail never contains OTP codes (OTP is phone-only), internal notes (`messages.kind = internal_note`), cost/margin data (`quotes.cost_snapshot`), or another customer's data.
 
@@ -833,7 +848,7 @@ final class SmsMessage { public string $text; public ?string $dltTemplateId; pub
 
 - `notifications` table (Laravel, `ulidMorphs` per 02); `type` column = event key (`databaseType()`).
 - Broadcast: `toBroadcast()` returns `new BroadcastMessage($payload->toArray())` `->onQueue('notify')`; event name `NotificationCreated` on private channel `users.{id}` (authorised in `routes/channels.php`: `(string) $user->id === $userId`). Frontend: `useNotifications()` subscribes via `useEcho('users.' + id, '.NotificationCreated', cb)`; on receipt: prepend to the loaded list (if loaded), increment `unreadCount`, show a `vue-sonner` toast (title + body, action "View" → `router.visit(url)`) unless the user is already on that URL.
-- Shared Inertia prop `unreadNotifications` (int) = `$user->unreadNotifications()->count()` (index in appendix); for guests absent. Display `99+` above 99.
+- Shared Inertia prop `unreadNotifications` (int) = `$user->unreadNotifications()->count()` (index (`notifiable_id`, `read_at`), 02 §1.8); for guests absent. Display `99+` above 99.
 - **Bell dropdown** (`NotificationBell.vue`, in both layouts' top bar): badge with unread count; on open, lazy `GET /api/notifications?limit=10` (no Inertia partial reload). Each item: icon, translated title (bold if unread), body (2-line clamp), relative time (`Intl.RelativeTimeFormat`), unread dot. Click → `POST /api/notifications/{id}/read` (fire-and-forget) then `router.visit(url)`. Header actions: **Mark all as read** (`POST /api/notifications/read-all`, optimistic), **Preferences** link. Footer: **See all** → notification center. Empty state key `notifications.empty`. Keyboard accessible (reka-ui `DropdownMenu`).
 - **Notification center** pages `customer.notifications.index` / `admin.notifications.index`: tabs **All** / **Unread**, cursor-paginated 25 per page (`GET /api/notifications?filter=unread&cursor=…` returns `{data: NotificationPayloadData[], nextCursor: string|null, unreadCount: int}`), "Load more" button, per-item "Mark as read/unread" (`POST /api/notifications/{id}/unread` sets `read_at = null`), "Mark all as read".
 - Opening an order page does **not** auto-mark notifications read (explicit model; simpler and predictable).
@@ -902,7 +917,7 @@ Rules:
 
 ## 11. Delivery log & health
 
-- `notification_deliveries` (schema in appendix) records every WhatsApp and SMS send attempt (including `auth.otp`). Mail and web push are not recorded (provider dashboards / package events suffice; keeps PII footprint low).
+- `notification_deliveries` (schema in `02 §1.7`) records every WhatsApp and SMS send attempt (including `auth.otp`). Mail and web push are not recorded (provider dashboards / package events suffice; keeps PII footprint low).
 - Admin settings → Notifications (`11`) shows: per-channel health (`Cache` keys `health:whatsapp`, `health:sms`), last 50 deliveries (masked numbers), 30-day counts by status and `pricing_category`, inbound WhatsApp counter.
 - `notifications:prune` also deletes `notification_deliveries` older than 180 days.
 
@@ -947,87 +962,4 @@ Fakes: `FakeWhatsAppClient` and `ArraySmsDriver` are bound in `tests/Pest.php` `
 
 ---
 
-## Appendix: Proposed additions to other documents
-
-### A. `02-data-model.md`
-
-**A.1 New table `notification_deliveries`** (§1 Identity, migration group 2 after `notifications`)
-
-| Column | Type | Null | Default | Notes |
-|---|---|---|---|---|
-| id | ulid PK | | | |
-| notification_id | uuid | yes | | Laravel notification id (shared across channels of one send); null for `auth.otp` |
-| user_id | ulid FK users **N** | yes | | null for on-demand (OTP before signup) |
-| event_key | string(64) | no | | |
-| channel | string(16) | no | | `whatsapp` \| `sms` |
-| driver | string(16) | no | | `meta` \| `twilio` \| `msg91` \| `log` \| `array` |
-| to_masked | string(32) | no | | e.g. `+91******3210` |
-| to_hash | char(64) | no | | `hash_hmac('sha256', phone_e164, APP_KEY)` |
-| template_name | string(128) | yes | | Meta template name / Twilio content SID / MSG91 template id |
-| provider_message_id | string(128) | yes | | `wamid…` / Twilio SID / MSG91 request id |
-| status | string(16) | no | `'pending'` | `pending` \| `accepted` \| `sent` \| `delivered` \| `read` \| `failed` |
-| error_code | string(32) | yes | | provider code |
-| error_title | string(255) | yes | | |
-| pricing_category | string(24) | yes | | from Meta status webhook `pricing.category` |
-| billable | boolean | yes | | from Meta `pricing.billable` |
-| fallback_of_id | ulid FK notification_deliveries **N** | yes | | SMS fallback of a failed WhatsApp delivery |
-| context | jsonb | yes | | serialized `NotificationContext` (to rebuild for fallback) |
-| attempts | smallint | no | 0 | |
-| accepted_at, sent_at, delivered_at, read_at, failed_at | timestamptz | yes | | |
-| timestamps | | | | |
-
-Indexes: partial unique (`driver`, `provider_message_id`) where `provider_message_id` is not null; (`user_id`, `channel`, `created_at`); (`to_hash`, `channel`, `created_at`); (`event_key`, `created_at`); (`status`, `created_at`).
-
-**A.2 `notifications` table index**: add index (`notifiable_id`, `read_at`) and (`notifiable_id`, `created_at`) for unread counts and the notification center.
-
-**A.3 Settings group `notifications`** — add field `quiet_hours`: `{enabled: bool, start: "HH:MM", end: "HH:MM"}`, default `{enabled: true, start: "21:00", end: "08:00"}`. Refine `whatsapp_templates` value shape to `{name: string, language: string, components: Array<{type: 'body', params: string[]} | {type: 'button', sub_type: 'url', index: int, param: string}>}`, keyed by `event_key` (customer audience) or `event_key@staff` (staff audience). Refine `sms_templates` value shape to `{text_key: string, dlt_template_id: ?string, provider_template_id: ?string}`; default seeded entries (all with null IDs) for: `order.changes_proposed`, `quote.sent`, `quote.negotiation_answered`, `quote.expiring_soon`, `order.confirmed`, `order.production_started`, `order.completed`, `order.delivery_scheduled`, `order.cancelled`, `call.no_answer`, `reminder.action_required`, `auth.otp` with `text_key = notifications.{key}.customer.sms` (`notifications.auth.otp.sms` for OTP).
-
-### B. `09-order-workflow.md` §11
-
-`NotifiableDomainEvent` additionally declares `eventId(): string` (ULID generated in the event constructor, used for notification idempotency) and `occurredAt(): CarbonImmutable`. Event payload keys per `12 §3.4`. The "Log confirmation call" action, for `callback_requested`, dispatches job `DispatchCallbackDue` delayed until `callback_at`, which fires `call.callback_due` only if the order is still `accepted`/`confirmed` and no newer call was logged; for outcome `no_answer` the action dispatches `call.no_answer`.
-
-### C. `01-architecture.md`
-
-- §1.1 composer additions: `symfony/postmark-mailer ^7.3`, `symfony/http-client ^7.3`, `resend/resend-php ^0.x latest` (mail transports); `twilio/sdk` is used directly (already a transitive dependency of `laravel-notification-channels/twilio`; declare it explicitly `^8.0`).
-- §3 layout: `routes/webhooks.php` (stateless group: no session, no CSRF, `throttle:webhooks`) for `/webhooks/*`.
-- §7 scheduler: hourly at :05 `notifications:staff-digest`; daily 03:30 `notifications:prune`.
-- §4: new event contract `App\Domain\Shared\Contracts\UserNotifiableEvent` (non-order events).
-
-### D. Master §6.7 feature flags — env names
-
-`features.whatsapp` ← `FEATURE_WHATSAPP` (and required WhatsApp envs present); `features.sms` ← `FEATURE_SMS`; `features.web_push` ← `FEATURE_WEB_PUSH` (default true; false if VAPID keys missing); `features.google_login` ← `FEATURE_GOOGLE_LOGIN` (and Google envs present).
-
-### E. `14-routes-and-api.md` — routes this file depends on (exact names)
-
-| Name | Method + path | Notes |
-|---|---|---|
-| `links.order` | GET `/o/{number}` | auth; redirect per §3.6 |
-| `customer.orders.show` | GET `/orders/{order}` | |
-| `customer.orders.quotes.show` | GET `/orders/{order}/quotes/{quote}` | |
-| `customer.orders.proposals.show` | GET `/orders/{order}/proposals/{proposal}` | |
-| `customer.orders.completion` | GET `/orders/{order}/completion` | |
-| `customer.imports.show` | GET `/imports/{import}` | review page |
-| `customer.account.ai-credits` | GET `/account/ai-credits` | |
-| `customer.account.notifications` / `.update` | GET/PUT `/account/notifications` | |
-| `customer.notifications.index` | GET `/notifications` | |
-| `customer.dashboard` | GET `/dashboard` | |
-| `admin.orders.show` | GET `/admin/orders/{order}` | `#messages` fragment for messages |
-| `admin.imports.show` | GET `/admin/imports/{import}` | |
-| `admin.account.notifications` / `.update` | GET/PUT `/admin/account/notifications` | |
-| `admin.notifications.index` | GET `/admin/notifications` | |
-| `admin.dashboard` | GET `/admin` | |
-| `api.notifications.index` | GET `/api/notifications` | `?filter=unread&cursor=&limit=` (limit ≤ 50) |
-| `api.notifications.read` / `.unread` | POST `/api/notifications/{id}/read` / `/unread` | |
-| `api.notifications.read-all` | POST `/api/notifications/read-all` | |
-| `api.push-subscriptions.store` / `.destroy` | POST/DELETE `/api/push-subscriptions` | |
-| `notifications.unsubscribe` | GET/POST `/notifications/unsubscribe/{user}/{event}/{channel}` | signed, no auth |
-| `manifest` | GET `/manifest.webmanifest` | |
-| `webhooks.whatsapp` | GET/POST `/webhooks/whatsapp` | |
-| `webhooks.twilio.status` | POST `/webhooks/twilio/status` | |
-| `webhooks.msg91` | POST `/webhooks/msg91/{token}` | |
-
-(`customer.orders.messages` / `admin.orders.messages` in §3.2 denote the order show route with fragment `messages`; no separate route.)
-
-### F. `11-admin-app.md`
-
-Settings → Notifications page: WhatsApp template mapping table per event (pre-filled from config, test-send button, status chips from `whatsapp:templates:check`), SMS driver select + template IDs per event, quiet hours, staff digest hour, delivery log (last 50), health banners.
+_Appendix merged into the target documents during reconciliation (see 19-reconciliation-log.md)._
