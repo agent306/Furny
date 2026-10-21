@@ -62,7 +62,12 @@ describe('wardrobe_hinged golden fixture (07 §12.2)', () => {
             testIds(),
         );
         expect(result.document).toEqual(golden);
-        expect(result.issues).toEqual([]);
+        // validateFurniture's findings: the three info issues of the wardrobe
+        expect(result.issues.map((i) => i.code)).toEqual([
+            'furniture.back_split',
+            'furniture.anti_tip_added',
+            'furniture.weight_estimate',
+        ]);
     });
 
     it('is deterministic', () => {

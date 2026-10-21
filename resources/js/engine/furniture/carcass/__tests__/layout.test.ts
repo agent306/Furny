@@ -98,6 +98,27 @@ describe('allocate (07 §3.7 rule 3)', () => {
         expect(mixed.sizes).toEqual([726, 272, 0]);
     });
 
+    it('flex-only children without room get 0 and no fixed-size error (Task 33 M6)', () => {
+        expect(allocate(sizeOf([flex(), flex(), flex()]), -78)).toEqual({
+            sizes: [0, 0, 0],
+            overBy: null,
+            adjusted: false,
+        });
+        expect(allocate(sizeOf([flex(1), flex(2)]), 0)).toEqual({
+            sizes: [0, 0],
+            overBy: null,
+            adjusted: false,
+        });
+    });
+
+    it('never gives a negative size when the fixed sizes and the dividers exceed the space', () => {
+        expect(allocate(sizeOf([fixed(100), flex()]), -50)).toEqual({
+            sizes: [0, 0],
+            overBy: 150,
+            adjusted: false,
+        });
+    });
+
     it('all-fixed children: the last one absorbs the remainder', () => {
         expect(allocate(sizeOf([fixed(400), fixed(500)]), 1000)).toEqual({
             sizes: [400, 600],
@@ -128,10 +149,12 @@ describe('allocate (07 §3.7 rule 3)', () => {
             overBy: null,
             adjusted: false,
         });
-        // zero total weight: equal shares instead of NaN
-        expect(allocate(sizeOf([fixed(0), fixed(0)]), -10).sizes).toEqual([
-            -5, -5,
-        ]);
+        // zero total weight: equal shares instead of NaN, never negative
+        expect(allocate(sizeOf([fixed(0), fixed(0)]), -10)).toEqual({
+            sizes: [0, 0],
+            overBy: 10,
+            adjusted: false,
+        });
     });
 });
 

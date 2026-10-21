@@ -52,3 +52,27 @@ export function withoutHardware(
         draft.hardware = draft.hardware.filter((h) => !set.has(h.code));
     });
 }
+
+/** `base` without the edge band rows of `codes` (deleted from the catalog). */
+export function withoutEdgeBand(
+    codes: string | readonly string[],
+    base: CatalogSnapshot = seedCatalog(),
+): CatalogSnapshot {
+    const set = new Set(typeof codes === 'string' ? [codes] : codes);
+    return mutateCatalog(base, (draft) => {
+        draft.edgeBands = draft.edgeBands.filter((e) => !set.has(e.code));
+    });
+}
+
+/** `base` with the thickness of the material `code` set to `thicknessMm`. */
+export function withThickness(
+    code: string,
+    thicknessMm: number,
+    base: CatalogSnapshot = seedCatalog(),
+): CatalogSnapshot {
+    return mutateCatalog(base, (draft) => {
+        for (const m of draft.materials) {
+            if (m.code === code) m.thicknessMm = thicknessMm;
+        }
+    });
+}

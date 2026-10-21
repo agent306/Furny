@@ -145,8 +145,11 @@ export function shelvesFor(
     const n = content.count;
     const depth = leafDepth(ctx, leaf) - content.frontSetback;
     const gap = (h - n * ts) / (n + 1);
+    const clearance = content.adjustable ? SHELF_SIDE_CLEARANCE : 0;
 
-    if (gap < 0 || depth <= 0) {
+    // No shelf of zero or negative size: a leaf squeezed to nothing (flex
+    // children without room) cannot hold one either.
+    if (gap < 0 || depth <= 0 || w - 2 * clearance <= 0) {
         ctx.issue(
             'furniture.shelves_dont_fit',
             'error',
@@ -156,7 +159,6 @@ export function shelvesFor(
         return;
     }
 
-    const clearance = content.adjustable ? SHELF_SIDE_CLEARANCE : 0;
     for (let i = 1; i <= n; i++) {
         const top = y1 - i * gap - (i - 1) * ts;
         const shelf = makePart(

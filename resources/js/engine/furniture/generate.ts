@@ -28,6 +28,7 @@ import {
     screwPacks,
 } from './rules/carcassHardware';
 import { connectorsForJoints } from './rules/connectors';
+import { modelRules } from './rules/model';
 import { leafWeightKg, roundKg } from './rules/weight';
 import type { Content, FurnitureDocument, Section } from './schema';
 import type { FurnitureModel, GenContext, ModelFront } from './types';
@@ -101,14 +102,6 @@ function weightEstimate(ctx: GenContext): void {
     ctx.issue('furniture.weight_estimate', 'info', {
         kg: roundKg(leafWeightKg(ctx.parts, ctx.idx)),
     });
-}
-
-/**
- * Step 6: model-level validation rules (07 §7.3: sag, sheet fit, …).
- * A no-op hook until `validate.ts` (Task 37) fills it.
- */
-function modelRules(ctx: GenContext): void {
-    void ctx;
 }
 
 const byFrontPosition = (a: ModelFront, b: ModelFront): number =>

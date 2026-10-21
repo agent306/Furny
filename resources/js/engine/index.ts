@@ -519,6 +519,16 @@ export { createGenContext } from './furniture/context';
 export { generateFurniture } from './furniture/generate';
 export { codeIssues, referencedCodes } from './furniture/codes';
 export type { CodeKind, CodeRef } from './furniture/codes';
+export {
+    CRITICAL_WARNING_CODES,
+    FURNITURE_ISSUE_CODES,
+    SAVE_BLOCKING_CODES,
+    isSaveBlocking,
+    validateFurniture,
+} from './furniture/validate';
+export type { FurnitureIssueCode } from './furniture/validate';
+export { SAG_TABLE, sagLimits } from './furniture/rules/sag';
+export type { SagLimits, SagRow } from './furniture/rules/sag';
 export { layoutSections } from './furniture/carcass/layout';
 export type {
     Divider,

@@ -7,6 +7,7 @@ import { newId as newIdFn } from '../../ids';
 import type { Issue } from '../../plan/types';
 import type { CatalogIndex } from '../catalogIndex';
 import type { FurnitureDocument, TemplateKey } from '../schema';
+import { validateFurniture } from '../validate';
 import { effectiveParams } from './common';
 import type { TemplateContext, TemplateDefinition } from './types';
 import { wardrobeHinged } from './wardrobe_hinged';
@@ -32,8 +33,8 @@ export function getTemplate(key: TemplateKey): TemplateDefinition {
 
 /**
  * The document a template generates with its effective default parameters
- * (code defaults merged with the admin `default_overrides`, 07 §2.1 rule 1).
- * `issues` stays empty until `validateFurniture` exists (Task 37).
+ * (code defaults merged with the admin `default_overrides`, 07 §2.1 rule 1),
+ * with the issues `validateFurniture` finds in it.
  */
 export function templateDefaultDocument(
     key: TemplateKey,
@@ -44,5 +45,5 @@ export function templateDefaultDocument(
     const template = getTemplate(key);
     const params = effectiveParams(template, defaultOverrides);
     const document = template.generate(params, { catalog, newId });
-    return { document, issues: [] };
+    return { document, issues: validateFurniture(document, catalog.snapshot) };
 }

@@ -52,7 +52,11 @@ export interface SectionLayout {
 
 export interface Allocation {
     sizes: number[];
-    /** `furniture.fixed_sizes_exceed`: millimetres by which the fixed sizes overshoot. */
+    /**
+     * `furniture.fixed_sizes_exceed`: millimetres by which the fixed sizes
+     * overshoot. Null without a fixed child: flex children that find no room
+     * get size 0 and are reported by `validateFurniture` as `section_too_small`.
+     */
     overBy: number | null;
     /** `furniture.fixed_sizes_adjusted`: no flex child, and the last one's stored size changed. */
     adjusted: boolean;
@@ -74,7 +78,10 @@ const sum = (values: readonly number[]): number =>
  *
  * Fixed sizes that overshoot `avail` are an error, and every child then gets
  * a proportional share (fixed mm and flex weights both used as weights) so
- * the result can still be rendered. Otherwise flex children share the rest by
+ * the result can still be rendered. No size is ever negative: when even the
+ * dividers overshoot `avail` the shares are 0 (and with no fixed child that
+ * is not a fixed-size error, the leaves are just too small). Otherwise flex
+ * children share the rest by
  * weight, floored, and the leftover millimetres go +1 each to the flex
  * children in order. With no flex child at all the last one absorbs the rest.
  */
@@ -96,9 +103,9 @@ export function allocate(
         const total = sum(weights);
         return {
             sizes: weights.map((w) =>
-                fl(total > 0 ? (avail * w) / total : avail / n),
+                Math.max(0, fl(total > 0 ? (avail * w) / total : avail / n)),
             ),
-            overBy: -rem,
+            overBy: sizes.some((s) => s.mode === 'fixed') ? -rem : null,
             adjusted: false,
         };
     }

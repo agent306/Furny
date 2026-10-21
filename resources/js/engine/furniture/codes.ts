@@ -3,6 +3,13 @@
  * references, and the issues for those the catalog does not know (error
  * `furniture.unknown_code`) or has archived (warning `furniture.archived_code`).
  *
+ * Two kinds of reference are checked that no field names directly:
+ *   - the default edge band of a role's material (`defaultEdgeBandCode`),
+ *     which banded parts use when the role has no explicit band (07 §5.1);
+ *   - an explicit `slideCode` that names a catalog item that is not a drawer
+ *     slide: the slide selection ignores it, so it is reported as an
+ *     unknown hardware code too (07 §3.12).
+ *
  * Generation goes on regardless: an unknown material is replaced by the role
  * default for generation only (`GenContext.mat`), unknown hardware codes are
  * kept on their lines.
@@ -49,6 +56,19 @@ function sectionContents(section: Section): Array<Content | null> {
         section.content,
         ...section.children.flatMap((c) => sectionContents(c.section)),
     ];
+}
+
+/** Explicit slide codes of the drawers in the document, in document order. */
+function slideCodes(doc: FurnitureDocument): string[] {
+    const table = doc.table;
+    const contents: Array<Content | null> = [
+        ...(doc.carcass ? sectionContents(doc.carcass.interior) : []),
+        ...(table ? [table.storage.endCabinets?.content ?? null] : []),
+    ];
+    return [
+        table?.storage.drawers?.slideCode ?? null,
+        ...contents.map((c) => (c?.type === 'drawers' ? c.slideCode : null)),
+    ].filter((code): code is string => code !== null);
 }
 
 const edgeCodes = (
@@ -143,13 +163,37 @@ function lookup(
 }
 
 /**
+ * Default edge band codes the document's roles fall back on (07 §5.1): the
+ * `defaultEdgeBandCode` of the material of each role without an explicit
+ * band, where an unknown material counts as its role default, as in
+ * generation. In role order, each code once.
+ */
+function derivedEdgeBands(doc: FurnitureDocument, idx: CatalogIndex): string[] {
+    const codes: string[] = [];
+    for (const role of MATERIAL_ROLES) {
+        const assignment = doc.materials[role];
+        if (assignment.edgeBandCode !== null) continue;
+        const material =
+            idx.material(assignment.materialCode) ??
+            idx.defaultMaterialFor(role);
+        const code = material?.defaultEdgeBandCode;
+        if (code && !codes.includes(code)) codes.push(code);
+    }
+    return codes;
+}
+
+/**
  * `furniture.unknown_code` (error, `{ code, kind }`) for every referenced
  * code missing from the catalog and `furniture.archived_code` (warning,
- * `{ code }`) for every inactive one, in `referencedCodes` order. Pure.
+ * `{ code }`) for every inactive one, in `referencedCodes` order; then the
+ * same for default edge bands no explicit reference names, and
+ * `unknown_code` (kind `hardware`) for each explicit slide code that is a
+ * catalog item but no drawer slide. Each code is reported once. Pure.
  */
 export function codeIssues(doc: FurnitureDocument, idx: CatalogIndex): Issue[] {
     const issues: Issue[] = [];
-    for (const ref of referencedCodes(doc)) {
+    const refs = referencedCodes(doc);
+    const report = (ref: CodeRef): void => {
         const row = lookup(idx, ref);
         if (!row) {
             issues.push(
@@ -165,6 +209,31 @@ export function codeIssues(doc: FurnitureDocument, idx: CatalogIndex): Issue[] {
                 }),
             );
         }
+    };
+
+    for (const ref of refs) report(ref);
+
+    const named = new Set(
+        refs.filter((r) => r.kind === 'edge_band').map((r) => r.code),
+    );
+    for (const code of derivedEdgeBands(doc, idx)) {
+        if (!named.has(code)) report({ code, kind: 'edge_band' });
+    }
+
+    // Unknown slide codes were reported above; this is the wrong-kind case.
+    const misused = new Set<string>();
+    for (const code of slideCodes(doc)) {
+        const row = idx.hardware(code);
+        if (!row || row.category === 'drawer_slide' || misused.has(code)) {
+            continue;
+        }
+        misused.add(code);
+        issues.push(
+            furnitureIssue('furniture.unknown_code', 'error', {
+                code,
+                kind: 'hardware',
+            }),
+        );
     }
     return issues;
 }
