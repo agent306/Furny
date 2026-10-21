@@ -190,6 +190,19 @@ describe('snapFootprint: wall faces (04 §5.8-2)', () => {
                 { kind: 'endpoint', at: pt(1300, -115) },
             ]);
         });
+
+        it('breaks an exact tie towards the corner, not the face centre', () => {
+            // 625 is 25 from both the start corner (600) and the centre (650);
+            // 675 is 25 from both the centre and the end corner (700).
+            expect(at(625).backCenter.x).toBe(600);
+            expect(at(625).markers).toEqual([
+                { kind: 'endpoint', at: pt(0, -115) },
+            ]);
+            expect(at(675).backCenter.x).toBe(700);
+            expect(at(675).markers).toEqual([
+                { kind: 'endpoint', at: pt(1300, -115) },
+            ]);
+        });
     });
 
     it('rounds the free along-face coordinate to the raw step, not 1 mm', () => {
