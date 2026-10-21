@@ -16,7 +16,8 @@ import {
 import { leafWeightKg, roundKg } from '../rules/weight';
 import type { Front } from '../schema';
 import type { GenContext } from '../types';
-import { glassFeasible, leafBody } from './glass';
+import { glassFeasible } from './glass';
+import { leafBody } from './leaf';
 import { checkLeafSize, leafZ } from './hinged';
 import { frontRect, type OpeningRect } from './openings';
 

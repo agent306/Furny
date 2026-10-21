@@ -523,6 +523,12 @@ export type {
     SectionLabel,
     SectionLayout,
 } from './furniture/carcass/layout';
+export {
+    drawerFrontRects,
+    drawersFor,
+    selectSlide,
+} from './furniture/carcass/drawers';
+export type { SlideRequest, SlideSelection } from './furniture/carcass/drawers';
 export { makePart, mapEdges, mapGrain } from './furniture/parts';
 export { PART_NAMES_EN, partNameEn } from './furniture/partNames';
 export {

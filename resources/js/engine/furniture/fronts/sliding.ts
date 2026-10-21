@@ -24,7 +24,8 @@ import {
 import { leafWeightKg, roundKg } from '../rules/weight';
 import type { Front } from '../schema';
 import type { GenContext } from '../types';
-import { glassFeasible, leafBody } from './glass';
+import { glassFeasible } from './glass';
+import { leafBody } from './leaf';
 import type { OpeningRect } from './openings';
 
 /** Leaves stand this far above the interior bottom (07 §4.6: bottom 15, top 25). */

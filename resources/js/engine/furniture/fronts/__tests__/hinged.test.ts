@@ -15,9 +15,12 @@ import {
     BOX_ROOT_ID,
     assign,
     boxDocument,
+    flex,
     frontOn,
     halfOverlayBox,
     insetBox,
+    leafSection,
+    splitSection,
     wardrobeFixture,
 } from '../../testing/docs';
 
@@ -382,6 +385,44 @@ describe('hinged front warnings (07 §4.2, §6.2)', () => {
         expect(hardwareOf(ctx, 'front.fr_0000000001.hinges')?.qty).toBe(5);
     });
 
+    it('warns door_heavy only above 22 kg: exactly 22 is quiet, just above warns', () => {
+        // 1000 x 1000 x 25 mm leaf; at 880 kg/m3 it weighs exactly 22 kg.
+        const weighing = (density: number) => {
+            const lighter = mutateCatalog(catalog, (draft) => {
+                for (const m of draft.materials) {
+                    if (m.code === 'PB25-WHITE') m.densityKgM3 = density;
+                }
+            });
+            const doc = singleFrontBox(1003, 1003);
+            doc.materials.front = assign('PB25-WHITE');
+            return runWithFronts(doc, lighter).ctx;
+        };
+        expect(issuesOf(weighing(879), 'furniture.door_heavy')).toEqual([]);
+        expect(issuesOf(weighing(880), 'furniture.door_heavy')).toEqual([]);
+        expect(issuesOf(weighing(881), 'furniture.door_heavy')).toMatchObject([
+            { severity: 'warning', params: { frontId: FR1, kg: 22 } },
+        ]);
+    });
+
+    it.each([0, -1])(
+        'reports hinged_leaves_unsupported for leaves %d and makes one leaf',
+        (leaves) => {
+            const { ctx } = runWithFronts(singleFrontBox(600, 720, { leaves }));
+            expect(
+                issuesOf(ctx, 'furniture.hinged_leaves_unsupported'),
+            ).toMatchObject([
+                {
+                    severity: 'error',
+                    params: { frontId: FR1 },
+                    entityIds: [FR1],
+                },
+            ]);
+            expect(leafParts(ctx).map((p) => [p.key, p.width])).toEqual([
+                ['front.fr_0000000001.leaf.1', 597],
+            ]);
+        },
+    );
+
     it('reports front_too_small below 100 mm', () => {
         const { ctx } = runWithFronts(
             singleFrontBox(600, 720, { leaves: 2 }, { width: 200 }),
@@ -431,6 +472,40 @@ describe('handles on hinged fronts (07 §6.4)', () => {
         expect(
             partOf(ctx, 'front.fr_0000000001.leaf.1').operations.handleHoles,
         ).toBe(1);
+    });
+});
+
+describe('handle fit along the handle orientation (07 §6.4)', () => {
+    const handle = (width: number, height: number) => {
+        const { ctx } = runWithFronts(
+            singleFrontBox(width, height, { handleCode: 'HDL-BAR-320' }),
+        );
+        return {
+            code: hardwareOf(ctx, 'front.fr_0000000001.handles')?.code,
+            replaced: issuesOf(ctx, 'furniture.handle_replaced_by_knob'),
+        };
+    };
+
+    it('measures a vertical bar against the leaf height, not the width', () => {
+        // 717 x 297 leaf: 320 + 2 x 40 = 400 > 297 although the leaf is 717 wide.
+        const result = handle(720, 300);
+        expect(result.code).toBe('KNB-ROUND-30');
+        expect(result.replaced).toMatchObject([
+            { severity: 'info', params: { frontId: FR1 } },
+        ]);
+    });
+
+    it('keeps a vertical bar that fits the height on a narrow leaf', () => {
+        // 297 x 717 leaf: the bar fits the height (400 <= 717) but not the width.
+        const result = handle(300, 720);
+        expect(result.code).toBe('HDL-BAR-320');
+        expect(result.replaced).toEqual([]);
+    });
+
+    it('accepts a bar whose length + 80 equals the leaf height', () => {
+        // A 403 mm box gives a 400 mm leaf: 320 + 80 = 400 fits, 399 does not.
+        expect(handle(720, 403).code).toBe('HDL-BAR-320');
+        expect(handle(720, 402).code).toBe('KNB-ROUND-30');
     });
 });
 
@@ -547,5 +622,82 @@ describe('flap fronts (07 §4.3, §6.3)', () => {
             hardwareOf(runWithFronts(doc).ctx, 'front.fr_0000000001.hinges')
                 ?.code,
         ).toBe('HNG-IN-SC');
+    });
+    it('counts flap hinges along the width, not the height', () => {
+        // 1197 x 297, 4.2 kg: 3 hinges by the width (<= 1600), 2 by the height.
+        const wide = runWithFronts(
+            singleFrontBox(1200, 300, { kind: 'flap_up' }),
+        ).ctx;
+        expect(hardwareOf(wide, 'front.fr_0000000001.hinges')?.qty).toBe(3);
+        expect(leafOf(wide).operations.hingeCups).toBe(3);
+        // 297 x 1197: 2 by the width; 3 by the height.
+        const tall = runWithFronts(
+            singleFrontBox(300, 1200, { kind: 'flap_up' }),
+        ).ctx;
+        expect(hardwareOf(tall, 'front.fr_0000000001.hinges')?.qty).toBe(2);
+    });
+
+    describe('full overlay across a fixed shelf (hinge edge class)', () => {
+        const FR3 = 'fr_0000000003';
+        /** 600 x 1000 box: two rows (top s_2, bottom s_3) with a fixed shelf. */
+        const twoRows = (top: Front, bottom: Front) =>
+            boxDocument({
+                width: 600,
+                height: 1000,
+                depth: 560,
+                interior: splitSection(BOX_ROOT_ID, 'rows', [
+                    [flex(), leafSection('s_0000000002')],
+                    [flex(), leafSection('s_0000000003')],
+                ]),
+                fronts: [top, bottom],
+            });
+        const hinges = (ctx: GenContext, id: string) =>
+            hardwareOf(ctx, `front.${id}.hinges`);
+        const shared = (ctx: GenContext, id: string) =>
+            hardwareOf(ctx, `front.${id}.hinges.shared`);
+
+        it('hinges a flap_down on its bottom edge, shared with the door below', () => {
+            const { ctx } = runWithFronts(
+                twoRows(
+                    frontOn(FR2, ['s_0000000002'], { kind: 'flap_down' }),
+                    frontOn(FR3, ['s_0000000003']),
+                ),
+            );
+            expect(shared(ctx, FR2)).toMatchObject({
+                code: 'HNG-HO-SC',
+                qty: 2,
+            });
+            expect(hinges(ctx, FR2)).toBeUndefined();
+            // The door's own hinge edge is an outer one.
+            expect(hinges(ctx, FR3)?.code).toBe('HNG-FO-SC');
+            expect(shared(ctx, FR3)).toBeUndefined();
+        });
+
+        it('hinges a flap_up on its top edge, shared with the door above', () => {
+            const { ctx } = runWithFronts(
+                twoRows(
+                    frontOn(FR2, ['s_0000000002']),
+                    frontOn(FR3, ['s_0000000003'], { kind: 'flap_up' }),
+                ),
+            );
+            expect(shared(ctx, FR3)).toMatchObject({
+                code: 'HNG-HO-SC',
+                qty: 2,
+            });
+            expect(hinges(ctx, FR3)).toBeUndefined();
+            expect(hinges(ctx, FR2)?.code).toBe('HNG-FO-SC');
+        });
+
+        it('keeps an outer hinge edge on the primary line', () => {
+            // flap_up on the top row hinges on the outer top edge.
+            const { ctx } = runWithFronts(
+                twoRows(
+                    frontOn(FR2, ['s_0000000002'], { kind: 'flap_up' }),
+                    frontOn(FR3, ['s_0000000003']),
+                ),
+            );
+            expect(hinges(ctx, FR2)?.code).toBe('HNG-FO-SC');
+            expect(shared(ctx, FR2)).toBeUndefined();
+        });
     });
 });

@@ -138,7 +138,8 @@ export const FrontSchema = z.object({
     id: entityId('fr'),
     kind: z.enum(FRONT_KINDS),
     covers: z.array(z.string()),
-    leaves: z.union([z.number().int(), z.literal('auto')]),
+    /** Leaf count: an integer of at least 1, or `'auto'` (03 gives no range). */
+    leaves: z.union([z.number().int().min(1), z.literal('auto')]),
     hingeSide: z.enum(['left', 'right', 'auto']),
     overlay: z.enum(['full', 'half', 'inset']),
     glass: z.boolean(),

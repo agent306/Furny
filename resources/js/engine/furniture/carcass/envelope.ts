@@ -86,6 +86,17 @@ export function hasExternalDrawers(doc: FurnitureDocument): boolean {
     return visit(carcass.interior);
 }
 
+/**
+ * Overlay of the external drawer fronts (07 §4.4): `inset` when the cabinet
+ * has fronts and all of them are inset, else `full`.
+ */
+export function drawerStyleOf(doc: FurnitureDocument): Envelope['drawerStyle'] {
+    const fronts = doc.carcass?.fronts ?? [];
+    return fronts.length > 0 && fronts.every((f) => f.overlay === 'inset')
+        ? 'inset'
+        : 'full';
+}
+
 function backFrontZ(type: CarcassSpec['back']['type'], tBack: number): number {
     switch (type) {
         case 'none':
@@ -118,10 +129,7 @@ export function computeEnvelope(ctx: GenContext): Envelope | null {
     const tb = ctx.t('back');
 
     const hasSliding = C.fronts.some((f) => f.kind === 'sliding');
-    const drawerStyle: Envelope['drawerStyle'] =
-        C.fronts.length > 0 && C.fronts.every((f) => f.overlay === 'inset')
-            ? 'inset'
-            : 'full';
+    const drawerStyle = drawerStyleOf(doc);
     const hasOverlayFronts =
         C.fronts.some((f) => f.kind !== 'sliding' && f.overlay !== 'inset') ||
         (hasExternalDrawers(doc) && drawerStyle === 'full');

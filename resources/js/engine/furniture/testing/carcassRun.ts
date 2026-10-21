@@ -1,14 +1,16 @@
 /**
- * Test-only driver for the carcass and front generators of Tasks 32-34, in the
- * order of the pipeline (07 §3.1 step 3): envelope, panels, layout and
+ * Test-only driver for the carcass, front and drawer generators of Tasks 32-35,
+ * in the order of the pipeline (07 §3.1 step 3): envelope, panels, layout and
  * dividers, openings and front leaves (only with `fronts: true`), contents per
- * leaf in pre-order, back, plinth, countertop.
+ * leaf in pre-order (drawers only with `drawers: true`), back, plinth,
+ * countertop.
  */
 import type { CatalogSnapshot } from '../../catalog/snapshot';
 import { seedCatalog } from '../../testing/seedCatalog';
 import { backPanels } from '../carcass/back';
 import { basketsFor, rodFor, shelvesFor } from '../carcass/contents';
 import { countertopPart } from '../carcass/countertop';
+import { drawersFor } from '../carcass/drawers';
 import { computeEnvelope, type Envelope } from '../carcass/envelope';
 import {
     dividerParts,
@@ -38,7 +40,7 @@ export interface CarcassRun {
 export function runCarcass(
     doc: FurnitureDocument,
     catalog: CatalogSnapshot = seedCatalog(),
-    options: { fronts?: boolean } = {},
+    options: { fronts?: boolean; drawers?: boolean } = {},
 ): CarcassRun {
     const ctx = createGenContext(doc, catalog);
     const env = computeEnvelope(ctx);
@@ -57,6 +59,8 @@ export function runCarcass(
         else if (content.type === 'hanging_rod') rodFor(ctx, info, content);
         else if (content.type === 'pull_out_basket') {
             basketsFor(ctx, info, content);
+        } else if (content.type === 'drawers' && options.drawers) {
+            drawersFor(ctx, env, layout, info, content);
         }
     }
     backPanels(ctx, env, layout);
@@ -70,6 +74,12 @@ export const runWithFronts = (
     doc: FurnitureDocument,
     catalog: CatalogSnapshot = seedCatalog(),
 ): CarcassRun => runCarcass(doc, catalog, { fronts: true });
+
+/** `runCarcass` with the fronts and the drawers. */
+export const runWithDrawers = (
+    doc: FurnitureDocument,
+    catalog: CatalogSnapshot = seedCatalog(),
+): CarcassRun => runCarcass(doc, catalog, { fronts: true, drawers: true });
 
 export const hardwareOf = (ctx: GenContext, key: string) =>
     ctx.hardware.find((h) => h.key === key);

@@ -16,7 +16,8 @@ import {
 import { leafWeightKg, roundKg } from '../rules/weight';
 import type { Front } from '../schema';
 import type { GenContext } from '../types';
-import { glassFeasible, leafBody } from './glass';
+import { glassFeasible } from './glass';
+import { leafBody } from './leaf';
 import { frontRect, type OpeningRect, type Overlay } from './openings';
 
 /** Smallest leaf width / height (07 §4.2 `front_too_small`). */
@@ -56,10 +57,10 @@ export function checkLeafSize(
 
 /**
  * The leaves of a hinged front (07 §4.2): `n` = `leaves`, or for `'auto'`
- * `min(2, ceil(opening width / 600))`; more than 2 is an error and 2 are
- * made. One leaf hinges on `hingeSide` (`auto` = right), two on the outer
- * sides. Named `hingedLeaves` to keep `hingedFront` for the template helper
- * (preflight I3).
+ * `min(2, ceil(opening width / 600))`. More than 2 is an error and 2 are
+ * made; fewer than 1 is an error too and 1 is made. One leaf hinges on
+ * `hingeSide` (`auto` = right), two on the outer sides. Named `hingedLeaves`
+ * to keep `hingedFront` for the template helper (preflight I3).
  */
 export function hingedLeaves(
     ctx: GenContext,
@@ -73,16 +74,15 @@ export function hingedLeaves(
         front.leaves === 'auto'
             ? Math.min(2, Math.ceil(ow / MAX_DOOR_WIDTH))
             : front.leaves;
-    if (n > 2) {
+    if (n < 1 || n > 2) {
         ctx.issue(
             'furniture.hinged_leaves_unsupported',
             'error',
             { frontId: front.id },
             [front.id],
         );
-        n = 2;
+        n = n < 1 ? 1 : 2;
     }
-    n = Math.max(1, n);
 
     const lw = (rect.x1 - rect.x0 - (n - 1) * DOOR_GAP) / n;
     const lh = rect.y1 - rect.y0;

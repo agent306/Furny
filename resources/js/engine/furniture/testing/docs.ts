@@ -4,6 +4,10 @@
  * Test-only; not exported from the engine index.
  */
 import { readFileSync } from 'node:fs';
+import { testIds } from '../../testing/ids';
+import { seedCatalog } from '../../testing/seedCatalog';
+import { indexCatalog } from '../catalogIndex';
+import { wardrobeHinged } from '../templates/wardrobe_hinged';
 import {
     FurnitureDocumentSchema,
     type CarcassSpec,
@@ -29,6 +33,19 @@ export function wardrobeFixture(
     );
     patch(doc);
     return doc;
+}
+
+/** The `wardrobe_hinged` template's document with parameters `over`, deterministic ids. */
+export function templateWardrobe(
+    over: Record<string, unknown> = {},
+): FurnitureDocument {
+    return wardrobeHinged.generate(
+        {
+            ...wardrobeHinged.defaults,
+            ...over,
+        } as typeof wardrobeHinged.defaults,
+        { catalog: indexCatalog(seedCatalog()), newId: testIds() },
+    );
 }
 
 export const assign = (materialCode: string) => ({

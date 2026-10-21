@@ -94,7 +94,7 @@ function addLine(
  * left and on the right: the part touching `x0` / `x1` and overlapping the
  * leaf in y and z.
  */
-function boundingVerticals(
+export function boundingVerticals(
     ctx: GenContext,
     leaf: SectionBoxInfo,
 ): { left: Part | undefined; right: Part | undefined } {

@@ -199,6 +199,50 @@ describe('sliding leaf count and hardware (07 §4.6)', () => {
     });
 });
 
+describe('handles on sliding glass leaves (07 §4.6, §6.4)', () => {
+    // HDL-BAR-160 has two holes: the stile that carries the pull shows them.
+    const holes = (leaves: number): string[] => {
+        const { ctx } = runWithFronts(
+            slidingWardrobe({ leaves, glass: true, handleCode: 'HDL-BAR-160' }),
+        );
+        return ctx.parts
+            .filter(
+                (p) =>
+                    /\.stile\.(left|right)$/.test(p.key) &&
+                    p.operations.handleHoles > 0,
+            )
+            .map((p) => p.key.replace('front.fr_0000000001.', ''));
+    };
+
+    it('drills the outer stile: left on the left half of the leaves, right on the rest', () => {
+        expect(holes(2)).toEqual(['leaf.1.stile.left', 'leaf.2.stile.right']);
+        expect(holes(3)).toEqual([
+            'leaf.1.stile.left',
+            'leaf.2.stile.left',
+            'leaf.3.stile.right',
+        ]);
+        expect(holes(4)).toEqual([
+            'leaf.1.stile.left',
+            'leaf.2.stile.left',
+            'leaf.3.stile.right',
+            'leaf.4.stile.right',
+        ]);
+    });
+
+    it('puts two holes and no cups in the pull stile', () => {
+        const { ctx } = runWithFronts(
+            slidingWardrobe({ glass: true, handleCode: 'HDL-BAR-160' }),
+        );
+        expect(
+            partOf(ctx, 'front.fr_0000000001.leaf.3.stile.right').operations,
+        ).toMatchObject({ handleHoles: 2, hingeCups: 0 });
+        expect(
+            partOf(ctx, 'front.fr_0000000001.leaf.3.stile.left').operations
+                .handleHoles,
+        ).toBe(0);
+    });
+});
+
 describe('sliding front restrictions (07 §4.6)', () => {
     it('rejects a sliding front that does not cover the whole interior', () => {
         const doc = slidingWardrobe();

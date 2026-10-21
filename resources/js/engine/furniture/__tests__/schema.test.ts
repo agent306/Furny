@@ -277,6 +277,21 @@ describe('FurnitureDocumentSchema', () => {
         expect(FurnitureDocumentSchema.safeParse(doc).success).toBe(false);
     });
 
+    it.each([0, -1, 1.5])(
+        'rejects leaves: %s (an integer of at least 1)',
+        (leaves) => {
+            const doc = clone();
+            doc.carcass.fronts[0].leaves = leaves;
+            expect(FurnitureDocumentSchema.safeParse(doc).success).toBe(false);
+        },
+    );
+
+    it.each([1, 2, 4, 'auto'])('accepts leaves: %s', (leaves) => {
+        const doc = clone();
+        doc.carcass.fronts[0].leaves = leaves;
+        expect(FurnitureDocumentSchema.safeParse(doc).success).toBe(true);
+    });
+
     it("rejects EdgeId 'L3' in a part override and in an extra part", () => {
         const doc = clone();
         doc.overrides.parts['carcass.top'] = { edges: { L3: 'EB08-WHITE' } };

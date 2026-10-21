@@ -201,6 +201,54 @@ describe('computeOpenings (07 §4.1)', () => {
         });
     });
 
+    describe('the largest overlapping divider decides (07 §4.1 rule 2)', () => {
+        /**
+         * 1200 x 720 x 560 box: a short top row (fixed 200) and a tall bottom
+         * row (flex 466), each split into two columns, so two partitions sit on
+         * the same plane. One front closes the right-hand columns of both rows;
+         * `leftDoor` is the front on one left-hand column.
+         */
+        const stacked = (leftDoor: Front) =>
+            boxDocument({
+                width: 1200,
+                height: 720,
+                depth: 560,
+                interior: splitSection(BOX_ROOT_ID, 'rows', [
+                    [
+                        fixed(200),
+                        splitSection('s_0000000002', 'columns', [
+                            [flex(), leafSection('s_0000000003')],
+                            [flex(), leafSection('s_0000000004')],
+                        ]),
+                    ],
+                    [
+                        flex(),
+                        splitSection('s_0000000005', 'columns', [
+                            [flex(), leafSection('s_0000000006')],
+                            [flex(), leafSection('s_0000000007')],
+                        ]),
+                    ],
+                ]),
+                fronts: [
+                    frontOn(FR1, ['s_0000000004', 's_0000000007']),
+                    leftDoor,
+                ],
+            });
+
+        it('shares the edge when the taller row has a front on the other face', () => {
+            // The tall bottom partition (466 mm) beats the short top one (200 mm).
+            const doc = stacked(frontOn(FR2, ['s_0000000006']));
+            expect(openingOf(doc, FR1).edges.left).toEqual(onDivider('shared'));
+        });
+
+        it('leaves the edge open when only the shorter row has a front', () => {
+            const doc = stacked(frontOn(FR2, ['s_0000000003']));
+            expect(openingOf(doc, FR1).edges.left).toEqual(
+                onDivider('divider_open'),
+            );
+        });
+    });
+
     it('adds one opening per external drawer leaf, keyed by the section id (I4)', () => {
         const openings = openingsOf(
             drawersAndDoorBox([frontOn(FR1, ['s_0000000003'])]),
