@@ -9,7 +9,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Removes the Google link (13 §5.3). Only while another way to sign in remains: a password or a verified phone.
+ * Removes the Google link (13 §5.3). Only while another way to sign in remains (13 §5.8): a password together with
+ * an email to sign in with, or a verified phone.
  */
 final class UnlinkGoogleAccount
 {
@@ -20,7 +21,7 @@ final class UnlinkGoogleAccount
             return;
         }
 
-        if (! $user->hasPassword() && ($user->phone_e164 === null || $user->phone_verified_at === null)) {
+        if (! ($user->hasPassword() && $user->email !== null) && ($user->phone_e164 === null || $user->phone_verified_at === null)) {
             throw ValidationException::withMessages(['google' => __('auth.errors.last_login_method')]);
         }
 

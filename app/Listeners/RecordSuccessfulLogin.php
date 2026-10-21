@@ -23,9 +23,10 @@ use Illuminate\Support\Facades\Auth;
  * The same event fires when the remember cookie signs a user in again. That is not a fresh authentication, so it
  * records the method `remember` and no `auth.login_at`: a revived cookie must not pass `recent.auth`.
  *
- * The method is `password` unless the sign-in flow named another one first: it puts `auth.pending_method` (`otp` or
- * `google`) in the session before `Auth::login`, and this listener takes it. A flow with a step in between (Google
- * and then the two-factor challenge of staff) leaves it there until the challenge signs the user in.
+ * The method is `password` unless the sign-in flow named another one first: it puts `auth.pending_method`
+ * (`{method: 'otp'|'google', user: id}`) in the session before `Auth::login`, and this listener takes it, for that
+ * user only. A flow with a step in between (Google and then the two-factor challenge of staff) leaves it there until
+ * the challenge signs the user in; a sign-in of anybody else, or by the remember cookie, does not take it.
  */
 final class RecordSuccessfulLogin
 {
@@ -49,8 +50,13 @@ final class RecordSuccessfulLogin
         $request = request();
         $pending = $request->hasSession() ? $request->session()->pull(self::PENDING_METHOD_KEY) : null;
 
-        if (! $viaRemember && is_string($pending) && in_array($pending, self::FLOW_METHODS, true)) {
-            $method = $pending;
+        if (
+            ! $viaRemember
+            && is_array($pending)
+            && in_array($pending['method'] ?? null, self::FLOW_METHODS, true)
+            && ($pending['user'] ?? null) === $user->getKey()
+        ) {
+            $method = $pending['method'];
         }
 
         User::withoutTimestamps(static fn (): bool => $user->forceFill(['last_login_at' => now()])->saveQuietly());

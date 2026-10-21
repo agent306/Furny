@@ -6,25 +6,21 @@ namespace App\Actions\Fortify;
 
 use App\Concerns\PasswordValidationRules;
 use App\Concerns\ProfileValidationRules;
-use App\Domain\Identity\Enums\LengthUnit;
-use App\Domain\Identity\Enums\UnitSystem;
-use App\Domain\Identity\Enums\UserType;
-use App\Domain\Identity\Events\CustomerRegistered;
+use App\Domain\Identity\Actions\RegisterCustomer;
 use App\Domain\Identity\Models\User;
 use App\Rules\TurnstileToken;
-use App\Support\Settings\Settings;
 use Illuminate\Support\Facades\Validator;
 use Laravel\Fortify\Contracts\CreatesNewUsers;
 
 /**
- * Registration with email and password (13 §5.1). The new customer starts with the business defaults for time
- * zone and units, has accepted the terms (the form made them), and has no onboarding yet.
+ * Registration with email and password (13 §5.1): validates the form, then `RegisterCustomer` creates the customer
+ * (business defaults, terms accepted, no onboarding yet).
  */
 final class CreateNewUser implements CreatesNewUsers
 {
     use PasswordValidationRules, ProfileValidationRules;
 
-    public function __construct(private readonly Settings $settings) {}
+    public function __construct(private readonly RegisterCustomer $customers) {}
 
     /**
      * @param  array<string, mixed>  $input
@@ -36,7 +32,7 @@ final class CreateNewUser implements CreatesNewUsers
         $validated = Validator::make($input, [
             ...$this->profileRules(),
             // A name is shown to staff and in messages: no links in it (a spam registration).
-            'name' => [...$this->nameRules(), 'not_regex:/(https?:\/\/|www\.)/i'],
+            'name' => [...$this->nameRules(), 'not_regex:'.RegisterCustomer::NAME_LINK_PATTERN],
             'password' => $this->passwordRules(),
             'terms' => ['accepted'],
             'marketing_opt_in' => ['boolean'],
@@ -47,25 +43,12 @@ final class CreateNewUser implements CreatesNewUsers
             'terms.accepted' => __('auth.terms_required'),
         ])->validate();
 
-        $units = $this->settings->units();
-
-        $user = new User([
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'password' => $validated['password'],
-            'timezone' => $this->settings->business()->timezone,
-            'unit_system' => UnitSystem::from($units->defaultSystem),
-            'length_unit' => LengthUnit::from($units->defaultLengthUnit),
-            'locale' => (string) config('app.locale'),
-            'marketing_opt_in' => (bool) $validated['marketing_opt_in'],
-        ]);
-        $user->type = UserType::Customer;
-        $user->terms_accepted_at = now();
-        $user->save();
-
-        CustomerRegistered::dispatch($user);
-
-        return $user;
+        return $this->customers->create(
+            name: $validated['name'],
+            email: $validated['email'],
+            password: $validated['password'],
+            marketingOptIn: (bool) $validated['marketing_opt_in'],
+        );
     }
 
     /**

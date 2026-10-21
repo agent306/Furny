@@ -25,6 +25,9 @@ final class RevokeSessions
 
     public const string REASON_PASSWORD_RESET = 'password_reset';
 
+    /** Google was linked to an account whose address nobody had verified: whatever its earlier holder could use is cleared. */
+    public const string REASON_GOOGLE_LINK_UNVERIFIED = 'google_link_unverified';
+
     public function __construct(private readonly SessionRegistry $registry) {}
 
     /**

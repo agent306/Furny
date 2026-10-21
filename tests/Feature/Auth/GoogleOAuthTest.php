@@ -9,6 +9,7 @@ use App\Domain\Identity\Events\ContactVerified;
 use App\Domain\Identity\Events\CustomerRegistered;
 use App\Domain\Identity\Models\StaffInvitation;
 use App\Domain\Identity\Models\User;
+use App\Http\Requests\Account\UnlinkGoogleRequest;
 use App\Listeners\RecordSuccessfulLogin;
 use App\Support\Auth\RecentAuthentication;
 use App\Support\Settings\Settings;
@@ -19,6 +20,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Inertia\Inertia;
 use Laravel\Socialite\Contracts\Provider;
@@ -29,6 +31,7 @@ use Laravel\Socialite\Two\User as SocialiteUser;
 use Spatie\Activitylog\Models\Activity;
 use Symfony\Component\HttpFoundation\Cookie;
 use Tests\Support\InertiaRequest;
+use Tests\Support\RegistryFixtures;
 
 /** What Google tells about the person who signed in; `email_verified` is the claim the callback relies on. */
 function googleProfile(string $id = '1000000000000000001', string $email = 'asha@example.com', ?string $name = 'Asha Kapoor', mixed $emailVerified = true): SocialiteUser
@@ -257,6 +260,36 @@ describe('a callback that cannot be used', function (): void {
         expect(User::query()->count())->toBe(0);
     })->with(['false' => false, 'the string "true"' => 'true', 'absent' => null]);
 
+    it('refuses an unverified address for every intent, whatever the round trip would have done', function (string $intent): void {
+        $user = User::factory()->googleLinked()->create(['email' => 'asha@example.com']);
+        $invitation = StaffInvitation::factory()->pending()->create(['email' => 'new.hire@example.com']);
+        $email = $intent === 'invitation' ? 'new.hire@example.com' : 'asha@example.com';
+        $originalGoogleId = $user->google_id;
+        $id = $intent === 'link' ? 'another-google-id' : $user->google_id;
+        googleAnswers(googleProfile(id: $id, email: $email, emailVerified: false));
+        $url = url('/staff/invitations/'.$invitation->id);
+
+        $response = ($this->callback)($intent, $intent === 'invitation' ? ['invitation.id' => $invitation->id, 'invitation.url' => $url] : [], as: in_array($intent, ['link', 'reauthenticate'], true) ? $user : null);
+
+        $response->assertRedirect(match ($intent) {
+            'login' => route('login'),
+            'invitation' => $url,
+            default => route('customer.dashboard'),
+        });
+        $page = match ($intent) {
+            'invitation' => $url,
+            'login' => route('login'),
+            default => route('customer.dashboard'),
+        };
+        expect($this->get($page, InertiaRequest::headers())->json('flash.error'))->toBe(trans_icu('auth.errors.google_email_unverified'))
+            ->and(session('invitation.google'))->toBeNull()
+            ->and(session(RecentAuthentication::CONFIRMED_KEY))->toBeNull()
+            ->and($user->refresh()->google_id)->toBe($originalGoogleId);
+        if ($intent !== 'link' && $intent !== 'reauthenticate') {
+            $this->assertGuest();
+        }
+    })->with(['login', 'link', 'invitation', 'reauthenticate']);
+
     it('refuses a profile without an address', function (): void {
         googleAnswers(googleProfile(email: ''));
 
@@ -365,7 +398,8 @@ describe('intent login', function (): void {
 
         $link = Activity::query()->where('event', 'auth.google_linked')->sole();
         expect($link->subject_id)->toBe($user->getKey())->and($link->causer_id)->toBe($user->getKey())
-            ->and($link->log_name)->toBe('security');
+            ->and($link->log_name)->toBe('security')
+            ->and($link->properties->all())->toBe(['replaced' => false, 'reason' => 'google_link_unverified']);
         expect(Activity::query()->where('event', 'auth.login')->sole()->properties['method'])->toBe('google');
     });
 
@@ -379,6 +413,107 @@ describe('intent login', function (): void {
         expect($user->refresh()->google_id)->toBe('777')
             ->and($user->email_verified_at->isBefore(now()->subMonth()))->toBeTrue();
         Event::assertNotDispatched(ContactVerified::class);
+    });
+
+    it('says in the audit when the link took the place of another Google account', function (): void {
+        $user = User::factory()->create(['email' => 'asha@example.com', 'google_id' => 'the-old-google-id']);
+        googleAnswers(googleProfile(id: 'the-new-google-id'));
+
+        ($this->callback)()->assertRedirect(route('customer.dashboard'));
+
+        expect($user->refresh()->google_id)->toBe('the-new-google-id')
+            ->and(Activity::query()->where('event', 'auth.google_linked')->sole()->properties->all())->toBe(['replaced' => true]);
+    });
+
+    it('leaves the password, the sessions and the remember token of a verified account alone', function (): void {
+        $user = User::factory()->create(['email' => 'asha@example.com']);
+        $hash = $user->password;
+        $token = $user->remember_token;
+        $session = RegistryFixtures::open($user);
+        googleAnswers(googleProfile(id: '777'));
+
+        ($this->callback)()->assertRedirect(route('customer.dashboard'));
+
+        expect($user->refresh()->password)->toBe($hash)
+            ->and($user->remember_token)->toBe($token)
+            ->and(RegistryFixtures::alive($session))->toBeTrue()
+            ->and(Activity::query()->where('event', 'auth.sessions_revoked')->count())->toBe(0);
+    });
+
+    describe('an address nobody verified (pre-hijacking)', function (): void {
+        it('takes the account from whoever registered it first: no password, no sessions, a new remember token', function (): void {
+            // The attacker registers the victim's address with a password of their own and never verifies it.
+            $attacker = User::factory()->unverified()->create(['email' => 'victim@example.com']);
+            $token = $attacker->remember_token;
+            $sessions = [RegistryFixtures::open($attacker), RegistryFixtures::open($attacker)];
+            googleAnswers(googleProfile(id: 'victim-google', email: 'victim@example.com'));
+
+            // The victim signs in with Google and lands in the account.
+            ($this->callback)()->assertRedirect(route('customer.dashboard'));
+            $this->assertAuthenticatedAs($attacker);
+
+            $account = $attacker->refresh();
+            expect($account->google_id)->toBe('victim-google')
+                ->and($account->email_verified_at)->not->toBeNull()
+                ->and($account->password)->toBeNull()
+                ->and($account->remember_token)->not->toBe($token)->toHaveLength(60)
+                ->and(RegistryFixtures::alive($sessions[0]))->toBeFalse()
+                ->and(RegistryFixtures::alive($sessions[1]))->toBeFalse();
+
+            $revoked = Activity::query()->where('event', 'auth.sessions_revoked')->sole();
+            expect($revoked->properties->all())->toBe(['count' => 2, 'reason' => 'google_link_unverified']);
+            $linked = Activity::query()->where('event', 'auth.google_linked')->sole();
+            expect($linked->properties->all())->toBe(['replaced' => false, 'reason' => 'google_link_unverified']);
+
+            // The attacker's password does not work any more, and the old sessions are not signed in.
+            Auth::forgetGuards();
+            $this->flushSession();
+            $this->post(route('login.store'), ['email' => 'victim@example.com', 'password' => 'password'])->assertSessionHasErrors();
+            $this->assertGuest();
+        });
+
+        it('treats a staff account the same way', function (): void {
+            $staff = User::factory()->support()->create(['email' => 'ravi@example.com', 'email_verified_at' => null]);
+            $session = RegistryFixtures::open($staff);
+            googleAnswers(googleProfile(id: '888', email: 'ravi@example.com'));
+
+            ($this->callback)()->assertRedirect(route('admin.dashboard'));
+
+            expect($staff->refresh()->password)->toBeNull()
+                ->and($staff->google_id)->toBe('888')
+                ->and(RegistryFixtures::alive($session))->toBeFalse();
+        });
+
+        it('also applies when a signed-in user links Google, and keeps the session in use', function (): void {
+            $user = User::factory()->unverified()->create(['email' => 'asha@example.com']);
+            $token = $user->remember_token;
+            $other = RegistryFixtures::open($user);
+            googleAnswers(googleProfile(id: '444', email: 'asha@example.com'));
+
+            ($this->callback)('link', as: $user)->assertRedirect(route('customer.dashboard'));
+
+            $this->assertAuthenticatedAs($user);
+            expect($user->refresh()->google_id)->toBe('444')
+                ->and($user->password)->toBeNull()
+                ->and($user->remember_token)->not->toBe($token)
+                ->and(RegistryFixtures::alive($other))->toBeFalse()
+                ->and(Activity::query()->where('event', 'auth.sessions_revoked')->sole()->properties['reason'])->toBe('google_link_unverified')
+                ->and(Activity::query()->where('event', 'auth.google_linked')->sole()->properties['reason'])->toBe('google_link_unverified');
+            // The session in use goes on working.
+            $this->get(route('customer.dashboard'))->assertSuccessful();
+        });
+
+        it('does not apply to a phone-only user who gets the address from Google', function (): void {
+            $user = User::factory()->phoneOnly()->create();
+            $other = RegistryFixtures::open($user);
+            googleAnswers(googleProfile(id: '444', email: 'maya@example.com'));
+
+            ($this->callback)('link', as: $user);
+
+            expect($user->refresh()->email)->toBe('maya@example.com')
+                ->and(RegistryFixtures::alive($other))->toBeTrue()
+                ->and(Activity::query()->where('event', 'auth.google_linked')->sole()->properties->all())->toBe(['replaced' => false]);
+        });
     });
 
     it('links staff by their address too, and signs them in without a remember cookie', function (): void {
@@ -484,6 +619,22 @@ describe('intent login', function (): void {
         expect(User::query()->where('email', 'maya.rao@example.com')->sole()->name)->toBe('maya.rao');
     })->with(['null' => null, 'empty' => '', 'blank' => '   ']);
 
+    it('does not take a name with a web address in it', function (string $name): void {
+        googleAnswers(googleProfile(email: 'maya.rao@example.com', name: $name));
+
+        ($this->callback)();
+
+        expect(User::query()->where('email', 'maya.rao@example.com')->sole()->name)->toBe('maya.rao');
+    })->with(['a link' => 'Visit https://spam.example now', 'a www address' => 'WWW.spam.example', 'inside the name' => 'Maya www.spam.example']);
+
+    it('cuts a name at 120 characters, not at 120 columns of width', function (): void {
+        googleAnswers(googleProfile(name: str_repeat('山', 200)));
+
+        ($this->callback)();
+
+        expect(mb_strlen(User::query()->sole()->name))->toBe(120);
+    });
+
     it('cuts a very long name at 120 characters', function (): void {
         googleAnswers(googleProfile(name: str_repeat('é', 200)));
 
@@ -571,12 +722,40 @@ describe('intent login', function (): void {
         // The challenge was abandoned; the visitor logs in with a password in the same session.
         $customer = User::factory()->create(['email' => 'asha@example.com']);
 
-        $this->withSession([RecordSuccessfulLogin::PENDING_METHOD_KEY => 'google'])
+        $this->withSession([RecordSuccessfulLogin::PENDING_METHOD_KEY => ['method' => 'google', 'user' => $owner->getKey()]])
             ->post(route('login.store'), ['email' => 'asha@example.com', 'password' => 'password'])
             ->assertRedirect(route('customer.dashboard'));
 
         $this->assertAuthenticatedAs($customer);
         expect(Activity::query()->where('event', 'auth.login')->sole()->properties['method'])->toBe('password');
+    });
+
+    it('does not give the pending method to somebody else who signs in in the same session', function (): void {
+        $owner = User::factory()->owner()->create(['email' => 'owner@example.com']);
+
+        // The owner's Google sign-in stopped at the two-factor challenge; a new customer registers in that session.
+        $this->withSession([RecordSuccessfulLogin::PENDING_METHOD_KEY => ['method' => 'google', 'user' => $owner->getKey()]])
+            ->post(route('register.store'), [
+                'name' => 'Asha Kapoor', 'email' => 'asha@example.com', 'password' => 'a-long-enough-password',
+                'password_confirmation' => 'a-long-enough-password', 'terms' => 'on',
+            ])->assertRedirect();
+
+        expect(Activity::query()->where('event', 'auth.login')->sole()->properties['method'])->toBe('password')
+            ->and(session('auth.method'))->toBe('password')
+            ->and(session()->has(RecordSuccessfulLogin::PENDING_METHOD_KEY))->toBeFalse();
+    });
+
+    it('does not give the pending method to a sign-in by the remember cookie', function (): void {
+        $user = User::factory()->create(['remember_token' => Str::random(60)]);
+        $recaller = $user->getKey().'|'.$user->remember_token.'|'.Auth::guard('web')->hashPasswordForCookie($user->getAuthPassword());
+
+        $this->withCookie(Auth::guard('web')->getRecallerName(), $recaller)
+            ->withSession([RecordSuccessfulLogin::PENDING_METHOD_KEY => ['method' => 'google', 'user' => $user->getKey()]])
+            ->get(route('customer.dashboard'))
+            ->assertOk();
+
+        expect(session('auth.method'))->toBe('remember')
+            ->and(Activity::query()->where('event', 'auth.login')->sole()->properties['method'])->toBe('remember');
     });
 
     it('can be used afterwards: a signed-in Google user has a working session', function (): void {
@@ -796,10 +975,33 @@ describe('intent invitation', function (): void {
 
         ($this->callback)('invitation', $this->invited)->assertRedirect($this->invitationUrl);
 
-        expect(session('invitation.google_id'))->toBe('616')
-            ->and(session('invitation.google_name'))->toBe('Nina Hire');
+        expect(session('invitation.google.'.$this->invitation->id))->toBe(['id' => '616', 'name' => 'Nina Hire']);
         $this->assertGuest();
         expect(User::query()->where('email', 'new.hire@example.com')->exists())->toBeFalse();
+    });
+
+    it('ties the Google choice to its invitation: another invitation does not get it', function (): void {
+        $second = StaffInvitation::factory()->pending()->create(['email' => 'second.hire@example.com']);
+        googleAnswers(googleProfile(id: '616', email: 'new.hire@example.com', name: 'Nina Hire'));
+
+        ($this->callback)('invitation', $this->invited)->assertRedirect($this->invitationUrl);
+
+        // The same browser opens the second invitation: what Google said about the first is not about this one.
+        expect(session('invitation.google.'.$this->invitation->id))->toBe(['id' => '616', 'name' => 'Nina Hire'])
+            ->and(session('invitation.google.'.$second->id))->toBeNull();
+    });
+
+    it('replaces the Google choice for one invitation with the choice for the next', function (): void {
+        $second = StaffInvitation::factory()->pending()->create(['email' => 'second.hire@example.com']);
+        googleAnswers(googleProfile(id: '717', email: 'second.hire@example.com', name: 'Sam Hire'));
+
+        ($this->callback)('invitation', [
+            'invitation.id' => $second->id,
+            'invitation.url' => url('/staff/invitations/'.$second->id),
+            'invitation.google' => [$this->invitation->id => ['id' => '616', 'name' => 'Nina Hire']],
+        ])->assertRedirect(url('/staff/invitations/'.$second->id));
+
+        expect(session('invitation.google'))->toBe([$second->id => ['id' => '717', 'name' => 'Sam Hire']]);
     });
 
     it('refuses another address and says so on the invitation page', function (): void {
@@ -807,7 +1009,7 @@ describe('intent invitation', function (): void {
 
         ($this->callback)('invitation', $this->invited)->assertRedirect($this->invitationUrl);
 
-        expect(session('invitation.google_id'))->toBeNull();
+        expect(session('invitation.google'))->toBeNull();
         $this->assertGuest();
     });
 
@@ -980,6 +1182,18 @@ describe('unlinking Google', function (): void {
             ->assertSessionHasErrors(['google' => __('auth.errors.last_login_method')]);
     });
 
+    it('does not count a password as a way in when the user has no email to sign in with', function (): void {
+        // A phone that is not verified, a password and Google: the email was cleared while Google was linked.
+        $user = User::factory()->create(['email' => null, 'google_id' => '444', 'phone_e164' => '+919876543210', 'phone_verified_at' => null]);
+        expect($user->hasPassword())->toBeTrue();
+
+        $this->actingAs($user)->withSession($this->justNow)->deleteJson(route('account.google.unlink'))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['google' => __('auth.errors.last_login_method')]);
+
+        expect($user->refresh()->google_id)->toBe('444');
+    });
+
     it('does nothing for a user without a Google link', function (): void {
         $user = User::factory()->passwordless()->create();
 
@@ -998,5 +1212,19 @@ describe('unlinking Google', function (): void {
         $this->actingAs($staff)->withSession($this->justNow)->deleteJson(route('account.google.unlink'))->assertNoContent();
 
         expect($staff->refresh()->google_id)->toBeNull();
+    });
+});
+
+describe('the unlink request (14 section 3.3)', function (): void {
+    it('has no fields', function (): void {
+        expect((new UnlinkGoogleRequest)->rules())->toBe([]);
+    });
+
+    it('is for a signed-in user only', function (): void {
+        $request = UnlinkGoogleRequest::create('/account/google', 'DELETE');
+        expect($request->authorize())->toBeFalse();
+
+        $request->setUserResolver(static fn (): User => User::factory()->create());
+        expect($request->authorize())->toBeTrue();
     });
 });

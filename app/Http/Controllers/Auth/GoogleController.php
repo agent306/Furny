@@ -55,10 +55,12 @@ final class GoogleController extends Controller
 
     private const string INVITATION_URL_KEY = 'invitation.url';
 
-    /** Session keys the callback leaves for the invitation page. */
-    private const string INVITATION_GOOGLE_ID_KEY = 'invitation.google_id';
-
-    private const string INVITATION_GOOGLE_NAME_KEY = 'invitation.google_name';
+    /**
+     * What the callback leaves for the invitation page, under the id of the invitation it is for:
+     * `invitation.google.{invitationId}` is `{id: Google subject, name: Google's display name}`. Read it with the id
+     * of the invitation being accepted, so it cannot carry over to another one opened in the same browser.
+     */
+    private const string INVITATION_GOOGLE_KEY = 'invitation.google';
 
     public function __construct(
         private readonly LinkGoogleAccount $links,
@@ -250,7 +252,7 @@ final class GoogleController extends Controller
     private function signIn(Request $request, User $user): Response
     {
         $session = $request->session();
-        $session->put(RecordSuccessfulLogin::PENDING_METHOD_KEY, 'google');
+        $session->put(RecordSuccessfulLogin::PENDING_METHOD_KEY, ['method' => 'google', 'user' => $user->getKey()]);
 
         if ($user->isStaff() && $user->two_factor_confirmed_at !== null) {
             $session->regenerate();
@@ -271,7 +273,7 @@ final class GoogleController extends Controller
         abort_if($user === null, 403);
 
         try {
-            $this->links->forSignedInUser($user, $googleId, $email);
+            $this->links->forSignedInUser($user, $googleId, $email, $request->session()->getId());
         } catch (GoogleAccountException $exception) {
             return $this->fail($request, GoogleIntent::Link, $exception->messageKey());
         }
@@ -311,8 +313,12 @@ final class GoogleController extends Controller
             return $this->fail($request, GoogleIntent::Invitation, 'auth.errors.google_email_mismatch');
         }
 
-        $request->session()->put(self::INVITATION_GOOGLE_ID_KEY, $googleId);
-        $request->session()->put(self::INVITATION_GOOGLE_NAME_KEY, trim((string) $google->getName()));
+        // One invitation at a time: an earlier Google choice for another invitation is dropped.
+        $request->session()->forget(self::INVITATION_GOOGLE_KEY);
+        $request->session()->put(self::INVITATION_GOOGLE_KEY.'.'.$invitation->id, [
+            'id' => $googleId,
+            'name' => trim((string) $google->getName()),
+        ]);
 
         return redirect()->to($this->invitationPage($request));
     }
