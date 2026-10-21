@@ -86,7 +86,7 @@ function coord(value: number): number {
 }
 
 /** The scaled point; the caller writes it field by field so an equal point makes no patch. */
-export function scaledPoint(p: Point, s: PlanScaling): Point {
+function scaledPoint(p: Point, s: PlanScaling): Point {
     return {
         x: coord(s.about.x + (p.x - s.about.x) * s.factor),
         y: coord(s.about.y + (p.y - s.about.y) * s.factor),

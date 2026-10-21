@@ -209,6 +209,17 @@ describe('rescalePlan', () => {
         expect(bus2.getDoc().openings[o2]!.offset).toBe(20000);
     });
 
+    it('clamps a scaled dimension offset at +-50000', () => {
+        const w = scaleWorld();
+        w.g.doc.annotations.dimensions[w.freeDimension]!.offset = 40_000;
+        w.g.doc.annotations.dimensions[w.attachedDimension]!.offset = -40_000;
+        const bus = busOf(w.g);
+        ok(rescale(bus, 2));
+        const dims = bus.getDoc().annotations.dimensions;
+        expect(dims[w.freeDimension]!.offset).toBe(50_000);
+        expect(dims[w.attachedDimension]!.offset).toBe(-50_000);
+    });
+
     it('scales a document without a background', () => {
         const { g } = oneWall();
         const bus = busOf(g);

@@ -1,7 +1,9 @@
 /**
- * Plan size and value limits (03 §1.1, 04 §6.6 intro), defined once for
- * `validatePlan` and the plan commands. A leaf module with no imports, so
- * both can use it without an import cycle.
+ * Plan size and value limits (03 §1.1, 04 §6.6 intro), each defined once.
+ * Not every limit is shared: `validatePlan` checks only the size limits and
+ * the wall and opening ranges it reports (thickness, height, width, sill);
+ * the plan commands refuse values against most of them. A leaf module
+ * with no imports, so both can use it without an import cycle.
  */
 
 /** `plan.too_large`: most walls in a plan. */

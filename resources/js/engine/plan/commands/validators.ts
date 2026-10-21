@@ -3,7 +3,7 @@
  * must exist, numeric ranges and the plan size limit. `check*` functions are
  * for `validate` and return the refusal or `null`; `fail` and `assert*` are
  * for `run` and throw a `CommandAbort`. The limits themselves live in
- * `plan/limits.ts`, shared with `validatePlan`.
+ * `plan/limits.ts` (some of them shared with `validatePlan`).
  */
 import { CommandAbort } from '../../commands/types';
 import { MAX_COORD, roundMm } from '../../geometry/tolerance';
