@@ -160,6 +160,65 @@ describe('snapFootprint: wall faces (04 §5.8-2)', () => {
         expect(r.markers).toEqual([]);
     });
 
+    describe('target choice on a face barely longer than the footprint', () => {
+        // Face 1300, width 1200: corners at t = 600 and 700, centre at 650.
+        const shortWall = (): PlanDocument => {
+            const doc = emptyPlan();
+            addWall(doc, WALL, [0, 0, 1300, 0]);
+            return doc;
+        };
+        const at = (x: number): FootprintSnapResult =>
+            snap(shortWall(), { cursorBackCenter: pt(x, -100) });
+
+        it('takes the centre, without a corner marker, when the cursor is on it', () => {
+            const r = at(650);
+            expect(r.backCenter).toEqual(pt(650, -115));
+            expect(r.markers).toEqual([]);
+        });
+
+        it('takes the nearer target on either side of the corner/centre midpoints', () => {
+            expect(at(624).backCenter.x).toBe(600);
+            expect(at(624).markers).toEqual([
+                { kind: 'endpoint', at: pt(0, -115) },
+            ]);
+            expect(at(626).backCenter.x).toBe(650);
+            expect(at(626).markers).toEqual([]);
+            expect(at(674).backCenter.x).toBe(650);
+            expect(at(674).markers).toEqual([]);
+            expect(at(676).backCenter.x).toBe(700);
+            expect(at(676).markers).toEqual([
+                { kind: 'endpoint', at: pt(1300, -115) },
+            ]);
+        });
+    });
+
+    it('rounds the free along-face coordinate to the raw step, not 1 mm', () => {
+        const doc = wallPlan();
+        // rawStepFor(0.1) = 10
+        expect(
+            snap(doc, { cursorBackCenter: pt(1504, -100) }).backCenter,
+        ).toEqual(pt(1500, -115));
+        expect(
+            snap(doc, { cursorBackCenter: pt(1506, -100) }).backCenter,
+        ).toEqual(pt(1510, -115));
+        // rawStepFor(0.02) = 100
+        expect(
+            snap(doc, { cursorBackCenter: pt(1540, -100), zoom: 0.02 })
+                .backCenter,
+        ).toEqual(pt(1500, -115));
+    });
+
+    it('keeps the rounded along-face coordinate inside a face shorter than the footprint', () => {
+        const doc = emptyPlan();
+        addWall(doc, WALL, [0, 0, 798, 0]);
+        // 797 rounds to 800 at the raw step of 10, past the face end (798).
+        const r = snap(doc, {
+            cursorBackCenter: pt(797, -100),
+            width: 1200,
+        });
+        expect(r.backCenter.x).toBe(798);
+    });
+
     it('attaches within 2*tol of the face and not beyond', () => {
         const doc = wallPlan();
         // 2*tol = 160 mm: 150 from the left face (y = -115) attaches.
@@ -228,14 +287,11 @@ describe('snapFootprint: wall faces (04 §5.8-2)', () => {
         expect(
             Math.abs(r.rotation * 100 - Math.round(r.rotation * 100)),
         ).toBeLessThan(1e-6);
-        // Facing +n = (0.8, -0.6) (left) or -n (right).
-        const front =
-            r.wallAttachment?.side === 'left'
-                ? { x: 0.8, y: -0.6 }
-                : { x: -0.8, y: 0.6 };
-        expect(Math.abs(r.rotation - rotationFromFront(front))).toBeLessThan(
-            0.01,
-        );
+        // The cursor is on the +n side of the centre line, so the left face.
+        expect(r.wallAttachment?.side).toBe('left');
+        expect(
+            Math.abs(r.rotation - rotationFromFront({ x: 0.8, y: -0.6 })),
+        ).toBeLessThan(0.01);
     });
 
     it('skips walls listed in exclude', () => {
@@ -246,14 +302,14 @@ describe('snapFootprint: wall faces (04 §5.8-2)', () => {
         expect(r.wallAttachment).toBeNull();
     });
 
-    it('honours the on_face toggle', () => {
+    it('attaches whatever the on_face toggle says (that kind is the Dimension snap)', () => {
         const settings = defaultSnapSettings('metric');
         settings.kinds.on_face = false;
         const r = snap(wallPlan(), {
             cursorBackCenter: pt(1500, -100),
             settings,
         });
-        expect(r.wallAttachment).toBeNull();
+        expect(r.wallAttachment).toEqual({ wallId: WALL, side: 'left' });
     });
 
     it('is not fooled by a face shorter than the footprint', () => {
@@ -263,6 +319,22 @@ describe('snapFootprint: wall faces (04 §5.8-2)', () => {
         expect(r.wallAttachment).not.toBeNull();
         expect(r.backCenter.x).toBeGreaterThanOrEqual(0);
         expect(r.backCenter.x).toBeLessThanOrEqual(800);
+    });
+
+    it('does not let an alignment push the footprint off a face shorter than itself', () => {
+        const doc = emptyPlan();
+        addWall(doc, WALL, [0, 0, 800, 0]);
+        // Spans x -930..270: our left edge (190 at t = 790) aligns +80, to
+        // t = 870, which is past the face end and so is clamped to 800.
+        doc.placements['f_0000000001'] = placement(
+            'f_0000000001',
+            -330,
+            -115,
+            180,
+        );
+        const r = snap(doc, { cursorBackCenter: pt(790, -100), width: 1200 });
+        expect(r.wallAttachment).not.toBeNull();
+        expect(r.backCenter.x).toBe(800);
     });
 });
 
@@ -573,6 +645,31 @@ describe('snapFootprint: furniture alignment (04 §5.8-3)', () => {
         expect(r.backCenter).toEqual(pt(3100, 3480));
     });
 
+    it('rounds the free axis of a single-axis alignment to the raw step', () => {
+        const doc = neighbour();
+        const r = snap(doc, { cursorBackCenter: pt(3140, 3504), width: 1000 });
+        expect(r.backCenter).toEqual(pt(3100, 3500));
+        const swapped = snap(doc, {
+            cursorBackCenter: pt(5004, 3030),
+            width: 1000,
+            depth: 700,
+        });
+        // Back aligns to 3000, x is free: raw step 10.
+        expect(swapped.backCenter).toEqual(pt(5000, 3000));
+    });
+
+    it('does not align with a neighbour rotated 3 degrees off', () => {
+        const doc = emptyPlan();
+        doc.placements['f_0000000001'] = placement(
+            'f_0000000001',
+            2000,
+            3000,
+            3,
+        );
+        const r = snap(doc, { cursorBackCenter: pt(3140, 3500), width: 1000 });
+        expect(r.guides).toEqual([]);
+    });
+
     it('only adjusts the coordinate along the face when a wall face was chosen', () => {
         const doc = wallPlan();
         // Neighbour against the same face: x 900..2100.
@@ -620,6 +717,49 @@ describe('snapFootprint: furniture alignment (04 §5.8-3)', () => {
         expect(r.backCenter.x).toBe(600);
         expect(r.markers).toEqual([{ kind: 'endpoint', at: pt(0, -115) }]);
         expect(r.guides.map((g) => g.kind)).toEqual(['face']);
+    });
+});
+
+describe('snapFootprint: priority along a face', () => {
+    const neighbourAt = (x: number): PlanDocument => {
+        const doc = wallPlan();
+        // Rotation 180, width 1200: spans x - 600 .. x + 600.
+        doc.placements['f_0000000001'] = placement(
+            'f_0000000001',
+            x,
+            -115,
+            180,
+        );
+        return doc;
+    };
+
+    it('lets an alignment beat the face-centre snap', () => {
+        // Cursor t = 2050 is 50 from the face centre (2000). Our left edge is
+        // 1650; the neighbour's right edge is 1700: alignment moves t to 2100.
+        const r = snap(neighbourAt(1100), {
+            cursorBackCenter: pt(2050, -100),
+            width: 800,
+        });
+        expect(r.backCenter).toEqual(pt(2100, -115));
+        expect(r.guides.map((g) => g.kind)).toEqual(['face', 'alignment']);
+        expect(r.markers).toEqual([]);
+    });
+
+    it('still takes the face centre when nothing aligns', () => {
+        const r = snap(neighbourAt(-2000), {
+            cursorBackCenter: pt(2050, -100),
+            width: 800,
+        });
+        expect(r.backCenter).toEqual(pt(2000, -115));
+        expect(r.guides.map((g) => g.kind)).toEqual(['face']);
+    });
+
+    it('keeps corner-flush above both alignment and centre', () => {
+        const r = snap(neighbourAt(730), {
+            cursorBackCenter: pt(650, -100),
+        });
+        expect(r.backCenter.x).toBe(600);
+        expect(r.markers).toEqual([{ kind: 'endpoint', at: pt(0, -115) }]);
     });
 });
 

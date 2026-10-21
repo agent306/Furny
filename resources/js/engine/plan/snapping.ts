@@ -33,7 +33,13 @@ import {
     type SnapNodeItem,
     type SnapWallItem,
 } from './snapIndex';
-import { ALIGNMENT_RADIUS_PX, snapTolerance, z, type Box } from './snapShared';
+import {
+    ALIGNMENT_RADIUS_PX,
+    snapTolerance,
+    TIE_EPS,
+    z,
+    type Box,
+} from './snapShared';
 
 export { gridStepFor, rawStepFor } from './grid';
 export { snapFootprint } from './snapFootprint';
@@ -181,8 +187,6 @@ const ANGLE_MIN_PX = 20;
 /** Extension lines reach this far (mm) beyond a wall end, at least. */
 const EXTENSION_REACH_MM = 600;
 const EXTENSION_REACH_PX = 60;
-/** A later candidate must be closer by more than this (mm) to win a tie. */
-const TIE_EPS = 1e-6;
 const SIN_ANGLE_TOL = Math.sin(ANGLE_TOL);
 
 type PointKind = 'endpoint' | 'intersection' | 'midpoint' | 'perpendicular';

@@ -13,7 +13,14 @@ import { add, dot, scale, sub, type Vec2 } from '../geometry/vec2';
 import { roundMm } from '../geometry/tolerance';
 import type { DerivedPlan, DerivedWall } from './derive';
 import type { PlanDocument } from './schema';
-import { snapTolerance, z, type SnapPointerType } from './snapShared';
+import {
+    cmp,
+    SLACK,
+    snapTolerance,
+    TIE_EPS,
+    z,
+    type SnapPointerType,
+} from './snapShared';
 import type { SnapGuide, SnapModifiers } from './snapping';
 
 export interface OpeningSnapInput {
@@ -59,13 +66,6 @@ export interface OpeningSnapResult {
 const RETURN_ALLOWANCE = 100;
 /** Free positions round to this many mm (04 §5.7-4). */
 const FREE_STEP = 10;
-/** A later candidate must be closer by more than this (mm) to win a tie. */
-const TIE_EPS = 1e-6;
-/** Float slack for range and overlap tests (mm). */
-const SLACK = 1e-6;
-
-const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
 interface Found {
     wall: DerivedWall;
     /** Cursor distance to the centre line. */

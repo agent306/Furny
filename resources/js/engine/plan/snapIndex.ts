@@ -14,7 +14,7 @@ import {
     type FootprintProvider,
 } from './footprint';
 import type { PlanDocument } from './schema';
-import type { Box } from './snapShared';
+import { cmp, type Box } from './snapShared';
 
 export interface SnapNodeItem {
     id: string;
@@ -88,8 +88,6 @@ function buildClass<T>(
     tree.finish();
     return { tree, items };
 }
-
-const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 const segBox = (a: Vec2, b: Vec2): Box => [
     Math.min(a.x, b.x),

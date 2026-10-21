@@ -397,6 +397,18 @@ describe('snapOpeningPosition: swing and hinge (04 §5.7)', () => {
         expect(snap(doc, { cursor: pt(2010, 0) }).hinge).toBe('end');
     });
 
+    it('hinges at end when the cursor is exactly on the opening centre', () => {
+        // 1230 is free (no target in reach), so u == offset.
+        const r = snap(horizontalWall(), { cursor: pt(1230, 0) });
+        expect(r.offset).toBe(1230);
+        expect(r.hinge).toBe('end');
+    });
+
+    it('swings left (+n) when the cursor is exactly on the centre line', () => {
+        const r = snap(horizontalWall(), { cursor: pt(1230, 0) });
+        expect(r.swing).toBe('left');
+    });
+
     it('measures u along the wall direction of a diagonal wall', () => {
         const doc = emptyPlan();
         addWall(doc, WALL, [0, 0, 3000, 4000]); // length 5000, d = (0.6, 0.8)

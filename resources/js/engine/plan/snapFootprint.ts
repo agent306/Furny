@@ -22,11 +22,13 @@ import {
     type Vec2,
 } from '../geometry/vec2';
 import type { DerivedPlan } from './derive';
-import { gridPoint, rawPoint } from './grid';
+import { gridPoint, rawPoint, rawStepFor } from './grid';
 import { query, type SnapIndex, type SnapFootprintItem } from './snapIndex';
 import {
     ALIGNMENT_RADIUS_PX,
+    SLACK,
     snapTolerance,
+    TIE_EPS,
     z,
     type SnapPointerType,
 } from './snapShared';
@@ -68,10 +70,6 @@ export interface FootprintSnapResult {
     markers: SnapMarker[];
 }
 
-/** A later candidate must be closer by more than this (mm) to win a tie. */
-const TIE_EPS = 1e-6;
-/** Float slack for range tests (mm). */
-const SLACK = 1e-6;
 /** With `keepRotation`, a face qualifies within this many degrees (04 §5.8-2). */
 const KEEP_ROTATION_TOL_DEG = 1;
 /** Neighbours align when their rotation is a multiple of 90 degrees off (±). */
@@ -158,27 +156,35 @@ function findFace(
     return best;
 }
 
+type FaceSnap = 'corner' | 'centre';
+
 interface FacePlacement {
     hit: FaceHit;
-    /** Back centre on the face (float). */
+    /** Back centre clamped onto the face, before any target snap (float). */
+    free: Vec2;
+    /** Back centre after the target snap, or `free` when none applied (float). */
     at: Vec2;
-    /** Valid range of `t` when the face is at least as long as the footprint. */
-    range: [number, number] | null;
-    /** `t` was set by a corner or centre target. */
-    snapped: boolean;
+    /** Which target `at` sits on, if any. */
+    snap: FaceSnap | null;
+    /** The face is at least as long as the footprint is wide. */
+    fits: boolean;
+    /** Valid `t` range: `[w/2, L-w/2]` when `fits`, else the whole face `[0, L]`. */
+    bounds: [number, number];
     marker: SnapMarker | null;
 }
 
-/** Clamps and target-snaps the position along the face (04 §5.8-2). */
+/**
+ * Clamps and target-snaps the position along the face (04 §5.8-2). Every
+ * target is measured against the clamped cursor position, so the nearest
+ * target within `tol` wins (ties go to the earlier of corner at the face
+ * start, corner at the face end, face centre).
+ */
 function placeOnFace(hit: FaceHit, width: number, tol: number): FacePlacement {
     const fits = hit.length >= width;
     const lo = width / 2;
     const hi = hit.length - width / 2;
-    let t = fits
-        ? Math.min(hi, Math.max(lo, hit.t))
-        : Math.min(hit.length, Math.max(0, hit.t));
-    let marker: SnapMarker | null = null;
-    let snapped = false;
+    const bounds: [number, number] = fits ? [lo, hi] : [0, hit.length];
+    const t0 = Math.min(bounds[1], Math.max(bounds[0], hit.t));
     const targets: Array<{ t: number; corner: Vec2 | null }> = fits
         ? [
               { t: lo, corner: hit.p0 },
@@ -186,26 +192,46 @@ function placeOnFace(hit: FaceHit, width: number, tol: number): FacePlacement {
               { t: hit.length / 2, corner: null },
           ]
         : [{ t: hit.length / 2, corner: null }];
+    let chosen: { t: number; corner: Vec2 | null } | null = null;
     let bestGap = Infinity;
     for (const target of targets) {
-        const gap = Math.abs(t - target.t);
+        const gap = Math.abs(t0 - target.t);
         if (gap <= tol && gap < bestGap - TIE_EPS) {
             bestGap = gap;
-            snapped = true;
-            marker =
-                target.corner === null
-                    ? null
-                    : { kind: 'endpoint', at: cleanPoint(target.corner) };
-            t = target.t;
+            chosen = target;
         }
     }
+    const free = add(hit.p0, scale(hit.dir, t0));
     return {
         hit,
-        at: add(hit.p0, scale(hit.dir, t)),
-        range: fits ? [lo, hi] : null,
-        snapped,
-        marker,
+        free,
+        at: chosen === null ? free : add(hit.p0, scale(hit.dir, chosen.t)),
+        snap:
+            chosen === null
+                ? null
+                : chosen.corner === null
+                  ? 'centre'
+                  : 'corner',
+        fits,
+        bounds,
+        marker:
+            chosen === null || chosen.corner === null
+                ? null
+                : { kind: 'endpoint', at: cleanPoint(chosen.corner) },
     };
+}
+
+/** `at` moved along the face so that its `t` lies within the face bounds. */
+function clampToFace(at: Vec2, face: FacePlacement): Vec2 {
+    const t = dot(sub(at, face.hit.p0), face.hit.dir);
+    const clamped = Math.min(face.bounds[1], Math.max(face.bounds[0], t));
+    return add(at, scale(face.hit.dir, clamped - t));
+}
+
+/** `at` moved along `axis` to the nearest multiple of `step` (anchored at the plan origin). */
+function roundAlong(at: Vec2, axis: Vec2, step: number): Vec2 {
+    const s = dot(at, axis);
+    return add(at, scale(axis, Math.round(s / step) * step - s));
 }
 
 /** One aligned axis: how far to move and the neighbour that was aligned to. */
@@ -395,12 +421,15 @@ const roundedPoint = (p: Vec2): Vec2 => ({
  * Snaps a dragged footprint (04 §5.8):
  *
  * 1. Alt or snapping disabled: raw rounding, rotation kept, no attachment;
- * 2. wall faces within `2 x tol`: attach, take the face rotation, clamp the
- *    back centre inside the face and snap it flush to a corner or to the
- *    middle;
+ * 2. wall faces within `2 x tol` (not gated by `kinds.on_face`, which is the
+ *    Dimension/Measure snap): attach, take the face rotation, clamp the back
+ *    centre inside the face and snap it to the nearest of the two corner-flush
+ *    positions and the face centre;
  * 3. alignment with neighbouring footprints, per axis (along the face only
- *    when attached, and not after a corner or middle snap);
- * 4. the grid when neither a face nor an alignment applied, else raw rounding.
+ *    when attached). Along a face the priority is corner-flush, then
+ *    alignment, then the face centre;
+ * 4. the grid when neither a face nor an alignment applied. Any coordinate
+ *    left free rounds to the raw step.
  */
 export function snapFootprint(
     input: FootprintSnapInput,
@@ -420,44 +449,64 @@ export function snapFootprint(
     }
 
     const tol = snapTolerance(input.pointerType, input.zoom);
-    const hit = kinds.on_face ? findFace(input, index, geom, 2 * tol) : null;
+    // Wall attach is not gated by `kinds.on_face`: that kind is the
+    // Dimension/Measure snap. Alt or `enabled: false` (above) turn it off.
+    const hit = findFace(input, index, geom, 2 * tol);
     const face = hit === null ? null : placeOnFace(hit, input.width, tol);
 
     const rotation =
         face === null ? cleanRotation(input.rotation) : face.hit.rotation;
     const front = frontVector(rotation);
     const frame: Frame = { f: front, r: rightOf(front) };
+    // Alignment is measured from the position before a centre snap, so an
+    // alignment in reach beats the face centre; a corner snap beats both.
+    const base = face === null ? c : face.free;
     let at = face === null ? c : face.at;
 
     let alignment: Alignment = { r: null, f: null };
     if (kinds.alignment) {
         const alongFace = (delta: number): boolean => {
-            if (face === null || face.range === null) return true;
+            if (face === null || !face.fits) return true;
             const t = dot(
-                sub(add(at, scale(frame.r, delta)), face.hit.p0),
+                sub(add(base, scale(frame.r, delta)), face.hit.p0),
                 face.hit.dir,
             );
-            return t >= face.range[0] - SLACK && t <= face.range[1] + SLACK;
+            return t >= face.bounds[0] - SLACK && t <= face.bounds[1] + SLACK;
         };
         alignment = alignWithNeighbours(
             input,
             index,
-            at,
+            base,
             frame,
             rotation,
             tol,
-            { r: face === null || !face.snapped, f: face === null },
+            { r: face === null || face.snap !== 'corner', f: face === null },
             alongFace,
         );
-        at = add(
-            at,
-            add(
-                scale(frame.r, alignment.r?.delta ?? 0),
-                scale(frame.f, alignment.f?.delta ?? 0),
-            ),
-        );
+        if (alignment.r !== null || alignment.f !== null) {
+            at = add(
+                base,
+                add(
+                    scale(frame.r, alignment.r?.delta ?? 0),
+                    scale(frame.f, alignment.f?.delta ?? 0),
+                ),
+            );
+            // A face shorter than the footprint cannot take the move whole.
+            if (face !== null && !face.fits) at = clampToFace(at, face);
+        }
     }
     const aligned = alignment.r !== null || alignment.f !== null;
+
+    // Coordinates that nothing snapped round to the raw step (04 §5.3).
+    const step = rawStepFor(input.zoom);
+    if (face !== null) {
+        if (face.snap === null && alignment.r === null) {
+            at = clampToFace(roundAlong(at, face.hit.dir, step), face);
+        }
+    } else if (aligned) {
+        if (alignment.r === null) at = roundAlong(at, frame.r, step);
+        if (alignment.f === null) at = roundAlong(at, frame.f, step);
+    }
 
     let backCenter: Vec2;
     if (face === null && !aligned) {
