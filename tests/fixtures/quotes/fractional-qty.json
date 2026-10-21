@@ -1,0 +1,35 @@
+{
+    "description": "08 §10.6 #3: 2.5 x 99999 = 249997.5 rounds half up to 249998; tax 44999.64 rounds to 45000",
+    "pricesIncludeTax": false,
+    "taxRates": [
+        {
+            "id": "tax-gst18",
+            "name": "GST 18%",
+            "rateBps": 1800
+        }
+    ],
+    "lines": [
+        {
+            "kind": "custom",
+            "quantity": "2.500",
+            "unitPriceMinor": 99999,
+            "taxRateId": "tax-gst18"
+        }
+    ],
+    "expected": {
+        "amounts": [249998],
+        "subtotal": 249998,
+        "discount": 0,
+        "tax": 45000,
+        "total": 294998,
+        "taxBreakdown": [
+            {
+                "taxRateId": "tax-gst18",
+                "name": "GST 18%",
+                "rateBps": 1800,
+                "taxableMinor": 249998,
+                "taxMinor": 45000
+            }
+        ]
+    }
+}

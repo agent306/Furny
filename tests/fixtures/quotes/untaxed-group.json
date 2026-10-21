@@ -1,0 +1,47 @@
+{
+    "description": "08 §10.6 #4: null-rate group takes a share; equal remainders, the extra unit goes to tax-gst18 (taxRateId asc, null last)",
+    "pricesIncludeTax": false,
+    "taxRates": [
+        {
+            "id": "tax-gst18",
+            "name": "GST 18%",
+            "rateBps": 1800
+        }
+    ],
+    "lines": [
+        {
+            "kind": "custom",
+            "quantity": "1.000",
+            "unitPriceMinor": 100000,
+            "taxRateId": null
+        },
+        {
+            "kind": "furniture",
+            "quantity": "1.000",
+            "unitPriceMinor": 100000,
+            "taxRateId": "tax-gst18"
+        },
+        {
+            "kind": "discount",
+            "quantity": "1.000",
+            "unitPriceMinor": -3,
+            "taxRateId": null
+        }
+    ],
+    "expected": {
+        "amounts": [100000, 100000, -3],
+        "subtotal": 200000,
+        "discount": 3,
+        "tax": 18000,
+        "total": 217997,
+        "taxBreakdown": [
+            {
+                "taxRateId": "tax-gst18",
+                "name": "GST 18%",
+                "rateBps": 1800,
+                "taxableMinor": 99998,
+                "taxMinor": 18000
+            }
+        ]
+    }
+}

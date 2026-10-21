@@ -1,0 +1,65 @@
+{
+    "description": "08 §10.6 #2: same lines, prices include tax; taxableMinor reports net",
+    "pricesIncludeTax": true,
+    "taxRates": [
+        {
+            "id": "tax-gst18",
+            "name": "GST 18%",
+            "rateBps": 1800
+        },
+        {
+            "id": "tax-gst12",
+            "name": "GST 12%",
+            "rateBps": 1200
+        }
+    ],
+    "lines": [
+        {
+            "kind": "furniture",
+            "quantity": "1.000",
+            "unitPriceMinor": 2431300,
+            "taxRateId": "tax-gst18"
+        },
+        {
+            "kind": "installation",
+            "quantity": "1.000",
+            "unitPriceMinor": 194600,
+            "taxRateId": "tax-gst18"
+        },
+        {
+            "kind": "custom",
+            "quantity": "1.000",
+            "unitPriceMinor": 500000,
+            "taxRateId": "tax-gst12"
+        },
+        {
+            "kind": "discount",
+            "quantity": "1.000",
+            "unitPriceMinor": -100000,
+            "taxRateId": null
+        }
+    ],
+    "expected": {
+        "amounts": [2431300, 194600, 500000, -100000],
+        "subtotal": 3125900,
+        "discount": 100000,
+        "tax": 439605,
+        "total": 3025900,
+        "taxBreakdown": [
+            {
+                "taxRateId": "tax-gst18",
+                "name": "GST 18%",
+                "rateBps": 1800,
+                "taxableMinor": 2154148,
+                "taxMinor": 387747
+            },
+            {
+                "taxRateId": "tax-gst12",
+                "name": "GST 12%",
+                "rateBps": 1200,
+                "taxableMinor": 432147,
+                "taxMinor": 51858
+            }
+        ]
+    }
+}

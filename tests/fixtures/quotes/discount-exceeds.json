@@ -1,0 +1,28 @@
+{
+    "description": "08 §10.6 #5: discount larger than subtotal is a validation error",
+    "pricesIncludeTax": false,
+    "taxRates": [
+        {
+            "id": "tax-gst18",
+            "name": "GST 18%",
+            "rateBps": 1800
+        }
+    ],
+    "lines": [
+        {
+            "kind": "furniture",
+            "quantity": "1.000",
+            "unitPriceMinor": 1000,
+            "taxRateId": "tax-gst18"
+        },
+        {
+            "kind": "discount",
+            "quantity": "1.000",
+            "unitPriceMinor": -1001,
+            "taxRateId": null
+        }
+    ],
+    "expected": {
+        "error": "discount_exceeds_subtotal"
+    }
+}
