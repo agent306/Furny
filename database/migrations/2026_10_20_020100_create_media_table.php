@@ -13,7 +13,11 @@ return new class extends Migration
         Schema::create('media', function (Blueprint $table): void {
             $table->id();
 
-            $table->ulidMorphs('model');
+            // Owners are ULID models plus the `business` BusinessProfile pseudo-model (02 §10): a char(26)
+            // id would blank-pad 'business' and the morphTo lookup would miss, so the id is varchar(26).
+            $table->string('model_type');
+            $table->string('model_id', 26);
+            $table->index(['model_type', 'model_id']);
             $table->uuid()->nullable()->unique();
             $table->string('collection_name');
             $table->string('name');

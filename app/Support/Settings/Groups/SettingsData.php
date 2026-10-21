@@ -51,6 +51,20 @@ abstract class SettingsData extends Data
             }
         }
 
+        return static::withEmptyMapsAsObjects($storage);
+    }
+
+    /**
+     * Turns empty map fields of a snake_case storage document into objects, so a document that was
+     * decoded from JSON (where `{}` became `[]`) is stored as `{}` again.
+     *
+     * @param  array<string, mixed>  $storage
+     * @return array<string, mixed>
+     */
+    public static function withEmptyMapsAsObjects(array $storage): array
+    {
+        $mapper = new SnakeCaseMapper;
+
         foreach (static::mapProperties() as $name) {
             $key = $mapper->map($name);
 
@@ -63,13 +77,20 @@ abstract class SettingsData extends Data
     }
 
     /**
-     * The Inertia/JSON props: camelCase keys, nested Data included.
+     * The Inertia/JSON props: camelCase keys, nested Data included. `#[Encrypted]` properties are
+     * omitted: a secret is never sent to the browser.
      *
      * @return array<string, mixed>
      */
     public function toWire(): array
     {
         $wire = $this->transform(TransformationContextFactory::create()->withoutPropertyNameMapping());
+
+        foreach ((new ReflectionClass($this))->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
+            if ($property->getAttributes(Encrypted::class) !== []) {
+                unset($wire[$property->getName()]);
+            }
+        }
 
         foreach (static::mapProperties() as $name) {
             if (($wire[$name] ?? null) === []) {

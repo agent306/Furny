@@ -49,3 +49,9 @@ it('produces a different ciphertext on every encryption', function (): void {
 it('refuses a stored value that is not valid ciphertext instead of using it as the secret', function (): void {
     SecretSettings::from(['api_key' => 'plain-text', 'label' => 'x']);
 })->throws(DecryptException::class);
+
+it('omits #[Encrypted] properties from the wire format', function (): void {
+    $wire = (new SecretSettings('secret', 'visible'))->toWire();
+
+    expect($wire)->toBe(['label' => 'visible']);
+});

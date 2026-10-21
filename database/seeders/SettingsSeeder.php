@@ -47,9 +47,10 @@ final class SettingsSeeder extends Seeder
         }
 
         $stored = is_array($row->value) ? $row->value : [];
-        $merged = $stored + $seed;
+        $class = $group->dataClass();
+        $merged = $class::withEmptyMapsAsObjects($stored + $seed);
 
-        if ($merged !== $stored) {
+        if (json_encode($merged) !== json_encode($class::withEmptyMapsAsObjects($stored))) {
             $row->value = $merged;
             $row->save();
             Settings::forgetAfterCommit($group->value);

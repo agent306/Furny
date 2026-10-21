@@ -15,8 +15,9 @@ it('uses char(26) ULID morph keys for the spatie permission pivots', function ()
         ->and(config('permission.column_names.model_morph_key'))->toBe('model_id');
 });
 
-it('uses a char(26) ULID morph key for media', function (): void {
-    expect(PgSchema::column('media', 'model_id'))->toMatchArray(['data_type' => 'character', 'character_maximum_length' => 26, 'is_nullable' => 'NO'])
+it('uses a varchar(26) morph key for media so non-ULID owners (business) resolve', function (): void {
+    expect(PgSchema::column('media', 'model_id'))->toMatchArray(['data_type' => 'character varying', 'character_maximum_length' => 26, 'is_nullable' => 'NO'])
+        ->and(PgSchema::indexDefinition('media', 'media_model_type_model_id_index'))->toContain('(model_type, model_id)')
         ->and(PgSchema::column('media', 'model_type'))->toMatchArray(['data_type' => 'character varying', 'is_nullable' => 'NO']);
 });
 

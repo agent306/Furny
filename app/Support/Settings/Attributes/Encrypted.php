@@ -10,7 +10,8 @@ use Spatie\LaravelData\Attributes\WithCast;
 
 /**
  * Marks a top-level string property of a settings Data class as a secret (13 §15): `toStorage()`
- * encrypts it, creating the object from stored data decrypts it, and audit logs redact it.
+ * encrypts it, creating the object from stored data decrypts it, and `toWire()` omits it. Redacting it in audit logs
+ * (13 §15) is enforced by the audit task, not here.
  * v1 stores no secrets in settings (all secrets are env); the mechanism exists for future use.
  */
 #[Attribute(Attribute::TARGET_PROPERTY)]

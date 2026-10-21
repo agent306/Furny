@@ -5,12 +5,14 @@ declare(strict_types=1);
 use App\Domain\Identity\Models\User;
 use App\Domain\Settings\Models\AppSetting;
 use App\Domain\Settings\Models\BusinessProfile;
+use App\Support\Media\Media;
 use App\Support\Settings\CatalogVersion;
 use App\Support\Settings\Groups\AiSettings;
 use App\Support\Settings\Groups\NotificationsSettings;
 use App\Support\Settings\Groups\PricingSettings;
 use App\Support\Settings\Settings;
 use App\Support\Settings\SettingsGroup;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 
 beforeEach(function (): void {
@@ -313,4 +315,17 @@ it('does not disturb stored business settings when the logo owner is resolved', 
     BusinessProfile::instance();
 
     expect(AppSetting::query()->find('business')->value)->toBe(['name' => 'Oak & Co']);
+});
+
+it('resolves the owner of the logo media (morphTo) for the non-ULID business key', function (): void {
+    $profile = BusinessProfile::instance();
+
+    $media = $profile->addMedia(UploadedFile::fake()->image('logo.png', 200, 200))->toMediaCollection('logo');
+    $found = Media::query()->findOrFail($media->id);
+
+    expect($found->model_id)->toBe('business')
+        ->and($found->model_type)->toBe('business_profile')
+        ->and($found->model)->toBeInstanceOf(BusinessProfile::class)
+        ->and($found->model->getKey())->toBe('business')
+        ->and($profile->fresh()->getFirstMedia('logo')->id)->toBe($media->id);
 });

@@ -95,6 +95,27 @@ it('is idempotent: keeps changed values, restores deleted fields and adds nothin
         ->and(AppSetting::query()->find('catalog.version')->value)->toBe(9);
 });
 
+it('keeps empty maps as JSON objects when it fills a missing field of an existing group', function (): void {
+    seedSettings();
+
+    $notifications = AppSetting::query()->find('notifications');
+    $value = $notifications->value;
+    unset($value['sms_driver']);
+    $notifications->update(['value' => $value]);
+
+    seedSettings();
+
+    $raw = json_decode((string) DB::table('app_settings')->where('key', 'notifications')->value('value'));
+
+    expect($raw->sms_driver)->toBe('log')
+        ->and($raw->whatsapp_templates)->toEqual((object) []);
+
+    $before = DB::table('app_settings')->where('key', 'notifications')->value('updated_at');
+    seedSettings();
+
+    expect(DB::table('app_settings')->where('key', 'notifications')->value('updated_at'))->toBe($before);
+});
+
 it('busts the cached groups it changes', function (): void {
     expect(app(Settings::class)->auth()->otpAllowedCountryCodes)->toBe(['IN']);
 
