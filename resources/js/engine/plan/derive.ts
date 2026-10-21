@@ -8,6 +8,9 @@
  * very `Vec2` objects of its `WallEnd`s, `leftFace`, ...), so consumers must
  * treat all returned points as read-only.
  *
+ * `createPlanDeriver` caches by entity identity (04 §7.2); `derivePlanGeometry`
+ * is a fresh deriver per call.
+ *
  * Rooms (04 §4) are detected from the wall centre lines and the union of the
  * wall outlines, then associated with the document's `RoomMeta` anchors.
  */
@@ -30,13 +33,20 @@ import {
     type Vec2,
 } from '../geometry/vec2';
 import type { Opening, PlanDocument, Wall } from './schema';
-import { analyzeRooms, associateRoomMetas } from './rooms';
+import {
+    analyzeRooms,
+    associateRoomMetas,
+    resolveRoomNet,
+    type ResolvedRoomNet,
+    type RoomNetResolver,
+} from './rooms';
 import type { DeriveIssue } from './types';
 import {
     buildWallGraph,
     buildWallOutline,
-    computeAllWallEnds,
+    computeNodeJoins,
     type WallEnd,
+    type WallGraph,
     type WallInfo,
 } from './walls';
 
@@ -249,92 +259,175 @@ function bboxOf(points: Vec2[]): { min: Vec2; max: Vec2 } {
     return points.length === 0 ? emptyBBox() : ringBBox(points);
 }
 
-/** Derives walls, openings, poché, node caps and the exterior outline. */
-export function derivePlanGeometry(doc: PlanDocument): DerivedPlan {
-    const g = buildWallGraph(doc);
-    const ends = computeAllWallEnds(g);
-    const issues: DeriveIssue[] = [...g.issues];
+/** Counts of what the last `derive` call recomputed (tests, perf diagnostics). */
+export interface DeriverStats {
+    /** Nodes whose joins were recomputed. */
+    joins: number;
+    /** Walls whose outline, openings or poché were recomputed. */
+    outlines: number;
+    /** Faces whose net polygon (and label) was recomputed. */
+    roomNets: number;
+    /** The whole previous result was returned (only `docRef` may differ). */
+    fullHit: boolean;
+}
 
-    // Openings per wall (those on missing or skipped walls are skipped).
-    const openingsByWall = new Map<string, Opening[]>();
-    const skippedOpenings: DeriveIssue[] = [];
-    for (const id of Object.keys(doc.openings).sort(cmpId)) {
-        const o = doc.openings[id]!;
-        if (!g.valid.has(o.wallId) || !ends.has(o.wallId)) {
-            skippedOpenings.push(
-                issue(
-                    'opening_skipped',
-                    'warning',
-                    { openingId: id, wallId: o.wallId },
-                    [id, o.wallId],
-                ),
-            );
-            continue;
-        }
-        const list = openingsByWall.get(o.wallId);
-        if (list) list.push(o);
-        else openingsByWall.set(o.wallId, [o]);
+export interface PlanDeriver {
+    derive(doc: PlanDocument): DerivedPlan;
+    /** Drops every cache; the next `derive` recomputes everything. */
+    clear(): void;
+    stats(): DeriverStats;
+}
+
+type WallShape = Pick<
+    DerivedWall,
+    | 'centerline'
+    | 'outline'
+    | 'leftFace'
+    | 'rightFace'
+    | 'length'
+    | 'id'
+    | 'dir'
+    | 'normal'
+    | 'thickness'
+    | 'height'
+    | 'kind'
+    | 'endA'
+    | 'endB'
+    | 'safeU'
+>;
+
+/** Cached derivation of one wall (04 §7.2-4). */
+interface WallEntry {
+    wall: Wall;
+    endA: WallEnd;
+    endB: WallEnd;
+    shape: WallShape;
+    bbox: { min: Vec2; max: Vec2 };
+    fallbackIssue: DeriveIssue | null;
+    openings: Opening[];
+    derived: DerivedOpening[];
+    openingIssues: DeriveIssue[];
+    /** Room fields are `null`; every `derive` copies it and fills them in. */
+    base: DerivedWall;
+}
+
+/** Cached join of one node (04 §7.2-3). */
+interface NodeEntry {
+    sig: string;
+    joins: Map<string, WallEnd>;
+}
+
+/** Cached net of one face (04 §7.2-6). */
+interface NetEntry {
+    /** The outlines it was computed against. */
+    clip: Ring[];
+    resolved: ResolvedRoomNet | null;
+}
+
+/** Everything that depends only on `nodes`, `walls` and `openings`. */
+interface Core {
+    walls: Record<string, DerivedWall>;
+    openings: Record<string, DerivedOpening>;
+    nodes: Record<string, { wallIds: string[] }>;
+    nodeCaps: Record<string, Vec2[]>;
+    wallsUnion: PolygonWithHoles[];
+    bbox: { min: Vec2; max: Vec2 };
+    exteriorOutline: Vec2[] | null;
+    /** All issues except those of the RoomMeta association. */
+    issues: DeriveIssue[];
+    /** Rooms before the RoomMeta association. */
+    rooms: DerivedRoom[];
+}
+
+interface UnionEntry {
+    outlines: Ring[];
+    wallsUnion: PolygonWithHoles[];
+    exteriorOutline: Vec2[] | null;
+    bbox: { min: Vec2; max: Vec2 };
+}
+
+const SEP = '\u0001';
+
+const sameRefs = <T>(a: readonly T[], b: readonly T[]): boolean =>
+    a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** Boxes that share area; touching along an edge cannot change a difference. */
+const boxesOverlap = (
+    a: { min: Vec2; max: Vec2 },
+    b: { min: Vec2; max: Vec2 },
+): boolean =>
+    a.min.x < b.max.x &&
+    b.min.x < a.max.x &&
+    a.min.y < b.max.y &&
+    b.min.y < a.max.y;
+
+const ringKey = (ring: Ring, holes: Ring[]): string => {
+    const one = (r: Ring): string => r.map((p) => `${p.x},${p.y}`).join(';');
+    return [ring, ...holes].map(one).join('/');
+};
+
+/** Signature of everything `computeNodeJoins` reads for one node (04 §7.2-3). */
+function nodeSignature(nodeId: string, ids: string[], g: WallGraph): string {
+    const parts: string[] = [];
+    let at = '';
+    for (const id of ids) {
+        const info = g.valid.get(id)!;
+        const atA = info.wall.a === nodeId;
+        const own = atA ? info.A : info.B;
+        const other = atA ? info.B : info.A;
+        at = `${own.x},${own.y}`;
+        parts.push(
+            `${id}:${atA ? 'a' : 'b'}:${other.x},${other.y}:${info.wall.thickness}`,
+        );
     }
+    return [at, ...parts].join(SEP);
+}
 
-    const walls: Record<string, DerivedWall> = {};
-    const openings: Record<string, DerivedOpening> = {};
-    const openingIssues: DeriveIssue[] = [];
+/** Outline, faces and usable range of one wall from its joined ends. */
+function buildWallShape(
+    id: string,
+    info: WallInfo,
+    endA: WallEnd,
+    endB: WallEnd,
+): { shape: WallShape; fallbackIssue: DeriveIssue | null } {
+    const built = buildWallOutline(info, endA, endB);
+    const { A, B, d, n, length } = info;
+    const half = info.wall.thickness / 2;
+    const fallbackIssue = built.fallback
+        ? issue(
+              'outline_fallback',
+              built.fallbackReason === 'self_intersection' ? 'info' : 'warning',
+              {
+                  wallId: id,
+                  reason: built.fallbackReason ?? 'degenerate',
+              },
+              [id],
+          )
+        : null;
 
-    for (const [id, info] of g.valid) {
-        const e = ends.get(id);
-        if (!e) continue;
-        const { endA, endB } = e;
-        const built = buildWallOutline(info, endA, endB);
-        const { A, B, d, n, length } = info;
-        const half = info.wall.thickness / 2;
-        if (built.fallback) {
-            issues.push(
-                issue(
-                    'outline_fallback',
-                    built.fallbackReason === 'self_intersection'
-                        ? 'info'
-                        : 'warning',
-                    {
-                        wallId: id,
-                        reason: built.fallbackReason ?? 'degenerate',
-                    },
-                    [id],
-                ),
-            );
-        }
-
-        // A fallback outline is the plain rectangle, so faces and the usable
-        // range follow it instead of the (unusable) mitered corners.
-        const off = scale(n, half);
-        const leftFace: [Vec2, Vec2] = built.fallback
-            ? [clean(add(A, off)), clean(add(B, off))]
-            : [endA.left, endB.left];
-        const rightFace: [Vec2, Vec2] = built.fallback
-            ? [clean(sub(A, off)), clean(sub(B, off))]
-            : [endA.right, endB.right];
-        const along = (p: Vec2): number => dot(sub(p, A), d);
-        const safeU: [number, number] = built.fallback
-            ? [0, length]
-            : [
-                  Math.max(0, along(endA.left), along(endA.right)),
-                  Math.min(length, along(endB.left), along(endB.right)),
-              ];
-
-        const derived = (openingsByWall.get(id) ?? [])
-            .map((o) => buildOpening(o, info, safeU))
-            .sort((p, q) => p.u0 - q.u0 || cmpId(p.id, q.id));
-        for (const o of derived) {
-            openings[o.id] = o;
-            openingIssues.push(...o.issues);
-        }
-
-        walls[id] = {
+    // A fallback outline is the plain rectangle, so faces and the usable
+    // range follow it instead of the (unusable) mitered corners.
+    const off = scale(n, half);
+    const leftFace: [Vec2, Vec2] = built.fallback
+        ? [clean(add(A, off)), clean(add(B, off))]
+        : [endA.left, endB.left];
+    const rightFace: [Vec2, Vec2] = built.fallback
+        ? [clean(sub(A, off)), clean(sub(B, off))]
+        : [endA.right, endB.right];
+    const along = (p: Vec2): number => dot(sub(p, A), d);
+    const safeU: [number, number] = built.fallback
+        ? [0, length]
+        : [
+              Math.max(0, along(endA.left), along(endA.right)),
+              Math.min(length, along(endB.left), along(endB.right)),
+          ];
+    return {
+        shape: {
             centerline: [A, B],
             outline: built.outline,
             leftFace,
             rightFace,
             length,
-            openings: derived.map((o) => ({ id: o.id, u0: o.u0, u1: o.u1 })),
             id,
             dir: d,
             normal: n,
@@ -343,100 +436,334 @@ export function derivePlanGeometry(doc: PlanDocument): DerivedPlan {
             kind: info.wall.kind,
             endA,
             endB,
-            leftRoomKey: null,
-            rightRoomKey: null,
-            exteriorSide: null,
-            pocheParts: buildPoche(
-                built.outline,
-                derived.map((o) => o.cut),
-            ),
             safeU,
+        },
+        fallbackIssue,
+    };
+}
+
+/**
+ * Creates a deriver that caches by entity identity (04 §7.2): with a
+ * structurally shared document (mutative) only what an edit touched is
+ * recomputed. Results equal those of a fresh deriver.
+ */
+export function createPlanDeriver(): PlanDeriver {
+    let lastDoc: PlanDocument | null = null;
+    let lastResult: DerivedPlan | null = null;
+    let lastCore: Core | null = null;
+    let nodeCache = new Map<string, NodeEntry>();
+    let wallCache = new Map<string, WallEntry>();
+    let netCache = new Map<string, NetEntry>();
+    let unionCache: UnionEntry | null = null;
+    let lastStats: DeriverStats = {
+        joins: 0,
+        outlines: 0,
+        roomNets: 0,
+        fullHit: false,
+    };
+
+    function deriveCore(doc: PlanDocument, stats: DeriverStats): Core {
+        const g = buildWallGraph(doc);
+        const issues: DeriveIssue[] = [...g.issues];
+
+        // Node joins (04 §7.2-3).
+        const nextNodes = new Map<string, NodeEntry>();
+        const ends = new Map<string, { endA: WallEnd; endB: WallEnd }>();
+        const joinsOf = new Map<string, Map<string, WallEnd>>();
+        for (const nodeId of [...g.incident.keys()].sort(cmpId)) {
+            const ids = g.incident.get(nodeId)!;
+            const sig = nodeSignature(nodeId, ids, g);
+            let entry = nodeCache.get(nodeId);
+            if (!entry || entry.sig !== sig) {
+                stats.joins += 1;
+                entry = { sig, joins: computeNodeJoins(nodeId, g) };
+            }
+            nextNodes.set(nodeId, entry);
+            joinsOf.set(nodeId, entry.joins);
+        }
+        for (const [id, info] of g.valid) {
+            const endA = joinsOf.get(info.wall.a)?.get(id);
+            const endB = joinsOf.get(info.wall.b)?.get(id);
+            if (endA && endB) ends.set(id, { endA, endB });
+        }
+
+        // Openings per wall (those on missing or skipped walls are skipped).
+        const openingsByWall = new Map<string, Opening[]>();
+        const skippedOpenings: DeriveIssue[] = [];
+        for (const id of Object.keys(doc.openings).sort(cmpId)) {
+            const o = doc.openings[id]!;
+            if (!g.valid.has(o.wallId) || !ends.has(o.wallId)) {
+                skippedOpenings.push(
+                    issue(
+                        'opening_skipped',
+                        'warning',
+                        { openingId: id, wallId: o.wallId },
+                        [id, o.wallId],
+                    ),
+                );
+                continue;
+            }
+            const list = openingsByWall.get(o.wallId);
+            if (list) list.push(o);
+            else openingsByWall.set(o.wallId, [o]);
+        }
+
+        // Wall outlines and poché (04 §7.2-4).
+        const nextWalls = new Map<string, WallEntry>();
+        const walls: Record<string, DerivedWall> = {};
+        const openings: Record<string, DerivedOpening> = {};
+        const openingIssues: DeriveIssue[] = [];
+        for (const [id, info] of g.valid) {
+            const e = ends.get(id);
+            if (!e) continue;
+            const { endA, endB } = e;
+            const list = openingsByWall.get(id) ?? [];
+            const prev = wallCache.get(id);
+            const prevShape =
+                prev !== undefined &&
+                prev.wall === info.wall &&
+                prev.endA === endA &&
+                prev.endB === endB
+                    ? prev
+                    : null;
+            let entry: WallEntry;
+            if (prevShape && sameRefs(prevShape.openings, list)) {
+                entry = prevShape;
+            } else {
+                stats.outlines += 1;
+                const built = prevShape ?? buildWallShape(id, info, endA, endB);
+                const shape = built.shape;
+                const derived = list
+                    .map((o) => buildOpening(o, info, shape.safeU))
+                    .sort((p, q) => p.u0 - q.u0 || cmpId(p.id, q.id));
+                entry = {
+                    wall: info.wall,
+                    endA,
+                    endB,
+                    shape,
+                    bbox: prevShape?.bbox ?? ringBBox(shape.outline),
+                    fallbackIssue: built.fallbackIssue,
+                    openings: list,
+                    derived,
+                    openingIssues: derived.flatMap((o) => o.issues),
+                    base: {
+                        ...shape,
+                        openings: derived.map((o) => ({
+                            id: o.id,
+                            u0: o.u0,
+                            u1: o.u1,
+                        })),
+                        leftRoomKey: null,
+                        rightRoomKey: null,
+                        exteriorSide: null,
+                        pocheParts: buildPoche(
+                            shape.outline,
+                            derived.map((o) => o.cut),
+                        ),
+                    },
+                };
+            }
+            const cached = entry;
+            nextWalls.set(id, cached);
+            if (cached.fallbackIssue) issues.push(cached.fallbackIssue);
+            for (const o of cached.derived) openings[o.id] = o;
+            openingIssues.push(...cached.openingIssues);
+            walls[id] = { ...cached.base };
+        }
+        issues.push(...skippedOpenings, ...openingIssues);
+
+        const nodes: Record<string, { wallIds: string[] }> = {};
+        for (const nodeId of Object.keys(doc.nodes).sort(cmpId)) {
+            nodes[nodeId] = { wallIds: [...(g.incident.get(nodeId) ?? [])] };
+        }
+
+        const nodeCaps: Record<string, Vec2[]> = {};
+        for (const [nodeId, wallIds] of g.incident) {
+            const node = doc.nodes[nodeId];
+            if (!node) continue;
+            const nodeEnds: WallEnd[] = [];
+            for (const wid of wallIds) {
+                const e = ends.get(wid);
+                if (!e) continue;
+                nodeEnds.push(
+                    g.valid.get(wid)!.wall.a === nodeId ? e.endA : e.endB,
+                );
+            }
+            if (
+                !nodeEnds.some(
+                    (x) => x.joint === 'junction' || x.joint === 'bevel',
+                )
+            ) {
+                continue;
+            }
+            const cap = buildNodeCap(clean({ x: node.x, y: node.y }), nodeEnds);
+            if (cap) nodeCaps[nodeId] = cap;
+        }
+
+        // Union, exterior outline, bbox (04 §7.2-7).
+        const wallIds = Object.keys(walls).sort(cmpId);
+        const outlines = wallIds.map((id) => walls[id]!.outline);
+        let union_ = unionCache;
+        if (!union_ || !sameRefs(union_.outlines, outlines)) {
+            const wallsUnion =
+                outlines.length === 0
+                    ? []
+                    : union(outlines.map((outer) => ({ outer, holes: [] })));
+            let exteriorOutline: Vec2[] | null = null;
+            let best = 0;
+            for (const p of wallsUnion) {
+                const a = Math.abs(signedArea(p.outer));
+                if (a > best) {
+                    best = a;
+                    exteriorOutline = p.outer;
+                }
+            }
+            union_ = {
+                outlines,
+                wallsUnion,
+                exteriorOutline,
+                bbox:
+                    outlines.length > 0 ? bboxOf(outlines.flat()) : emptyBBox(),
+            };
+        }
+        const bbox =
+            outlines.length > 0
+                ? union_.bbox
+                : bboxOf(
+                      Object.values(doc.nodes).map((nd) =>
+                          clean({ x: nd.x, y: nd.y }),
+                      ),
+                  );
+
+        // Room nets, local to each face (04 §7.2-5, §7.2-6).
+        const nextNets = new Map<string, NetEntry>();
+        const localBoxes = wallIds.map((id) => ({
+            outline: walls[id]!.outline,
+            bbox: nextWalls.get(id)!.bbox,
+        }));
+        const resolveNet: RoomNetResolver = (ring, holes) => {
+            const key = ringKey(ring, holes);
+            const faceBox = ringBBox(ring);
+            const clip = localBoxes
+                .filter((w) => boxesOverlap(w.bbox, faceBox))
+                .map((w) => w.outline);
+            let entry = netCache.get(key);
+            if (!entry || !sameRefs(entry.clip, clip)) {
+                stats.roomNets += 1;
+                entry = {
+                    clip,
+                    resolved: resolveRoomNet(
+                        ring,
+                        holes,
+                        clip.map((outer) => ({ outer, holes: [] })),
+                    ),
+                };
+            }
+            nextNets.set(key, entry);
+            return entry.resolved;
+        };
+        const analysis = analyzeRooms(g, union_.wallsUnion, walls, resolveNet);
+        for (const [wallId, sides] of analysis.wallSides) {
+            const w = walls[wallId];
+            if (!w) continue;
+            w.leftRoomKey = sides.left;
+            w.rightRoomKey = sides.right;
+            w.exteriorSide = sides.exteriorSide;
+        }
+
+        nodeCache = nextNodes;
+        wallCache = nextWalls;
+        netCache = nextNets;
+        unionCache = union_;
+        return {
+            walls,
+            openings,
+            nodes,
+            nodeCaps,
+            wallsUnion: union_.wallsUnion,
+            bbox,
+            exteriorOutline: union_.exteriorOutline,
+            issues,
+            rooms: analysis.rooms,
         };
     }
-    issues.push(...skippedOpenings, ...openingIssues);
 
-    const nodes: Record<string, { wallIds: string[] }> = {};
-    for (const nodeId of Object.keys(doc.nodes).sort(cmpId)) {
-        nodes[nodeId] = { wallIds: [...(g.incident.get(nodeId) ?? [])] };
-    }
-
-    const nodeCaps: Record<string, Vec2[]> = {};
-    for (const [nodeId, wallIds] of g.incident) {
-        const node = doc.nodes[nodeId];
-        if (!node) continue;
-        const nodeEnds: WallEnd[] = [];
-        for (const wid of wallIds) {
-            const e = ends.get(wid);
-            if (!e) continue;
-            nodeEnds.push(
-                g.valid.get(wid)!.wall.a === nodeId ? e.endA : e.endB,
-            );
-        }
-        if (
-            !nodeEnds.some((x) => x.joint === 'junction' || x.joint === 'bevel')
-        ) {
-            continue;
-        }
-        const cap = buildNodeCap(clean({ x: node.x, y: node.y }), nodeEnds);
-        if (cap) nodeCaps[nodeId] = cap;
-    }
-
-    const outlines = Object.keys(walls)
-        .sort(cmpId)
-        .map((id) => walls[id]!.outline);
-    const wallsUnion =
-        outlines.length === 0
-            ? []
-            : union(outlines.map((outer) => ({ outer, holes: [] })));
-    let exteriorOutline: Vec2[] | null = null;
-    let best = 0;
-    for (const p of wallsUnion) {
-        const a = Math.abs(signedArea(p.outer));
-        if (a > best) {
-            best = a;
-            exteriorOutline = p.outer;
-        }
-    }
-
-    const bbox =
-        outlines.length > 0
-            ? bboxOf(outlines.flat())
-            : bboxOf(
-                  Object.values(doc.nodes).map((nd) =>
-                      clean({ x: nd.x, y: nd.y }),
-                  ),
-              );
-
-    const analysis = analyzeRooms(g, wallsUnion, walls);
-    const associated = associateRoomMetas(analysis.rooms, doc);
-    issues.push(...associated.issues);
-    const rooms = associated.rooms;
-    const roomIndexByMetaId: Record<string, number> = {};
-    const roomIndexByFaceKey: Record<string, number> = {};
-    rooms.forEach((room, i) => {
-        roomIndexByFaceKey[room.faceKey] = i;
-        if (room.metaId !== null) roomIndexByMetaId[room.metaId] = i;
-    });
-    for (const [wallId, sides] of analysis.wallSides) {
-        const w = walls[wallId];
-        if (!w) continue;
-        w.leftRoomKey = sides.left;
-        w.rightRoomKey = sides.right;
-        w.exteriorSide = sides.exteriorSide;
+    function assemble(doc: PlanDocument, core: Core): DerivedPlan {
+        const associated = associateRoomMetas(core.rooms, doc);
+        const rooms = associated.rooms;
+        const roomIndexByMetaId: Record<string, number> = {};
+        const roomIndexByFaceKey: Record<string, number> = {};
+        rooms.forEach((room, i) => {
+            roomIndexByFaceKey[room.faceKey] = i;
+            if (room.metaId !== null) roomIndexByMetaId[room.metaId] = i;
+        });
+        return {
+            walls: core.walls,
+            rooms,
+            openings: core.openings,
+            nodes: core.nodes,
+            nodeCaps: core.nodeCaps,
+            wallsUnion: core.wallsUnion,
+            roomIndexByMetaId,
+            roomIndexByFaceKey,
+            bbox: core.bbox,
+            exteriorOutline: core.exteriorOutline,
+            issues: [...core.issues, ...associated.issues],
+            docRef: doc,
+        };
     }
 
     return {
-        walls,
-        rooms,
-        openings,
-        nodes,
-        nodeCaps,
-        wallsUnion,
-        roomIndexByMetaId,
-        roomIndexByFaceKey,
-        bbox,
-        exteriorOutline,
-        issues,
-        docRef: doc,
+        derive(doc) {
+            const stats: DeriverStats = {
+                joins: 0,
+                outlines: 0,
+                roomNets: 0,
+                fullHit: false,
+            };
+            const prev = lastDoc;
+            const geometrySame =
+                prev !== null &&
+                lastCore !== null &&
+                prev.nodes === doc.nodes &&
+                prev.walls === doc.walls &&
+                prev.openings === doc.openings;
+            let result: DerivedPlan;
+            if (geometrySame && lastResult && prev.rooms === doc.rooms) {
+                // Whole result (04 §7.2-1).
+                stats.fullHit = true;
+                result =
+                    lastResult.docRef === doc
+                        ? lastResult
+                        : { ...lastResult, docRef: doc };
+            } else if (geometrySame) {
+                // Rooms association only (04 §7.2-2).
+                result = assemble(doc, lastCore!);
+            } else {
+                lastCore = deriveCore(doc, stats);
+                result = assemble(doc, lastCore);
+            }
+            lastDoc = doc;
+            lastResult = result;
+            lastStats = stats;
+            return result;
+        },
+        clear() {
+            lastDoc = null;
+            lastResult = null;
+            lastCore = null;
+            nodeCache = new Map();
+            wallCache = new Map();
+            netCache = new Map();
+            unionCache = null;
+        },
+        stats() {
+            return { ...lastStats };
+        },
     };
+}
+
+/** Derives walls, openings, poché, node caps, rooms and the exterior outline. */
+export function derivePlanGeometry(doc: PlanDocument): DerivedPlan {
+    return createPlanDeriver().derive(doc);
 }

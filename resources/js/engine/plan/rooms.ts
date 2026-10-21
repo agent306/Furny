@@ -123,6 +123,35 @@ export function computeRoomNet(
     };
 }
 
+/** A room net with its label placement (pole of inaccessibility of the net). */
+export interface ResolvedRoomNet {
+    net: RoomNet;
+    label: { point: Vec2; distance: number };
+}
+
+/** Resolves the net of one face (outer ring and hole rings); `null` = dropped. */
+export type RoomNetResolver = (
+    ring: Ring,
+    holes: Ring[],
+) => ResolvedRoomNet | null;
+
+/**
+ * `computeRoomNet` plus `polylabel`. `clip` may be just the wall outlines near
+ * the face: the result equals the one with the global union (04 §7.2-6).
+ */
+export function resolveRoomNet(
+    ring: Ring,
+    holes: Ring[],
+    clip: PolygonWithHoles[],
+): ResolvedRoomNet | null {
+    const net = computeRoomNet(ring, holes, clip);
+    if (!net) return null;
+    return {
+        net,
+        label: polylabel({ outer: net.polygon, holes: net.holes }),
+    };
+}
+
 /** Wall ids of the outer cycle of a face (hole cycles excluded, 04 §4.6). */
 function outerCycleWallIds(pg: PlanarGraph, face: RawFace): string[] {
     const ids = new Set<string>();
@@ -136,6 +165,7 @@ interface Candidate {
     faceIndex: number;
     baseKey: string;
     net: RoomNet;
+    label: { point: Vec2; distance: number };
     face: RawFace;
 }
 
@@ -143,11 +173,15 @@ interface Candidate {
  * Detects the rooms of a plan and the room on each side of every wall.
  * Faces whose net area is below `MIN_ROOM_NET_AREA` are dropped (not reported);
  * a wall side facing a dropped face or the outside has key `null`.
+ * `resolveNet` replaces the default (global `wallsUnion`) net computation, so
+ * a caller can memoise it per face.
  */
 export function analyzeRooms(
     graph: WallGraph,
     wallsUnion: PolygonWithHoles[],
     derivedWalls: Record<string, DerivedWall>,
+    resolveNet: RoomNetResolver = (ring, holes) =>
+        resolveRoomNet(ring, holes, wallsUnion),
 ): RoomAnalysis {
     const segments: Array<{ a: Vec2; b: Vec2; wallId: string }> = [];
     for (const [wallId, info] of graph.valid) {
@@ -160,12 +194,13 @@ export function analyzeRooms(
 
     const candidates: Candidate[] = [];
     faces.forEach((face, faceIndex) => {
-        const net = computeRoomNet(face.ring, face.holes, wallsUnion);
-        if (!net) return;
+        const resolved = resolveNet(face.ring, face.holes);
+        if (!resolved) return;
         candidates.push({
             faceIndex,
             baseKey: faceKeyFor(outerCycleWallIds(pg, face)),
-            net,
+            net: resolved.net,
+            label: resolved.label,
             face,
         });
     });
@@ -193,12 +228,11 @@ export function analyzeRooms(
     }
 
     const rooms: DerivedRoom[] = candidates.map((c) => {
-        const { net, face } = c;
+        const { net, face, label } = c;
         const facePolygon: PolygonWithHoles = {
             outer: face.ring,
             holes: face.holes,
         };
-        const label = polylabel({ outer: net.polygon, holes: net.holes });
         return {
             faceKey: keyOfFace.get(c.faceIndex)!,
             polygon: net.polygon,
