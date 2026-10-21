@@ -3,6 +3,7 @@ import { roundMm } from '../geometry/tolerance';
 import type { Vec2 } from '../geometry/vec2';
 import { derivePlanGeometry, type DerivedPlan } from './derive';
 import type { PlanDocument, Point } from './schema';
+import { canDerive } from './validate';
 
 export interface PlanSummary {
     wallCount: number;
@@ -28,7 +29,19 @@ export function planSummary(
     doc: PlanDocument,
     geom?: DerivedPlan,
 ): PlanSummary {
-    const derived = geom ?? derivePlanGeometry(doc);
+    // Like validatePlan: no derivation for coordinates or crossings it cannot
+    // afford (the plan is invalid then), so the summary has no rooms.
+    const derived =
+        geom ?? (canDerive(doc) ? derivePlanGeometry(doc) : undefined);
+    if (derived === undefined) {
+        return {
+            wallCount: Object.keys(doc.walls).length,
+            roomCount: 0,
+            rooms: [],
+            totalAreaMm2: 0,
+            bbox: null,
+        };
+    }
     const rooms = derived.rooms.map((room) => ({
         id: room.metaId ?? room.faceKey,
         name:

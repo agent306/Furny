@@ -56,6 +56,16 @@ const MESSAGE_KEY_PREFIX = 'plan_editor.issues.';
 /** Float noise allowance for the opening bounds test (mm). */
 export const BOUNDS_TOL = 1e-6;
 const CACHE_SIZE = 4;
+/**
+ * Work budget for walls that cross without sharing a node (deviation from
+ * 03 §1.1, recorded for spec 19). Deriving a plan splits every crossing, so
+ * its cost grows with them: a plan with more than `MAX_CROSSINGS` is not
+ * derived (room anchors, `planSummary`) and gets a `plan.too_large` error of
+ * kind `crossings`. At most `MAX_CROSSING_ISSUES` `walls_intersect` warnings
+ * are listed, the first by wall id.
+ */
+export const MAX_CROSSINGS = 2000;
+export const MAX_CROSSING_ISSUES = 200;
 /** mm; collinear walls overlapping by no more than this are not reported. */
 const MIN_OVERLAP = 1;
 
@@ -345,6 +355,12 @@ function openingTooTall(doc: PlanDocument): Issue[] {
     return out;
 }
 
+/** Capped `walls_intersect` issues, and the crossings found (the scan stops past `MAX_CROSSINGS`). */
+interface Crossings {
+    issues: Issue[];
+    count: number;
+}
+
 /**
  * Walls that cross without sharing a node (04 §6.4: a `point` intersection
  * strictly inside both walls; params `{ x, y }`) and walls that overlap along
@@ -355,14 +371,17 @@ function openingTooTall(doc: PlanDocument): Issue[] {
  * interior), collinear walls running opposite ways from a shared node, and
  * the same unordered node pair (that is `wall_duplicate`).
  */
-function wallsIntersect(placed: Map<string, Placed>): Issue[] {
-    const walls = [...placed.values()].filter(
-        (w) =>
-            w.a !== w.b &&
-            Number.isFinite(w.length) &&
-            w.length >= MIN_WALL_LENGTH,
-    );
-    if (walls.length < 2) return [];
+function wallsIntersect(placed: Map<string, Placed>): Crossings {
+    // Sorted by id, so the scan (and where it stops) never depends on key order.
+    const walls = [...placed.values()]
+        .filter(
+            (w) =>
+                w.a !== w.b &&
+                Number.isFinite(w.length) &&
+                w.length >= MIN_WALL_LENGTH,
+        )
+        .sort((p, q) => cmpId(p.id, q.id));
+    if (walls.length < 2) return { issues: [], count: 0 };
     const index = new Flatbush(walls.length);
     for (const w of walls) {
         index.add(
@@ -377,7 +396,8 @@ function wallsIntersect(placed: Map<string, Placed>): Issue[] {
     const interior = (param: number, length: number): boolean =>
         param * length > EPS && (1 - param) * length > EPS;
     const out: Issue[] = [];
-    walls.forEach((w, i) => {
+    let count = 0;
+    walls.some((w, i) => {
         const near = index.search(
             Math.min(w.p.x, w.q.x) - EPS,
             Math.min(w.p.y, w.q.y) - EPS,
@@ -401,6 +421,7 @@ function wallsIntersect(placed: Map<string, Placed>): Issue[] {
             if (hit.kind === 'overlap') {
                 const overlap = (hit.t1 - hit.t0) * w.length;
                 if (overlap > MIN_OVERLAP) {
+                    count += 1;
                     out.push(
                         issue(
                             'plan.walls_intersect',
@@ -409,6 +430,7 @@ function wallsIntersect(placed: Map<string, Placed>): Issue[] {
                             ids,
                         ),
                     );
+                    if (count > MAX_CROSSINGS) return true;
                 }
                 continue;
             }
@@ -418,6 +440,7 @@ function wallsIntersect(placed: Map<string, Placed>): Issue[] {
                 !interior(hit.u, other.length)
             )
                 continue;
+            count += 1;
             out.push(
                 issue(
                     'plan.walls_intersect',
@@ -426,13 +449,16 @@ function wallsIntersect(placed: Map<string, Placed>): Issue[] {
                     ids,
                 ),
             );
+            if (count > MAX_CROSSINGS) return true;
         }
+        return false;
     });
-    return out.sort(
+    out.sort(
         (p, q) =>
             cmpId(p.entityIds[0]!, q.entityIds[0]!) ||
             cmpId(p.entityIds[1]!, q.entityIds[1]!),
     );
+    return { issues: out.slice(0, MAX_CROSSING_ISSUES), count };
 }
 
 function roomAnchors(doc: PlanDocument, geom: DerivedPlan): Issue[] {
@@ -453,7 +479,7 @@ function roomAnchors(doc: PlanDocument, geom: DerivedPlan): Issue[] {
     return out;
 }
 
-function tooLarge(doc: PlanDocument): Issue[] {
+function tooLarge(doc: PlanDocument, crossings: number): Issue[] {
     const out: Issue[] = [];
     const check = (kind: string, count: number, max: number): void => {
         if (count > max)
@@ -465,6 +491,7 @@ function tooLarge(doc: PlanDocument): Issue[] {
     check('openings', Object.keys(doc.openings).length, MAX_OPENINGS);
     check('placements', Object.keys(doc.placements).length, MAX_PLACEMENTS);
     check('fixtures', Object.keys(doc.fixtures).length, MAX_FIXTURES);
+    check('crossings', crossings, MAX_CROSSINGS);
     const json = JSON.stringify(doc);
     // A UTF-16 unit is at most three UTF-8 bytes: skip the exact count when it cannot matter.
     if (json.length * 3 > MAX_JSON_BYTES) {
@@ -559,12 +586,15 @@ function valuesInRange(doc: PlanDocument): {
 function runValidation(doc: PlanDocument, geom?: DerivedPlan): Issue[] {
     const placed = placeWalls(doc);
     const ranges = valuesInRange(doc);
-    // Derivation is only attempted for coordinates it can be trusted with:
-    // untrusted documents (CLI input) must not be able to stall validation.
+    const crossings = wallsIntersect(placed);
+    // Derivation is only attempted for coordinates it can be trusted with and
+    // a crossing count it can afford: untrusted documents (CLI input) must
+    // not be able to stall validation.
+    const affordable = ranges.coordinatesOk && crossings.count <= MAX_CROSSINGS;
     const derived =
         Object.keys(doc.rooms).length === 0
             ? null
-            : (geom ?? (ranges.coordinatesOk ? derivePlanGeometry(doc) : null));
+            : (geom ?? (affordable ? derivePlanGeometry(doc) : null));
     return [
         ...nodeMissing(doc),
         ...wallDegenerate(placed),
@@ -574,11 +604,23 @@ function runValidation(doc: PlanDocument, geom?: DerivedPlan): Issue[] {
         ...openingBounds(doc, placed),
         ...openingOverlap(doc),
         ...openingTooTall(doc),
-        ...wallsIntersect(placed),
+        ...crossings.issues,
         ...(derived ? roomAnchors(doc, derived) : []),
-        ...tooLarge(doc),
+        ...tooLarge(doc, crossings.count),
         ...ranges.issues,
     ];
+}
+
+/**
+ * Whether `derivePlanGeometry(doc)` is affordable for this document: every
+ * coordinate is finite and within +-MAX_COORD, and at most `MAX_CROSSINGS`
+ * walls cross. `validatePlan` and `planSummary` skip derivation otherwise.
+ */
+export function canDerive(doc: PlanDocument): boolean {
+    return (
+        valuesInRange(doc).coordinatesOk &&
+        wallsIntersect(placeWalls(doc)).count <= MAX_CROSSINGS
+    );
 }
 
 /** Least recently used last. Holds the results for the last four documents. */

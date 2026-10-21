@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { makeCrossingPlan } from '../../../resources/js/engine/plan/testing/fixtures';
 import { seedCatalog } from '../../../resources/js/engine/testing/seedCatalog';
 import { dispatch, type CliResponse } from '../commands';
 import { get, loadFurniture, set } from './fixtureSources';
@@ -162,5 +163,23 @@ describe('work budget of validate-furniture and compute-bom', () => {
             ok: false,
             error: { code: 'invalid_input' },
         });
+    });
+});
+
+describe('work budget of validate-plan and plan-summary', () => {
+    const plan = makeCrossingPlan(2000);
+
+    it('validate-plan answers for 2000 mutually crossing walls in under 2 s', () => {
+        const { response, ms } = timed('validate-plan', { document: plan });
+        expect(ms).toBeLessThan(2000);
+        expect(get(response, 'result.valid')).toBe(false);
+        expect(issueCodes(response)).toContain('plan.too_large');
+        expect(get(response, 'result.summary.roomCount')).toBe(0);
+    });
+
+    it('plan-summary answers for 2000 mutually crossing walls in under 2 s', () => {
+        const { response, ms } = timed('plan-summary', { document: plan });
+        expect(ms).toBeLessThan(2000);
+        expect(get(response, 'result.wallCount')).toBe(2000);
     });
 });

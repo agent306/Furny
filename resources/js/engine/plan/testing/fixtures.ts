@@ -313,3 +313,34 @@ export function makeDirtyPlan(newId: NewId = testIds()): PlanDocument {
 
     return doc;
 }
+
+/**
+ * `count` walls that all cross each other without sharing a node: `count / 2`
+ * horizontal against `count / 2` vertical, so `(count / 2)^2` crossings. Has
+ * no rooms. Test-only, for the work budget of `validatePlan`.
+ */
+export function makeCrossingPlan(
+    count: number,
+    newId: NewId = testIds(),
+): PlanDocument {
+    const doc = emptyPlan();
+    const half = Math.floor(count / 2);
+    const extent = (half + 1) * 40;
+    for (let i = 1; i <= half; i += 1) {
+        const pos = i * 40;
+        for (const [ax, ay, bx, by] of [
+            [0, pos, extent, pos],
+            [pos, 0, pos, extent],
+        ] as const) {
+            addWall(
+                doc,
+                newId,
+                addNode(doc, newId, ax, ay),
+                addNode(doc, newId, bx, by),
+                115,
+                'interior',
+            );
+        }
+    }
+    return doc;
+}
