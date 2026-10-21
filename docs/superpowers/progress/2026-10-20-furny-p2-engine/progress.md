@@ -268,3 +268,8 @@ Task 47: review 972a6cc: spec ✅ (08 §6.3 step-by-step, fixtures hand-recomput
 Carry P7 (QuoteCalculator PHP port): mirror unknown taxRateId → error (or document upstream validation in tests/fixtures/quotes/README.md); parseQuantityMilli regex needs \z / D modifier in PHP (no trailing-newline match); BigInt '/' truncates — only equal to floor because discount ≤0 / others ≥0 is validated upstream; the test pins the exact fixture file list (P7 additions must edit it).
 Task 47: minor (deferred): no parse tests for '+1', ' 1', '.5', '1\n'; unreachable `?? ''` (quoteTotals.ts:330).
 Task 47: complete (commits 4df6418..972a6cc, review clean)
+Task 48: impl c224f0d (DONE; 72 CLI tests, 5184 full; 33 fixtures {command,request,response} ~1.5 MB; .gitattributes *.csv -text for CRLF; dispatch optional {newId}).
+Task 48: review c224f0d: spec ✅ (01 §5.4 envelope + exit codes verified by hand on built bundle; zod at boundary; 16 §5.2/§13.1 fixture list complete; C2/C10/I15/E4 met), quality Approved. Decisions accepted: fixture {command,request,response}; dispatch optional {newId}; .gitattributes csv -text; catalog embedded per fixture.
+Carry P5 (PHP engine contract tests): consume tests/fixtures/engine-cli/* (do not re-create); ignore the extra `command` key; PHP must log engine_error messages, never show them to users; the six-furniture validate-furniture contract is built from the compute-bom request documents.
+Task 48: minor (deferred): no test pins plan-summary == validate-plan summary (after removeOrphanNodes); details.issues uncapped.
+Task 48: complete (commits 8cf8b92..c224f0d, review clean)
