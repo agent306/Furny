@@ -19,6 +19,10 @@ const { isCurrentUrl, isCurrentOrParentUrl } = useCurrentUrl();
 const tabs = computed(() => props.items.filter((item) => item.tab === true));
 
 function isActive(item: NavItem): boolean {
+    if (item.match !== undefined) {
+        return item.match.some((path) => isCurrentOrParentUrl(path));
+    }
+
     return item.exact
         ? isCurrentUrl(item.href)
         : isCurrentOrParentUrl(item.href);

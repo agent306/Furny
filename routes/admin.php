@@ -2,6 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\Account\AvatarController;
+use App\Http\Controllers\Admin\Account\PreferencesController;
+use App\Http\Controllers\Admin\Account\ProfileController;
+use App\Http\Controllers\Admin\Account\SecurityController;
 use App\Http\Controllers\Admin\Account\TwoFactorController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\StaffController;
@@ -15,6 +19,15 @@ Route::get('/', DashboardController::class)->name('dashboard');
 // The second factor of the signed-in staff member (13 §5.10). Exempt from `2fa.enrolled` (EnsureTwoFactorEnrolled::EXEMPT),
 // or an owner or admin who has not enrolled could not reach the page that enrols them.
 Route::get('account/two-factor', [TwoFactorController::class, 'show'])->name('security.two-factor');
+
+// The staff member's own account pages (11 §18), open to any staff. The second factor has its page above.
+Route::prefix('account')->name('account.')->group(function (): void {
+    Route::get('profile', [ProfileController::class, 'show'])->name('profile');
+    Route::put('avatar', [AvatarController::class, 'update'])->name('avatar.update');
+    Route::get('security', [SecurityController::class, 'show'])->name('security');
+    Route::get('preferences', [PreferencesController::class, 'show'])->name('preferences');
+    Route::put('preferences', [PreferencesController::class, 'update'])->name('preferences.update');
+});
 
 // Staff management (11 §7, 13 §5.9): `staff.manage`; everything that concerns an owner also needs the owner gate, which
 // the requests and the actions ask. Invitations are limited together, invitations and resends (13 §10).

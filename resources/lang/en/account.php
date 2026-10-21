@@ -100,5 +100,138 @@ return [
         'profile_updated' => 'Your details were saved.',
         'phone_verified' => 'Phone number verified.',
         'sessions_revoked' => '{count, plural, =0 {No other devices were signed in.} one {Signed out # other device.} other {Signed out # other devices.}}',
+        'avatar_updated' => 'Photo updated.',
+        'avatar_removed' => 'Photo removed.',
+        'preferences_saved' => 'Preferences saved.',
+    ],
+
+    // 10 §13.4: the refusals of the preferences form.
+    'errors' => [
+        'length_unit' => 'Choose a length unit that fits the measurement system.',
+        'timezone' => 'Choose a valid time zone.',
+    ],
+
+    // 10 §13.1, 11 §18: the sections of the account area.
+    'nav' => [
+        'label' => 'Account sections',
+        'profile' => 'Profile',
+        'security' => 'Security',
+        'preferences' => 'Preferences',
+        'two_factor' => 'Two-factor',
+    ],
+
+    // 10 §13.2: the page of the details.
+    'profile' => [
+        'title' => 'Profile',
+        'description' => 'Your photo and the details we reach you with.',
+        'photo' => [
+            'title' => 'Photo',
+            'description' => 'Shown next to your name.',
+            'upload_label' => 'Change photo',
+            'upload_hint' => 'JPG, PNG or WebP, up to {max}.',
+            'remove' => 'Remove photo',
+        ],
+        'details' => [
+            'title' => 'Your details',
+            'description' => 'Your name, and the email address we write to.',
+            'name' => 'Full name',
+            'email' => 'Email address',
+            'email_hint' => "We'll send a verification link to the new address.",
+            'marketing_opt_in' => 'Send me occasional updates and offers',
+        ],
+        'phone' => [
+            'title' => 'Phone number',
+            'description' => 'We send codes and order updates to this number.',
+            'staff_description' => 'Used for WhatsApp notifications and for codes that confirm it is you.',
+            'none' => 'No phone number yet.',
+            'verified' => 'Verified',
+            'not_verified' => 'Not verified',
+            'add' => 'Add a phone number',
+            'verify' => 'Verify',
+            'unavailable' => "Codes can't be sent right now, so a phone number can't be verified. Try again later.",
+        ],
+        'email_verification' => [
+            'title' => 'Email verification',
+            'description' => 'Your address is not verified yet, so some actions stay locked.',
+            'resend' => 'Resend link',
+        ],
+    ],
+
+    // 10 §13.3: the page of the sign-in methods and the devices.
+    'security' => [
+        'title' => 'Security',
+        'description' => 'How you sign in, and where you are signed in.',
+        'password' => [
+            'title' => 'Password',
+            'set_title' => 'Set a password',
+            'description' => 'Choose a password that you use nowhere else.',
+            'set_description' => 'You sign in without a password today. Set one to also sign in with your email.',
+            'current' => 'Current password',
+            'new' => 'New password',
+            'confirmation' => 'Confirm new password',
+            'save' => 'Update password',
+            'set' => 'Set password',
+        ],
+        'google' => [
+            'title' => 'Google',
+            'description' => 'Sign in with your Google account.',
+            'connected' => 'Connected',
+            'not_connected' => 'Not connected',
+            'disconnect' => 'Disconnect',
+            'connect' => 'Connect Google',
+        ],
+        'phone' => [
+            'title' => 'Phone sign-in',
+            'description' => 'Sign in with a code sent to your phone.',
+            'on' => 'On: {phone}',
+            'off' => 'Off',
+            'manage' => 'Manage your phone number',
+        ],
+        'devices' => [
+            'title' => 'Devices',
+            'description' => 'The devices that are signed in to your account.',
+            'this_device' => 'This device',
+            'last_active' => 'Active {when}',
+            'method' => '{method, select, password {Password} otp {Phone code} google {Google} remember {Remembered} other {Signed in}}',
+            'sign_out' => 'Sign out',
+            'sign_out_label' => 'Sign out {device}',
+            'sign_out_others' => 'Sign out all other devices',
+            'sign_out_others_title' => 'Sign out all other devices?',
+            'sign_out_others_body' => 'Every device but this one is signed out. They sign in again with their password or a code.',
+        ],
+    ],
+
+    // 10 §13.4: the page of the units and the time zone.
+    'preferences' => [
+        'title' => 'Preferences',
+        'description' => 'How lengths and times are shown to you.',
+        'units' => [
+            'title' => 'Measurement system',
+            'description' => 'The system your drawings and sizes are shown in.',
+            'metric' => 'Metric',
+            'metric_hint' => 'Millimetres, centimetres and metres',
+            'imperial' => 'Imperial',
+            'imperial_hint' => 'Feet and inches',
+        ],
+        'length_unit' => [
+            'label' => 'Editing length unit',
+            'hint' => 'The unit length fields start in.',
+            'mm' => 'Millimetres (mm)',
+            'cm' => 'Centimetres (cm)',
+            'm' => 'Metres (m)',
+            'ftin' => 'Feet and inches (ft-in)',
+            'in' => 'Inches (in)',
+        ],
+        'timezone' => [
+            'title' => 'Time zone',
+            'description' => 'Dates and times are shown in this time zone.',
+            'label' => 'Time zone',
+            'search' => 'Search time zones',
+            'empty' => 'No time zone matches.',
+        ],
+        'appearance' => [
+            'title' => 'Appearance',
+            'description' => 'Saved on this device.',
+        ],
     ],
 ];

@@ -54,8 +54,10 @@ return [
     'loading' => 'Loading',
 
     'nav' => [
+        'account' => 'Account',
         'dashboard' => 'Dashboard',
         'home' => 'Home',
+        'my_account' => 'My account',
         'staff' => 'Staff',
         'groups' => [
             'administration' => 'Administration',

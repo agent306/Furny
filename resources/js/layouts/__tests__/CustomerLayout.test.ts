@@ -239,4 +239,21 @@ describe('MobileTabBar in CustomerLayout (15 §7.1, §14 item 6)', () => {
         expect(link.attributes('aria-current')).toBe('page');
         expect(link.classes()).toContain('text-primary');
     });
+
+    it('has the Account tab, current on every page of the account area, and not in the header links', () => {
+        page.url = '/account/security';
+        const wrapper = layout();
+        const tabs = wrapper.findAll('[data-test="mobile-tab-bar"] a');
+        const account = tabs.find((tab) => tab.text() === 'Account');
+
+        expect(account?.attributes('href')).toBe('/account/profile');
+        expect(account?.attributes('aria-current')).toBe('page');
+        expect(tabs[0]?.attributes('aria-current')).toBeUndefined();
+        expect(
+            wrapper
+                .get('nav[aria-label="Main"]')
+                .findAll('a')
+                .map((link) => link.text()),
+        ).toEqual(['Dashboard']);
+    });
 });

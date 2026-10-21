@@ -28,6 +28,23 @@ export type PresetCategory = 'wardrobe' | 'kitchen' | 'storage' | 'shelving' | '
 }
 namespace Identity {
 namespace Data {
+export type AccountPreferencesProps = {
+unitSystem: App.Domain.Identity.Enums.UnitSystem,
+lengthUnit: App.Domain.Identity.Enums.LengthUnit,
+timezone: string,
+timezones: string[],
+};
+export type AccountProfileProps = {
+user: App.Domain.Identity.Data.AuthUserData,
+marketingOptIn: boolean,
+otpChannels: App.Domain.Identity.Enums.OtpChannel[],
+};
+export type AccountSecurityProps = {
+hasPassword: boolean,
+googleLinked: boolean,
+googleEnabled: boolean,
+sessions: App.Domain.Identity.Data.SessionData[],
+};
 export type AuthUserData = {
 id: string,
 type: App.Domain.Identity.Enums.UserType,
@@ -47,6 +64,14 @@ locale: string,
 onboarded: boolean,
 hasPassword: boolean,
 twoFactorEnabled: boolean,
+};
+export type SessionData = {
+id: string,
+uaSummary: string,
+ipMasked: string,
+lastActiveAt: string,
+isCurrent: boolean,
+method: string,
 };
 export type StaffInvitationRowData = {
 id: string,

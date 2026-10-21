@@ -96,6 +96,38 @@ describe('UserMenu (15 §9.31)', () => {
     });
 });
 
+describe('UserMenu account link (15 §9.31)', () => {
+    it('links a customer to their profile as Account', async () => {
+        const wrapper = mount(UserMenu, { attachTo: document.body });
+
+        await open(wrapper.get('[data-test="user-menu"]'));
+
+        const link = document.body.querySelector('[data-test="account-link"]');
+
+        expect(link?.getAttribute('href')).toBe('/account/profile');
+        expect(link?.textContent?.trim()).toBe('Account');
+    });
+
+    it('links staff to their profile as My account', async () => {
+        page.props.auth = {
+            user: {
+                type: 'staff',
+                name: 'Sam',
+                email: 's@x.test',
+                avatarUrl: null,
+            },
+        };
+        const wrapper = mount(UserMenu, { attachTo: document.body });
+
+        await open(wrapper.get('[data-test="user-menu"]'));
+
+        const link = document.body.querySelector('[data-test="account-link"]');
+
+        expect(link?.getAttribute('href')).toBe('/admin/account/profile');
+        expect(link?.textContent?.trim()).toBe('My account');
+    });
+});
+
 describe('ThemeToggle (15 §9.31, §11)', () => {
     it('lists Light, Dark and System with the current one selected', async () => {
         const wrapper = mountToggle();

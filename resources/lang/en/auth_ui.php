@@ -69,8 +69,8 @@ return [
         'email' => 'Email address',
         'password' => 'Password',
         'password_confirmation' => 'Confirm password',
-        'terms_before' => 'I accept the',
-        'terms_and' => 'and the',
+        // One message, the tags mark the two links (see staff.accept.terms).
+        'terms' => 'I accept the <terms>Terms of service</terms> and the <privacy>Privacy policy</privacy>',
         'marketing_opt_in' => 'Send me occasional updates and offers',
         'submit' => 'Create account',
         'have_account' => 'Already have an account?',

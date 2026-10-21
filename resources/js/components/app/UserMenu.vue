@@ -17,12 +17,18 @@ import {
 import { useI18n } from '@/composables/useI18n';
 import { ICONS } from '@/lib/icons';
 import { logout } from '@/routes';
+import { profile as staffProfile } from '@/routes/admin/account';
+import { profile as customerProfile } from '@/routes/customer/account';
 
-// 15 §9.31: the account menu. Account and Help links join in Task 34; today it
-// carries who is signed in, the theme and log out.
+// 15 §9.31: the account menu: who is signed in, the account link (customer: Account; staff: My account), the theme and
+// log out. The Help link joins with the customer help page.
 const { t } = useI18n();
 const page = usePage();
 const user = computed(() => page.props.auth?.user ?? null);
+const isStaff = computed(() => user.value?.type === 'staff');
+const accountHref = computed(() =>
+    isStaff.value ? staffProfile.url() : customerProfile.url(),
+);
 
 // A fresh session must not see cached pages of the previous one.
 function onLogout(): void {
@@ -50,6 +56,26 @@ function onLogout(): void {
                 </p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+            <DropdownMenuItem as-child class="min-h-11 lg:min-h-0">
+                <Link
+                    :href="accountHref"
+                    class="w-full cursor-pointer"
+                    data-test="account-link"
+                >
+                    <component
+                        :is="ICONS.user"
+                        class="size-4"
+                        aria-hidden="true"
+                    />
+                    {{
+                        t(
+                            isStaff
+                                ? 'common.nav.my_account'
+                                : 'common.nav.account',
+                        )
+                    }}
+                </Link>
+            </DropdownMenuItem>
             <DropdownMenuSub>
                 <DropdownMenuSubTrigger
                     class="min-h-11 lg:min-h-0"

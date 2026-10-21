@@ -5,14 +5,26 @@ import { ICONS } from '@/lib/icons';
 import type { NavGroup } from '@/types';
 
 describe('navigation data', () => {
-    it('customerNav is the dashboard, a tab, from Wayfinder', () => {
-        expect(customerNav).toHaveLength(1);
+    it('customerNav is the dashboard and the account tab, from Wayfinder', () => {
+        expect(customerNav).toHaveLength(2);
         expect(customerNav[0]).toMatchObject({
             key: 'dashboard',
             href: '/dashboard',
             exact: true,
             tab: true,
             tabLabelKey: 'common.nav.home',
+        });
+        // Account is a tab only (15 §7.1), active on every page of the account area.
+        expect(customerNav[1]).toMatchObject({
+            key: 'account',
+            href: '/account/profile',
+            tab: true,
+            headerHidden: true,
+            match: [
+                '/account/profile',
+                '/account/security',
+                '/account/preferences',
+            ],
         });
     });
 

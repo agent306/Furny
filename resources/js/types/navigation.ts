@@ -26,6 +26,10 @@ export type NavItem = {
     exact?: boolean;
     /** Appears in the mobile tab bar (customer app, < 768 px). */
     tab?: boolean;
+    /** Left out of the header links and the tablet menu: the item is reached through the account menu there. */
+    headerHidden?: boolean;
+    /** The item is also active on these paths and below them (the pages of the account area). */
+    match?: readonly string[];
 };
 
 export type NavGroup = {

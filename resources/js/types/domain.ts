@@ -24,3 +24,9 @@ export type StaffRoleOption = {
 
 export type MediaData = App.Domain.Shared.Data.MediaData;
 export type UploadPurpose = App.Domain.Shared.Enums.UploadPurpose;
+
+export type AuthUserData = App.Domain.Identity.Data.AuthUserData;
+export type SessionData = App.Domain.Identity.Data.SessionData;
+export type OtpChannel = App.Domain.Identity.Enums.OtpChannel;
+export type UnitSystem = App.Domain.Identity.Enums.UnitSystem;
+export type LengthUnit = App.Domain.Identity.Enums.LengthUnit;

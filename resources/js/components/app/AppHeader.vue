@@ -35,8 +35,8 @@ import type { BreadcrumbItem as Crumb, NavItem } from '@/types';
 // account menu. The admin top bar carries the sidebar trigger, the breadcrumbs,
 // the bell, the theme toggle and the account menu.
 //
-// The account menu stays on phones too: until the account pages (Task 34) the
-// tab bar has no Account tab, so it is the only way to log out there.
+// The account menu stays on phones too, although 15 §7 draws none there: the customer tab bar has its Account tab now,
+// but nothing on a phone offers log out or the theme except this menu (Task 34 ruling).
 const props = withDefaults(
     defineProps<{
         variant: 'customer' | 'admin';
@@ -51,6 +51,9 @@ const props = withDefaults(
 const { t } = useI18n();
 const { isCurrentUrl, isCurrentOrParentUrl } = useCurrentUrl();
 
+const headerNav = computed(() =>
+    props.nav.filter((item) => item.headerHidden !== true),
+);
 const pageTitle = computed(() => props.breadcrumbs.at(-1)?.title ?? '');
 
 function isActive(item: NavItem): boolean {
@@ -94,7 +97,7 @@ function isActive(item: NavItem): boolean {
                     </SheetHeader>
                     <nav :aria-label="t('a11y.main_navigation')" class="px-2">
                         <ul class="space-y-1">
-                            <li v-for="item in nav" :key="item.key">
+                            <li v-for="item in headerNav" :key="item.key">
                                 <Link
                                     :href="item.href"
                                     :aria-current="
@@ -133,7 +136,7 @@ function isActive(item: NavItem): boolean {
                 class="ml-6 hidden h-full lg:block"
             >
                 <ul class="flex h-full items-stretch gap-6">
-                    <li v-for="item in nav" :key="item.key" class="flex">
+                    <li v-for="item in headerNav" :key="item.key" class="flex">
                         <Link
                             :href="item.href"
                             :aria-current="isActive(item) ? 'page' : undefined"

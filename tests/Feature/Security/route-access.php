@@ -100,9 +100,22 @@ return [
 
     // Customer app (10 §2).
     'customer.dashboard' => $entry('customer'),
+    // The account pages (10 §13): open to a customer who has not onboarded (EnsureCustomerOnboarded::EXEMPT).
+    'customer.account.profile' => $entry('customer'),
+    'customer.account.avatar.update' => $entry('customer'),
+    'customer.account.security' => $entry('customer'),
+    'customer.account.preferences' => $entry('customer'),
+    'customer.account.preferences.update' => $entry('customer'),
 
     // Admin app (11 §2).
     'admin.dashboard' => $entry('staff'),
+
+    // The staff member's own account pages (11 §18): any staff.
+    'admin.account.profile' => $entry('staff'),
+    'admin.account.avatar.update' => $entry('staff'),
+    'admin.account.security' => $entry('staff'),
+    'admin.account.preferences' => $entry('staff'),
+    'admin.account.preferences.update' => $entry('staff'),
 
     // The page of the staff member's second factor (13 §5.10): any staff, and exempt from `2fa.enrolled`.
     'admin.security.two-factor' => $entry('staff'),
