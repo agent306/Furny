@@ -227,6 +227,58 @@ describe('PhoneVerifyDialog (10 §13.2.3)', () => {
         );
     });
 
+    it('does not take a throttled try for a verified number: the dialog stays and says why', async () => {
+        answerWith('success', { channel: 'sms', maskedPhone: '+91******3210' });
+        const wrapper = dialog();
+        await flushPromises();
+        button('send-code-button')?.click();
+        await flushPromises();
+        answerWith({ rate_limited: '42' });
+
+        await type('123456');
+        await flushPromises();
+
+        expect(wrapper.emitted('verified')).toBeUndefined();
+        expect(wrapper.emitted('update:open')).toBeUndefined();
+        expect(q('[data-test="code-step"]')).not.toBeNull();
+        expect(q('#dialog-wait')?.textContent).toBe(
+            'Too many attempts. Try again in 42 seconds.',
+        );
+    });
+
+    it('does not take a refusal that came back as a toast for a success either', async () => {
+        answerWith('success', { channel: 'sms', maskedPhone: '+91******3210' });
+        const wrapper = dialog();
+        await flushPromises();
+        button('send-code-button')?.click();
+        await flushPromises();
+        // A redirect with an error flash and no errors: Inertia calls it a success.
+        answerWith('success', {
+            error: 'Too many attempts. Try again in 60 seconds.',
+        });
+
+        await type('123456');
+        await flushPromises();
+
+        expect(wrapper.emitted('verified')).toBeUndefined();
+        expect(wrapper.emitted('update:open')).toBeUndefined();
+        expect(q('[data-test="code-step"]')).not.toBeNull();
+    });
+
+    it('does not move to the code step when the send came back as a toast', async () => {
+        answerWith('success', {
+            error: 'Too many attempts. Try again in 60 seconds.',
+        });
+        dialog();
+        await flushPromises();
+
+        button('send-code-button')?.click();
+        await flushPromises();
+
+        expect(q('[data-test="phone-step"]')).not.toBeNull();
+        expect(q('[data-test="code-step"]')).toBeNull();
+    });
+
     it('holds the resend button for 60 seconds after a send', async () => {
         answerWith('success', { channel: 'sms', maskedPhone: '+91******3210' });
         dialog();

@@ -10,9 +10,9 @@ afterEach(() => {
     vi.useRealTimers();
 });
 
-function countdown(seconds?: () => number) {
+function countdown(seconds?: () => number, key?: () => unknown) {
     const scope = effectScope();
-    const result = scope.run(() => useCountdown(seconds));
+    const result = scope.run(() => useCountdown(seconds, key));
 
     if (result === undefined) {
         throw new Error('The scope did not run.');
@@ -52,6 +52,21 @@ describe('useCountdown (13 §4.4)', () => {
         seconds.value = 20;
         await vi.advanceTimersByTimeAsync(0);
         expect(remaining.value).toBe(20);
+    });
+
+    it('starts over when its key changes, although the wait is the same number', async () => {
+        const key = ref(1);
+        const { remaining } = countdown(
+            () => 60,
+            () => key.value,
+        );
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(remaining.value).toBe(0);
+
+        key.value = 2;
+        await vi.advanceTimersByTimeAsync(0);
+        expect(remaining.value).toBe(60);
     });
 
     it('can be restarted for a wait that begins on an event', async () => {

@@ -4,8 +4,13 @@ import type { Ref } from 'vue';
 /**
  * A wait counted down once a second (13 §4.4: "resend in 60 s"). `seconds` is read again whenever it changes, and
  * `restart()` starts the wait over from a number of seconds, for a wait that begins on an event (a code was sent).
+ * `key` names the event the wait belongs to: when it changes the wait starts over from `seconds()` even if that is
+ * the same number as before (every resend answers 60).
  */
-export function useCountdown(seconds: () => number = () => 0): {
+export function useCountdown(
+    seconds: () => number = () => 0,
+    key: () => unknown = () => null,
+): {
     remaining: Ref<number>;
     restart: (from: number) => void;
 } {
@@ -36,7 +41,13 @@ export function useCountdown(seconds: () => number = () => 0): {
         }
     }
 
-    watch(seconds, restart, { immediate: true });
+    watch(
+        () => [seconds(), key()] as const,
+        ([from]) => restart(from),
+        {
+            immediate: true,
+        },
+    );
 
     onScopeDispose(stop);
 

@@ -11,6 +11,7 @@ use App\Domain\Identity\Models\User;
 use App\Domain\Identity\Otp\OtpChallenge;
 use App\Domain\Identity\Otp\OtpChannelResolver;
 use App\Domain\Identity\Otp\OtpException;
+use App\Exceptions\RecentAuthenticationRequired;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\ReauthenticateRequest;
 use App\Support\Auth\AuthPageProps;
@@ -51,6 +52,13 @@ final class ReauthenticateController extends Controller
     public function store(ReauthenticateRequest $request, SendOtp $send, VerifyOtp $verify): RedirectResponse
     {
         $user = $request->userOrFail();
+
+        // For users who have no password to confirm; the others confirm it (13 §6.4). Otherwise a stolen session could
+        // be confirmed with a code, without the password.
+        if ($user->hasPassword()) {
+            throw new RecentAuthenticationRequired;
+        }
+
         $phone = $this->verifiedPhone($user);
 
         if ($phone === null) {
@@ -58,8 +66,7 @@ final class ReauthenticateController extends Controller
         }
 
         if ($request->step() === 'send') {
-            $token = $request->input('cf_turnstile_response');
-            $result = $send->handle($phone, OtpPurpose::Login, $request->ip(), is_string($token) ? $token : null);
+            $result = $send->handle($phone, OtpPurpose::Login, $request->ip(), $request->captchaToken());
 
             OtpChallenge::start($result, OtpPurpose::Login, OtpChallenge::REAUTHENTICATE);
             Inertia::flash('info', trans_icu('auth_ui.reauth.sent', ['channel' => $result->channel->value, 'phone' => $result->maskedPhone]));

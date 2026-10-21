@@ -10,6 +10,8 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Testing\TestResponse;
 use Spatie\Activitylog\Models\Activity;
+use Tests\Support\InertiaRequest;
+use Tests\Support\SessionStamp;
 
 const ACCOUNT_PHONE = '98765 43210';
 const ACCOUNT_E164 = '+919876543210';
@@ -19,12 +21,16 @@ beforeEach(function (): void {
     $this->delivery = app(OtpDelivery::class);
     $this->user = User::factory()->create();
 
+    // Signed in just now, so `recent.auth` passes; the tests of the rule start the session older.
+    $this->recent = fn (): array => ['auth.login_at' => now()->getTimestamp()];
     $this->sendCode = fn (string $phone = ACCOUNT_PHONE, ?User $as = null): TestResponse => $this
         ->actingAs($as ?? $this->user)
+        ->withSession(($this->recent)())
         ->from('/account/profile')
         ->post(route('account.phone.send'), ['phone' => $phone]);
     $this->verifyCode = fn (?string $code = null, ?User $as = null): TestResponse => $this
         ->actingAs($as ?? $this->user)
+        ->withSession(($this->recent)())
         ->from('/account/profile')
         ->post(route('account.phone.verify'), ['code' => $code ?? $this->delivery->lastCode()]);
 });
@@ -74,7 +80,7 @@ describe('sending the code (13 section 5.7)', function (): void {
     });
 
     it('answers machines with the code and its status', function (): void {
-        $this->actingAs($this->user)->postJson(route('account.phone.send'), ['phone' => 'abc'])
+        $this->actingAs($this->user)->withSession(($this->recent)())->postJson(route('account.phone.send'), ['phone' => 'abc'])
             ->assertStatus(422)->assertExactJson(['code' => 'phone_invalid']);
     });
 
@@ -156,7 +162,7 @@ describe('verifying the code (13 section 5.7)', function (): void {
         User::factory()->withPhone(ACCOUNT_E164)->pendingDeletion()->create();
         ($this->sendCode)();
 
-        $this->actingAs($this->user)->postJson(route('account.phone.verify'), ['code' => $this->delivery->lastCode()])
+        $this->actingAs($this->user)->withSession(($this->recent)())->postJson(route('account.phone.verify'), ['code' => $this->delivery->lastCode()])
             ->assertStatus(422)->assertExactJson(['code' => 'phone_unavailable']);
     });
 
@@ -212,5 +218,78 @@ describe('sending the code again', function (): void {
         ($this->sendCode)()->assertSessionHasNoErrors();
 
         expect($this->delivery->sent())->toHaveCount(2);
+    });
+});
+
+describe('recent authentication (a ruling beyond 13 section 5.7, 13 section 6.4)', function (): void {
+    // The number is where re-authentication codes go. Without this a stolen session could put in its own number and
+    // confirm itself with a code sent there.
+    beforeEach(function (): void {
+        $this->old = SessionStamp::loginHoursAgo(3);
+        $this->aged = fn (string $route, array $body, User $as) => $this->actingAs($as)->withSession($this->old)->from('/account/profile')->post(route($route), $body);
+    });
+
+    it('is asked of a user with a password, who is sent to confirm it', function (): void {
+        ($this->aged)('account.phone.send', ['phone' => ACCOUNT_PHONE], $this->user)->assertRedirectToRoute('password.confirm');
+        ($this->aged)('account.phone.verify', ['code' => '123456'], $this->user)->assertRedirectToRoute('password.confirm');
+
+        expect($this->delivery->sent())->toBe([])->and($this->user->refresh()->phone_e164)->toBeNull();
+    });
+
+    it('is asked of a user with a verified phone and no password, who is sent to re-authenticate', function (): void {
+        $user = User::factory()->phoneOnly()->create();
+
+        ($this->aged)('account.phone.send', ['phone' => ACCOUNT_PHONE], $user)->assertRedirectToRoute('auth.reauthenticate');
+
+        expect($this->delivery->sent())->toBe([]);
+    });
+
+    it('is asked of a user whose only way in is Google', function (): void {
+        $user = User::factory()->passwordless()->googleLinked()->create();
+
+        ($this->aged)('account.phone.send', ['phone' => ACCOUNT_PHONE], $user)->assertRedirectToRoute('auth.reauthenticate');
+    });
+
+    it('is asked of staff, who have a password', function (): void {
+        ($this->aged)('account.phone.send', ['phone' => ACCOUNT_PHONE], User::factory()->support()->create())->assertRedirectToRoute('password.confirm');
+    });
+
+    it('is not asked of a user who has no way to prove who they are yet', function (): void {
+        $user = User::factory()->passwordless()->unverified()->create();
+
+        ($this->aged)('account.phone.send', ['phone' => ACCOUNT_PHONE], $user)->assertSessionHasNoErrors();
+        expect($this->delivery->sent())->toHaveCount(1);
+
+        ($this->aged)('account.phone.verify', ['code' => $this->delivery->lastCode()], $user)->assertSessionHasNoErrors();
+        expect($user->refresh()->phone_e164)->toBe(ACCOUNT_E164);
+    });
+
+    it('answers machines with 403 recent_auth_required', function (): void {
+        $this->actingAs($this->user)->withSession($this->old)->postJson(route('account.phone.send'), ['phone' => ACCOUNT_PHONE])
+            ->assertStatus(403)->assertJsonPath('code', 'recent_auth_required');
+    });
+
+    it('lets a session confirmed in the last ten minutes through', function (): void {
+        $this->actingAs($this->user)->withSession([...$this->old, 'auth.password_confirmed_at' => now()->subMinutes(5)->getTimestamp()])
+            ->post(route('account.phone.send'), ['phone' => ACCOUNT_PHONE])->assertSessionHasNoErrors();
+
+        expect($this->delivery->sent())->toHaveCount(1);
+    });
+});
+
+describe('too many tries', function (): void {
+    it('comes back to the page with the wait as an error, so that the dialog does not take it for a success', function (): void {
+        ($this->sendCode)();
+        foreach (range(1, 10) as $_) {
+            ($this->verifyCode)('12 34');
+        }
+
+        $headers = [...InertiaRequest::headers(), 'Referer' => url('/account/profile')];
+        $this->actingAs($this->user)->withSession(($this->recent)())->withHeaders($headers)
+            ->post(route('account.phone.verify'), ['code' => '123456'])->assertRedirect(url('/account/profile'));
+
+        expect((int) session('errors.default.messages.rate_limited.0'))->toBeGreaterThan(0)
+            ->and(session('inertia.flash_data.error'))->toBeNull()
+            ->and($this->user->refresh()->phone_e164)->toBeNull();
     });
 });

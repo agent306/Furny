@@ -670,6 +670,8 @@ describe('a throttled sign-in on the page itself (10 section 4)', function (): v
             'auth.otp.resend',
             'auth.otp.complete',
             'auth.reauthenticate.store',
+            'account.phone.send',
+            'account.phone.verify',
         ]);
     });
 });

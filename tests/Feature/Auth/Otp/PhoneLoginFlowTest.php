@@ -236,6 +236,7 @@ describe('the verification page', function (): void {
                 ->where('channel', 'sms')
                 ->where('maskedPhone', '+91******3210')
                 ->where('resendAvailableIn', 60)
+                ->where('expiresAt', now()->addMinutes(10)->getTimestamp())
                 ->where('channels', ['sms'])
                 ->has('features')
                 ->has('turnstileSiteKey'));
@@ -657,6 +658,16 @@ describe('sending again (13 section 4.4)', function (): void {
 });
 
 describe('the status of the code (13 section 4.2)', function (): void {
+    it('is limited, as the poll of a page is no reason to be asked without end', function (): void {
+        ($this->send)();
+
+        foreach (range(1, 60) as $_) {
+            $this->getJson(route('auth.otp.status'))->assertOk();
+        }
+
+        $this->getJson(route('auth.otp.status'))->assertStatus(429);
+    });
+
     it('says the channel the code went by, and that no fallback happened', function (): void {
         ($this->send)();
 
@@ -676,6 +687,20 @@ describe('the status of the code (13 section 4.2)', function (): void {
 
     it('is a 404 for a challenge it cannot read', function (): void {
         $this->withSession(['otp.challenge' => ['e164' => FLOW_E164]])->getJson(route('auth.otp.status'))->assertNotFound();
+    });
+});
+
+describe('a challenge of another intent', function (): void {
+    it('is not one to show, verify or resend in the guest flow: a re-authentication cannot be swapped into a sign-in', function (): void {
+        $this->withSession(['otp.challenge' => [
+            'e164' => FLOW_E164, 'purpose' => 'login', 'intent' => 'reauthenticate', 'channel' => 'sms',
+            'otpId' => Str::ulid()->toBase32(), 'expiresAt' => now()->addMinutes(10)->getTimestamp(),
+        ]]);
+
+        $this->get(route('auth.otp.verify.show'))->assertRedirectToRoute('auth.otp.create');
+        $this->post(route('auth.otp.verify'), ['code' => '123456'])->assertRedirectToRoute('auth.otp.create');
+        $this->post(route('auth.otp.resend'))->assertRedirectToRoute('auth.otp.create');
+        $this->assertGuest();
     });
 });
 

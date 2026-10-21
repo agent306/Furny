@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\Auth;
 
 use App\Domain\Identity\Models\User;
+use App\Http\Requests\Concerns\HasCaptchaToken;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -15,6 +16,8 @@ use Illuminate\Validation\Rule;
  */
 final class ReauthenticateRequest extends FormRequest
 {
+    use HasCaptchaToken;
+
     public function authorize(): bool
     {
         return $this->user() instanceof User;

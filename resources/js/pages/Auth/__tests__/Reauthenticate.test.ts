@@ -59,8 +59,13 @@ function reauth(props: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+    vi.useFakeTimers();
     post.mockReset();
     resetPage({ auth: { user: { type: 'customer' } }, features, errors: {} });
+});
+
+afterEach(() => {
+    vi.useRealTimers();
 });
 
 describe('Reauthenticate (10 §4.8, 13 §6.4)', () => {
@@ -103,6 +108,34 @@ describe('Reauthenticate (10 §4.8, 13 §6.4)', () => {
         expect(
             wrapper.get('input[name="code"]').attributes('autocomplete'),
         ).toBe('one-time-code');
+    });
+
+    it('holds the send button for 60 seconds after a code was sent', async () => {
+        const wrapper = reauth();
+        post.mockImplementation(
+            (_url: string, _data: unknown, options: Visit) =>
+                options.onSuccess?.(),
+        );
+
+        await wrapper.get('[data-test="send-code-button"]').trigger('click');
+
+        expect(
+            wrapper
+                .get('[data-test="send-code-button"]')
+                .attributes('disabled'),
+        ).toBeDefined();
+        expect(wrapper.get('[data-test="resend-wait"]').text()).toBe(
+            'You can ask for a new code in 60 seconds.',
+        );
+
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        expect(
+            wrapper
+                .get('[data-test="send-code-button"]')
+                .attributes('disabled'),
+        ).toBeUndefined();
+        expect(wrapper.find('[data-test="resend-wait"]').exists()).toBe(false);
     });
 
     it('confirms by itself at six digits', async () => {

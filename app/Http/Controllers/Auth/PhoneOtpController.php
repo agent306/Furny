@@ -58,7 +58,7 @@ final class PhoneOtpController extends Controller
     {
         $intent = $request->string('intent')->toString();
 
-        $result = $send->handle($request->string('phone')->toString(), OtpPurpose::Login, $request->ip(), $this->captcha($request));
+        $result = $send->handle($request->string('phone')->toString(), OtpPurpose::Login, $request->ip(), $request->captchaToken());
 
         $request->session()->forget(OtpChallenge::VERIFIED_PHONE_KEY);
         OtpChallenge::start($result, OtpPurpose::Login, $intent, $intent === OtpChallenge::REGISTER ? $request->string('name')->toString() : null);
@@ -80,6 +80,8 @@ final class PhoneOtpController extends Controller
             'channel' => $challenge->channel->value,
             'maskedPhone' => $challenge->maskedPhone(),
             'resendAvailableIn' => $challenge->resendAvailableIn(),
+            // Changes with every code that is sent, so the page restarts its wait even when the wait is the same 60 s.
+            'expiresAt' => $challenge->expiresAt,
             'channels' => array_map(static fn (OtpChannel $channel): string => $channel->value, $channels->available($challenge->e164)),
         ]);
     }
@@ -116,7 +118,7 @@ final class PhoneOtpController extends Controller
             return redirect()->route('auth.otp.create');
         }
 
-        $result = $send->handle($challenge->e164, OtpPurpose::Login, $request->ip(), $this->captcha($request), $request->channel());
+        $result = $send->handle($challenge->e164, OtpPurpose::Login, $request->ip(), $request->captchaToken(), $request->channel());
 
         $challenge->followedBy($result);
         Inertia::flash(['channel' => $result->channel->value, 'maskedPhone' => $result->maskedPhone]);
@@ -218,12 +220,5 @@ final class PhoneOtpController extends Controller
         }
 
         return now()->getTimestamp() - $verified['at'] <= OtpChallenge::VERIFIED_PHONE_MINUTES * 60 ? $verified['phone'] : null;
-    }
-
-    private function captcha(Request $request): ?string
-    {
-        $token = $request->input('cf_turnstile_response');
-
-        return is_string($token) ? $token : null;
     }
 }

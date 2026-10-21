@@ -5,6 +5,7 @@ import AlternativeSignIn from '@/components/auth/AlternativeSignIn.vue';
 import PasswordField from '@/components/auth/PasswordField.vue';
 import ThrottleNotice from '@/components/auth/ThrottleNotice.vue';
 import TurnstileWidget from '@/components/auth/TurnstileWidget.vue';
+import TermsCheckbox from '@/components/auth/TermsCheckbox.vue';
 import InputError from '@/components/common/InputError.vue';
 import RequiredMark from '@/components/common/RequiredMark.vue';
 import { Button } from '@/components/ui/button';
@@ -16,7 +17,6 @@ import { useFocusFirstError } from '@/composables/useFocusFirstError';
 import { useI18n } from '@/composables/useI18n';
 import { useThrottleCountdown } from '@/composables/useThrottleCountdown';
 import { login } from '@/routes';
-import { privacy, terms } from '@/routes/legal';
 import { store } from '@/routes/register';
 import type { FeatureFlags } from '@/types/inertia';
 
@@ -172,42 +172,7 @@ function describedBy(error: string | undefined): string | undefined {
                 />
             </div>
 
-            <div class="grid gap-2">
-                <div class="flex items-start gap-3">
-                    <Checkbox
-                        id="terms"
-                        name="terms"
-                        class="mt-0.5"
-                        :aria-invalid="errors.terms ? 'true' : undefined"
-                        :aria-describedby="
-                            errors.terms ? 'terms-error' : undefined
-                        "
-                    />
-                    <Label
-                        for="terms"
-                        class="block text-sm leading-relaxed font-normal"
-                    >
-                        {{ t('auth_ui.register.terms_before') }}
-                        <a
-                            :href="terms().url"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="underline underline-offset-4"
-                            >{{ t('legal.terms.title') }}</a
-                        >
-                        {{ t('auth_ui.register.terms_and') }}
-                        <a
-                            :href="privacy().url"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="underline underline-offset-4"
-                            >{{ t('legal.privacy.title') }}</a
-                        >
-                        <RequiredMark />
-                    </Label>
-                </div>
-                <InputError id="terms-error" :message="errors.terms" />
-            </div>
+            <TermsCheckbox :error="errors.terms" />
 
             <div class="flex items-start gap-3">
                 <Checkbox

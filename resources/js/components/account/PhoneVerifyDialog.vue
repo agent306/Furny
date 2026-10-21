@@ -60,6 +60,14 @@ const phoneError = computed(() =>
 const codeError = computed(() =>
     errors.value.reason ? errors.value.code : undefined,
 );
+// A refused try because of too many (the server answers it as an error so that it is not taken for a success).
+const waitError = computed(() => {
+    const seconds = Number.parseInt(errors.value.rate_limited ?? '', 10);
+
+    return Number.isFinite(seconds) && seconds > 0
+        ? t('auth_ui.throttled', { seconds })
+        : undefined;
+});
 const channel = computed(() => page.flash?.channel ?? null);
 const masked = computed(() => page.flash?.maskedPhone ?? '');
 
@@ -89,7 +97,12 @@ function sendCode(): void {
             preserveState: true,
             onStart: () => (sending.value = true),
             onFinish: () => (sending.value = false),
-            onSuccess: () => {
+            onSuccess: (visited) => {
+                // A refusal that came back as a toast is not a sent code.
+                if (visited.flash?.error) {
+                    return;
+                }
+
                 step.value = 'code';
                 code.value = '';
                 restart(RESEND_SECONDS);
@@ -112,7 +125,14 @@ function verifyCode(typed: string): void {
             preserveState: true,
             onStart: () => (verifying.value = true),
             onFinish: () => (verifying.value = false),
-            onSuccess: () => {
+            onSuccess: (visited) => {
+                // A refusal that came back as a toast is not a verified number.
+                if (visited.flash?.error) {
+                    code.value = '';
+
+                    return;
+                }
+
                 emit('verified');
                 emit('update:open', false);
             },
@@ -217,6 +237,7 @@ function onOpenChange(value: boolean): void {
                         @complete="verifyCode"
                     />
                     <InputError id="dialog-code-error" :message="codeError" />
+                    <InputError id="dialog-wait" :message="waitError" />
                 </div>
 
                 <div class="grid gap-2">

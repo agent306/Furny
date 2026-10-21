@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { useCountdown } from '@/composables/useCountdown';
 import { useFocusFirstError } from '@/composables/useFocusFirstError';
 import { useI18n } from '@/composables/useI18n';
 import { useThrottleCountdown } from '@/composables/useThrottleCountdown';
@@ -34,6 +35,10 @@ const page = usePage();
 const errors = computed(() => page.props.errors ?? {});
 // Too many codes or tries: the wait is counted down here, not shown as a toast (10 §4).
 const { remaining } = useThrottleCountdown(() => page.props.errors);
+
+// 13 §4.4: a new code can be asked for 60 seconds after the last one.
+const RESEND_SECONDS = 60;
+const { remaining: resendIn, restart } = useCountdown();
 
 const code = ref('');
 const codeSent = ref(false);
@@ -64,6 +69,7 @@ function sendCode(): void {
             onFinish: () => (sending.value = false),
             onSuccess: () => {
                 codeSent.value = true;
+                restart(RESEND_SECONDS);
             },
         },
     );
@@ -120,13 +126,20 @@ function confirm(typed: string): void {
                 size="lg"
                 :variant="codeSent ? 'secondary' : 'default'"
                 class="w-full"
-                :disabled="sending || remaining > 0"
+                :disabled="sending || remaining > 0 || resendIn > 0"
                 data-test="send-code-button"
                 @click="sendCode"
             >
                 <Spinner v-if="sending" />
                 {{ t('auth_ui.reauth.send') }}
             </Button>
+            <p
+                v-if="resendIn > 0"
+                class="text-center text-sm text-muted-foreground"
+                data-test="resend-wait"
+            >
+                {{ t('auth_ui.otp.resend_in', { seconds: resendIn }) }}
+            </p>
             <p
                 v-if="maskedPhone"
                 class="text-center text-sm text-muted-foreground"

@@ -54,7 +54,8 @@ Route::prefix('auth/otp')->name('auth.otp.')->group(function (): void {
         Route::post('complete', [PhoneOtpController::class, 'complete'])->middleware('throttle:register')->name('complete');
     });
 
-    Route::get('status', [PhoneOtpController::class, 'status'])->name('status');
+    // Polled every 5 s for two minutes by the verify page; the `api` limiter (60 a minute per address for guests) is room enough.
+    Route::get('status', [PhoneOtpController::class, 'status'])->middleware('throttle:api')->name('status');
 });
 
 // Account security, for both audiences (14 §3.3). Signing out one's own devices is not a sensitive action; signing

@@ -181,3 +181,65 @@ describe('verifying the code', function (): void {
             ->assertStatus(422)->assertExactJson(['code' => 'otp_expired']);
     });
 });
+
+describe('a stolen session (13 section 6.4)', function (): void {
+    // Whoever holds the cookie of a session that is hours old must not be able to pass `recent.auth` without the
+    // password, or the phone the user already had.
+    it('cannot be confirmed by a code when the user has a password: they confirm the password instead', function (): void {
+        $user = User::factory()->withPhone('+919876543299')->create();
+
+        $this->actingAs($user)->withSession($this->old)->post(route('auth.reauthenticate.store'), ['step' => 'send'])
+            ->assertRedirectToRoute('password.confirm');
+        $this->actingAs($user)->withSession($this->old)->post(route('auth.reauthenticate.store'), ['step' => 'verify', 'code' => '123456'])
+            ->assertRedirectToRoute('password.confirm');
+
+        expect($this->delivery->sent())->toBe([])->and(session(RecentAuthentication::CONFIRMED_KEY))->toBeNull();
+    });
+
+    it('answers machines with 403 for a user with a password', function (): void {
+        $this->actingAs(User::factory()->withPhone('+919876543299')->create())->withSession($this->old)
+            ->postJson(route('auth.reauthenticate.store'), ['step' => 'send'])
+            ->assertStatus(403)->assertJsonPath('code', 'recent_auth_required');
+    });
+
+    it('cannot swap in a number of its own to receive the code', function (): void {
+        // The thief adds their number: refused, since the account has a verified phone to prove itself with.
+        $this->actingAs($this->user)->withSession($this->old)
+            ->post(route('account.phone.send'), ['phone' => '98765 43299'])
+            ->assertRedirectToRoute('auth.reauthenticate');
+        expect($this->delivery->sent())->toBe([]);
+
+        // And the code for re-authentication still goes to the number the user had.
+        ($this->store)(['step' => 'send'])->assertSessionHasNoErrors();
+
+        expect($this->delivery->sent())->toHaveCount(1)
+            ->and($this->delivery->sent()[0]['e164'])->toBe('+919876543210')
+            ->and($this->user->refresh()->phone_e164)->toBe('+919876543210');
+    });
+
+    it('cannot add a number through a code sent before the session aged either', function (): void {
+        // A code asked for while the session was fresh is no use to a session that has aged.
+        $this->actingAs($this->user)->withSession(['auth.login_at' => now()->getTimestamp()])
+            ->post(route('account.phone.send'), ['phone' => '98765 43299'])->assertSessionHasNoErrors();
+        $code = $this->delivery->lastCode();
+        $this->travel(11)->minutes();
+
+        $this->actingAs($this->user)->withSession($this->old)->post(route('account.phone.verify'), ['code' => $code])
+            ->assertRedirectToRoute('auth.reauthenticate');
+
+        expect($this->user->refresh()->phone_e164)->toBe('+919876543210');
+    });
+});
+
+describe('where the confirmation leads (13 section 12.7)', function (): void {
+    it('does not follow an intended URL of another site', function (string $intended): void {
+        ($this->store)(['step' => 'send']);
+
+        $this->actingAs($this->user)
+            ->withSession([...$this->old, 'url.intended' => $intended])
+            ->post(route('auth.reauthenticate.store'), ['step' => 'verify', 'code' => $this->delivery->lastCode()])
+            ->assertRedirect(route('customer.dashboard'));
+
+        expect(session(RecentAuthentication::CONFIRMED_KEY))->toBeInt();
+    })->with(['another host' => 'https://evil.example/steal', 'protocol-relative' => '//evil.example/steal', 'a backslash' => '/\\evil.example']);
+});

@@ -43,6 +43,7 @@ function verifyPage(props: Record<string, unknown> = {}) {
             channel: 'sms',
             maskedPhone: '+91******3210',
             resendAvailableIn: 60,
+            expiresAt: 1_000,
             channels: ['sms'],
             features,
             turnstileSiteKey: null,
@@ -213,6 +214,29 @@ describe('PhoneVerify (10 §4.4, 13 §4.4)', () => {
         expect(
             wrapper.get('[data-test="resend-sms"]').attributes('disabled'),
         ).toBeUndefined();
+    });
+
+    it('starts the wait over after a resend, although the server answers 60 again', async () => {
+        const wrapper = verifyPage({
+            resendAvailableIn: 60,
+            expiresAt: 1_000,
+            channels: ['sms'],
+        });
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(
+            wrapper.get('[data-test="resend-sms"]').attributes('disabled'),
+        ).toBeUndefined();
+
+        // The page is answered with the same wait and the expiry of the new code.
+        await wrapper.setProps({ resendAvailableIn: 60, expiresAt: 1_600 });
+
+        expect(
+            wrapper.get('[data-test="resend-sms"]').attributes('disabled'),
+        ).toBeDefined();
+        expect(wrapper.get('[data-test="resend-wait"]').text()).toBe(
+            'You can ask for a new code in 60 seconds.',
+        );
     });
 
     it('starts without a wait when the server says the code can be asked for again', () => {

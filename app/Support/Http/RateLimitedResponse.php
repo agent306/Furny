@@ -24,7 +24,8 @@ final class RateLimitedResponse
      * Route names of forms that show the wait on the page itself. The password reset form is not here: its limit is
      * silent (13 §5.5), so it never answers 429. The resend button is the verification page's own form. The phone
      * sign-in pages (`auth.otp.*`) and the re-authentication page each count their wait down; the dialog that adds a
-     * phone number to an account (`account.phone.*`) has no room for a countdown and toasts like any other form.
+     * phone number to an account (`account.phone.*`) shows the wait inside the dialog. A refusal that came back as a
+     * toast would look like a success to the dialog (a redirect without errors), so it gets the error.
      */
     public const array INLINE_ROUTES = [
         'login.store',
@@ -35,6 +36,8 @@ final class RateLimitedResponse
         'auth.otp.resend',
         'auth.otp.complete',
         'auth.reauthenticate.store',
+        'account.phone.send',
+        'account.phone.verify',
     ];
 
     /**

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { Form, Head, usePage } from '@inertiajs/vue3';
 import ThrottleNotice from '@/components/auth/ThrottleNotice.vue';
+import TermsCheckbox from '@/components/auth/TermsCheckbox.vue';
 import InputError from '@/components/common/InputError.vue';
 import RequiredMark from '@/components/common/RequiredMark.vue';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
@@ -12,7 +12,6 @@ import { useFocusFirstError } from '@/composables/useFocusFirstError';
 import { useI18n } from '@/composables/useI18n';
 import { useThrottleCountdown } from '@/composables/useThrottleCountdown';
 import { complete } from '@/routes/auth/otp';
-import { privacy, terms } from '@/routes/legal';
 import type { FeatureFlags } from '@/types/inertia';
 
 // 10 §4.4, 13 §5.2: step 3, for a number that was verified and has no account yet. The name and the terms; the
@@ -75,42 +74,7 @@ const { remaining } = useThrottleCountdown(() => page.props.errors);
                 <InputError id="name-error" :message="errors.name" />
             </div>
 
-            <div class="grid gap-2">
-                <div class="flex items-start gap-3">
-                    <Checkbox
-                        id="terms"
-                        name="terms"
-                        class="mt-0.5"
-                        :aria-invalid="errors.terms ? 'true' : undefined"
-                        :aria-describedby="
-                            errors.terms ? 'terms-error' : undefined
-                        "
-                    />
-                    <Label
-                        for="terms"
-                        class="block text-sm leading-relaxed font-normal"
-                    >
-                        {{ t('auth_ui.register.terms_before') }}
-                        <a
-                            :href="terms().url"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="underline underline-offset-4"
-                            >{{ t('legal.terms.title') }}</a
-                        >
-                        {{ t('auth_ui.register.terms_and') }}
-                        <a
-                            :href="privacy().url"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="underline underline-offset-4"
-                            >{{ t('legal.privacy.title') }}</a
-                        >
-                        <RequiredMark />
-                    </Label>
-                </div>
-                <InputError id="terms-error" :message="errors.terms" />
-            </div>
+            <TermsCheckbox :error="errors.terms" />
 
             <Button
                 type="submit"

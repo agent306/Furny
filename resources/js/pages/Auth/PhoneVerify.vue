@@ -25,6 +25,8 @@ const props = defineProps<{
     channel: 'whatsapp' | 'sms';
     maskedPhone: string;
     resendAvailableIn: number;
+    /** When the code expires: new with every code that is sent, so a resend restarts the wait. */
+    expiresAt: number;
     channels: ('whatsapp' | 'sms')[];
     features: FeatureFlags;
     turnstileSiteKey: string | null;
@@ -36,7 +38,10 @@ const page = usePage();
 const errors = computed(() => page.props.errors ?? {});
 // Too many tries: the wait is counted down here, not shown as a toast (10 §4).
 const { remaining: throttled } = useThrottleCountdown(() => page.props.errors);
-const { remaining: resendIn } = useCountdown(() => props.resendAvailableIn);
+const { remaining: resendIn } = useCountdown(
+    () => props.resendAvailableIn,
+    () => props.expiresAt,
+);
 const { focusFirstError } = useFocusFirstError();
 const turnstile =
     useTemplateRef<InstanceType<typeof TurnstileWidget>>('turnstile');

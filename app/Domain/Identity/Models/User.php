@@ -221,6 +221,18 @@ final class User extends Authenticatable implements HasLocalePreference, HasMedi
         return $this->password !== null;
     }
 
+    /**
+     * Whether the user has a way to prove who they are again: a password, a verified phone or a linked Google account
+     * (13 §6.4). Changing the phone number of such a user needs a recent authentication (`recent.auth`), or a stolen
+     * session could swap in its own number and confirm itself with a code sent there.
+     */
+    public function hasSignInCredential(): bool
+    {
+        return $this->hasPassword()
+            || ($this->phone_e164 !== null && $this->phone_verified_at !== null)
+            || $this->google_id !== null;
+    }
+
     /** The mail with the link to choose a new password (13 §2); the broker passes the token. */
     public function sendPasswordResetNotification(#[SensitiveParameter] $token): void
     {

@@ -1311,16 +1311,25 @@ describe('staff with a second factor and an address nobody verified (13 section 
             ->and(Activity::query()->where('event', 'auth.sessions_revoked')->count())->toBe(0);
     });
 
-    it('is bound to the user: somebody else who signs in in the same session does not trigger it', function (): void {
-        $customer = User::factory()->create(['email' => 'asha@example.com']);
-        $this->withSession([ApplyPendingGoogleLink::KEY => ['user' => $this->owner->getKey(), 'googleId' => '321']])
-            ->post(route('login.store'), ['email' => 'asha@example.com', 'password' => 'password'])
-            ->assertRedirect(route('customer.dashboard'));
+    it('is bound to the user: somebody else who passes a challenge in the same session does not trigger it', function (): void {
+        // The stash is the owner's; the one who signs in through a second factor is another staff member. A password
+        // sign-in would drop the stash before the event, so the other one comes in by a challenge of their own.
+        $other = User::factory()->admin()->create(['email' => 'admin@example.com']);
+        $other->forceFill(['two_factor_recovery_codes' => encrypt(json_encode(['eeeeeeeeee-ffffffffff']))])->save();
+        $otherHash = $other->password;
+        $this->withSession([
+            ApplyPendingGoogleLink::KEY => ['user' => $this->owner->getKey(), 'googleId' => '321'],
+            'login.id' => $other->getKey(),
+            'login.remember' => false,
+        ])->post(route('two-factor.login.store'), ['recovery_code' => 'eeeeeeeeee-ffffffffff'])->assertRedirect(route('admin.dashboard'));
 
-        $this->assertAuthenticatedAs($customer);
-        expect($this->owner->refresh()->password)->toBe($this->hash)
+        $this->assertAuthenticatedAs($other);
+        expect($other->refresh()->google_id)->toBeNull()->and($other->password)->toBe($otherHash)
+            ->and($this->owner->refresh()->password)->toBe($this->hash)
             ->and($this->owner->google_id)->toBeNull()
-            ->and(RegistryFixtures::alive($this->open))->toBeTrue();
+            ->and(RegistryFixtures::alive($this->open))->toBeTrue()
+            // The stash is spent either way.
+            ->and(session()->has(ApplyPendingGoogleLink::KEY))->toBeFalse();
     });
 
     it('is forgotten by a password sign-in, so that the same owner signing in with the password later is not taken over', function (): void {
