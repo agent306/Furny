@@ -6,6 +6,7 @@
 import type { CatalogSnapshot } from '../catalog/snapshot';
 import { cmpId } from '../compare';
 import type { Issue } from '../plan/types';
+import { budgetIssues, dimsIssues } from './budget';
 import { layoutSections, type SectionLayout } from './carcass/layout';
 import { fl } from './constants';
 import { furnitureIssue } from './context';
@@ -99,6 +100,8 @@ export const FURNITURE_ISSUE_CODES = [
     'furniture.panel_seam_unsupported',
 ] as const;
 
+export { DIMENSION_RANGES } from './budget';
+
 export type FurnitureIssueCode = (typeof FURNITURE_ISSUE_CODES)[number];
 
 /**
@@ -130,31 +133,9 @@ export function isSaveBlocking(issues: readonly Issue[]): boolean {
     return issues.some((issue) => SAVE_BLOCKING_CODES.has(issue.code));
 }
 
-/** Overall size limits of 03 §2.4, in the order they are reported. */
-export const DIMENSION_RANGES = [
-    ['width', 150, 6000],
-    ['height', 100, 3000],
-    ['depth', 100, 1200],
-] as const;
-
 /** A leaf narrower or lower than this (net) is `section_too_small` (03 §2.4). */
 const MIN_LEAF_WIDTH = 100;
 const MIN_LEAF_HEIGHT = 80;
-
-function dimsIssues(doc: FurnitureDocument): Issue[] {
-    return DIMENSION_RANGES.flatMap(([dimension, min, max]) => {
-        const value = doc.dims[dimension];
-        return value < min || value > max
-            ? [
-                  furnitureIssue('furniture.dims_range', 'error', {
-                      dimension,
-                      min,
-                      max,
-                  }),
-              ]
-            : [];
-    });
-}
 
 /** `carcass` non-null iff the family is carcass, `table` iff table: one issue. */
 function familyIssues(doc: FurnitureDocument): Issue[] {
@@ -282,6 +263,10 @@ export function validateFurniture(
     doc: FurnitureDocument,
     catalog: CatalogSnapshot,
 ): Issue[] {
+    // Over the work budget: the layout and tree checks would scale with the
+    // document too, so only the cheap ones run (generation refuses it).
+    const over = budgetIssues(doc);
+    if (over.length > 0) return dedupeIssues([...over, ...familyIssues(doc)]);
     return dedupeIssues([
         ...structuralIssues(doc, catalog),
         ...generateFurniture(doc, catalog).issues,

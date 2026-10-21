@@ -5,6 +5,7 @@
  */
 import type { CatalogSnapshot } from '../catalog/snapshot';
 import { cmpId } from '../compare';
+import { budgetIssues } from './budget';
 import { backPanels } from './carcass/back';
 import { basketsFor, rodFor, shelvesFor } from './carcass/contents';
 import { countertopPart } from './carcass/countertop';
@@ -124,6 +125,19 @@ export function generateFurniture(
     doc: FurnitureDocument,
     catalog: CatalogSnapshot,
 ): FurnitureModel {
+    // 0. Work budget: a document that cannot be saved is not generated.
+    const over = budgetIssues(doc);
+    if (over.length > 0) {
+        const { width, height, depth } = doc.dims;
+        return {
+            parts: [],
+            hardware: [],
+            fronts: [],
+            sections: [],
+            bbox: { min: [0, 0, 0], size: [width, height, depth] },
+            issues: over,
+        };
+    }
     // 1. Context.
     const idx = indexCatalog(catalog);
     const ctx = createGenContext(doc, idx);

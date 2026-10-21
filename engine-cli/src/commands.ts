@@ -85,8 +85,16 @@ const COMMANDS: Readonly<Record<(typeof CLI_COMMANDS)[number], Command>> = {
             valid: !isSaveBlocking(issues),
             issues,
             migratedDocument,
-            // 03 §5 server step 4 reads the bounding box
-            bbox: generateFurniture(migratedDocument, request.catalog).bbox,
+            // 03 §5 server step 4 reads the bounding box; generation sets it
+            // to the document dims, so it is not generated a second time
+            bbox: {
+                min: [0, 0, 0],
+                size: [
+                    migratedDocument.dims.width,
+                    migratedDocument.dims.height,
+                    migratedDocument.dims.depth,
+                ],
+            },
         };
     },
     'compute-bom': (input) => {
@@ -172,6 +180,11 @@ function failure(error: unknown): CliResponse {
             ...extra,
             code: error.code,
         });
+    }
+    // Stack overflow on a too deep document and money overflow are both
+    // RangeErrors: the input is at fault, not the engine.
+    if (error instanceof RangeError) {
+        return fail('invalid_input', error.message);
     }
     return fail(
         'engine_error',
