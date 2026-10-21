@@ -10,12 +10,17 @@ use App\Domain\Catalog\Models\HardwareItem;
 use App\Domain\Catalog\Models\LabourRate;
 use App\Domain\Catalog\Models\Material;
 use App\Domain\Catalog\Models\TaxRate;
+use App\Domain\Furniture\Models\FurnitureDesign;
+use App\Domain\Furniture\Models\FurniturePreset;
+use App\Domain\Furniture\Models\FurnitureRevision;
+use App\Domain\Furniture\Models\FurnitureTemplateSetting;
 use App\Domain\Identity\Models\Address;
 use App\Domain\Identity\Models\NotificationDelivery;
 use App\Domain\Identity\Models\NotificationPreference;
 use App\Domain\Identity\Models\OtpCode;
 use App\Domain\Identity\Models\StaffInvitation;
 use App\Domain\Identity\Models\User;
+use App\Domain\Imports\Models\BlueprintImport;
 use App\Domain\Projects\Models\Plan;
 use App\Domain\Projects\Models\PlanRevision;
 use App\Domain\Projects\Models\Project;
@@ -51,5 +56,10 @@ final class MorphMap
         'finish' => Finish::class,
         'labour_rate' => LabourRate::class,
         'tax_rate' => TaxRate::class,
+        'furniture_design' => FurnitureDesign::class,
+        'furniture_revision' => FurnitureRevision::class,
+        'furniture_preset' => FurniturePreset::class,
+        'furniture_template_setting' => FurnitureTemplateSetting::class,
+        'blueprint_import' => BlueprintImport::class,
     ];
 }

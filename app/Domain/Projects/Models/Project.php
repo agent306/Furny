@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Domain\Projects\Models;
 
+use App\Domain\Furniture\Models\FurnitureDesign;
 use App\Domain\Identity\Models\Address;
 use App\Domain\Identity\Models\User;
+use App\Domain\Imports\Models\BlueprintImport;
 use App\Domain\Projects\Enums\ProjectStatus;
 use App\Domain\Projects\Enums\PropertyType;
 use Carbon\CarbonImmutable;
@@ -86,6 +88,22 @@ final class Project extends Model implements HasMedia
     public function plans(): HasMany
     {
         return $this->hasMany(Plan::class);
+    }
+
+    /**
+     * @return HasMany<FurnitureDesign, $this>
+     */
+    public function furnitureDesigns(): HasMany
+    {
+        return $this->hasMany(FurnitureDesign::class);
+    }
+
+    /**
+     * @return HasMany<BlueprintImport, $this>
+     */
+    public function blueprintImports(): HasMany
+    {
+        return $this->hasMany(BlueprintImport::class);
     }
 
     /** 02 §10: one auto-generated 3D cover (png, webp) on the public disk. */

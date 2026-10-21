@@ -1,5 +1,10 @@
 declare namespace App {
 namespace Domain {
+namespace Ai {
+namespace Enums {
+export type AiProvider = 'anthropic' | 'openai' | 'openai_compatible' | 'none';
+}
+}
 namespace Catalog {
 namespace Enums {
 export type BoardType = 'particle_board' | 'mdf' | 'hdf' | 'plywood' | 'blockboard' | 'solid_wood' | 'glass' | 'acrylic' | 'metal_sheet';
@@ -8,6 +13,14 @@ export type HardwareCategory = 'hinge' | 'hinge_plate' | 'drawer_slide' | 'handl
 export type HardwareUnit = 'piece' | 'pair' | 'set' | 'meter' | 'pack';
 export type LabourUnit = 'sheet' | 'meter' | 'part' | 'piece' | 'item' | 'sqm' | 'hour';
 export type MaterialSurface = 'raw' | 'melamine' | 'laminate' | 'veneer' | 'painted' | 'lacquered' | 'pre_laminated';
+}
+}
+namespace Furniture {
+namespace Enums {
+export type AuthorKind = 'customer' | 'staff';
+export type BomStatus = 'pending' | 'ready' | 'failed';
+export type FurnitureRevisionReason = 'manual_checkpoint' | 'order_submitted' | 'staff_proposal' | 'proposal_applied' | 'before_restore';
+export type PresetCategory = 'wardrobe' | 'kitchen' | 'storage' | 'shelving' | 'tv_unit' | 'table' | 'desk' | 'bed' | 'other';
 }
 }
 namespace Identity {
@@ -20,6 +33,13 @@ export type OtpPurpose = 'login' | 'verify_phone';
 export type StaffRole = 'owner' | 'admin' | 'estimator' | 'production' | 'support';
 export type UnitSystem = 'metric' | 'imperial';
 export type UserType = 'customer' | 'staff';
+}
+}
+namespace Imports {
+namespace Enums {
+export type ImportMode = 'auto' | 'trace';
+export type ImportSourceKind = 'raster' | 'pdf_vector' | 'pdf_raster' | 'dxf' | 'heic';
+export type ImportStatus = 'uploaded' | 'queued' | 'preprocessing' | 'recognizing' | 'ready_for_review' | 'accepted' | 'discarded' | 'failed' | 'cancelled';
 }
 }
 namespace Projects {
