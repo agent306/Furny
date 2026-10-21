@@ -16,6 +16,7 @@ use App\Support\Media\Media;
 use App\Support\Settings\Settings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\File;
 use Inertia\Inertia;
 use Inertia\Middleware;
 
@@ -34,6 +35,9 @@ final class HandleInertiaRequests extends Middleware
 
     /** The cache keys of the integration health monitors (13 §4.5, 12 §11), in banner order. */
     private const array HEALTH_KEYS = ['whatsapp', 'sms', 'otp'];
+
+    /** @var array<string, mixed>|null */
+    private static ?array $manifest = null;
 
     /**
      * The root template that's loaded on the first page visit.
@@ -82,8 +86,6 @@ final class HandleInertiaRequests extends Middleware
             'features' => fn (): array => Features::all(),
             'flash' => fn (): array => $this->flash($request),
             'i18n' => fn (): array => $this->i18n(),
-            // The sidebar's open state lives in a cookie the layout reads before it renders (15 §7).
-            'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
         ];
 
         if ($user !== null) {
@@ -95,7 +97,11 @@ final class HandleInertiaRequests extends Middleware
         return $props;
     }
 
-    /** The business logo; its media id is part of the cache key, so replacing the logo needs no invalidation. */
+    /**
+     * The business logo; its media id is part of the cache key, so replacing the logo needs no invalidation.
+     * The lookup is pinned to the logo collection of the business profile: a media id that points at
+     * any other owner's or collection's file (a setting edited by hand) is never exposed.
+     */
     private function logoUrl(): ?string
     {
         $mediaId = $this->settings->business()->logoMediaId;
@@ -106,7 +112,11 @@ final class HandleInertiaRequests extends Middleware
 
         $url = Cache::rememberForever(
             BusinessProfile::KEY.":logo-url:{$mediaId}",
-            static fn (): string => Media::query()->find($mediaId)?->getUrl() ?? '',
+            static fn (): string => Media::query()
+                ->where('model_type', (new BusinessProfile)->getMorphClass())
+                ->where('model_id', BusinessProfile::KEY)
+                ->where('collection_name', BusinessProfile::LOGO_COLLECTION)
+                ->find($mediaId)?->getUrl() ?? '',
         );
 
         return $url === '' ? null : $url;
@@ -141,13 +151,35 @@ final class HandleInertiaRequests extends Middleware
      */
     private function i18n(): array
     {
-        $path = resource_path('js/lang/generated/manifest.json');
-        $manifest = is_file($path) ? json_decode((string) file_get_contents($path), true) : null;
-        $manifest = is_array($manifest) ? $manifest : [];
+        $manifest = $this->manifest();
         $locale = app()->getLocale();
         $locale = isset($manifest[$locale]) ? $locale : 'en';
 
         return ['locale' => $locale, 'hash' => (string) ($manifest[$locale] ?? '')];
+    }
+
+    /**
+     * The locale → content hash map of the exported catalogues. It only changes with a deploy, so a
+     * long-lived worker reads and decodes the file once.
+     *
+     * @return array<string, mixed>
+     */
+    private function manifest(): array
+    {
+        if (self::$manifest !== null) {
+            return self::$manifest;
+        }
+
+        $path = resource_path('js/lang/generated/manifest.json');
+        $decoded = File::isFile($path) ? json_decode(File::get($path), true) : null;
+
+        return self::$manifest = is_array($decoded) ? $decoded : [];
+    }
+
+    /** Drops the memoised manifest (tests; a worker that outlives a deploy). */
+    public static function forgetManifest(): void
+    {
+        self::$manifest = null;
     }
 
     /**

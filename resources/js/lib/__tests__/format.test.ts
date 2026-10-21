@@ -207,6 +207,10 @@ describe('parseMajorToMinor', () => {
         expect(parseMajorToMinor('१,२३,४५६.७८', 2)).toBe(12345678);
         expect(parseMajorToMinor('１２３', 2)).toBe(12300);
         expect(parseMajorToMinor('𝟗𝟕', 0)).toBe(97);
+        // Double-struck (U+1D7D8) and monospace (U+1D7F6) digits.
+        expect(parseMajorToMinor('𝟚𝟘', 0)).toBe(20);
+        expect(parseMajorToMinor('𝟷𝟾𝟿', 0)).toBe(189);
+        expect(parseMajorToMinor('𝟷𝟾𝟿.𝟻', 2)).toBe(18950);
         expect(parseMajorToMinor('\u200e12.5\u200f', 2)).toBe(1250);
         expect(parseMajorToMinor('\u200f-\u200e5', 2)).toBe(-500);
     });

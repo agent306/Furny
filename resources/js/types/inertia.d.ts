@@ -37,8 +37,6 @@ export type SharedPageProps = {
     /** Already-translated strings. */
     flash: FlashMessages;
     i18n: { locale: string; hash: string };
-    /** Open state of the sidebar, from its cookie. */
-    sidebarOpen: boolean;
     /** Authenticated users only. */
     unreadNotifications?: number;
     /** Optional prop (partial reloads only); `null` unless the user is active staff (11 §4). */

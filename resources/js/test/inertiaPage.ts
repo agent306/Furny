@@ -1,4 +1,5 @@
 import { reactive } from 'vue';
+import type { FlashMessages, HealthBanner } from '@/types/inertia';
 
 /**
  * Reactive stand-in for `usePage()` in component tests. Mock it like so (the
@@ -9,24 +10,45 @@ import { reactive } from 'vue';
  *       usePage: () => page,
  *   }));
  */
+export type TestUser = {
+    type: 'customer' | 'staff';
+    name?: string;
+    email?: string | null;
+    avatarUrl?: string | null;
+    timezone?: string;
+    lengthUnit?: 'mm' | 'cm' | 'm' | 'ftin' | 'in';
+    roles?: string[];
+    permissions?: string[];
+    abilities?: string[];
+};
+
 export type TestPageProps = {
-    auth?: {
-        user: {
-            type: 'customer' | 'staff';
-            timezone?: string;
-            lengthUnit?: 'mm' | 'cm' | 'm' | 'ftin' | 'in';
-        } | null;
-    };
+    app?: { name: string; logoUrl: string | null; version?: string };
+    auth?: { user: TestUser | null };
     business?: {
+        name?: string;
         locale?: string;
         currency?: string;
         timezone?: string;
         defaultCountryCode?: string;
+        phoneE164?: string | null;
+        email?: string;
+        workingHours?: string;
     };
+    flash?: Partial<FlashMessages> & { id?: string };
+    unreadNotifications?: number;
+    staffCounters?: { submitted: number; toCall: number } | null;
+    healthBanners?: HealthBanner[];
 };
 
-export const page = reactive<{ props: TestPageProps }>({ props: {} });
+export const page = reactive<{
+    props: TestPageProps;
+    component: string;
+    url: string;
+}>({ props: {}, component: 'Test', url: '/' });
 
 export function resetPage(props: TestPageProps = {}): void {
     page.props = props;
+    page.component = 'Test';
+    page.url = '/';
 }

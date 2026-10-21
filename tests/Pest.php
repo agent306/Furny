@@ -13,7 +13,8 @@ use Tests\TestCase;
 |--------------------------------------------------------------------------
 */
 
-pest()->extend(TestCase::class)->use(LazilyRefreshDatabase::class)->in('Feature');
+// Feature tests assert on props and markup, never on built assets: `public/build` may be absent or stale.
+pest()->extend(TestCase::class)->use(LazilyRefreshDatabase::class)->beforeEach(fn () => $this->withoutVite())->in('Feature');
 pest()->extend(TestCase::class)->use(RefreshDatabase::class)->in('Browser');
 pest()->extend(TestCase::class)->in('Unit');
 

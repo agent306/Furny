@@ -17,11 +17,12 @@ const ENUM_KEY_PATTERNS: Record<string, string> = {
     'orders.states.{state}': 'OrderStateKey',
     'orders.states_customer.{state}': 'OrderStateKey',
     'orders.states_customer_short.{state}': 'OrderStateKey',
+    'roles.names.{role}': 'StaffRole',
 };
 
 const KEY_CALLS = [
     /(?<![\w$])\$?t\(\s*(['"])([\w.]+)\1/g,
-    /\b(?:labelKey|titleKey)\s*:\s*(['"])([\w.]+)\1/g,
+    /\b(?:labelKey|titleKey|tabLabelKey)\s*:\s*(['"])([\w.]+)\1/g,
 ];
 
 function sourceFiles(): string[] {
@@ -69,7 +70,7 @@ describe('literal translation keys', () => {
     it('are found in t(), $t(), labelKey and titleKey calls', () => {
         const source = `
             t('a.one'); $t("a.two"); i18n.t('a.three');
-            { labelKey: 'a.four', titleKey: "a.five" }
+            { labelKey: 'a.four', titleKey: "a.five", tabLabelKey: 'a.six' }
             format('not.a.key'); t(\`dynamic.\${x}\`); t(variable);
         `;
 
@@ -77,6 +78,7 @@ describe('literal translation keys', () => {
             'a.five',
             'a.four',
             'a.one',
+            'a.six',
             'a.three',
             'a.two',
         ]);

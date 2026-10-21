@@ -19,7 +19,9 @@ const emits = defineEmits<{
   "update:open": [open: boolean]
 }>()
 
-const isMobile = useMediaQuery("(max-width: 768px)")
+// Furny (15 §7.2): the sidebar is an offcanvas sheet below the `lg` breakpoint
+// (tablet and phone), persistent from 1024 px. Upstream shadcn switches at 768 px.
+const isMobile = useMediaQuery("(max-width: 1023px)")
 const openMobile = ref(false)
 
 const open = useVModel(props, "open", emits, {

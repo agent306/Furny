@@ -26,6 +26,8 @@ final class BusinessProfile extends Model implements HasMedia
 
     public const string KEY = 'business';
 
+    public const string LOGO_COLLECTION = 'logo';
+
     protected $table = 'app_settings';
 
     protected $primaryKey = 'key';
@@ -55,7 +57,7 @@ final class BusinessProfile extends Model implements HasMedia
     /** 02 §10: one logo (png, webp, jpg) on the public disk. */
     public function registerMediaCollections(): void
     {
-        $this->addMediaCollection('logo')
+        $this->addMediaCollection(self::LOGO_COLLECTION)
             ->useDisk('s3-public')
             ->singleFile()
             ->acceptsMimeTypes(['image/png', 'image/webp', 'image/jpeg']);

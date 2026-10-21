@@ -13,9 +13,11 @@ use App\Http\Middleware\HandleInertiaRequests;
 use App\Support\Features;
 use App\Support\Settings\Settings;
 use App\Support\Settings\SettingsGroup;
+use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
@@ -77,6 +79,22 @@ it('shares the guest props and nothing that needs a signed-in user', function ()
         ->and($props['flash'])->toBe(['success' => null, 'error' => null, 'info' => null, 'warning' => null]);
 });
 
+it('reads the i18n manifest once and serves it from memory afterwards', function (): void {
+    HandleInertiaRequests::forgetManifest();
+
+    File::partialMock()
+        ->shouldReceive('get')
+        ->withArgs(static fn (string $path): bool => str_ends_with($path, 'lang/generated/manifest.json'))
+        ->once()
+        ->passthru();
+
+    $first = sharedProps()['i18n'];
+    $second = sharedProps()['i18n'];
+
+    expect($second)->toBe($first)
+        ->and($first['hash'])->not->toBe('');
+});
+
 it('shares the i18n locale and the manifest hash of that locale', function (): void {
     $manifest = json_decode((string) file_get_contents(resource_path('js/lang/generated/manifest.json')), true, flags: JSON_THROW_ON_ERROR);
 
@@ -133,6 +151,24 @@ it('shares the logo url of the business logo', function (): void {
     $settings->put(SettingsGroup::Business, $business);
 
     expect(sharedProps()['app']['logoUrl'])->toBe($media->getUrl());
+});
+
+it('does not expose a media row of another owner or collection as the business logo', function (): void {
+    $settings = app(Settings::class);
+    $business = $settings->business();
+
+    // Same table, other collection of the same owner.
+    $otherCollection = BusinessProfile::instance()->addMedia(UploadedFile::fake()->image('other.png', 50, 50))->toMediaCollection('gallery');
+    // Same collection name, other owner (a user's avatar).
+    $otherOwner = User::factory()->create()->addMedia(UploadedFile::fake()->image('avatar.png', 50, 50))->toMediaCollection('logo');
+
+    foreach ([$otherCollection, $otherOwner] as $media) {
+        $business->logoMediaId = $media->id;
+        $settings->put(SettingsGroup::Business, $business);
+        Cache::flush();
+
+        expect(sharedProps()['app']['logoUrl'])->toBeNull();
+    }
 });
 
 it('shares the exact 18 auth user fields for a customer, with empty lists', function (): void {
@@ -304,6 +340,14 @@ it('resolves the staff counters only on a partial reload, from the orders in sta
         ->and(sharedProps($staff, ['staffCounters'])['staffCounters'])->toBe(['submitted' => 2, 'toCall' => 1]);
 });
 
+it('leaves soft-deleted orders out of the staff counters', function (): void {
+    Order::factory()->inState(Submitted::class)->create();
+    Order::factory()->inState(Submitted::class)->create()->delete();
+    Order::factory()->inState(Accepted::class)->create()->delete();
+
+    expect(sharedProps(User::factory()->estimator()->create(), ['staffCounters'])['staffCounters'])->toBe(['submitted' => 1, 'toCall' => 0]);
+});
+
 it('caches the staff counters for 30 seconds', function (): void {
     Order::factory()->inState(Submitted::class)->create();
     $staff = User::factory()->support()->create();
@@ -360,9 +404,20 @@ it('shares the session flash messages', function (): void {
     expect($flash)->toBe(['success' => 'Saved.', 'error' => 'Nope.', 'info' => null, 'warning' => null]);
 });
 
-it('keeps the sidebar state from its cookie', function (): void {
-    expect(sharedProps()['sidebarOpen'])->toBeTrue()
-        ->and(test()->withUnencryptedCookie('sidebar_state', 'false')->withHeaders(['X-Inertia' => 'true'])->get('/_props')->json('props.sidebarOpen'))->toBeFalse();
+it('does not share the sidebar state: the admin shell reads its own cookie in the browser', function (): void {
+    test()->withUnencryptedCookie('sidebar_state', 'false');
+
+    expect(sharedProps())->not->toHaveKey('sidebarOpen');
+});
+
+it('does not exempt the sidebar cookie from encryption, and ignores a plain one', function (): void {
+    $encryption = app(EncryptCookies::class);
+
+    // A stray plain cookie of that name is dropped by the decryptor, it does not break the request.
+    test()->withUnencryptedCookie('sidebar_state', 'false')->get('/_props')->assertOk();
+
+    expect($encryption->isDisabled('sidebar_state'))->toBeFalse()
+        ->and($encryption->isDisabled('appearance'))->toBeTrue();
 });
 
 it('runs no database query for a guest once the settings are cached', function (): void {

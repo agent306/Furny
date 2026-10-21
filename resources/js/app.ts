@@ -1,13 +1,10 @@
 import { createInertiaApp } from '@inertiajs/vue3';
 import { initializeTheme } from '@/composables/useTheme';
-import AppLayout from '@/layouts/AppLayout.vue';
-import AuthLayout from '@/layouts/AuthLayout.vue';
-import { initializeFlashToast } from '@/lib/flashToast';
+import { resolveLayout } from '@/layouts/resolveLayout';
 import { createI18n } from '@/lib/i18n';
 import { reloadForStaleI18n } from '@/lib/i18nBoot';
 import manifest from './lang/generated/manifest.json';
-
-const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
+import type { SharedPageProps } from './types/inertia';
 
 const DEFAULT_LOCALE = 'en';
 
@@ -68,17 +65,18 @@ reloadForStaleI18n(bundledHashes[locale], hash);
 const messages = await loadMessages(locale);
 
 void createInertiaApp({
-    title: (title) => (title ? `${title} - ${appName}` : appName),
-    layout: (name) => {
-        switch (true) {
-            case name === 'Welcome':
-                return null;
-            case name.startsWith('Auth/'):
-                return AuthLayout;
-            default:
-                return AppLayout;
-        }
+    // `{page title} · {app name}` (15 §14 item 4); the name is the shared `app.name`, never a literal.
+    title: (title, page) => {
+        const appName =
+            (page.props as Partial<SharedPageProps>).app?.name ?? '';
+
+        return title ? `${title} · ${appName}` : appName;
     },
+    layout: (name, page) =>
+        resolveLayout(
+            name,
+            (page.props as Partial<SharedPageProps>).auth?.user,
+        ),
     withApp: (app) => {
         app.use(createI18n({ locale, messages }));
         app.directive('focus', {
@@ -89,13 +87,12 @@ void createInertiaApp({
             },
         });
     },
+    // 15 §10.4: the primary colour, shown after 250 ms.
     progress: {
-        color: '#4B5563',
+        color: 'var(--primary)',
+        delay: 250,
     },
 });
 
 // This will set light / dark mode on page load...
 initializeTheme();
-
-// This will listen for flash toast data from the server...
-initializeFlashToast();

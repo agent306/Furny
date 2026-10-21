@@ -4,17 +4,24 @@ declare(strict_types=1);
 
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Support\Http\ErrorPage;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 
 $app = Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
+        then: function (): void {
+            // Task 23 replaces these placeholder groups with the full customer and staff groups (13 §1).
+            Route::middleware(['web', 'auth'])->name('customer.')->group(base_path('routes/customer.php'));
+            Route::middleware(['web', 'auth'])->prefix('admin')->name('admin.')->group(base_path('routes/admin.php'));
+        },
     )
     ->withMiddleware(function (Middleware $middleware): void {
         // Traefik (Coolify) connects from the Docker networks (13 §12.8, 17 §5.11 item 1).
@@ -29,7 +36,7 @@ $app = Application::configure(basePath: dirname(__DIR__))
         // `php artisan down` must not break the health checks (17 §5.11 item 2).
         $middleware->preventRequestsDuringMaintenance(except: ['up', 'up/deep']);
 
-        $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
+        $middleware->encryptCookies(except: ['appearance']);
 
         $middleware->web(append: [
             HandleAppearance::class,
@@ -41,6 +48,9 @@ $app = Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        // 403/404/419/429/503, and 500 outside debug mode, render the Inertia `Error` page (10 §4.10).
+        $exceptions->respond(ErrorPage::render(...));
     })->create();
 
 // ICU translations live in resources/lang (15 §15.2).

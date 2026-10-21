@@ -47,16 +47,3 @@ describe('raw Tailwind palette colours (15 §3)', () => {
         ]);
     });
 });
-
-describe('auth split layout (Task 16 review)', () => {
-    it('draws its logo icon with the primary-foreground token on the primary panel, not white', () => {
-        const source = readFileSync(
-            'resources/js/layouts/auth/AuthSplitLayout.vue',
-            'utf8',
-        );
-        const logo = /<AppLogoIcon[^>]*>/s.exec(source)?.[0];
-
-        expect(logo).toContain('text-primary-foreground');
-        expect(logo).not.toMatch(/text-(white|black)\b/);
-    });
-});

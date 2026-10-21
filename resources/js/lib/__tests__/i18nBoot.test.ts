@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     I18N_RELOADED_KEY,
     reloadForStaleI18n,
@@ -79,7 +79,7 @@ describe('reloadForStaleI18n', () => {
         expect(reload).not.toHaveBeenCalled();
     });
 
-    it('survives unavailable storage (treated as not yet reloaded, reloads)', () => {
+    it('does not reload when storage is unavailable (it could not remember having reloaded)', () => {
         const reload = vi.fn();
         const broken: ReloadDeps = {
             reload,
@@ -97,6 +97,44 @@ describe('reloadForStaleI18n', () => {
         };
 
         expect(reloadForStaleI18n('old', 'new', broken)).toBe(false);
+        expect(reload).not.toHaveBeenCalled();
+    });
+});
+
+describe('reloadForStaleI18n default wiring', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+        window.sessionStorage.clear();
+    });
+
+    it('uses the window sessionStorage and location.reload when no deps are given', () => {
+        const reload = vi.fn();
+
+        vi.stubGlobal('location', { reload });
+
+        expect(reloadForStaleI18n('old', 'new')).toBe(true);
+        expect(reload).toHaveBeenCalledTimes(1);
+        expect(window.sessionStorage.getItem(I18N_RELOADED_KEY)).toBe('1');
+
+        // The second stale load in the same tab is left alone.
+        expect(reloadForStaleI18n('old', 'new')).toBe(false);
+        expect(reload).toHaveBeenCalledTimes(1);
+
+        // Matching hashes clear the flag again.
+        expect(reloadForStaleI18n('new', 'new')).toBe(false);
+        expect(window.sessionStorage.getItem(I18N_RELOADED_KEY)).toBeNull();
+    });
+
+    it('does not reload when reading window.sessionStorage itself throws', () => {
+        const reload = vi.fn();
+
+        vi.stubGlobal('location', { reload });
+        vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+            throw new Error('blocked');
+        });
+
+        expect(reloadForStaleI18n('old', 'new')).toBe(false);
         expect(reload).not.toHaveBeenCalled();
     });
 });

@@ -1,0 +1,68 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Support\Http;
+
+use App\Http\Middleware\HandleInertiaRequests;
+use Illuminate\Http\Request;
+use Inertia\Inertia;
+use Symfony\Component\HttpFoundation\Response;
+use Throwable;
+
+/**
+ * Turns framework error responses into the Inertia `Error` page (10 §4.10, 15 §14). The page gets the
+ * status and nothing else: no exception message, class, file or trace ever reaches the props.
+ */
+final class ErrorPage
+{
+    /** Statuses that always render the page. 500 joins them only when `app.debug` is off. */
+    private const array STATUSES = [403, 404, 419, 429, 503];
+
+    /** Headers a client or proxy acts on; everything else of the original response is dropped. */
+    private const array KEPT_HEADERS = ['Retry-After', 'Allow', 'X-RateLimit-Limit', 'X-RateLimit-Remaining'];
+
+    /**
+     * The response to send: the Error page for a handled status, else `$response` untouched. The
+     * exception is deliberately unused: the page must not be able to show anything about it.
+     */
+    public static function render(Response $response, Throwable $exception, Request $request): Response
+    {
+        $status = $response->getStatusCode();
+
+        if (! self::handles($status, $request)) {
+            return $response;
+        }
+
+        try {
+            // A URL that matches no route never entered the `web` group, which shares the props.
+            if (Inertia::getShared('auth') === null) {
+                Inertia::share(app(HandleInertiaRequests::class)->share($request));
+            }
+
+            $page = Inertia::render('Error', ['status' => $status])->toResponse($request);
+        } catch (Throwable) {
+            // Rendering the page failed too (e.g. the view): fall back to the original response.
+            return $response;
+        }
+
+        $page->setStatusCode($status);
+
+        foreach (self::KEPT_HEADERS as $header) {
+            if ($response->headers->has($header)) {
+                $page->headers->set($header, $response->headers->get($header));
+            }
+        }
+
+        return $page;
+    }
+
+    private static function handles(int $status, Request $request): bool
+    {
+        if (! $request->header('X-Inertia') && ($request->expectsJson() || $request->is('api/*'))) {
+            return false;
+        }
+
+        return in_array($status, self::STATUSES, true) || ($status === 500 && ! config('app.debug'));
+    }
+}

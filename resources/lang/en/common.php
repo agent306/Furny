@@ -16,6 +16,7 @@ return [
         'confirm' => 'Confirm',
         'copy' => 'Copy',
         'discard' => 'Discard',
+        'log_out' => 'Log out',
         'retry' => 'Retry',
         'save_changes' => 'Save changes',
     ],
@@ -42,11 +43,46 @@ return [
 
     'copied' => 'Copied',
 
+    'footer' => [
+        'copyright' => '© {year} {business}',
+        'privacy' => 'Privacy',
+        'terms' => 'Terms',
+    ],
+
     'loading' => 'Loading',
+
+    'nav' => [
+        'dashboard' => 'Dashboard',
+        'home' => 'Home',
+    ],
+
+    'offline' => [
+        'banner' => "You're offline. Changes will be sent when you reconnect.",
+    ],
+
+    'read_only' => 'View only',
+
+    'save_status' => [
+        'conflict' => 'Conflict',
+        'dirty' => 'Unsaved changes',
+        'error' => "Couldn't save",
+        'invalid' => 'Fix {count, plural, one {# problem} other {# problems}} to save',
+        'offline' => 'Offline — changes kept on this device',
+        'saved' => 'Saved',
+        'saved_ago' => 'Saved · {time}',
+        'saving' => 'Saving…',
+    ],
 
     'screen_too_small' => [
         'title' => 'This screen needs a larger display',
         'body' => 'Open it on a tablet or computer to continue.',
+    ],
+
+    'theme' => [
+        'dark' => 'Dark',
+        'label' => 'Theme',
+        'light' => 'Light',
+        'system' => 'System',
     ],
 
     'unsaved_changes' => 'Unsaved changes',
