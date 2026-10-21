@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Actions\Fortify;
 
 use App\Domain\Identity\Models\User;
+use App\Listeners\ApplyPendingGoogleLink;
 use App\Listeners\RecordSuccessfulLogin;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -27,10 +28,10 @@ final class AuthenticateUser
     /** @throws ValidationException when the password is right but the account is not active */
     public static function handle(Request $request): ?User
     {
-        // A password login is a password login: a method another flow left for a later step (Google and then the
-        // two-factor challenge, abandoned) must not be taken for this sign-in's.
+        // A password login is a password login: a method, and a Google link, that another flow left for a later step
+        // (Google and then the two-factor challenge, abandoned) must not be taken for this sign-in's.
         if ($request->hasSession()) {
-            $request->session()->forget(RecordSuccessfulLogin::PENDING_METHOD_KEY);
+            $request->session()->forget([RecordSuccessfulLogin::PENDING_METHOD_KEY, ApplyPendingGoogleLink::KEY]);
         }
 
         // Fortify asks twice for one login: its two-factor step and its authenticate step each call this. The

@@ -111,9 +111,17 @@ it('answers with the responses of the app', function (): void {
         ->and(app(LogoutResponseContract::class))->toBeInstanceOf(LogoutResponse::class);
 });
 
-it('listens once for each event: no listener is registered twice', function (string $event): void {
-    expect(Event::getListeners($event))->toHaveCount(1);
-})->with([Login::class, Logout::class, CurrentDeviceLogout::class, Failed::class, Lockout::class, CustomerRegistered::class]);
+it('listens once for each event: no listener is registered twice', function (string $event, int $listeners): void {
+    expect(Event::getListeners($event))->toHaveCount($listeners);
+})->with([
+    // A sign-in is recorded, and finishes the Google link that waited for the two-factor challenge.
+    'login' => [Login::class, 2],
+    'logout' => [Logout::class, 1],
+    'current device logout' => [CurrentDeviceLogout::class, 1],
+    'failed' => [Failed::class, 1],
+    'lockout' => [Lockout::class, 1],
+    'customer registered' => [CustomerRegistered::class, 1],
+]);
 
 it('hands every auth page the flags, the Turnstile key and canRegister', function (string $route, string $component, bool $signedIn): void {
     if ($signedIn) {

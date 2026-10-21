@@ -133,6 +133,57 @@ describe('CustomerLayout (15 §7.1)', () => {
         ).toBe('Verify your email');
     });
 
+    describe('the verify-contact banner (10 §1.1)', () => {
+        const unverified = {
+            type: 'customer' as const,
+            name: 'Asha Rao',
+            email: 'asha@example.test',
+            emailVerified: false,
+            phoneVerified: false,
+        };
+
+        it('is the content of #banner for a customer with neither contact verified, above the page banner', () => {
+            page.props.auth = { user: unverified };
+            const banner = layout({ banner: () => 'Page notice' }).get(
+                '#banner',
+            );
+
+            expect(
+                banner.get('[data-test="verify-contact-banner"]').text(),
+            ).toContain(
+                'Verify your email or phone to send orders and messages.',
+            );
+            expect(banner.text().indexOf('Verify your email')).toBeLessThan(
+                banner.text().indexOf('Page notice'),
+            );
+        });
+
+        it('opens #banner by itself when the page has none', () => {
+            page.props.auth = { user: unverified };
+
+            expect(layout().find('#banner').exists()).toBe(true);
+        });
+
+        it.each([
+            [
+                'an email that is verified',
+                { ...unverified, emailVerified: true },
+            ],
+            [
+                'a phone that is verified',
+                { ...unverified, phoneVerified: true },
+            ],
+        ])('is not shown for %s', (_name, user) => {
+            page.props.auth = { user };
+            const wrapper = layout();
+
+            expect(wrapper.find('#banner').exists()).toBe(false);
+            expect(
+                wrapper.find('[data-test="verify-contact-banner"]').exists(),
+            ).toBe(false);
+        });
+    });
+
     it('shows the footer from tablet up: copyright, Terms and Privacy', () => {
         const footer = layout().get('footer');
 

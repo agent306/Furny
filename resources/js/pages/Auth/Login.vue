@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Form, Head, Link, usePage } from '@inertiajs/vue3';
-import GoogleButton from '@/components/auth/GoogleButton.vue';
+import AlternativeSignIn from '@/components/auth/AlternativeSignIn.vue';
 import PasswordField from '@/components/auth/PasswordField.vue';
 import ThrottleNotice from '@/components/auth/ThrottleNotice.vue';
 import InputError from '@/components/common/InputError.vue';
@@ -19,7 +19,7 @@ import { store } from '@/routes/login';
 import { request } from '@/routes/password';
 import type { FeatureFlags } from '@/types/inertia';
 
-// 10 §4.2. The phone sign-in button is added with that sign-in method.
+// 10 §4.2.
 defineProps<{
     status?: string | null;
     canResetPassword: boolean;
@@ -129,7 +129,7 @@ const { remaining } = useThrottleCountdown(() => page.props.errors);
             </Button>
         </Form>
 
-        <GoogleButton separated />
+        <AlternativeSignIn intent="login" />
 
         <p v-if="canRegister" class="text-center text-sm text-muted-foreground">
             {{ t('auth_ui.login.new_here') }}

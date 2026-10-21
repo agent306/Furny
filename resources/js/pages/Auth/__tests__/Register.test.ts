@@ -200,6 +200,28 @@ describe('Register (10 §4.3)', () => {
                 .exists(),
         ).toBe(false);
     });
+
+    it('offers the phone sign-up, which opens the form with a name, while a code can be sent', () => {
+        const wrapper = register();
+
+        expect(
+            wrapper.get('a[data-test="phone-button"]').attributes('href'),
+        ).toBe('/login/phone?intent=register');
+        expect(wrapper.get('a[data-test="phone-button"]').text()).toBe(
+            'Use my phone instead',
+        );
+    });
+
+    it('has no phone button when neither WhatsApp nor SMS can carry a code', () => {
+        const flags = { ...features, whatsapp: false, sms: false };
+        resetPage({ auth: { user: null }, features: flags });
+
+        expect(
+            register({ features: flags })
+                .find('a[data-test="phone-button"]')
+                .exists(),
+        ).toBe(false);
+    });
 });
 
 describe('Register and the captcha', () => {

@@ -55,6 +55,16 @@ return [
     'auth.google.redirect' => $entry('public'),
     'auth.google.callback' => $entry('public'),
 
+    // Phone sign-in and sign-up (13 §5.2): for guests; the status poll reads the session's challenge, whoever holds it.
+    'auth.otp.create' => $entry('guest'),
+    'auth.otp.send' => $entry('guest'),
+    'auth.otp.verify.show' => $entry('guest'),
+    'auth.otp.verify' => $entry('guest'),
+    'auth.otp.resend' => $entry('guest'),
+    'auth.otp.status' => $entry('public'),
+    'auth.otp.complete.show' => $entry('guest'),
+    'auth.otp.complete' => $entry('guest'),
+
     // Fortify, signed-in (13 §2). Customers are kept out of `two-factor.*` by a later middleware (13 §5.10).
     'logout' => $entry('any'),
     'verification.notice' => $entry('any'),
@@ -77,6 +87,10 @@ return [
     'account.sessions.destroy' => $entry('any'),
     'account.sessions.destroy-others' => $entry('any'),
     'account.google.unlink' => $entry('any'),
+    'account.phone.send' => $entry('any'),
+    'account.phone.verify' => $entry('any'),
+    'auth.reauthenticate' => $entry('any'),
+    'auth.reauthenticate.store' => $entry('any'),
 
     // Customer app (10 §2).
     'customer.dashboard' => $entry('customer'),

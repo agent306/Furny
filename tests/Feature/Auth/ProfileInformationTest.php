@@ -325,12 +325,6 @@ describe('a user without a password (13 section 6.4)', function (): void {
     it('is sent to re-authenticate, not to confirm a password they do not have', function (): void {
         $passwordless = User::factory()->phoneOnly()->create();
 
-        if (! Route::has('auth.reauthenticate')) {
-            // The OTP/Google task adds `auth.reauthenticate`; the exception names it, and until it exists there is
-            // no URL to redirect to.
-            $this->markTestSkipped('auth.reauthenticate does not exist yet (phone OTP task); the redirect for passwordless users cannot be asserted.');
-        }
-
         $this->actingAs($passwordless)
             ->withSession(SessionStamp::loginHoursAgo(4))
             ->put(route('user-profile-information.update'), ['name' => $passwordless->name, 'email' => 'new@example.com'])

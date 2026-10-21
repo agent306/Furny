@@ -22,9 +22,27 @@ final class RateLimitedResponse
 {
     /**
      * Route names of forms that show the wait on the page itself. The password reset form is not here: its limit is
-     * silent (13 §5.5), so it never answers 429. The resend button is the verification page's own form.
+     * silent (13 §5.5), so it never answers 429. The resend button is the verification page's own form. The phone
+     * sign-in pages (`auth.otp.*`) and the re-authentication page each count their wait down; the dialog that adds a
+     * phone number to an account (`account.phone.*`) has no room for a countdown and toasts like any other form.
      */
-    public const array INLINE_ROUTES = ['login.store', 'register.store', 'verification.send'];
+    public const array INLINE_ROUTES = [
+        'login.store',
+        'register.store',
+        'verification.send',
+        'auth.otp.send',
+        'auth.otp.verify',
+        'auth.otp.resend',
+        'auth.otp.complete',
+        'auth.reauthenticate.store',
+    ];
+
+    /**
+     * Request header of a form that sits on a page of its own and wants the wait as a toast even though its route is
+     * inline: the verify-contact banner posts to `verification.send` from every customer page, where there is no
+     * countdown to show the wait in. The verify page's own resend form does not send it and keeps its countdown.
+     */
+    public const string TOAST_HEADER = 'X-Throttle-Toast';
 
     /** The validation error that carries the wait, in seconds, to the page. */
     public const string INLINE_ERROR = 'rate_limited';
@@ -54,7 +72,7 @@ final class RateLimitedResponse
         }
 
         // A form posts to the URL of its own page, so for it going back is not a loop.
-        if ($request->routeIs(...self::INLINE_ROUTES)) {
+        if ($request->routeIs(...self::INLINE_ROUTES) && ! $request->headers->has(self::TOAST_HEADER)) {
             return redirect()->to($previous)->withErrors([self::INLINE_ERROR => (string) $seconds]);
         }
 

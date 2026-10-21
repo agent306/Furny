@@ -23,8 +23,7 @@ use App\Http\Responses\PasswordUpdatedResponse;
 use App\Http\Responses\ProfileUpdatedResponse;
 use App\Http\Responses\RegisterResponse;
 use App\Http\Responses\TwoFactorLoginResponse;
-use App\Support\Features;
-use App\Support\Settings\Settings;
+use App\Support\Auth\AuthPageProps;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
@@ -165,13 +164,6 @@ final class FortifyServiceProvider extends ServiceProvider
      */
     private function pageProps(): array
     {
-        $siteKey = config('services.turnstile.site_key');
-
-        return [
-            'features' => Features::all(),
-            'turnstileSiteKey' => Features::enabled('captcha') && is_string($siteKey) ? $siteKey : null,
-            'canRegister' => FortifyFeatures::enabled(FortifyFeatures::registration())
-                && $this->app->make(Settings::class)->auth()->allowCustomerRegistration,
-        ];
+        return AuthPageProps::make();
     }
 }

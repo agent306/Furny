@@ -34,13 +34,27 @@ final class AccessProbe
      * Guest pages that legitimately send a signed-out visitor elsewhere: the 2FA challenge has nothing to
      * challenge without a half-finished login.
      */
-    private const array GUEST_REDIRECTS = ['two-factor.login' => 'login'];
+    private const array GUEST_REDIRECTS = [
+        'two-factor.login' => 'login',
+        // The steps of the phone sign-in need what the step before left in the session.
+        'auth.otp.verify.show' => 'auth.otp.create',
+        'auth.otp.complete.show' => 'auth.otp.create',
+    ];
+
+    /** Public routes that read something a visitor must have in their session first: without it they answer 404. */
+    private const array PUBLIC_NEEDS_STATE = ['auth.otp.status'];
 
     /**
      * Public routes that send a visitor on without showing a page: the Google round trip starts with a redirect
      * (here, back with an error, as the visitor did not say what they come for) and ends with one.
      */
     private const array PUBLIC_REDIRECTS = ['auth.google.redirect', 'auth.google.callback'];
+
+    /**
+     * Signed-in routes that send a user with a password on without showing a page: re-authentication is for users who
+     * have none; the others confirm the password they have.
+     */
+    private const array ANY_PASSWORD_REDIRECTS = ['auth.reauthenticate' => 'password.confirm'];
 
     public function __construct(private readonly TestCase $test) {}
 
@@ -192,7 +206,17 @@ final class AccessProbe
         $this->assert($this->redirectsTo($this->get($name), route('login')), "{$name}: a guest is not sent to login.");
 
         // Unverified, so the verification notice renders for them instead of redirecting away.
-        $this->assert($this->opened($this->get($name, User::factory()->unverified()->create()), $name), "{$name}: a signed-in customer does not get the page.");
+        $user = User::factory()->unverified()->create();
+        $redirect = self::ANY_PASSWORD_REDIRECTS[$name] ?? null;
+
+        if ($redirect !== null) {
+            $this->assert($this->get($name, $user)->isRedirect(route($redirect)), "{$name}: a signed-in customer with a password is not sent to {$redirect}.");
+            $this->assert($this->opened($this->get($name, User::factory()->unverified()->passwordless()->create()), $name), "{$name}: a signed-in customer without a password does not get the page.");
+
+            return;
+        }
+
+        $this->assert($this->opened($this->get($name, $user), $name), "{$name}: a signed-in customer does not get the page.");
     }
 
     private function checkPublic(string $name): void
@@ -201,6 +225,12 @@ final class AccessProbe
 
         if (in_array($name, self::PUBLIC_REDIRECTS, true)) {
             $this->assert($guest->isRedirect(), "{$name}: a guest is not redirected.");
+
+            return;
+        }
+
+        if (in_array($name, self::PUBLIC_NEEDS_STATE, true)) {
+            $this->assert($guest->getStatusCode() === 404, "{$name}: a visitor without the state it reads does not get a 404.");
 
             return;
         }

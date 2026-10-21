@@ -661,6 +661,15 @@ describe('a throttled sign-in on the page itself (10 section 4)', function (): v
     });
 
     it('lists the forms whose wait is shown on the page', function (): void {
-        expect(RateLimitedResponse::INLINE_ROUTES)->toBe(['login.store', 'register.store', 'verification.send']);
+        expect(RateLimitedResponse::INLINE_ROUTES)->toBe([
+            'login.store',
+            'register.store',
+            'verification.send',
+            'auth.otp.send',
+            'auth.otp.verify',
+            'auth.otp.resend',
+            'auth.otp.complete',
+            'auth.reauthenticate.store',
+        ]);
     });
 });

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Domain\Identity\Events\ContactVerified;
 use App\Domain\Identity\Models\User;
 use App\Notifications\Auth\VerifyEmail;
+use App\Support\Http\RateLimitedResponse;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Http\Request;
@@ -251,6 +252,58 @@ describe('resending (verification.send)', function (): void {
 
         expect((int) $page->json('props.errors.rate_limited'))->toBeGreaterThan(0)->toBeLessThanOrEqual(600)
             ->and($page->json())->not->toHaveKey('flash');
+    });
+
+    describe('from the banner (10 section 1.1)', function (): void {
+        // The banner posts to the same route as the verify page, but sits on any customer page: it has no countdown
+        // to show the wait in, so it asks for the toast with a header. The verify page sends nothing and keeps the
+        // inline countdown.
+        beforeEach(function (): void {
+            Notification::fake();
+            $this->actingAs($this->user);
+
+            foreach (range(1, 3) as $_) {
+                $this->post(route('verification.send'));
+            }
+
+            $this->banner = fn (string $from = 'customer.dashboard') => $this
+                ->withHeaders([...InertiaRequest::headers(), 'Referer' => route($from), RateLimitedResponse::TOAST_HEADER => '1'])
+                ->post(route('verification.send'));
+        });
+
+        it('shows the wait as a toast, with the seconds', function (): void {
+            ($this->banner)()->assertRedirect(route('customer.dashboard'));
+
+            $page = $this->withHeaders(InertiaRequest::headers())->get(route('customer.dashboard'))->assertOk();
+
+            $seconds = (int) preg_replace('/\D+/', '', (string) $page->json('flash.error'));
+            expect($seconds)->toBeGreaterThan(0)->toBeLessThanOrEqual(600)
+                ->and($page->json('flash.error'))->toBe(trans_icu('errors.rate_limited', ['seconds' => $seconds]))
+                ->and($page->json('props.errors'))->not->toHaveKey('rate_limited');
+        });
+
+        it('is the header that decides, not the page it was posted from', function (): void {
+            // Even from the verify page: a banner on a page of its own kind would still ask for the toast.
+            ($this->banner)('verification.notice')->assertRedirect(route('verification.notice'));
+
+            $page = $this->withHeaders(InertiaRequest::headers())->get(route('verification.notice'))->assertOk();
+
+            expect($page->json('flash.error'))->toBeString()->and($page->json('props.errors'))->not->toHaveKey('rate_limited');
+        });
+
+        it('leaves the verify page its inline countdown when it does not send the header', function (): void {
+            $this->withHeaders([...InertiaRequest::headers(), 'Referer' => route('verification.notice')])
+                ->post(route('verification.send'))->assertRedirect(route('verification.notice'));
+
+            $page = $this->withHeaders(InertiaRequest::headers())->get(route('verification.notice'))->assertOk();
+
+            expect((int) $page->json('props.errors.rate_limited'))->toBeGreaterThan(0)->and($page->json())->not->toHaveKey('flash');
+        });
+
+        it('answers machines the same either way', function (): void {
+            $this->withHeaders([RateLimitedResponse::TOAST_HEADER => '1'])->postJson(route('verification.send'))
+                ->assertStatus(429)->assertJsonPath('code', 'rate_limited');
+        });
     });
 
     it('keeps a guest out', function (): void {

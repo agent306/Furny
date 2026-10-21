@@ -16,6 +16,7 @@ use App\Http\Middleware\RequireRecentAuthentication;
 use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\TrackSession;
 use App\Support\Http\ErrorPage;
+use App\Support\Http\OtpErrorResponse;
 use App\Support\Http\RateLimitedResponse;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -140,6 +141,9 @@ $app = Application::configure(basePath: dirname(__DIR__))
 
         // 429: JSON for machines, a flash and a redirect back for Inertia visits (13 §10).
         $exceptions->render(RateLimitedResponse::render(...));
+
+        // A refused phone code: JSON for machines, the errors bag of 14 §1.9 for forms (13 §4).
+        $exceptions->render(OtpErrorResponse::render(...));
 
         // 403/404/405/419/429/503, and 500 outside debug mode, render the Inertia `Error` page (10 §4.10).
         $exceptions->respond(ErrorPage::render(...));

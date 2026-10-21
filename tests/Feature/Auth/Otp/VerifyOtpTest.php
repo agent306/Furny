@@ -288,4 +288,44 @@ describe('limits (13 section 4.3 step 1)', function (): void {
 
         expect(fn () => ($this->verify)('123456', e164: '+919876500000'))->toThrow(ThrottleRequestsException::class);
     });
+
+    it('counts first and compares the count that came back, so the eleventh is refused whatever else counted meanwhile', function (): void {
+        // Ten tries are already counted for the address, as parallel requests would have counted them between
+        // another request's look at the counter and its own count.
+        $key = OtpLimits::key(OtpLimits::VERIFY, 'ip', VERIFY_E164, VERIFY_IP);
+        foreach (range(1, 10) as $_) {
+            RateLimiter::hit($key, 60);
+        }
+
+        expect(fn () => ($this->verify)('123456'))->toThrow(ThrottleRequestsException::class)
+            // The refused try is counted too: the count is the place in line.
+            ->and(RateLimiter::attempts($key))->toBe(11)
+            ->and($this->otp->refresh()->consumed_at)->toBeNull();
+    });
+
+    it('does not count against the number a try that the address was refused', function (): void {
+        $ip = OtpLimits::key(OtpLimits::VERIFY, 'ip', VERIFY_E164, VERIFY_IP);
+        $phone = OtpLimits::key(OtpLimits::VERIFY, 'phone', VERIFY_E164, VERIFY_IP);
+        foreach (range(1, 10) as $_) {
+            RateLimiter::hit($ip, 60);
+        }
+
+        foreach (range(1, 3) as $_) {
+            expect(fn () => ($this->verify)('000000'))->toThrow(ThrottleRequestsException::class);
+        }
+
+        // Somebody hammering from a blocked address cannot use up the number's hour for its owner.
+        expect(RateLimiter::attempts($phone))->toBe(0);
+    });
+
+    it('refuses the try that makes the twenty-first for the number when the count comes back over the limit', function (): void {
+        $phone = OtpLimits::key(OtpLimits::VERIFY, 'phone', VERIFY_E164, VERIFY_IP);
+        foreach (range(1, 20) as $_) {
+            RateLimiter::hit($phone, 3600);
+        }
+
+        expect(fn () => ($this->verify)('123456'))->toThrow(ThrottleRequestsException::class)
+            ->and(RateLimiter::attempts($phone))->toBe(21)
+            ->and($this->otp->refresh()->consumed_at)->toBeNull();
+    });
 });

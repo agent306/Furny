@@ -161,7 +161,54 @@ describe('Login (10 §4.2)', () => {
         expect(wrapper.find('[data-test="google-sign-in"]').exists()).toBe(
             false,
         );
-        expect(wrapper.findAll('a')).toHaveLength(2);
+        // The way to the password reset, the registration and the phone.
+        expect(
+            wrapper.findAll('a').map((link) => link.attributes('href')),
+        ).toEqual(['/forgot-password', '/login/phone', '/register']);
+    });
+
+    it('offers the phone sign-in under the form while a code can be sent by WhatsApp or SMS', () => {
+        const wrapper = login();
+        const phone = wrapper.get('a[data-test="phone-button"]');
+
+        expect(phone.attributes('href')).toBe('/login/phone');
+        expect(phone.text()).toBe('Use my phone instead');
+        expect(wrapper.find('[data-test="google-separator"]').exists()).toBe(
+            true,
+        );
+    });
+
+    it.each([
+        ['neither is on', { whatsapp: false, sms: false }, false],
+        ['only WhatsApp is on', { whatsapp: true, sms: false }, true],
+        ['only SMS is on', { whatsapp: false, sms: true }, true],
+    ])('has the phone button when %s: %s', (_name, flags, shown) => {
+        resetPage({
+            auth: { user: null },
+            features: { ...features, ...flags },
+        });
+
+        expect(
+            login({ features: { ...features, ...flags } })
+                .find('a[data-test="phone-button"]')
+                .exists(),
+        ).toBe(shown);
+    });
+
+    it('has no "or" line when there is nothing under the form', () => {
+        const none = {
+            ...features,
+            whatsapp: false,
+            sms: false,
+            google_login: false,
+        };
+        resetPage({ auth: { user: null }, features: none });
+
+        expect(
+            login({ features: none })
+                .find('[data-test="alternative-sign-in"]')
+                .exists(),
+        ).toBe(false);
     });
 
     it('shows the status message of the session', () => {

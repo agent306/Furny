@@ -196,6 +196,34 @@ describe('sends', function (): void {
     });
 });
 
+describe('the verify limiters (13 section 4.3 step 1)', function (): void {
+    // Laravel's `RateLimiter::hit` creates a window with `add` and then `increment`, and when the increment answers 1
+    // for a window that already existed it puts 1 back. Parallel requests that open a window together can therefore
+    // lose one count, once per window, however the limit is checked. The windows are opened here with one try, so that
+    // what is tested is that the count that comes back is compared, not that creating a window is race-free.
+    it('lets ten of fifteen requests from one IP through, counting first and then comparing', function (): void {
+        // Fifteen numbers with no live code: each request that passes the limiter ends as `otp_expired`.
+        $base = random_int(100, 800);
+        $phones = array_map(fn (int $n): string => '+9198770'.str_pad((string) ($base + $n), 5, '0', STR_PAD_LEFT), range(1, 15));
+        $this->limiter->hit(OtpLimits::key(OtpLimits::VERIFY, 'ip', $phones[0], '203.0.113.88'), 60);
+
+        $results = otpParallel(array_map(fn (string $phone): array => ['verify', $phone, '203.0.113.88', '123456'], $phones));
+
+        // The one try that opened the window used one of the ten.
+        expect(otpTally($results))->toEqual(['otp_expired' => 9, 'throttled' => 6]);
+    });
+
+    it('lets twenty of twenty-five requests for one number through, from as many addresses', function (): void {
+        $phone = '+91987719'.random_int(1000, 9999);
+        $this->limiter->hit(OtpLimits::key(OtpLimits::VERIFY, 'phone', $phone, null), 3600);
+
+        $results = otpParallel(array_map(fn (int $n): array => ['verify', $phone, '203.0.113.'.(100 + $n), '123456'], range(1, 25)));
+
+        // The one try that opened the window used one of the twenty.
+        expect(otpTally($results))->toEqual(['otp_expired' => 19, 'throttled' => 6]);
+    });
+});
+
 describe('verifications', function (): void {
     it('consumes a code once when five requests carry the right code at once', function (): void {
         $phone = '+91987650'.random_int(1000, 9999);

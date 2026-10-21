@@ -11,9 +11,11 @@ use App\Domain\Identity\Models\StaffInvitation;
 use App\Domain\Identity\Models\User;
 use App\Domain\Identity\Support\GoogleAccountException;
 use App\Http\Controllers\Controller;
+use App\Listeners\ApplyPendingGoogleLink;
 use App\Listeners\RecordSuccessfulLogin;
 use App\Support\Auth\IntendedRedirect;
 use App\Support\Auth\RecentAuthentication;
+use App\Support\Auth\RememberCookie;
 use App\Support\Features;
 use App\Support\Settings\Settings;
 use Illuminate\Auth\AuthenticationException;
@@ -214,7 +216,10 @@ final class GoogleController extends Controller
                 return $this->fail($request, GoogleIntent::Login, 'auth.inactive');
             }
 
-            if ($foundByEmail) {
+            if ($foundByEmail && $this->waitsForChallenge($user)) {
+                // Linking would take the account over; that waits until the second factor has been passed.
+                $request->session()->put(ApplyPendingGoogleLink::KEY, ['user' => $user->getKey(), 'googleId' => $googleId]);
+            } elseif ($foundByEmail) {
                 try {
                     $this->links->byEmail($user, $googleId);
                 } catch (GoogleAccountException $exception) {
@@ -245,6 +250,16 @@ final class GoogleController extends Controller
     }
 
     /**
+     * Whether linking Google to this account has to wait for the two-factor challenge: it would take the account over
+     * (its address was never verified, `LinkGoogleAccount`) and the user has a second factor that Google's word does
+     * not replace. `ApplyPendingGoogleLink` links after the challenge.
+     */
+    private function waitsForChallenge(User $user): bool
+    {
+        return $user->isStaff() && $user->two_factor_confirmed_at !== null && $user->email_verified_at === null;
+    }
+
+    /**
      * Customers stay signed in for 14 days; staff never do (13 §5.3 step 5). Staff with a confirmed second factor
      * are not signed in yet: Fortify's challenge reads `login.id` and `login.remember` from the session and finishes
      * the login, as it does after the password form.
@@ -272,10 +287,18 @@ final class GoogleController extends Controller
     {
         abort_if($user === null, 403);
 
+        $token = $user->getRememberToken();
+
         try {
             $this->links->forSignedInUser($user, $googleId, $email, $request->session()->getId());
         } catch (GoogleAccountException $exception) {
             return $this->fail($request, GoogleIntent::Link, $exception->messageKey());
+        }
+
+        // Taking over an unverified account rotated the remember token (13 §6.3): this browser's remember cookie holds
+        // the old one and would stop working, so it gets the new one, as after "sign out other devices".
+        if ($user->getRememberToken() !== $token) {
+            RememberCookie::renew($request, $user);
         }
 
         Inertia::flash('success', trans_icu('account.toasts.google_linked'));

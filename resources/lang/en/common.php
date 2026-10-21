@@ -94,6 +94,14 @@ return [
         'reason_required' => 'Choose a reason.',
     ],
 
+    // 10 §1.1, 15 §9.31: shown to a customer with neither a verified email nor a verified phone.
+    'verify_banner' => [
+        'message' => 'Verify your email or phone to send orders and messages.',
+        'resend_email' => 'Resend email link',
+        'email_sent' => 'We sent a new verification link to your email.',
+        'verify_phone' => 'Verify phone',
+    ],
+
     'verify_required' => 'Verify your email or phone number to continue.',
 
     'a11y' => [

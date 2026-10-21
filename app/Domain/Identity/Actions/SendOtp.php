@@ -62,10 +62,13 @@ final class SendOtp
     ) {}
 
     /**
+     * `$preferred` is the channel the person asked for ("Resend on WhatsApp", "Send by SMS", 13 §4.4): it goes first
+     * when it is available, and the usual order stands when it is not.
+     *
      * @throws OtpException `phone_*` (422), `otp_cooldown`, `otp_rate_limited` (429), `captcha_required` (422),
      *                      `captcha_unavailable`, `otp_unavailable`, `otp_send_failed` (503)
      */
-    public function handle(string $rawPhone, OtpPurpose $purpose, ?string $ip, ?string $captchaToken): OtpSendResult
+    public function handle(string $rawPhone, OtpPurpose $purpose, ?string $ip, ?string $captchaToken, ?OtpChannel $preferred = null): OtpSendResult
     {
         $e164 = $this->parse($rawPhone)->e164;
         $ip = $ip !== null && filter_var($ip, FILTER_VALIDATE_IP) !== false ? $ip : null;
@@ -82,7 +85,7 @@ final class SendOtp
 
             $this->assertCaptcha($captchaToken, $phoneCount, $ipCount);
 
-            $channels = $this->channels->available($e164, $globalCount);
+            $channels = $this->prefer($this->channels->available($e164, $globalCount), $preferred);
 
             if ($channels === []) {
                 Log::critical('otp.no_channel', ['phone' => Mask::phone($e164)]);
@@ -100,6 +103,8 @@ final class SendOtp
         }
 
         $this->countSessionSend();
+        // A send of its own: whatever the fallback of an earlier code said does not describe this one.
+        Cache::forget(OtpLimits::fallbackKey($e164));
 
         try {
             $channel = $this->deliver($otp, $e164, $code, $channels);
@@ -113,6 +118,86 @@ final class SendOtp
             throw $exception;
         }
 
+        $this->audit($e164, $channel, $purpose, $ip);
+
+        return new OtpSendResult($channel, Mask::phone($e164), $otp->id, $e164, $otp->expires_at);
+    }
+
+    /**
+     * A WhatsApp code that was not delivered (the provider's status says so, 13 §4.2): a new code goes out by SMS
+     * and the old one is dead, so the person gets one code to type. Called with the id of the code that failed, by
+     * whatever receives delivery statuses; false when nothing was done: the code was used, has expired, did not go by
+     * WhatsApp, SMS is not available, the number has used its hourly sends, or the SMS was refused (the WhatsApp code
+     * then stays valid, it may still arrive).
+     *
+     * Not a new request from the person, so the cooldown does not apply. It counts toward the hourly limits of the
+     * number and of the address the code was asked from, but only the number's limit can stop it.
+     */
+    public function fallBackToSms(string $otpId): bool
+    {
+        $failed = OtpCode::query()->find($otpId);
+
+        if (! $failed instanceof OtpCode || $failed->consumed_at !== null || $failed->expires_at->lessThanOrEqualTo(now()) || $failed->channel !== OtpChannel::Whatsapp) {
+            return false;
+        }
+
+        $e164 = $failed->phone_e164;
+        $ip = $failed->ip;
+        $counters = [];
+
+        try {
+            $this->reserveHourly($e164, $ip, 'phone', $counters);
+            $globalCount = $this->reserveGlobal($counters);
+
+            if (! in_array(OtpChannel::Sms, $this->channels->available($e164, $globalCount), true)) {
+                throw new OtpException('otp_unavailable', 503);
+            }
+        } catch (OtpException) {
+            $this->release($counters);
+
+            return false;
+        }
+
+        if ($ip !== null) {
+            RateLimiter::hit(OtpLimits::key(OtpLimits::SEND, 'ip', $e164, $ip), OtpLimits::limit(OtpLimits::SEND, 'ip')['decay']);
+        }
+
+        $code = $this->codes->generate();
+        $otp = $this->store($e164, $failed->purpose, OtpChannel::Sms, $code, $ip);
+
+        try {
+            $this->deliver($otp, $e164, $code, [OtpChannel::Sms]);
+        } catch (Throwable) {
+            // `deliver` expired the SMS code; the code that was replaced to make room for it is the one to keep.
+            OtpCode::query()->whereKey($failed->id)->update(['expires_at' => $failed->expires_at]);
+            $this->release($counters);
+
+            return false;
+        }
+
+        Cache::put(OtpLimits::fallbackKey($e164), OtpChannel::Sms->value, now()->addMinutes(OtpCode::LIFETIME_MINUTES));
+        $this->audit($e164, OtpChannel::Sms, $failed->purpose, $ip);
+
+        return true;
+    }
+
+    /**
+     * The preferred channel first, when the available ones include it.
+     *
+     * @param  list<OtpChannel>  $channels
+     * @return list<OtpChannel>
+     */
+    private function prefer(array $channels, ?OtpChannel $preferred): array
+    {
+        if ($preferred === null || ! in_array($preferred, $channels, true)) {
+            return $channels;
+        }
+
+        return [$preferred, ...array_values(array_filter($channels, static fn (OtpChannel $channel): bool => $channel !== $preferred))];
+    }
+
+    private function audit(string $e164, OtpChannel $channel, OtpPurpose $purpose, ?string $ip): void
+    {
         activity('security')
             ->causedBy(Auth::user())
             ->event('auth.otp_sent')
@@ -123,8 +208,6 @@ final class SendOtp
                 'ip' => Mask::ip((string) $ip),
             ])
             ->log('auth.otp_sent');
-
-        return new OtpSendResult($channel, Mask::phone($e164), $otp->id, $e164);
     }
 
     private function parse(string $rawPhone): ParsedPhone

@@ -34,23 +34,26 @@ final class RegisterCustomer
 
     /**
      * The customer is saved with the terms accepted (the form or the button they pressed said so) and
-     * `CustomerRegistered` is dispatched after commit. `$emailVerified` is for an address someone else vouched for.
-     * `$email` is already trimmed and lower-cased.
+     * `CustomerRegistered` is dispatched after commit. `$emailVerified` is for an address someone else vouched for,
+     * `$verifiedPhone` (E.164) for a number whose owner just proved it with a code. `$email` is already trimmed and
+     * lower-cased; an account has an email or a phone, or both.
      */
     public function create(
         string $name,
-        string $email,
+        ?string $email,
         #[SensitiveParameter] ?string $password = null,
         bool $marketingOptIn = false,
         ?string $googleId = null,
         bool $emailVerified = false,
+        ?string $verifiedPhone = null,
     ): User {
         $units = $this->settings->units();
 
-        return DB::transaction(function () use ($name, $email, $password, $marketingOptIn, $googleId, $emailVerified, $units): User {
+        return DB::transaction(function () use ($name, $email, $password, $marketingOptIn, $googleId, $emailVerified, $verifiedPhone, $units): User {
             $user = new User([
                 'name' => $name,
                 'email' => $email,
+                'phone_e164' => $verifiedPhone,
                 'timezone' => $this->settings->business()->timezone,
                 'unit_system' => UnitSystem::from($units->defaultSystem),
                 'length_unit' => LengthUnit::from($units->defaultLengthUnit),
@@ -67,10 +70,25 @@ final class RegisterCustomer
                 $this->contacts->markEmailVerified($user);
             }
 
+            if ($verifiedPhone !== null) {
+                $this->contacts->markPhoneVerified($user);
+            }
+
             CustomerRegistered::dispatch($user);
 
             return $user;
         });
+    }
+
+    /**
+     * A customer who signed up with a phone code (13 §5.2). The number is verified, which announces the user's first
+     * verified contact; there is no email and no password, and the terms are accepted (the form said so before the
+     * code was sent). The caller has seen to it that nobody has the number, and treats a unique violation (a sign-up
+     * with the same number that finished a moment ago) as having an account.
+     */
+    public function fromPhone(string $e164, string $name): User
+    {
+        return $this->create(trim($name), null, verifiedPhone: $e164);
     }
 
     /**

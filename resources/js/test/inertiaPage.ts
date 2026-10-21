@@ -3,6 +3,7 @@ import type {
     FeatureFlags,
     FlashMessages,
     HealthBanner,
+    PhoneCodeFlash,
 } from '@/types/inertia';
 
 /**
@@ -24,6 +25,9 @@ export type TestUser = {
     roles?: string[];
     permissions?: string[];
     abilities?: string[];
+    emailVerified?: boolean;
+    phoneVerified?: boolean;
+    phoneE164?: string | null;
 };
 
 export type TestPageProps = {
@@ -50,7 +54,7 @@ export type TestPageProps = {
 export const page = reactive<{
     props: TestPageProps;
     /** The native top-level flash of the page, not a prop. */
-    flash: FlashMessages & { id?: string };
+    flash: FlashMessages & PhoneCodeFlash & { id?: string };
     component: string;
     url: string;
 }>({ props: {}, flash: {}, component: 'Test', url: '/' });

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Identity\Otp;
 
 use App\Support\Http\RateLimitKey;
+use Illuminate\Support\Facades\Cache;
 use InvalidArgumentException;
 
 /**
@@ -30,6 +31,21 @@ final class OtpLimits
     public static function cooldownKey(string $e164): string
     {
         return 'otp:cooldown:'.hash('sha256', $e164);
+    }
+
+    /** Seconds until the number may be sent another code (0 when it may be now). */
+    public static function cooldownRemaining(string $e164): int
+    {
+        return max(0, (int) Cache::get(self::cooldownKey($e164), 0) - now()->getTimestamp());
+    }
+
+    /**
+     * Set for ten minutes when a code went out by SMS because the WhatsApp one could not be delivered (13 §4.2), and
+     * cleared by the next send; the verify page's status poll reads it.
+     */
+    public static function fallbackKey(string $e164): string
+    {
+        return 'otp:fallback:'.hash('sha256', $e164);
     }
 
     public static function key(string $limiter, string $kind, string $e164, ?string $ip): string

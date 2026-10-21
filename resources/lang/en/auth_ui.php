@@ -94,7 +94,54 @@ return [
         'continue' => 'Continue to the app',
     ],
 
-    // 10 §4.8. The re-authentication page of passwordless users comes with the phone sign-in.
+    // 10 §4.2, §4.3: the way to the phone sign-in, under the email forms.
+    'use_phone' => 'Use my phone instead',
+
+    // 10 §4.4: step 1 of the phone sign-in and sign-up.
+    'phone' => [
+        'title' => 'Sign in with your phone',
+        'title_register' => 'Sign up with your phone',
+        'description' => "We'll send a 6-digit code by WhatsApp or SMS.",
+        'number' => 'Phone number',
+        'name' => 'Full name',
+        'send' => 'Send code',
+        'use_email' => 'Use email instead',
+    ],
+
+    // 10 §4.4: step 2, the code (also the code field of the re-authentication page).
+    'otp' => [
+        'title' => 'Enter your code',
+        'sent' => 'We sent a code to {phone} via {channel, select, whatsapp {WhatsApp} other {SMS}}.',
+        'code' => '6-digit code',
+        'verify' => 'Verify',
+        'resend_in' => 'You can ask for a new code in {seconds, plural, one {# second} other {# seconds}}.',
+        'resend_whatsapp' => 'Resend on WhatsApp',
+        'resend_sms' => 'Send by SMS',
+        'change_number' => 'Change number',
+        'fallback' => "We couldn't reach you on WhatsApp, so we sent an SMS instead.",
+    ],
+
+    // 10 §4.4: step 3, the name of a new customer.
+    'complete' => [
+        'title' => 'Almost there',
+        'description' => 'Your number {phone} is verified. What should we call you?',
+        'name' => 'Full name',
+        'submit' => 'Create account',
+    ],
+
+    // 10 §4.8, 13 §6.4: confirming who is at the keyboard without a password.
+    'reauth' => [
+        'title' => 'Confirm it is you',
+        'description' => 'This is a secure action. Confirm your identity before continuing.',
+        'send' => 'Send me a code',
+        'to_phone' => 'The code goes to {phone}.',
+        'sent' => 'We sent a code {channel, select, whatsapp {by WhatsApp} other {by SMS}} to {phone}.',
+        'code' => '6-digit code',
+        'confirm' => 'Confirm',
+        'nothing' => 'There is no way to confirm your identity on this account. Please contact us.',
+    ],
+
+    // 10 §4.8
     'confirm' => [
         'title' => 'Confirm your password',
         'description' => 'This is a secure area. Please confirm your password before continuing.',

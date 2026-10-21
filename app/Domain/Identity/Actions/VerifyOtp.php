@@ -78,23 +78,27 @@ final class VerifyOtp
         return $otp->refresh();
     }
 
-    /** Every try counts against the IP (10 a minute) and the number (20 an hour), typos included. */
+    /**
+     * Every try counts against the IP (10 a minute) and the number (20 an hour), typos included. The count comes first
+     * and the comparison second: `hit` returns the count including this try, which is its place in line, so parallel
+     * tries cannot all pass a check that none of them has counted yet (a check followed by a count would let every
+     * request that arrives before the first count through).
+     *
+     * (`RateLimiter::hit` can lose one count when parallel requests open a window together; that costs a limit one try
+     * once per window, and nothing else.)
+     *
+     * The address is counted first, and a try it is refused is not counted against the number: somebody hammering from
+     * a blocked address cannot use up the hour of the number's owner.
+     */
     private function countAttempt(string $e164, ?string $ip): void
     {
-        $keys = [];
-
         foreach (['ip', 'phone'] as $kind) {
             $key = OtpLimits::key(OtpLimits::VERIFY, $kind, $e164, $ip);
+            ['max' => $max, 'decay' => $decay] = OtpLimits::limit(OtpLimits::VERIFY, $kind);
 
-            if (RateLimiter::tooManyAttempts($key, OtpLimits::limit(OtpLimits::VERIFY, $kind)['max'])) {
+            if (RateLimiter::hit($key, $decay) > $max) {
                 throw new ThrottleRequestsException('Too Many Attempts.', headers: ['Retry-After' => max(1, RateLimiter::availableIn($key))]);
             }
-
-            $keys[$kind] = $key;
-        }
-
-        foreach ($keys as $kind => $key) {
-            RateLimiter::hit($key, OtpLimits::limit(OtpLimits::VERIFY, $kind)['decay']);
         }
     }
 

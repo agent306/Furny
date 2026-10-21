@@ -47,6 +47,24 @@ return [
         'email_unavailable' => "This email can't be used with your account. Try another Google account.",
         'account_pending_deletion' => 'This account is scheduled for deletion. Contact us to restore it.',
         'pending_staff_invitation' => 'Open the invitation link we emailed you.',
+
+        // Phone codes (13 §4, §5.2, §5.7). `otp_invalid` counts the tries the code has left (`:attemptsLeft`).
+        'phone_invalid' => "That doesn't look like a phone number. Check it and try again.",
+        'phone_not_mobile' => 'Enter a mobile number: codes are sent by WhatsApp or SMS.',
+        'phone_country_not_supported' => "We can't send codes to numbers from that country yet.",
+        'captcha_required' => 'Complete the check below to get a code.',
+        'captcha_unavailable' => 'The check that you are not a robot is not available right now. Please try again in a moment.',
+        'otp_cooldown' => 'Please wait a moment before asking for another code.',
+        'otp_rate_limited' => 'Too many codes were asked for. Please try again later.',
+        'otp_unavailable' => "We can't send codes right now. Please try again later or sign in another way.",
+        'otp_send_failed' => "We couldn't send the code. Please try again in a moment.",
+        'otp_invalid' => "{0} That code isn't right and has no tries left.|{1} That code isn't right. 1 attempt left.|[2,*] That code isn't right. :attemptsLeft attempts left.",
+        'otp_expired' => 'That code has expired. Ask for a new one.',
+        'otp_too_many_attempts' => 'Too many wrong tries. Ask for a new code.',
+        'otp_failed' => "We couldn't sign you in with that number. Please try again.",
+        'staff_use_email' => 'Staff sign in with their email address and password.',
+        'phone_unavailable' => "That phone number can't be used with your account.",
+        'reauth_no_phone' => 'There is no verified phone number on your account to send a code to.',
     ],
 
 ];

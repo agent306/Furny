@@ -10,10 +10,13 @@ use App\Domain\Identity\Events\CustomerRegistered;
 use App\Domain\Identity\Models\StaffInvitation;
 use App\Domain\Identity\Models\User;
 use App\Http\Requests\Account\UnlinkGoogleRequest;
+use App\Listeners\ApplyPendingGoogleLink;
 use App\Listeners\RecordSuccessfulLogin;
 use App\Support\Auth\RecentAuthentication;
+use App\Support\Auth\SessionRegistry;
 use App\Support\Settings\Settings;
 use App\Support\Settings\SettingsGroup;
+use Illuminate\Cookie\CookieValuePrefix;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Event;
@@ -78,6 +81,12 @@ function googleRecaller(TestResponse $response): ?Cookie
     $name = Auth::guard('web')->getRecallerName();
 
     return collect($response->headers->getCookies())->first(fn ($cookie): bool => $cookie->getName() === $name);
+}
+
+/** Whether the session registry lists the session (its meta exists and it is in the user's set). */
+function googleSessionIsRegistered(string $sessionId): bool
+{
+    return (bool) Redis::connection('sessions')->exists('sess:meta:'.$sessionId);
 }
 
 function allowGoogleRegistration(bool $open): void
@@ -488,6 +497,12 @@ describe('intent login', function (): void {
             $user = User::factory()->unverified()->create(['email' => 'asha@example.com']);
             $token = $user->remember_token;
             $other = RegistryFixtures::open($user);
+            // The session in use is registered first, the way TrackSession registers it on the user's first
+            // request: the link must leave it alone while it signs the other one out.
+            $current = Str::random(40);
+            $this->withCookie((string) config('session.cookie'), $current);
+            $this->actingAs($user)->get(route('customer.dashboard'))->assertOk();
+            expect(googleSessionIsRegistered($current))->toBeTrue();
             googleAnswers(googleProfile(id: '444', email: 'asha@example.com'));
 
             ($this->callback)('link', as: $user)->assertRedirect(route('customer.dashboard'));
@@ -497,7 +512,12 @@ describe('intent login', function (): void {
                 ->and($user->password)->toBeNull()
                 ->and($user->remember_token)->not->toBe($token)
                 ->and(RegistryFixtures::alive($other))->toBeFalse()
+                ->and(googleSessionIsRegistered($other))->toBeFalse()
+                // The session in use is still registered, and is not tombstoned.
+                ->and(googleSessionIsRegistered($current))->toBeTrue()
+                ->and(app(SessionRegistry::class)->isRevoked($current))->toBeFalse()
                 ->and(Activity::query()->where('event', 'auth.sessions_revoked')->sole()->properties['reason'])->toBe('google_link_unverified')
+                ->and(Activity::query()->where('event', 'auth.sessions_revoked')->sole()->properties['count'])->toBe(1)
                 ->and(Activity::query()->where('event', 'auth.google_linked')->sole()->properties['reason'])->toBe('google_link_unverified');
             // The session in use goes on working.
             $this->get(route('customer.dashboard'))->assertSuccessful();
@@ -1226,5 +1246,179 @@ describe('the unlink request (14 section 3.3)', function (): void {
 
         $request->setUserResolver(static fn (): User => User::factory()->create());
         expect($request->authorize())->toBeTrue();
+    });
+});
+
+describe('staff with a second factor and an address nobody verified (13 section 5.3 step 5)', function (): void {
+    // Linking by address takes the account over: the password goes, the remember token is rotated and the sessions are
+    // revoked. For staff with a confirmed second factor none of it may happen before the challenge is passed, or
+    // whoever owns the Google account for that address could lock the staff member out without the authenticator.
+    beforeEach(function (): void {
+        $this->owner = User::factory()->owner()->create(['email' => 'owner@example.com', 'email_verified_at' => null]);
+        $this->owner->forceFill(['two_factor_recovery_codes' => encrypt(json_encode(['aaaaaaaaaa-bbbbbbbbbb', 'cccccccccc-dddddddddd']))])->save();
+        $this->hash = $this->owner->password;
+        $this->token = $this->owner->remember_token;
+        $this->open = RegistryFixtures::open($this->owner);
+        googleAnswers(googleProfile(id: '321', email: 'owner@example.com'));
+        $this->challenge = fn (string $code = 'aaaaaaaaaa-bbbbbbbbbb') => $this->post(route('two-factor.login.store'), ['recovery_code' => $code]);
+    });
+
+    it('leaves the account untouched until the challenge is passed', function (): void {
+        ($this->callback)()->assertRedirect(route('two-factor.login'));
+
+        $this->assertGuest();
+        $owner = $this->owner->refresh();
+        expect($owner->password)->toBe($this->hash)
+            ->and($owner->remember_token)->toBe($this->token)
+            ->and($owner->google_id)->toBeNull()
+            ->and($owner->email_verified_at)->toBeNull()
+            ->and(RegistryFixtures::alive($this->open))->toBeTrue()
+            ->and(Activity::query()->whereIn('event', ['auth.google_linked', 'auth.sessions_revoked'])->count())->toBe(0)
+            ->and(session(ApplyPendingGoogleLink::KEY))->toBe(['user' => $this->owner->getKey(), 'googleId' => '321']);
+    });
+
+    it('does the clean-up when the challenge is passed, and only then', function (): void {
+        ($this->callback)()->assertRedirect(route('two-factor.login'));
+
+        ($this->challenge)()->assertRedirect(route('admin.dashboard'));
+
+        $this->assertAuthenticatedAs($this->owner);
+        $owner = $this->owner->refresh();
+        expect($owner->google_id)->toBe('321')
+            ->and($owner->email_verified_at)->not->toBeNull()
+            ->and($owner->password)->toBeNull()
+            ->and($owner->remember_token)->not->toBe($this->token)->toHaveLength(60)
+            ->and(RegistryFixtures::alive($this->open))->toBeFalse()
+            ->and(session()->has(ApplyPendingGoogleLink::KEY))->toBeFalse()
+            ->and(session('auth.method'))->toBe('google')
+            ->and(Activity::query()->where('event', 'auth.sessions_revoked')->sole()->properties->all())->toBe(['count' => 1, 'reason' => 'google_link_unverified'])
+            ->and(Activity::query()->where('event', 'auth.google_linked')->sole()->properties->all())->toBe(['replaced' => false, 'reason' => 'google_link_unverified'])
+            // The sign-in that passed the challenge is the one session left, and it is registered.
+            ->and(googleSessionIsRegistered(session()->getId()))->toBeTrue()
+            ->and(app(SessionRegistry::class)->isRevoked(session()->getId()))->toBeFalse();
+    });
+
+    it('does nothing when the challenge is failed or abandoned', function (): void {
+        ($this->callback)()->assertRedirect(route('two-factor.login'));
+
+        ($this->challenge)('wrong-wrong-wr')->assertSessionHasErrors();
+
+        $this->assertGuest();
+        $owner = $this->owner->refresh();
+        expect($owner->password)->toBe($this->hash)
+            ->and($owner->google_id)->toBeNull()
+            ->and(RegistryFixtures::alive($this->open))->toBeTrue()
+            ->and(Activity::query()->where('event', 'auth.sessions_revoked')->count())->toBe(0);
+    });
+
+    it('is bound to the user: somebody else who signs in in the same session does not trigger it', function (): void {
+        $customer = User::factory()->create(['email' => 'asha@example.com']);
+        $this->withSession([ApplyPendingGoogleLink::KEY => ['user' => $this->owner->getKey(), 'googleId' => '321']])
+            ->post(route('login.store'), ['email' => 'asha@example.com', 'password' => 'password'])
+            ->assertRedirect(route('customer.dashboard'));
+
+        $this->assertAuthenticatedAs($customer);
+        expect($this->owner->refresh()->password)->toBe($this->hash)
+            ->and($this->owner->google_id)->toBeNull()
+            ->and(RegistryFixtures::alive($this->open))->toBeTrue();
+    });
+
+    it('is forgotten by a password sign-in, so that the same owner signing in with the password later is not taken over', function (): void {
+        ($this->callback)()->assertRedirect(route('two-factor.login'));
+        Auth::forgetGuards();
+
+        // The challenge was abandoned; the owner signs in with the password in the same session and passes a challenge.
+        $this->post(route('login.store'), ['email' => 'owner@example.com', 'password' => 'password'])->assertRedirect(route('two-factor.login'));
+        ($this->challenge)()->assertRedirect(route('admin.dashboard'));
+
+        $this->assertAuthenticatedAs($this->owner);
+        expect($this->owner->refresh()->password)->toBe($this->hash)
+            ->and($this->owner->google_id)->toBeNull()
+            ->and(session('auth.method'))->toBe('password')
+            ->and(RegistryFixtures::alive($this->open))->toBeTrue();
+    });
+
+    it('does not do it for a sign-in by the remember cookie', function (): void {
+        $recaller = $this->owner->getKey().'|'.$this->token.'|'.Auth::guard('web')->hashPasswordForCookie($this->hash);
+
+        $this->withCookie(Auth::guard('web')->getRecallerName(), $recaller)
+            ->withSession([ApplyPendingGoogleLink::KEY => ['user' => $this->owner->getKey(), 'googleId' => '321']])
+            ->get(route('admin.dashboard'));
+
+        expect($this->owner->refresh()->google_id)->toBeNull()->and($this->owner->password)->toBe($this->hash);
+    });
+
+    it('links at once when the address was verified, as before', function (): void {
+        $this->owner->forceFill(['email_verified_at' => now()])->save();
+
+        ($this->callback)()->assertRedirect(route('two-factor.login'));
+
+        expect($this->owner->refresh()->google_id)->toBe('321')->and($this->owner->password)->toBe($this->hash)
+            ->and(session()->has(ApplyPendingGoogleLink::KEY))->toBeFalse();
+    });
+
+    it('does not wait for staff without a second factor', function (): void {
+        $this->owner->forceFill(['two_factor_secret' => null, 'two_factor_recovery_codes' => null, 'two_factor_confirmed_at' => null])->save();
+
+        ($this->callback)()->assertRedirect(route('admin.dashboard'));
+
+        expect($this->owner->refresh()->password)->toBeNull()->and($this->owner->google_id)->toBe('321');
+    });
+
+    it('finishes the sign-in even when the link has become impossible meanwhile', function (): void {
+        ($this->callback)()->assertRedirect(route('two-factor.login'));
+        // Somebody else linked that Google account in the meantime.
+        User::factory()->create(['google_id' => '321']);
+
+        ($this->challenge)()->assertRedirect(route('admin.dashboard'));
+
+        $this->assertAuthenticatedAs($this->owner);
+        expect($this->owner->refresh()->google_id)->toBeNull()->and($this->owner->password)->toBe($this->hash);
+    });
+});
+
+describe('linking Google rotates the remember token (13 section 6.3)', function (): void {
+    // The unverified address makes the link a take-over, which rotates the token and with it the cookie of every
+    // device. The device in use gets the new one at once, as "sign out other devices" does.
+    beforeEach(function (): void {
+        $this->user = User::factory()->unverified()->create(['email' => 'asha@example.com', 'remember_token' => Str::random(60)]);
+        $this->token = $this->user->remember_token;
+    });
+
+    it('re-issues the recaller cookie of the current device with the new token', function (): void {
+        googleAnswers(googleProfile(id: '444', email: 'asha@example.com'));
+        $old = $this->user->getKey().'|'.$this->token.'|'.Auth::guard('web')->hashPasswordForCookie($this->user->password);
+
+        $response = $this->withCookie(Auth::guard('web')->getRecallerName(), $old)
+            ->actingAs($this->user)
+            ->withSession(['oauth.intent' => 'link', 'oauth.user' => $this->user->getKey()])
+            ->get(route('auth.google.callback'));
+
+        $user = $this->user->refresh();
+        $recaller = googleRecaller($response);
+        expect($user->remember_token)->not->toBe($this->token)
+            ->and($recaller)->not->toBeNull()
+            ->and(CookieValuePrefix::remove(decrypt($recaller->getValue(), false)))->toBe($user->getKey().'|'.$user->remember_token.'|'.Auth::guard('web')->hashPasswordForCookie(null))
+            ->and($recaller->getExpiresTime())->toBeGreaterThan(time());
+    });
+
+    it('sets no cookie on a device that had none', function (): void {
+        googleAnswers(googleProfile(id: '444', email: 'asha@example.com'));
+        $response = ($this->callback)('link', as: $this->user);
+
+        expect($this->user->refresh()->remember_token)->not->toBe($this->token)->and(googleRecaller($response))->toBeNull();
+    });
+
+    it('sets no cookie when the token was not rotated', function (): void {
+        $verified = User::factory()->create(['email' => 'maya@example.com', 'remember_token' => Str::random(60)]);
+        googleAnswers(googleProfile(id: '555', email: 'maya@example.com'));
+        $old = $verified->getKey().'|'.$verified->remember_token.'|'.Auth::guard('web')->hashPasswordForCookie($verified->password);
+
+        $response = $this->withCookie(Auth::guard('web')->getRecallerName(), $old)
+            ->actingAs($verified)
+            ->withSession(['oauth.intent' => 'link', 'oauth.user' => $verified->getKey()])
+            ->get(route('auth.google.callback'));
+
+        expect($verified->refresh()->google_id)->toBe('555')->and(googleRecaller($response))->toBeNull();
     });
 });

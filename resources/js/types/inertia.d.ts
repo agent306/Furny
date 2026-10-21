@@ -28,6 +28,12 @@ export type FlashMessages = {
     warning?: string;
 };
 
+/** After a phone code was sent (13 §5.2, §5.7): the channel it went by and the number as it may be shown. Not toasts. */
+export type PhoneCodeFlash = {
+    channel?: 'whatsapp' | 'sms';
+    maskedPhone?: string;
+};
+
 export type HealthBanner = {
     key: string;
     /** Translation key `admin.health.{key}.{status}`. */
@@ -51,6 +57,6 @@ export type SharedPageProps = {
 declare module '@inertiajs/core' {
     export interface InertiaConfig {
         sharedPageProps: SharedPageProps;
-        flashDataType: FlashMessages;
+        flashDataType: FlashMessages & PhoneCodeFlash;
     }
 }
