@@ -10,11 +10,18 @@ import { reactive } from 'vue';
  *   }));
  */
 export type TestPageProps = {
-    auth?: { user: { type: 'customer' | 'staff'; timezone?: string } | null };
+    auth?: {
+        user: {
+            type: 'customer' | 'staff';
+            timezone?: string;
+            lengthUnit?: 'mm' | 'cm' | 'm' | 'ftin' | 'in';
+        } | null;
+    };
     business?: {
         locale?: string;
         currency?: string;
         timezone?: string;
+        defaultCountryCode?: string;
     };
 };
 

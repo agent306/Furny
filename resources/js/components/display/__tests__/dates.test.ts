@@ -151,6 +151,43 @@ describe('DateText', () => {
         expect(time.text()).toBe('20 Oct 2026');
     });
 
+    it('dateStyle (the preferred prop) picks the style', () => {
+        const wrapper = mount(DateText, {
+            props: { value: '2026-10-20', kind: 'date', dateStyle: 'long' },
+        });
+
+        expect(wrapper.text()).toBe('20 October 2026');
+    });
+
+    it('dateStyle wins over style when both are given', () => {
+        const wrapper = mount(DateText, {
+            props: {
+                value: '2026-10-20',
+                kind: 'date',
+                dateStyle: 'short',
+                style: 'long',
+            },
+        });
+        const time = wrapper.get('time');
+
+        expect(time.text()).toBe('20/10/26');
+        expect(time.attributes('style')).toBeUndefined();
+    });
+
+    it('dateStyle leaves style free for inline CSS', () => {
+        const time = mount(DateText, {
+            props: {
+                value: '2026-10-20',
+                kind: 'date',
+                dateStyle: 'long',
+                style: { color: 'red' },
+            },
+        }).get('time');
+
+        expect(time.text()).toBe('20 October 2026');
+        expect(time.attributes('style')).toContain('color: red');
+    });
+
     it('class still falls through', () => {
         const wrapper = mount(DateText, {
             props: { value: '2026-10-20', kind: 'date' },

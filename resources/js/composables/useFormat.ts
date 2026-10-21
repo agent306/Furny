@@ -17,14 +17,13 @@ type FormatProps = {
 };
 
 /**
- * `lib/format` bound to the business locale and currency and the user's time
- * zone (falling back to the business zone) from the page props. The functions
- * read the props on every call, so they follow prop changes.
+ * The format context (business locale and currency, user time zone) read from
+ * the page props on every call, so it follows prop changes.
  */
-export function useFormat(): Formatters {
+export function useFormatContext(): () => FormatContext {
     const page = usePage();
 
-    return createFormat((): FormatContext => {
+    return (): FormatContext => {
         const { auth, business } = page.props as FormatProps;
         const businessTimeZone =
             business?.timezone ?? DEFAULT_FORMAT_CONTEXT.businessTimeZone;
@@ -35,5 +34,14 @@ export function useFormat(): Formatters {
             timeZone: auth?.user?.timezone ?? businessTimeZone,
             businessTimeZone,
         };
-    });
+    };
+}
+
+/**
+ * `lib/format` bound to the business locale and currency and the user's time
+ * zone (falling back to the business zone) from the page props. The functions
+ * read the props on every call, so they follow prop changes.
+ */
+export function useFormat(): Formatters {
+    return createFormat(useFormatContext());
 }

@@ -20,6 +20,17 @@ return [
         'save_changes' => 'Save changes',
     ],
 
+    'address' => [
+        'city' => 'City',
+        'country' => 'Country',
+        'label' => 'Label',
+        'label_placeholder' => 'Home',
+        'line1' => 'Address line 1',
+        'line2' => 'Address line 2',
+        'postal_code' => 'Postal code',
+        'region' => 'State / region',
+    ],
+
     'confirm' => [
         'type_to_confirm' => 'Type {text} to confirm.',
     ],

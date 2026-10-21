@@ -133,6 +133,11 @@ function validTimeZone(candidate: string, fallback: string): string {
 
 const currencyDigits = new Map<string, number>();
 
+/** Minor-unit digits of a currency: 0 (JPY), 2 (INR) or 3 (BHD, KWD). */
+export function currencyFractionDigits(currency: string): number {
+    return fractionDigitsFor(currency);
+}
+
 function fractionDigitsFor(currency: string): number {
     let digits = currencyDigits.get(currency);
 
@@ -330,6 +335,41 @@ export function createFormat(source: FormatContext | (() => FormatContext)) {
         ).format(minorToMajorString(minor, code) as `${number}`);
     }
 
+    // The same cached currency formatter, split at the symbol: the amount
+    // text (`12,345.67`, `-0.005`) and the symbol (`₹`) apart, for inputs that
+    // draw the symbol beside the field.
+    function moneyParts(
+        minor: number,
+        currency?: string,
+    ): { symbol: string; amount: string } {
+        const { locale, currency: businessCurrency } = read();
+        const code = currency ?? businessCurrency;
+        const parts = currencyFormat(
+            locale,
+            code,
+            undefined,
+            false,
+        ).formatToParts(minorToMajorString(minor, code) as `${number}`);
+        const text = (own: boolean): string =>
+            parts
+                .filter((part) => (part.type === 'currency') === own)
+                .map((part) => part.value)
+                .join('')
+                .trim();
+
+        return { symbol: text(true), amount: text(false) };
+    }
+
+    /** `12,345.67`: the grouped amount of `formatMoney`, without the symbol. */
+    function formatMoneyAmount(minor: number, currency?: string): string {
+        return moneyParts(minor, currency).amount;
+    }
+
+    /** `₹`, `$`, `BHD`: the currency symbol of `formatMoney`. */
+    function currencySymbol(currency?: string): string {
+        return moneyParts(0, currency).symbol;
+    }
+
     function formatNumber(
         n: number,
         options?: Intl.NumberFormatOptions,
@@ -518,6 +558,8 @@ export function createFormat(source: FormatContext | (() => FormatContext)) {
 
     return {
         formatMoney,
+        formatMoneyAmount,
+        currencySymbol,
         minorToMajorString,
         parseMajorToMinor,
         formatNumber,
@@ -544,6 +586,8 @@ const bound = createFormat(() => current);
 
 export const {
     formatMoney,
+    formatMoneyAmount,
+    currencySymbol,
     formatNumber,
     formatPercent,
     formatBps,

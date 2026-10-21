@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     createFormat,
+    currencyFractionDigits,
+    currencySymbol,
+    formatMoneyAmount,
     formatBps,
     formatDate,
     formatDateTime,
@@ -551,5 +554,43 @@ describe('performance', () => {
 
         expect(zone).not.toHaveBeenCalled();
         zone.mockRestore();
+    });
+});
+
+describe('formatMoneyAmount, currencySymbol and currencyFractionDigits (input support)', () => {
+    it('splits formatMoney into the symbol and the grouped amount', () => {
+        expect(currencySymbol()).toBe('₹');
+        expect(formatMoneyAmount(1234567)).toBe('12,345.67');
+        expect(formatMoneyAmount(1234567890)).toBe('1,23,45,678.90');
+        expect(formatMoneyAmount(0)).toBe('0.00');
+    });
+
+    it('keeps the sign with the amount', () => {
+        expect(formatMoneyAmount(-500)).toBe('-5.00');
+    });
+
+    it('follows 0-, 2- and 3-decimal currencies', () => {
+        expect(currencyFractionDigits('JPY')).toBe(0);
+        expect(currencyFractionDigits('INR')).toBe(2);
+        expect(currencyFractionDigits('BHD')).toBe(3);
+        expect(formatMoneyAmount(1500, 'JPY')).toBe('1,500');
+        expect(formatMoneyAmount(1234567, 'BHD')).toBe('1,234.567');
+        expect(currencySymbol('JPY')).toBe('JP¥');
+        expect(currencySymbol('BHD')).toBe('BHD');
+    });
+
+    it('joins to what formatMoney prints (symbol and amount, in locale order)', () => {
+        const format = createFormat({
+            locale: 'de-DE',
+            currency: 'EUR',
+            timeZone: 'UTC',
+            businessTimeZone: 'UTC',
+        });
+
+        expect(format.currencySymbol()).toBe('€');
+        expect(format.formatMoneyAmount(1234567)).toBe('12.345,67');
+        expect(format.formatMoney(1234567).replace(/\s/g, ' ')).toBe(
+            '12.345,67 €',
+        );
     });
 });
