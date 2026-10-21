@@ -1,15 +1,16 @@
 """Intermediate (pre-assembly) candidate types shared by the pipeline stages (06 section 7-8).
 
 Extended task by task; this module currently holds ``ParsedText``, ``TextToken``, ``Segment``,
-``DimensionLine``, ``DimensionSpan``, ``RawWall``, ``WallCandidate``, ``GapCandidate``, ``WallGraph`` and
-``OpeningCandidate``.
+``DimensionLine``, ``DimensionSpan``, ``RawWall``, ``WallCandidate``, ``GapCandidate``, ``WallGraph``,
+``OpeningCandidate``, ``RoomFace`` and ``CandidateSet``.
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
-from app.utils.geometry import Pt, seg_angle_deg
+from app.schemas.meta import DrawingKind
+from app.utils.geometry import Pt, Rect, seg_angle_deg
 
 TextKind = Literal[
     "mm_number",
@@ -207,3 +208,116 @@ class OpeningCandidate:
     hinge: Literal["start", "end"]
     swing: Literal["left", "right"]
     support: float
+
+
+@dataclass(frozen=True, slots=True)
+class RoomFace:
+    """A room face (06 section 8.6): a component of the free space inside the plan region that the walls and
+    the opening closures enclose, in pixels.
+
+    ``polygon_px`` is its outer contour simplified with ``approxPolyDP(0.5 t_median)``; ``anchor_px`` the
+    maximum of its distance transform (the pole of inaccessibility, strictly inside); ``area_px`` its pixel
+    count; ``bbox`` ``(x0, y0, x1, y1)`` of its pixels; ``contains_text_ids`` the tokens centred inside it.
+    ``open`` is set when it only closes thanks to closures longer than ``6 t`` (reason ``open_face``).
+    """
+
+    id: str
+    polygon_px: tuple[Pt, ...]
+    anchor_px: Pt
+    area_px: float
+    bbox: tuple[float, float, float, float]
+    contains_text_ids: tuple[str, ...]
+    open: bool
+
+
+@dataclass(frozen=True)
+class CandidateSet:
+    """Everything the CV stages found on one page (06 sections 7.7-8.6), in normalized-page pixels: the input
+    of labeling, scale and assembly. ``drawing_kind_cv`` is the preprocess classification."""
+
+    texts: list[TextToken]
+    segments: list[Segment]
+    dimension_lines: list[DimensionLine]
+    spans: list[DimensionSpan]
+    nodes: dict[str, Pt]
+    walls: list[WallCandidate]
+    gaps: list[GapCandidate]
+    openings: list[OpeningCandidate]
+    rooms: list[RoomFace]
+    theta0: float
+    t_thin: float
+    t_median: float
+    region: Rect
+    drawing_kind_cv: DrawingKind
+
+    def scale_y(self, factor: float) -> "CandidateSet":
+        """A copy with every y coordinate multiplied by ``factor`` (06 section 8.2 step 7, anisotropy).
+
+        Lengths measured along a line (opening and gap intervals along a wall, tick positions along a
+        dimension line) follow their line's new length; room areas scale by ``factor``. Stroke widths, wall
+        thicknesses and text heights of horizontal text are lengths across, not coordinates, and are kept.
+        """
+
+        def pt(p: Pt) -> Pt:
+            return (p[0], p[1] * factor)
+
+        def stretch(a: Pt, b: Pt) -> float:
+            """New length per old length along ``a -> b``."""
+            old = math.hypot(b[0] - a[0], b[1] - a[1])
+            return math.hypot(b[0] - a[0], (b[1] - a[1]) * factor) / old if old > 0 else 1.0
+
+        wall_k = {w.id: stretch(w.a, w.b) for w in self.walls}
+
+        def along(wid: str, u: float) -> float:
+            return u * wall_k.get(wid, 1.0)
+
+        def text(t: TextToken) -> TextToken:
+            x0, y0, x1, y1 = t.box
+            q0, q1, q2, q3 = t.quad
+            height = t.height_px * factor if t.angle == 90 else t.height_px
+            return replace(
+                t,
+                quad=(pt(q0), pt(q1), pt(q2), pt(q3)),
+                box=(x0, y0 * factor, x1, y1 * factor),
+                height_px=height,
+            )
+
+        def line(d: DimensionLine) -> DimensionLine:
+            k = stretch(d.p0, d.p1)
+            return replace(d, p0=pt(d.p0), p1=pt(d.p1), tick_positions=[u * k for u in d.tick_positions])
+
+        def room(r: RoomFace) -> RoomFace:
+            x0, y0, x1, y1 = r.bbox
+            return replace(
+                r,
+                polygon_px=tuple(pt(p) for p in r.polygon_px),
+                anchor_px=pt(r.anchor_px),
+                area_px=r.area_px * factor,
+                bbox=(x0, y0 * factor, x1, y1 * factor),
+            )
+
+        region = self.region
+        y0, y1 = round(region.y * factor), round((region.y + region.h) * factor)
+        return replace(
+            self,
+            texts=[text(t) for t in self.texts],
+            segments=[replace(s, p0=pt(s.p0), p1=pt(s.p1)) for s in self.segments],
+            dimension_lines=[line(d) for d in self.dimension_lines],
+            spans=[replace(s, p0=pt(s.p0), p1=pt(s.p1)) for s in self.spans],
+            nodes={k: pt(p) for k, p in self.nodes.items()},
+            walls=[
+                replace(
+                    w,
+                    a=pt(w.a),
+                    b=pt(w.b),
+                    openings_px=tuple((along(w.id, u0), along(w.id, u1)) for u0, u1 in w.openings_px),
+                )
+                for w in self.walls
+            ],
+            gaps=[replace(g, u0=along(g.wall_id, g.u0), u1=along(g.wall_id, g.u1)) for g in self.gaps],
+            openings=[
+                replace(o, u0=along(o.wall_id, o.u0), u1=along(o.wall_id, o.u1)) for o in self.openings
+            ],
+            rooms=[room(r) for r in self.rooms],
+            region=Rect(region.x, y0, region.w, y1 - y0),
+        )
