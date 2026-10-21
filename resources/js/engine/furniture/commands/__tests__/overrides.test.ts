@@ -263,6 +263,13 @@ describe('hardware overrides', () => {
         expect(bus.history().undo[0]!.mergeKey).toBe('hw:hinge.x');
     });
 
+    it.each([-1, 0, 1000])('addExtraHardware rejects qty %i', (qty) => {
+        const bus = furnitureBus();
+        expect(
+            bus.execute('furniture.addExtraHardware', { ...EXTRA_HW, qty }).ok,
+        ).toBe(false);
+    });
+
     it('extra hardware: add (h_ id), update, remove', () => {
         const added = roundTrip('furniture.addExtraHardware', EXTRA_HW);
         expect(added.result.result).toEqual({ id: 'h_0000000001' });

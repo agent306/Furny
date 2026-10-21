@@ -7,6 +7,7 @@ import {
 } from '../migrate';
 import {
     EDGE_IDS,
+    ExtraHardwareSchema,
     FurnitureDocumentSchema,
     MATERIAL_ROLES,
     TEMPLATE_KEYS,
@@ -446,5 +447,24 @@ describe('migrateFurniture', () => {
                 'unsupported_schema_version',
             );
         }
+    });
+});
+
+describe('ExtraHardwareSchema qty (07 §8.7.5: 1 to 999)', () => {
+    const hardware = (qty: number) => ({
+        id: 'h_0000000001',
+        code: 'CON-CAM-15',
+        qty,
+        note: null,
+    });
+
+    it.each([1, 999])('accepts %i', (qty) => {
+        expect(ExtraHardwareSchema.safeParse(hardware(qty)).success).toBe(true);
+    });
+
+    it.each([-1000, -1, 0, 1000, 1.5])('rejects %s', (qty) => {
+        expect(ExtraHardwareSchema.safeParse(hardware(qty)).success).toBe(
+            false,
+        );
     });
 });

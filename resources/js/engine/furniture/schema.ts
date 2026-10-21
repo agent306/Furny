@@ -266,7 +266,8 @@ export type HardwareOverride = z.infer<typeof HardwareOverrideSchema>;
 export const ExtraHardwareSchema = z.object({
     id: entityId('h'),
     code: z.string(),
-    qty: z.number().int(),
+    /** 1..999 (07 §8.7.5): a negative qty would silently remove billed hardware. */
+    qty: z.number().int().min(1).max(999),
     note: z.string().nullable(),
 });
 export type ExtraHardware = z.infer<typeof ExtraHardwareSchema>;
