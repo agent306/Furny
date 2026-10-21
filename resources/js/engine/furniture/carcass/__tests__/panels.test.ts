@@ -4,7 +4,12 @@ import { seedCatalog } from '../../../testing/seedCatalog';
 import { createGenContext } from '../../context';
 import { FurnitureDocumentSchema, type FurnitureDocument } from '../../schema';
 import type { GenContext, Part } from '../../types';
-import { boxDocument, countertopBox, drawerTestBox } from '../../testing/docs';
+import {
+    assign,
+    boxDocument,
+    countertopBox,
+    drawerTestBox,
+} from '../../testing/docs';
 import { countertopPart } from '../countertop';
 import { computeEnvelope } from '../envelope';
 import { carcassPanels } from '../panels';
@@ -478,5 +483,180 @@ describe('countertopPart', () => {
         expect(generate(countertopBox({ overhangFront: 300 })).issues).toEqual(
             [],
         );
+    });
+});
+
+// Gaps found in the review of the first version of these generators.
+describe('grain, offsets, role thicknesses and guards', () => {
+    const oak = assign('PB18-OAK');
+
+    it('grain follows the board: oak sides, top, bottom and plinth parts run lengthwise', () => {
+        const ctx = generate(
+            wardrobe((d) => {
+                d.materials.carcass = oak;
+                d.materials.plinth = oak;
+            }),
+        );
+        for (const key of [
+            'carcass.side.left',
+            'carcass.side.right',
+            'carcass.top',
+            'carcass.bottom',
+            'plinth.front',
+            'plinth.back',
+            'plinth.return.1',
+            'plinth.return.3',
+        ]) {
+            expect([key, part(ctx, key).grain]).toEqual([key, 'length']);
+        }
+        // the same parts in a board without grain have none
+        expect(part(generate(wardrobe()), 'carcass.side.left').grain).toBe(
+            'none',
+        );
+    });
+
+    it('grain follows the board: an oak countertop grain runs along x', () => {
+        const doc = countertopBox();
+        doc.materials.top = oak;
+        expect(part(generate(doc), 'countertop').grain).toBe('length');
+        // deeper than wide: the grain (along x) is then the width
+        const deep = boxDocument({
+            width: 500,
+            height: 850,
+            depth: 600,
+            carcass: {
+                countertop: {
+                    enabled: true,
+                    overhangFront: 0,
+                    overhangLeft: 0,
+                    overhangRight: 0,
+                },
+            },
+            materials: { top: oak },
+        });
+        expect(part(generate(deep), 'countertop').grain).toBe('width');
+    });
+
+    it('a left overhang shifts the plinth: front, back and returns start at x0', () => {
+        const ctx = generate(
+            boxDocument({
+                width: 1100,
+                height: 850,
+                depth: 560,
+                carcass: {
+                    plinth: {
+                        type: 'plinth',
+                        height: 100,
+                        setback: 20,
+                        legCode: null,
+                    },
+                    countertop: {
+                        enabled: true,
+                        overhangFront: 0,
+                        overhangLeft: 30,
+                        overhangRight: 20,
+                    },
+                },
+                materials: { top: assign('PB25-WHITE') },
+            }),
+        );
+        // Wc = 1100 - 30 - 20 = 1050
+        expect(box(part(ctx, 'plinth.front'))).toEqual({
+            min: [30, 0, 522],
+            size: [1050, 100, 18],
+        });
+        expect(box(part(ctx, 'plinth.back'))?.min[0]).toBe(30);
+        const returns = ctx.parts.filter((p) =>
+            p.key.startsWith('plinth.return.'),
+        );
+        expect(returns.map((r) => box(r)?.min[0])).toEqual([30, 546, 1062]);
+    });
+
+    it('role thicknesses: a 25 mm front and a 12 mm plinth on an 18 mm carcass', () => {
+        const ctx = generate(
+            boxDocument({
+                width: 600,
+                height: 720,
+                depth: 560,
+                carcass: {
+                    plinth: {
+                        type: 'plinth',
+                        height: 100,
+                        setback: 20,
+                        legCode: null,
+                    },
+                },
+                fronts: [
+                    {
+                        id: 'fr_0000000001',
+                        kind: 'hinged',
+                        covers: ['s_0000000001'],
+                        leaves: 1,
+                        hingeSide: 'left',
+                        overlay: 'full',
+                        glass: false,
+                        handleCode: 'inherit',
+                        hingeCode: 'auto',
+                        slidingTrackCode: null,
+                    },
+                ],
+                materials: {
+                    front: assign('PB25-WHITE'),
+                    plinth: assign('PLY12-BWR'),
+                },
+            }),
+        );
+        // fz = 25 (front board), Dc = 535
+        expect(part(ctx, 'carcass.side.left').width).toBe(535);
+        const f = part(ctx, 'plinth.front');
+        expect(f.thickness).toBe(12);
+        expect(box(f)).toEqual({ min: [0, 0, 503], size: [600, 100, 12] });
+        expect(box(part(ctx, 'plinth.back'))?.size[2]).toBe(12);
+        // return depth = 535 - 20 - 2 x 12
+        const r = part(ctx, 'plinth.return.1');
+        expect(box(r)).toEqual({ min: [0, 0, 12], size: [12, 100, 491] });
+        expect(r.width).toBe(100);
+    });
+
+    it('a wall unit with the bottom over the sides does not band the side bottoms', () => {
+        const ctx = generate(
+            boxDocument({
+                width: 600,
+                height: 720,
+                depth: 560,
+                carcass: {
+                    mounting: 'wall',
+                    construction: {
+                        top: 'between_sides',
+                        bottom: 'over_sides',
+                    },
+                },
+            }),
+        );
+        expect(part(ctx, 'carcass.side.left').edges).toEqual({
+            L1: B,
+            L2: null,
+            W1: B,
+            W2: null,
+        });
+    });
+
+    it('a plinth of height 0 makes no parts and no issue', () => {
+        for (const type of ['plinth', 'legs'] as const) {
+            const ctx = generate(
+                boxDocument({
+                    width: 600,
+                    height: 720,
+                    depth: 560,
+                    carcass: {
+                        plinth: { type, height: 0, setback: 50, legCode: null },
+                    },
+                }),
+            );
+            expect(keys(ctx).filter((k) => k.startsWith('plinth.'))).toEqual(
+                [],
+            );
+            expect(ctx.issues).toEqual([]);
+        }
     });
 });

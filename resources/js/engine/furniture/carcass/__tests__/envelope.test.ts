@@ -6,6 +6,7 @@ import { FurnitureDocumentSchema, type Front } from '../../schema';
 import type { FurnitureDocument, Section } from '../../schema';
 import {
     BOX_ROOT_ID,
+    assign,
     boxDocument,
     countertopBox,
     drawerTestBox,
@@ -270,6 +271,57 @@ describe('computeEnvelope', () => {
         expect(() => computeEnvelope(createGenContext(doc, catalog))).toThrow(
             /carcass/,
         );
+    });
+});
+
+describe('computeEnvelope: front thickness and sliding mixes', () => {
+    const thick = { front: assign('PB25-WHITE') };
+
+    it('a 25 mm front board gives a 25 mm front zone', () => {
+        const env = envOf(
+            boxDocument({
+                width: 600,
+                height: 720,
+                depth: 560,
+                fronts: [front()],
+                materials: thick,
+            }),
+        );
+        expect(env.fz).toBe(25);
+        expect(env.Dc).toBe(535);
+    });
+
+    it('a 25 mm front board widens the sliding zone to 2 x (25 + 12)', () => {
+        const env = envOf(
+            boxDocument({
+                width: 1200,
+                height: 720,
+                depth: 560,
+                fronts: [front({ kind: 'sliding', leaves: 2 })],
+                materials: thick,
+            }),
+        );
+        expect(env.slidingZone).toBe(74);
+        expect(env.fz).toBe(0);
+        expect(env.interior.size[2]).toBe(560 - 74 - 13);
+    });
+
+    it('sliding doors beside an overlay front still leave no front zone', () => {
+        const env = envOf(
+            boxDocument({
+                width: 1200,
+                height: 720,
+                depth: 560,
+                fronts: [
+                    front({ kind: 'sliding', leaves: 2 }),
+                    front({ id: 'fr_0000000002', covers: ['s_0000000009'] }),
+                ],
+            }),
+        );
+        expect(env.fz).toBe(0);
+        expect(env.slidingZone).toBe(60);
+        expect(env.Dc).toBe(560);
+        expect(env.drawerStyle).toBe('full');
     });
 });
 
