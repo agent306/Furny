@@ -11,9 +11,37 @@ import { validateFurniture } from '../validate';
 import { effectiveParams } from './common';
 import type { TemplateContext, TemplateDefinition } from './types';
 import { wardrobeHinged } from './wardrobe_hinged';
+import { wardrobeSliding } from './wardrobe_sliding';
+import { loftCabinet } from './loft_cabinet';
+import { baseCabinet } from './base_cabinet';
+import { wallCabinet } from './wall_cabinet';
+import { tallCabinet } from './tall_cabinet';
+import { bookshelf } from './bookshelf';
+import { openShelfWall } from './open_shelf_wall';
+import { tvUnit } from './tv_unit';
+import { shoeRack } from './shoe_rack';
+import { chestOfDrawers } from './chest_of_drawers';
+import { sideboard } from './sideboard';
+import { bedsideTable } from './bedside_table';
+import { dressingUnit } from './dressing_unit';
+import { customBox } from './custom_box';
 
 export const TEMPLATES = {
     wardrobe_hinged: wardrobeHinged,
+    wardrobe_sliding: wardrobeSliding,
+    loft_cabinet: loftCabinet,
+    base_cabinet: baseCabinet,
+    wall_cabinet: wallCabinet,
+    tall_cabinet: tallCabinet,
+    bookshelf,
+    open_shelf_wall: openShelfWall,
+    tv_unit: tvUnit,
+    shoe_rack: shoeRack,
+    chest_of_drawers: chestOfDrawers,
+    sideboard,
+    bedside_table: bedsideTable,
+    dressing_unit: dressingUnit,
+    custom_box: customBox,
 } satisfies Partial<Record<TemplateKey, TemplateDefinition>>;
 
 const REGISTRY: Partial<Record<TemplateKey, TemplateDefinition>> = TEMPLATES;

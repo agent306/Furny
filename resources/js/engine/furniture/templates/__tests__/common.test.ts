@@ -9,11 +9,19 @@ import {
     clamp,
     columnsFromDoors,
     commonCarcass,
+    dimensionFields,
     effectiveParams,
     emptyOverrides,
+    evenSplit,
+    fitDoors,
+    fitDrawers,
     hingedFront,
+    intField,
     interiorHeight,
     leaf,
+    lengthField,
+    maxColumns,
+    maxRows,
     reidentify,
     resolveDefaultMaterials,
     shelfCount,
@@ -413,5 +421,112 @@ describe('reidentify', () => {
         doc.carcass = null;
         doc.family = 'table';
         expect(reidentify(doc, offsetIds())).toEqual(doc);
+    });
+});
+
+describe('count clamps (07 gap, log 19)', () => {
+    it('maxColumns: n columns need n x 100 mm plus n - 1 dividers', () => {
+        expect(maxColumns(100)).toBe(1);
+        expect(maxColumns(217)).toBe(1);
+        expect(maxColumns(218)).toBe(2); // 2 x 100 + 18
+        expect(maxColumns(336)).toBe(3); // 3 x 100 + 2 x 18
+        expect(maxColumns(335)).toBe(2);
+        expect(maxColumns(10)).toBe(1);
+    });
+
+    it('maxRows: n rows need n x 80 mm plus n - 1 dividers', () => {
+        expect(maxRows(79)).toBe(1);
+        expect(maxRows(178)).toBe(2); // 2 x 80 + 18
+        expect(maxRows(177)).toBe(1);
+        expect(maxRows(276)).toBe(3);
+    });
+
+    it('fitDoors keeps the count while every door has 100 mm of the columns', () => {
+        expect(fitDoors(3, 1764)).toBe(3);
+        expect(fitDoors(12, 3564)).toBe(12);
+        // 3 doors: 2 columns, one divider: (346 - 0) / 3
+        expect(fitDoors(3, 364)).toBe(3);
+        expect(fitDoors(4, 364)).toBe(3); // 346 / 4 < 100
+        expect(fitDoors(12, 364)).toBe(3);
+        expect(fitDoors(2, 50)).toBe(1);
+        expect(fitDoors(1, 50)).toBe(1);
+    });
+
+    it('fitDrawers: at least one, at most count, 120 mm of carcass per drawer', () => {
+        expect(fitDrawers(5, 584)).toBe(5); // 620 / 120
+        expect(fitDrawers(5, 544)).toBe(4); // 580 / 120
+        expect(fitDrawers(3, 10)).toBe(1);
+        expect(fitDrawers(2, 5000)).toBe(2);
+    });
+});
+
+describe('evenSplit', () => {
+    it('numbers the parent before its equal-weight children', () => {
+        const ctx = ctxFor();
+        const out = evenSplit(
+            'columns',
+            3,
+            () => leaf({ type: 'empty' }, ctx),
+            ctx,
+        );
+        expect(out.id).toBe('s_0000000001');
+        expect(out.split).toBe('columns');
+        expect(out.children.map((c) => c.size)).toEqual([
+            { mode: 'flex', weight: 1 },
+            { mode: 'flex', weight: 1 },
+            { mode: 'flex', weight: 1 },
+        ]);
+        expect(out.children.map((c) => c.section.id)).toEqual([
+            's_0000000002',
+            's_0000000003',
+            's_0000000004',
+        ]);
+    });
+
+    it('returns the only child as is (a split needs two children)', () => {
+        const ctx = ctxFor();
+        const out = evenSplit(
+            'rows',
+            1,
+            () => leaf({ type: 'empty' }, ctx),
+            ctx,
+        );
+        expect(out).toEqual({
+            id: 's_0000000001',
+            split: 'none',
+            children: [],
+            content: { type: 'empty' },
+        });
+    });
+});
+
+describe('field constructors', () => {
+    it('build the §2.1 field shapes with pinned label keys', () => {
+        expect(lengthField('width', 100, 200)).toEqual({
+            key: 'width',
+            kind: 'length',
+            labelKey: 'templates.fields.width',
+            min: 100,
+            max: 200,
+            step: 10,
+        });
+        expect(
+            intField('rows', 1, 6, { allowAuto: true, advanced: true }),
+        ).toEqual({
+            key: 'rows',
+            kind: 'int',
+            labelKey: 'templates.fields.rows',
+            min: 1,
+            max: 6,
+            allowAuto: true,
+            advanced: true,
+        });
+        expect(
+            dimensionFields([1, 2], [3, 4], [5, 6], { helpKey: 'h' }),
+        ).toMatchObject([
+            { key: 'width', min: 1, max: 2 },
+            { key: 'height', min: 3, max: 4 },
+            { key: 'depth', min: 5, max: 6, helpKey: 'h' },
+        ]);
     });
 });

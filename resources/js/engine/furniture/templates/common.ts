@@ -17,8 +17,9 @@ import type {
     Overrides,
     Section,
     SectionChild,
+    TemplateKey,
 } from '../schema';
-import type { TemplateContext, TemplateDefinition } from './types';
+import type { ParamField, TemplateContext, TemplateDefinition } from './types';
 
 export function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
@@ -104,7 +105,7 @@ export function split(
 
 export function hingedFront(
     covers: string[],
-    leaves: number,
+    leaves: Front['leaves'],
     hingeSide: Front['hingeSide'],
     ctx: TemplateContext,
     overlay: Front['overlay'] = 'full',
@@ -121,6 +122,27 @@ export function hingedFront(
         hingeCode: 'auto',
         slidingTrackCode: null,
     };
+}
+
+/**
+ * `n` equal-weight children of `dir`, built by `build(index)`. A divided
+ * section needs two children (03 §2.4), so one child is returned as is.
+ */
+export function evenSplit(
+    dir: 'columns' | 'rows',
+    n: number,
+    build: (index: number) => Section,
+    ctx: TemplateContext,
+): Section {
+    if (n <= 1) return build(0);
+    return split(
+        dir,
+        Array.from({ length: n }, (_, index) => [
+            { mode: 'flex', weight: 1 },
+            () => build(index),
+        ]),
+        ctx,
+    );
 }
 
 /**
@@ -144,6 +166,71 @@ export function interiorHeight(H: number, plinthHeight: number): number {
 /** Number of shelves that fit `h` at roughly `pitch` spacing (a count, not a part size). */
 export function shelfCount(h: number, pitch: number): number {
     return clamp(Math.round(h / pitch) - 1, 1, 20);
+}
+
+// --- Count clamps (07 gap, log 19) -------------------------------------------
+//
+// The §2.4 ranges allow counts that cannot be built (12 doors in 400 mm).
+// Generators clamp them before building, so every in-range parameter set
+// yields a document without a size error. Like `interiorHeight` these assume
+// 18 mm boards and are heuristics, not envelope arithmetic.
+
+/** Board thickness the clamps assume for dividers and sides. */
+const CLAMP_BOARD = 18;
+/** Narrowest section / door share `validateFurniture` accepts (100 mm). */
+const MIN_SECTION_WIDTH = 100;
+/** Shortest section height `validateFurniture` accepts (80 mm). */
+const MIN_SECTION_HEIGHT = 80;
+/**
+ * Carcass height one drawer needs: a slot of 100 mm (box height = slot - 40
+ * >= 60) plus the board that the end drawers' slots lose to the top and bottom.
+ */
+const MIN_DRAWER_PITCH = 120;
+
+/** Columns that fit `interiorWidth` (the carcass width less both sides) at 100 mm each. */
+export function maxColumns(interiorWidth: number): number {
+    return Math.max(
+        1,
+        Math.floor(
+            (interiorWidth + CLAMP_BOARD) / (MIN_SECTION_WIDTH + CLAMP_BOARD),
+        ),
+    );
+}
+
+/** Rows that fit `interiorHeight` at 80 mm each. */
+export function maxRows(interiorHeight: number): number {
+    return Math.max(
+        1,
+        Math.floor(
+            (interiorHeight + CLAMP_BOARD) / (MIN_SECTION_HEIGHT + CLAMP_BOARD),
+        ),
+    );
+}
+
+/**
+ * The most doors, up to `doors`, that `columnsFromDoors` can lay out in
+ * `interiorWidth` with every door's share of the columns at least 100 mm.
+ */
+export function fitDoors(doors: number, interiorWidth: number): number {
+    for (let n = doors; n > 1; n--) {
+        const dividers = columnsFromDoors(n).length - 1;
+        if ((interiorWidth - dividers * CLAMP_BOARD) / n >= MIN_SECTION_WIDTH) {
+            return n;
+        }
+    }
+    return 1;
+}
+
+/**
+ * The most equal external drawers, up to `count`, that fit `height` of
+ * interior with boxes of at least 60 mm. At least one.
+ */
+export function fitDrawers(count: number, height: number): number {
+    return clamp(
+        Math.floor((height + 2 * CLAMP_BOARD) / MIN_DRAWER_PITCH),
+        1,
+        count,
+    );
 }
 
 /**
@@ -206,4 +293,163 @@ export function effectiveParams<P extends Record<string, unknown>>(
     }
     const parsed = def.paramsSchema.safeParse(merged);
     return parsed.success ? parsed.data : { ...def.defaults };
+}
+
+// --- Field constructors (07 §2.1, §2.2) ------------------------------------
+
+type FieldExtras = Partial<
+    Pick<ParamField, 'advanced' | 'visibleIf' | 'helpKey'>
+>;
+
+/** `select` options: labels are `templates.options.{value}`. */
+export function selectOptions(values: readonly string[]) {
+    return values.map((value) => ({
+        value,
+        labelKey: `templates.options.${value}`,
+    }));
+}
+
+export function lengthField(
+    key: string,
+    min: number,
+    max: number,
+    extras: FieldExtras = {},
+    step = 10,
+): ParamField {
+    return {
+        key,
+        kind: 'length',
+        labelKey: `templates.fields.${key}`,
+        min,
+        max,
+        step,
+        ...extras,
+    };
+}
+
+export function intField(
+    key: string,
+    min: number,
+    max: number,
+    extras: FieldExtras & { allowAuto?: boolean } = {},
+): ParamField {
+    return {
+        key,
+        kind: 'int',
+        labelKey: `templates.fields.${key}`,
+        min,
+        max,
+        ...extras,
+    };
+}
+
+export function selectField(
+    key: string,
+    values: readonly string[],
+    extras: FieldExtras = {},
+): ParamField {
+    return {
+        key,
+        kind: 'select',
+        labelKey: `templates.fields.${key}`,
+        options: selectOptions(values),
+        ...extras,
+    };
+}
+
+export function booleanField(
+    key: string,
+    extras: FieldExtras = {},
+): ParamField {
+    return {
+        key,
+        kind: 'boolean',
+        labelKey: `templates.fields.${key}`,
+        ...extras,
+    };
+}
+
+/** The three leading `length` fields every template has (07 §2.1 rule 2). */
+export function dimensionFields(
+    width: [number, number],
+    height: [number, number],
+    depth: [number, number],
+    depthExtras: FieldExtras = {},
+): ParamField[] {
+    return [
+        lengthField('width', ...width),
+        lengthField('height', ...height),
+        lengthField('depth', ...depth, depthExtras),
+    ];
+}
+
+// --- Document assembly -------------------------------------------------------
+
+/** A carcass-family document with no overrides and no notes. */
+export function carcassDocument(
+    key: TemplateKey,
+    dims: FurnitureDocument['dims'],
+    materials: MaterialAssignments,
+    carcass: CarcassSpec,
+): FurnitureDocument {
+    return {
+        schemaVersion: 1,
+        templateKey: key,
+        family: 'carcass',
+        dims,
+        materials,
+        carcass,
+        table: null,
+        overrides: emptyOverrides(),
+        notes: null,
+    };
+}
+
+/** The catalog default slide of a type, or null when the catalog has none (07 §2.4.4, §2.4.11). */
+export function defaultSlideCode(
+    ctx: TemplateContext,
+    type: 'side_mount' | 'undermount',
+): string | null {
+    return ctx.catalog.defaultHardware(`slide.${type}`)?.code ?? null;
+}
+
+/** A `drawers` content with equal fronts and no drawers behind a door. */
+export function drawersContent(
+    count: number,
+    slideCode: string | null,
+    behindDoor = false,
+): Content {
+    return {
+        type: 'drawers',
+        count,
+        frontHeights: 'equal',
+        slideCode,
+        behindDoor,
+    };
+}
+
+/** An adjustable `shelves` content. */
+export function shelvesContent(count: number, frontSetback = 20): Content {
+    return { type: 'shelves', count, adjustable: true, frontSetback };
+}
+
+/** A front of `kind` over `covers` that is not a hinged door (flap or sliding). */
+export function otherFront(
+    kind: Exclude<Front['kind'], 'hinged'>,
+    covers: string[],
+    leaves: number,
+    ctx: TemplateContext,
+): Front {
+    return {
+        id: ctx.newId('fr'),
+        kind,
+        covers,
+        leaves,
+        hingeSide: 'auto',
+        overlay: 'full',
+        glass: false,
+        handleCode: 'inherit',
+        hingeCode: kind === 'sliding' ? null : 'auto',
+        slidingTrackCode: kind === 'sliding' ? 'auto' : null,
+    };
 }
