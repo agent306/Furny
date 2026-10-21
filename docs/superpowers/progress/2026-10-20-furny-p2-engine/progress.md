@@ -287,3 +287,8 @@ Note: AppShell/AddressFields vitest files flaked once under load (passed alone) 
 Task 50: fix round 1/5 commit cc6aa3b (3 addressed, 0 open). Re-review: mayAddNoWall bound SNAP=hypot(10,5)+1 proven against every resolveEndpoint path + 120k-segment fuzz (no skip/duplicate case); property test non-vacuous. Grid-paste speedup gone (117–148 ms; correctness first).
 Final review: fragment refOf resolves an idMap end as nodeId — if settleRoundedCuts merge deleted that node the next lookup could throw (pre-existing).
 Task 50: complete (commits e440b75..cc6aa3b, 1 fix round)
+Task 51: impl 7987aa7..14c30c1 (DONE_WITH_CONCERNS; 5241 vitest; coverage engine 99.62/94.84, units+geometry+plan 99.67 lines; furniture/BOM texts in engine.php; engine testTimeout 20 s; PlanFragment exported; plan text C6 wording fixed).
+Task 51: review ffa2dca..14c30c1: spec ✅ (all 11 carries; key patterns; coverage thresholds C5 exact; intMath dedupe behaviour-preserving; parser fix pinned), quality Approved. Controller verified `yarn test:coverage:engine` exit 0.
+Task 51: minor (deferred): publicApi test doesn't fail on unexpected extra exports (add Object.keys(engine) − PUBLIC_NAMES == []); hardware.php reason.sliding_track drops {length}; parts.php "– piece N" only for 1–9 in UI; changes.php dims_changed adds " mm" / capitalises (spec-19 note); plan-issue key test covers node_missing only; engine testTimeout 20 s blanket.
+Task 51: complete (commits ffa2dca..14c30c1, review clean)
+ALL P2 TASKS COMPLETE (43–51 this session). Next: final whole-branch review.
