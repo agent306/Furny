@@ -35,7 +35,7 @@ STEMS = sorted(IMAGES)
 # Regression floors: the matched rooms Task 18 reached with 06 §8.6 on the current walls stage. The HDB's
 # remaining rooms need walls the walls stage does not extract (I11, I12, I14, I16, I17; task-18-report.md).
 ROOMS_FLOOR = {"hdb-3room": 4, "brochure-2bhk": 3}
-HDB_TARGET = 7  # the brief's acceptance target (Task 16c ruling), a strict xfail until the walls exist
+HDB_TARGET = 7  # carried to Task 34 with the walls residuals (ruling R18-a): a strict xfail until then
 LABEL_SHARE_MIN = 0.8
 
 
@@ -72,7 +72,7 @@ def test_truth_rooms_are_consistent(stem: str) -> None:
         for b in rooms:
             if a["id"] < b["id"]:
                 assert polys[a["id"]].intersection(polys[b["id"]]).area < 1.0, (a["id"], b["id"])
-    assert {"traced", "points", "labels", "open", "not_rooms"} <= set(raw["method"])
+    assert {"traced", "points", "labels", "open", "not_rooms", "judgement_calls"} <= set(raw["method"])
 
 
 @pytest.mark.parametrize("stem", STEMS)
@@ -122,9 +122,9 @@ def test_matched_rooms_do_not_drop(stem: str, chains: dict[str, ChainResult]) ->
 
 @pytest.mark.xfail(
     strict=True,
-    reason="Task 18 acceptance target (Task 16c ruling): the HDB needs walls the walls stage does not "
-    "extract -- I11 (toilet 2), I12/I16 (the bay), I14 (toilet 3 / bedroom 3), I17 (the store); with them "
-    "find_room_faces matches 11 of 11 (task-18-report.md, NEEDS_CONTEXT)",
+    reason="Task 34 target (ruling R18-a): the HDB needs walls the walls stage does not extract -- I11 "
+    "(toilet 2), I12/I16 (the bay), I14 (toilet 3 / bedroom 3), I17 (the store); with them find_room_faces "
+    "matches 11 of 11 (task-18-report.md)",
 )
 def test_hdb_seven_rooms_are_matched(chains: dict[str, ChainResult]) -> None:
     assert len(metrics(chains["hdb-3room"]).matched) >= HDB_TARGET

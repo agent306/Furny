@@ -6,7 +6,11 @@
    "points": "Interior points lie on the room's floor colour away from lines, furniture outlines and labels (9 x 9 px window minimum: >= 199 on the bedroom, living, kitchen and toilet fills; 130 on the deck's wood-grain fill, median 148; wall poche reads 85-105 and line work under 80).",
    "labels": "As printed: BEDROOM (2), DECK, LIVING/DINING, KITCHEN, TOILET (2); every label has a replayed OCR token inside its room.",
    "open": "kitchen: open onto the living room through its 30 px side opening without a door. The deck opens to the living room through folding doors (a door, so not open).",
-   "not_rooms": "The OTS (x 247-341, y 236-311), the hatched 6'6\" x 7'0\" shaft right of the right toilet, the 5'8\" strip left of the left toilet and kitchen, and the corridor lie outside the flat's outline (no truth wall encloses them): a face there is neither matched nor counted against."
+   "not_rooms": "The OTS (x 247-341, y 236-311), the hatched 6'6\" x 7'0\" shaft right of the right toilet, the 5'8\" strip left of the left toilet and kitchen, and the corridor lie outside the flat's outline (no truth wall encloses them): a face there is neither matched nor counted against.",
+   "judgement_calls": [
+       "Kitchen cut-out: the kitchen and the living room are one face of the wall truth (the kitchen's open side x 152, y 215-245 carries no truth wall); the kitchen's polygon is that face's part left of x 152 and the living room's the rest. The kitchen is open onto the living room (opens_onto living).",
+       "The OTS, the hatched shaft, the 5'8\" strip and the corridor are not rooms (outside the flat's outline): see not_rooms."
+   ]
  },
  "rooms": [
   {"id": "bedroom-left", "point": [128, 112], "label": "BEDROOM", "open": false, "polygon": [[152.0, 61.5], [56.0, 61.5], [56.0, 165.0], [152.0, 165.0]]},

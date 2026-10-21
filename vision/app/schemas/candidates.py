@@ -218,7 +218,8 @@ class RoomFace:
     ``polygon_px`` is its outer contour simplified with ``approxPolyDP(0.5 t_median)``; ``anchor_px`` the
     maximum of its distance transform (the pole of inaccessibility, strictly inside); ``area_px`` its pixel
     count; ``bbox`` ``(x0, y0, x1, y1)`` of its pixels; ``contains_text_ids`` the tokens centred inside it.
-    ``open`` is set when it only closes thanks to closures longer than ``6 t`` (reason ``open_face``).
+    ``open`` is set when it only closes thanks to passage closures longer than ``6 t`` (reason
+    ``open_face``): passages and gaps between collinear walls, never doors or windows (ruling R18-c).
     """
 
     id: str

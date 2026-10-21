@@ -88,11 +88,40 @@ def test_two_rooms_with_door_closure() -> None:
 
 
 def test_open_face_flag() -> None:
-    """A 120 px passage (> 6 t = 84): the two faces only close thanks to that closure, so both are open."""
+    """A 120 px passage (> 6 t = 84): the two faces only close thanks to that passage closure, so both are
+    open."""
     rooms, _, openings, _ = chain_faces(gaps=[SGap(PARTITION, 500, 120)])
     assert [o.kind for o in openings] == ["opening"]
     assert len(rooms) == 2
     assert all(f.open for f in rooms)
+
+
+def test_wide_door_keeps_the_room_closed() -> None:
+    """Ruling R18-c: a 120 px door (> 6 t = 84) closes its rooms; only passages and gaps open a face."""
+    rooms, _, openings, _ = chain_faces(doors=[SDoor(PARTITION, 500, 120)])
+    assert [o.kind for o in openings] == ["door"]
+    assert len(rooms) == 2
+    assert not any(f.open for f in rooms)
+
+
+@pytest.mark.parametrize(
+    ("kind", "is_open"), [("door", False), ("window", False), ("opening", True), (None, True)]
+)
+def test_only_passages_and_gaps_open_a_face(kind: str | None, is_open: bool) -> None:
+    """Ruling R18-c: a 150 px closure (> 6 t) in the partition opens both faces when it is a passage or a
+    bare graph gap (no candidate on it), never when a door or a window lies on it."""
+    mask = outline_mask()
+    cv2.line(mask, (1200, 300), (1200, 800), 255, T)
+    cv2.line(mask, (1200, 950), (1200, 1500), 255, T)
+    n = {"N1": (1200.0, 300.0), "N2": (1200.0, 1500.0)}
+    partition = dataclasses.replace(wall("W1", n["N1"], n["N2"], "N1", "N2"), openings_px=((500.0, 650.0),))
+    graph = WallGraph(n, [partition], [GapCandidate("W1", 500.0, 650.0)])
+    openings = (
+        [] if kind is None else [OpeningCandidate("O1", "W1", 500.0, 650.0, kind, kind, "start", "left", 0.8)]
+    )  # type: ignore[arg-type]
+    rooms, _ = find_room_faces(mask, graph, openings, [], REGION, float(T))
+    assert len(rooms) == 2
+    assert all(f.open is is_open for f in rooms)
 
 
 def test_border_and_sliver_discarded() -> None:

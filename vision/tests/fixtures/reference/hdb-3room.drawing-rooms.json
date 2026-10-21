@@ -6,7 +6,11 @@
    "points": "Interior points lie on paper: the 9 x 9 px window around each reads gray 255 (minimum) on the decoded image. They were moved off labels, dimension lines and door arcs: the Task 16c truth-test points of toilets 1-3, the store, bedroom 3, the balcony and the bay sat on glyphs or lines.",
    "labels": "As printed. Toilet 2's TOILET is overprinted by the vertical 1900 and the replayed OCR has no token for it; toilet 3's reads TOILE (parsed as TOILET). The store, the 600 recess beside the balcony and the bay above toilet 3 carry no label.",
    "open": "kitchen: open onto the living room (no wall, no door; the counter line at x 297 ends at y 480 and the living room continues below). Every other room is closed by walls, doors or windows.",
-   "not_rooms": "None inside the outline: the truth's 11 faces are all listed (plus the kitchen)."
+   "not_rooms": "None inside the outline: the truth's 11 faces are all listed (plus the kitchen).",
+   "judgement_calls": [
+       "Kitchen cut-out: the kitchen has no wall of its own; its polygon is the rectangle x 140-297, y 182-480 cut from the living/kitchen face of the wall truth, and the living room's polygon is that face minus the rectangle. It is open onto the living room (opens_onto living) and is scored as open_in_host when it shares the living room's face.",
+       "Bay (x 938-1118, y 115-178, above toilet 3) and 600 recess (x 832-888, y 804-925, beside the balcony) are counted as rooms with label null: each is a face of the verified wall truth enclosed by drawn walls (Task 16c's 11 truth faces), so a face found there is scored like any room."
+   ]
  },
  "rooms": [
   {"id": "toilet-1", "point": [360, 320], "label": "TOILET", "open": false, "polygon": [[418.0, 180.0], [297.0, 181.0], [299.0, 364.0], [418.0, 364.0]]},

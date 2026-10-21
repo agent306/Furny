@@ -14,8 +14,10 @@
 5. Its anchor is the maximum of its distance transform (the pole of inaccessibility), strictly inside.
 6. ``contains_text_ids`` lists the tokens centred inside its polygon (the innermost one when faces nest).
 7. Faces are ``R1..`` in the order of their anchors' ``(y, x)``. A face is ``open`` when it only closes
-   thanks to closures longer than ``6 t`` (``t`` the closed wall's thickness): without them its free space
-   would reach beyond it.
+   thanks to passage closures longer than ``6 t`` (``t`` the closed wall's thickness): without them its
+   free space would reach beyond it. Passage closures are passages (openings of kind ``opening``), graph
+   gaps no door or window lies on, and the collinear closures; a door or a window closes its room
+   whatever its width (ruling R18-c).
 
 The second result is the int32 face-id map: ``k`` on the pixels of ``R{k}``, 0 elsewhere.
 
@@ -50,10 +52,11 @@ class _Closure:
     a: Pt
     b: Pt
     thickness: float
+    passage: bool  # a passage or a bare gap; a door or window closure never opens a face (ruling R18-c)
 
     @property
     def long(self) -> bool:
-        return math.dist(self.a, self.b) > OPEN_CLOSURE_T * self.thickness
+        return self.passage and math.dist(self.a, self.b) > OPEN_CLOSURE_T * self.thickness
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,9 +90,9 @@ def find_room_faces(
     closures: list[_Closure] = []
     for wall in graph.walls:
         cut = intervals.get(wall.id, [])
-        for a, b in _pieces(wall, cut):
+        for a, b in _pieces(wall, [(u0, u1) for u0, u1, _ in cut]):
             _draw(walls, a, b, wall.thickness_px)
-        closures += [_Closure(_at(wall, u0), _at(wall, u1), wall.thickness_px) for u0, u1 in cut]
+        closures += [_Closure(_at(wall, u0), _at(wall, u1), wall.thickness_px, p) for u0, u1, p in cut]
     closures += _collinear_closures(graph)
 
     closed = walls.copy()
@@ -138,27 +141,29 @@ def find_room_faces(
 
 def _opening_intervals(
     graph: WallGraph, openings: list[OpeningCandidate]
-) -> dict[str, list[tuple[float, float]]]:
-    """Per wall, the merged sorted intervals of its openings: the openings stage's candidates and the
-    graph's own gap intervals."""
-    raw: dict[str, list[tuple[float, float]]] = defaultdict(list)
+) -> dict[str, list[tuple[float, float, bool]]]:
+    """Per wall, the merged sorted intervals ``(u0, u1, passage)`` of its openings: the openings stage's
+    candidates and the graph's own gap intervals. ``passage`` is false when a door or window lies on the
+    interval."""
+    raw: dict[str, list[tuple[float, float, bool]]] = defaultdict(list)
     for wall in graph.walls:
-        raw[wall.id] += list(wall.openings_px)
+        raw[wall.id] += [(u0, u1, True) for u0, u1 in wall.openings_px]
     for o in openings:
-        raw[o.wall_id].append((o.u0, o.u1))
+        raw[o.wall_id].append((o.u0, o.u1, o.kind == "opening"))
     lengths = {wall.id: math.dist(wall.a, wall.b) for wall in graph.walls}
-    merged: dict[str, list[tuple[float, float]]] = {}
+    merged: dict[str, list[tuple[float, float, bool]]] = {}
     for wid, spans in raw.items():
         if wid not in lengths:
             continue
-        out: list[tuple[float, float]] = []
-        for u0, u1 in sorted((max(0.0, min(a, b)), min(lengths[wid], max(a, b))) for a, b in spans):
+        out: list[tuple[float, float, bool]] = []
+        clipped = ((max(0.0, min(a, b)), min(lengths[wid], max(a, b)), p) for a, b, p in spans)
+        for u0, u1, p in sorted(clipped):
             if u1 <= u0:
                 continue
             if out and u0 <= out[-1][1]:
-                out[-1] = (out[-1][0], max(out[-1][1], u1))
+                out[-1] = (out[-1][0], max(out[-1][1], u1), out[-1][2] and p)
             else:
-                out.append((u0, u1))
+                out.append((u0, u1, p))
         if out:
             merged[wid] = out
     return merged
@@ -230,7 +235,7 @@ def _collinear_closures(graph: WallGraph) -> list[_Closure]:
         if _crosses_a_wall(graph, e, f):
             continue
         used |= {i, j}
-        out.append(_Closure(e.p, f.p, (e.thickness + f.thickness) / 2.0))
+        out.append(_Closure(e.p, f.p, (e.thickness + f.thickness) / 2.0, True))
     return out
 
 
