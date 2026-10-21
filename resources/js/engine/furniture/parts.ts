@@ -9,6 +9,7 @@ import type {
     GenContext,
     PanelSpec,
     Part,
+    PartGeometry,
     PartGrain,
     PhysEdge,
 } from './types';
@@ -61,6 +62,14 @@ export function mapGrain(
     return 'none';
 }
 
+function copyGeometry(geometry: PartGeometry): PartGeometry {
+    if (geometry.kind === 'box') {
+        const { min, size } = geometry.box;
+        return { kind: 'box', box: { min: [...min], size: [...size] } };
+    }
+    return { ...geometry, outline: geometry.outline.map(([x, z]) => [x, z]) };
+}
+
 /** Builds a `Part` from a panel spec and records its edge meaning in `ctx.edgeMap`. */
 export function makePart(spec: PanelSpec, ctx: GenContext): Part {
     const [a, b] = AXES.filter((axis) => axis !== spec.thicknessAxis) as [
@@ -108,18 +117,14 @@ export function makePart(spec: PanelSpec, ctx: GenContext): Part {
             W2: edgeCode('W2'),
         },
         qty: 1,
-        geometry: spec.geometry ?? {
-            kind: 'box',
-            box: { min: [...spec.box.min], size: [...spec.box.size] },
-        },
+        geometry: copyGeometry(spec.geometry ?? { kind: 'box', box: spec.box }),
         operations: {
-            hingeCups: 0,
-            shelfPinHoles: 0,
-            slideScrewSets: 0,
-            handleHoles: 0,
-            dowels: 0,
-            camLocks: 0,
-            ...spec.operations,
+            hingeCups: spec.operations?.hingeCups ?? 0,
+            shelfPinHoles: spec.operations?.shelfPinHoles ?? 0,
+            slideScrewSets: spec.operations?.slideScrewSets ?? 0,
+            handleHoles: spec.operations?.handleHoles ?? 0,
+            dowels: spec.operations?.dowels ?? 0,
+            camLocks: spec.operations?.camLocks ?? 0,
         },
         visibleFaces: spec.visibleFaces,
         source: 'generated',

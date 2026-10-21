@@ -71,4 +71,16 @@ describe('partNameEn', () => {
     it('returns an unknown key unchanged', () => {
         expect(partNameEn('parts.nope')).toBe('parts.nope');
     });
+
+    it('does not resolve inherited object properties as names', () => {
+        expect(partNameEn('constructor')).toBe('constructor');
+        expect(partNameEn('toString')).toBe('toString');
+        expect(partNameEn('__proto__')).toBe('__proto__');
+    });
+
+    it('keeps inner whitespace of a user-supplied extra part name', () => {
+        expect(partNameEn('parts.extra', { name: '  Kick  plate ' })).toBe(
+            'Kick  plate',
+        );
+    });
 });

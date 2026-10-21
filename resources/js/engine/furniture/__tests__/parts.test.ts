@@ -78,6 +78,20 @@ describe('fl', () => {
 });
 
 describe('makePart: sizes and edge numbering (07 §1.2)', () => {
+    it('floors both axes with the epsilon, not Math.floor or Math.round', () => {
+        const sized = (size: [number, number, number]) => {
+            const part = makePart(
+                spec({ box: { min: [0, 0, 0], size } }),
+                ctxFor(),
+            );
+            return [part.length, part.width];
+        };
+        // first axis (y): 1996.9999995 -> 1997 (Math.floor gives 1996); second (z): 582.5 -> 582 (Math.round gives 583)
+        expect(sized([18, 1996.9999995, 582.5])).toEqual([1997, 582]);
+        // first axis 1996.5 -> 1996 (Math.round gives 1997); second 582.9999995 -> 583 (Math.floor gives 582)
+        expect(sized([18, 1996.5, 582.9999995])).toEqual([1996, 583]);
+    });
+
     it('side panel: thin x, length along y', () => {
         const ctx = ctxFor();
         const part = makePart(
@@ -226,6 +240,35 @@ describe('makePart: banding', () => {
         });
     });
 
+    it('bands W2 alone and L2 alone', () => {
+        // side panel: L1 front, L2 back, W1 top, W2 bottom
+        expect(makePart(spec({ banded: ['bottom'] }), ctxFor()).edges).toEqual({
+            L1: null,
+            L2: null,
+            W1: null,
+            W2: 'EB08-WHITE',
+        });
+        expect(makePart(spec({ banded: ['back'] }), ctxFor()).edges).toEqual({
+            L1: null,
+            L2: 'EB08-WHITE',
+            W1: null,
+            W2: null,
+        });
+    });
+
+    it('uses the band of the part role, not the carcass one', () => {
+        const doc = docWith();
+        doc.materials.front = {
+            ...doc.materials.front,
+            edgeBandCode: 'EB2-OAK',
+        };
+        const ctx = createGenContext(doc, seedCatalog());
+        const front = makePart(spec({ role: 'front', banded: ['front'] }), ctx);
+        expect(front.edges.L1).toBe('EB2-OAK');
+        const carcass = makePart(spec({ banded: ['front'] }), ctx);
+        expect(carcass.edges.L1).toBe('EB08-WHITE');
+    });
+
     it('hidden edges stay null', () => {
         expect(makePart(spec({}), ctxFor()).edges).toEqual({
             L1: null,
@@ -365,7 +408,38 @@ describe('makePart: defaults', () => {
         expect(part.operations.hingeCups).toBe(4);
         expect(part.operations.camLocks).toBe(2);
         expect(part.operations.dowels).toBe(0);
-        expect(part.geometry).toBe(geometry);
+        expect(part.geometry).toEqual(geometry);
+    });
+
+    it('does not let explicit undefined operation fields overwrite the zero defaults', () => {
+        const part = makePart(
+            spec({ operations: { hingeCups: undefined, dowels: 6 } }),
+            ctxFor(),
+        );
+        expect(part.operations.hingeCups).toBe(0);
+        expect(part.operations.dowels).toBe(6);
+    });
+
+    it('copies an explicit geometry instead of aliasing it', () => {
+        const geometry = {
+            kind: 'box' as const,
+            box: {
+                min: [1, 2, 3] as [number, number, number],
+                size: [4, 5, 6] as [number, number, number],
+            },
+        };
+        const part = makePart(spec({ geometry }), ctxFor());
+        expect(part.geometry).toEqual(geometry);
+        expect(part.geometry).not.toBe(geometry);
+        if (part.geometry.kind === 'box') {
+            expect(part.geometry.box.min).not.toBe(geometry.box.min);
+        }
+    });
+
+    it('uses spec.materialCode when it differs from the role material', () => {
+        const part = makePart(spec({ materialCode: 'PLY12-BWR' }), ctxFor());
+        expect(part.materialCode).toBe('PLY12-BWR');
+        expect(part.thickness).toBe(12);
     });
 
     it('falls back to the role default for an unknown material code', () => {

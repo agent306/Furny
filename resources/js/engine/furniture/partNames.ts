@@ -53,12 +53,15 @@ export function partNameEn(
     nameKey: string,
     nameParams: Record<string, string | number> = {},
 ): string {
-    const template = PART_NAMES_EN[nameKey];
-    if (template === undefined) return nameKey;
+    if (!Object.hasOwn(PART_NAMES_EN, nameKey)) return nameKey;
+    const template = PART_NAMES_EN[nameKey] as string;
+    // A missing param drops out together with the space before it; the values
+    // themselves (a user-supplied extra part name) are never rewritten.
     return template
-        .replace(/\{(\w+)\}/g, (_, name: string) =>
-            String(nameParams[name] ?? ''),
-        )
-        .replace(/\s+/g, ' ')
+        .replace(/\s*\{(\w+)\}/g, (match, name: string) => {
+            const value = nameParams[name];
+            if (value === undefined) return '';
+            return match.replace(/\{\w+\}/, String(value));
+        })
         .trim();
 }
