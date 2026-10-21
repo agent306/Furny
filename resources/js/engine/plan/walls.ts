@@ -322,16 +322,24 @@ function selfIntersects(r: Ring): boolean {
     return false;
 }
 
+/** Why `buildWallOutline` gave up on the mitered shape. */
+export type OutlineFallbackReason = 'degenerate' | 'self_intersection';
+
 /**
  * Closed CW outline of a wall from its two joined ends (04 §3.4). Falls back
- * to the plain rectangle (flagged `fallback: true`) when the mitered shape is
- * degenerate (< 3 vertices, area <= 1 mm2) or self-intersecting.
+ * to the plain rectangle (flagged `fallback: true`, with the cause in
+ * `fallbackReason`) when the mitered shape is degenerate (< 3 vertices,
+ * area <= 1 mm2) or self-intersecting.
  */
 export function buildWallOutline(
     info: WallInfo,
     endA: WallEnd,
     endB: WallEnd,
-): { outline: Vec2[]; fallback: boolean } {
+): {
+    outline: Vec2[];
+    fallback: boolean;
+    fallbackReason: OutlineFallbackReason | null;
+} {
     const raw: Ring = [
         endA.left,
         endB.left,
@@ -341,12 +349,9 @@ export function buildWallOutline(
         ...endA.via,
     ];
     const outline = ensureCW(simplifyCollinear(raw, EPS));
-    if (
-        outline.length >= 3 &&
-        signedArea(outline) > 1 &&
-        !selfIntersects(outline)
-    ) {
-        return { outline, fallback: false };
+    const solid = outline.length >= 3 && signedArea(outline) > 1;
+    if (solid && !selfIntersects(outline)) {
+        return { outline, fallback: false, fallbackReason: null };
     }
     const off = scale(info.n, info.wall.thickness / 2);
     return {
@@ -357,6 +362,7 @@ export function buildWallOutline(
             clean(sub(info.A, off)),
         ]),
         fallback: true,
+        fallbackReason: solid ? 'self_intersection' : 'degenerate',
     };
 }
 

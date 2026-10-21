@@ -182,7 +182,15 @@ export {
 } from './plan/walls';
 export type {
     DeriveIssueCode,
+    OutlineFallbackReason,
     WallEnd,
     WallGraph,
     WallInfo,
 } from './plan/walls';
+export { derivePlanGeometry } from './plan/derive';
+export type {
+    DerivedOpening,
+    DerivedPlan,
+    DerivedRoom,
+    DerivedWall,
+} from './plan/derive';

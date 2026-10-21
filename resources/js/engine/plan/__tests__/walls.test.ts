@@ -474,6 +474,7 @@ describe('04 §3.9 edge cases', () => {
         expect(selfIntersects(res.outline)).toBe(false);
         expect(signedArea(res.outline)).toBeGreaterThan(1);
         expect(res.fallback).toBe(true);
+        expect(res.fallbackReason).not.toBeNull();
         // the fallback is the plain rectangle
         expect(res.outline).toHaveLength(4);
         expect(has(res.outline, 0, -57.5)).toBe(true);
@@ -640,6 +641,7 @@ describe('04 §3.10 tessellation of the plan fixtures', () => {
             const e = endsOf(b, id);
             const res = buildWallOutline(info, e.endA, e.endB);
             expect(res.fallback).toBe(false);
+            expect(res.fallbackReason).toBeNull();
             const o = res.outline;
             expect(o.length).toBeGreaterThanOrEqual(4);
             expect(
@@ -692,6 +694,7 @@ describe('buildWallOutline', () => {
         };
         const res = buildWallOutline(info, e.endA, bad);
         expect(res.fallback).toBe(true);
+        expect(res.fallbackReason).not.toBeNull();
         expect(res.outline).toEqual([
             v(0, -50),
             v(1000, -50),
