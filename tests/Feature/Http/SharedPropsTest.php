@@ -76,7 +76,7 @@ it('shares the guest props and nothing that needs a signed-in user', function ()
         ->and($props['features'])->toBe(Features::all())
         ->and($props['app'])->toBe(['name' => config('app.name'), 'logoUrl' => null, 'version' => config('app.version')])
         ->and($props['app']['version'])->toBe(config('app.version'))
-        ->and($props['flash'])->toBe(['success' => null, 'error' => null, 'info' => null, 'warning' => null]);
+        ->and($props)->not->toHaveKey('flash');
 });
 
 it('reads the i18n manifest once and serves it from memory afterwards', function (): void {
@@ -398,10 +398,22 @@ it('shares no health banners with customers or inactive admins', function (): vo
         ->and(sharedProps(User::factory()->admin()->inactive()->create())['healthBanners'])->toBe([]);
 });
 
-it('shares the session flash messages', function (): void {
-    $flash = sharedProps(session: ['success' => 'Saved.', 'error' => 'Nope.'])['flash'];
+it('flashes through Inertia, once, as the top-level flash of the page and never as a prop', function (): void {
+    Route::middleware('web')->get('/_flash', function () {
+        Inertia::flash('success', 'Saved.');
+        Inertia::flash('error', 'Nope.');
 
-    expect($flash)->toBe(['success' => 'Saved.', 'error' => 'Nope.', 'info' => null, 'warning' => null]);
+        return redirect('/_props');
+    });
+    $headers = ['X-Inertia' => 'true', 'X-Inertia-Version' => (string) app(HandleInertiaRequests::class)->version(request())];
+
+    $first = test()->withHeaders($headers)->followingRedirects()->get('/_flash')->assertOk();
+
+    expect($first->json('flash'))->toBe(['success' => 'Saved.', 'error' => 'Nope.'])
+        ->and($first->json('props'))->not->toHaveKey('flash');
+
+    // Pulled from the session: the next visit has none.
+    expect(test()->withHeaders($headers)->get('/_props')->json())->not->toHaveKey('flash');
 });
 
 it('does not share the sidebar state: the admin shell reads its own cookie in the browser', function (): void {

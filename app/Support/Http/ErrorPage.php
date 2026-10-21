@@ -41,8 +41,10 @@ final class ErrorPage
             }
 
             $page = Inertia::render('Error', ['status' => $status])->toResponse($request);
-        } catch (Throwable) {
-            // Rendering the page failed too (e.g. the view): fall back to the original response.
+        } catch (Throwable $failure) {
+            // Rendering the page failed too (e.g. the view): report it and fall back to the original response.
+            report($failure);
+
             return $response;
         }
 

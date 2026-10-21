@@ -4,7 +4,12 @@ declare(strict_types=1);
 
 use App\Domain\Identity\Models\User;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Support\Http\ErrorPage;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 use Inertia\Testing\AssertableInertia as Assert;
 
 beforeEach(function (): void {
@@ -101,14 +106,53 @@ it('shares the audience props with an error raised inside the web group', functi
             ->has('i18n.hash'));
 });
 
-it('still shares the app, business and i18n props for an unmatched url', function (): void {
+it('renders an unmatched url inside the web group for a guest, with the shared props', function (): void {
     $this->get('/definitely-missing')
+        ->assertNotFound()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Error')
             ->where('auth.user', null)
             ->has('app.name')
             ->has('business.name')
             ->has('i18n.hash'));
+});
+
+it('gives a signed-in user their own session and layout props on an unmatched url', function (): void {
+    $this->actingAs(User::factory()->create(['name' => 'Asha Rao']))
+        ->get('/definitely-missing')
+        ->assertNotFound()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Error')
+            ->where('status', 404)
+            ->where('auth.user.name', 'Asha Rao')
+            ->where('auth.user.type', 'customer'));
+
+    $this->actingAs(User::factory()->admin()->create())
+        ->get('/also/not/there')
+        ->assertInertia(fn (Assert $page) => $page->where('auth.user.type', 'staff'));
+});
+
+it('registers the fallback as the one named catch-all, and only the fallback answers unmatched urls', function (): void {
+    expect(Route::getRoutes()->getByName('fallback')?->isFallback)->toBeTrue()
+        ->and(route('welcome', absolute: false))->toBe('/');
+});
+
+it('puts the Error page props through the shared props for a failure raised before they were shared', function (): void {
+    // CSRF and other early web middleware fail before HandleInertiaRequests ran.
+    Route::middleware('web')->get('/_early', fn () => abort(419));
+
+    $this->get('/_early')->assertStatus(419)->assertInertia(fn (Assert $page) => $page->has('auth')->has('i18n.hash'));
+});
+
+it('reports a failure to render the Error page and falls back to the original response', function (): void {
+    Exceptions::fake();
+    Inertia::setRootView('missing-root-view');
+    $original = new Response('forbidden', 403);
+
+    $result = ErrorPage::render($original, new RuntimeException('boom'), Request::create('/somewhere'));
+
+    expect($result)->toBe($original);
+    Exceptions::assertReported(InvalidArgumentException::class);
 });
 
 it('does not turn redirects or validation failures into error pages', function (): void {

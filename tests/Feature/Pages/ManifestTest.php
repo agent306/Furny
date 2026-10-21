@@ -94,3 +94,16 @@ it('links the manifest and the touch icon from the page head', function (): void
         ->and($html)->toContain('<link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png">')
         ->and($html)->toContain('<meta name="apple-mobile-web-app-capable" content="yes">');
 });
+
+it('is stateless: no session, no cookie, a public cacheable response', function (): void {
+    $response = $this->get(route('manifest'))->assertOk();
+
+    expect($response->headers->getCookies())->toBe([])
+        ->and($response->headers->has('Set-Cookie'))->toBeFalse()
+        ->and($response->headers->get('Cache-Control'))->toContain('public');
+
+    // Even with a session cookie on the request, nothing is started or written.
+    $withSession = $this->withCookie('furny_session', 'abc')->get(route('manifest'))->assertOk();
+
+    expect($withSession->headers->getCookies())->toBe([]);
+});

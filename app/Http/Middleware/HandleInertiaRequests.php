@@ -25,6 +25,10 @@ use Inertia\Middleware;
  * field by field from public data (never from a whole model or settings group), and guests cost no
  * database query beyond the cached settings. Props that need the database are closures, so a partial
  * reload computes only what it asks for.
+ *
+ * Flash messages are deliberately not a shared prop: a prop is stored in the browser's history state and
+ * would show its toast again on Back. Controllers use `Inertia::flash('success', trans_icu(...))`, which
+ * Inertia sends once as the top-level `flash` of the page and the history never keeps (15 §10.3).
  */
 final class HandleInertiaRequests extends Middleware
 {
@@ -84,7 +88,6 @@ final class HandleInertiaRequests extends Middleware
             ],
             'business' => fn (): array => BusinessPublicData::fromSettings($this->settings->business(), $this->settings->units())->toArray(),
             'features' => fn (): array => Features::all(),
-            'flash' => fn (): array => $this->flash($request),
             'i18n' => fn (): array => $this->i18n(),
         ];
 
@@ -120,27 +123,6 @@ final class HandleInertiaRequests extends Middleware
         );
 
         return $url === '' ? null : $url;
-    }
-
-    /**
-     * Already-translated messages that controllers flashed into the session.
-     *
-     * @return array{success: ?string, error: ?string, info: ?string, warning: ?string}
-     */
-    private function flash(Request $request): array
-    {
-        $message = static function (string $type) use ($request): ?string {
-            $value = $request->hasSession() ? $request->session()->get($type) : null;
-
-            return is_string($value) ? $value : null;
-        };
-
-        return [
-            'success' => $message('success'),
-            'error' => $message('error'),
-            'info' => $message('info'),
-            'warning' => $message('warning'),
-        ];
     }
 
     /**
