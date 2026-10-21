@@ -165,6 +165,24 @@ describe('the enrolment every owner and admin has to complete', function (): voi
             ->assertRedirect(route('admin.security.two-factor'));
     });
 
+    it('sends anyone who needs the password confirmed through it and back to the page, enforced or not', function (string $role): void {
+        $user = User::factory()->{$role}()->create();
+
+        $this->actingAs($user)->withSession(['auth.login_at' => now()->getTimestamp()])
+            ->get(route('admin.security.two-factor', ['confirm-password' => 1]))
+            ->assertRedirectToRoute('password.confirm');
+
+        $this->post(route('password.confirm.store'), ['password' => 'password'])
+            ->assertRedirect(route('admin.security.two-factor'));
+    })->with(['estimator', 'admin', 'owner']);
+
+    it('shows the page at once when the password was confirmed a moment ago', function (): void {
+        ($this->as)(User::factory()->estimator()->create())
+            ->get(route('admin.security.two-factor', ['confirm-password' => 1]))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->component('Admin/Account/TwoFactor'));
+    });
+
     it('answers a wrong code of a page visit in the error bag Fortify names', function (): void {
         $owner = User::factory()->owner()->withoutTwoFactor()->create();
 
@@ -226,6 +244,27 @@ describe('disabling (PreventRequiredTwoFactorDisable)', function (): void {
             ->and($audit->subject_id)->toBe($user->id)
             ->and($audit->causer_id)->toBe($user->id);
     })->with(['estimator', 'production', 'support']);
+
+    it('lets a role that does not need it cancel a setup it never confirmed', function (string $role): void {
+        $user = User::factory()->{$role}()->withoutTwoFactor()->create();
+
+        ($this->as)($user)->postJson(route('two-factor.enable'))->assertOk();
+        expect($user->refresh()->two_factor_secret)->not->toBeNull();
+
+        $this->deleteJson(route('two-factor.disable'))->assertOk();
+
+        expect($user->refresh()->two_factor_secret)->toBeNull()
+            ->and($user->two_factor_recovery_codes)->toBeNull();
+    })->with(['estimator', 'support']);
+
+    it('does not let an owner or an admin cancel a setup either: they have to finish it', function (string $role): void {
+        $user = User::factory()->{$role}()->withoutTwoFactor()->create();
+
+        ($this->as)($user)->postJson(route('two-factor.enable'))->assertOk();
+        $this->deleteJson(route('two-factor.disable'))->assertForbidden();
+
+        expect($user->refresh()->two_factor_secret)->not->toBeNull();
+    })->with(['owner', 'admin']);
 
     it('applies at once when a role change makes the second factor required', function (): void {
         $user = User::factory()->estimator()->withTwoFactor()->create();

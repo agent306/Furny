@@ -697,15 +697,17 @@ describe('authorization is asked again once the owners lock is held (13 section 
             'grant' => fn () => app(UpdateStaffMember::class)->handle($actor, $this->estimator, 'Eli Estimator', StaffRole::Owner),
             'deactivate' => fn () => app(DeactivateUser::class)->handle($actor, $target),
             'activate' => fn () => app(ActivateUser::class)->handle($actor, $gone),
+            'reset' => fn () => app(ResetTwoFactor::class)->handle($actor, $target),
         };
 
         expect($call)->toThrow(AuthorizationException::class);
 
         expect($target->refresh()->name)->toBe('Target Owner')
+            ->and($target->two_factor_confirmed_at)->not->toBeNull()
             ->and($target->is_active)->toBeTrue()
             ->and($gone->refresh()->is_active)->toBeFalse()
             ->and($this->estimator->refresh()->hasRole('estimator'))->toBeTrue();
-    })->with(['update', 'grant', 'deactivate', 'activate']);
+    })->with(['update', 'grant', 'deactivate', 'activate', 'reset']);
 
     it('refuses an actor who was deactivated while the request waited', function (): void {
         $actor = User::factory()->admin()->create();

@@ -46,7 +46,8 @@ function download(): void {
     link.href = url;
     link.download = fileName.value;
     link.click();
-    URL.revokeObjectURL(url);
+    // Not at once: some browsers have not started the download when `click()` returns, and a revoked URL ends it.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 </script>
 

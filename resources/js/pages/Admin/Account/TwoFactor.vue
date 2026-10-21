@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, router } from '@inertiajs/vue3';
+import { Head, router, usePage } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 import { toast } from 'vue-sonner';
 import RecoveryCodesPanel from '@/components/account/RecoveryCodesPanel.vue';
@@ -25,7 +25,8 @@ import { useControlSize } from '@/composables/useControlSize';
 import { useFocusFirstError } from '@/composables/useFocusFirstError';
 import { useI18n } from '@/composables/useI18n';
 import { dashboard } from '@/routes/admin';
-import { confirm as confirmPassword } from '@/routes/password';
+import { twoFactor as twoFactorPage } from '@/routes/admin/security';
+import { confirmation as passwordStatus } from '@/routes/password';
 import {
     confirm as confirmCode,
     disable,
@@ -54,9 +55,12 @@ const { t } = useI18n();
 const { confirm } = useConfirm();
 const { focusFirstError } = useFocusFirstError();
 const size = useControlSize();
+const page = usePage();
 
 // What a Fortify route answers when the password was not confirmed lately (`password.confirm`, JSON clients).
 const PASSWORD_CONFIRMATION_REQUIRED = 423;
+// This page's component name: a visit that ends on another one (the password form) did not do what was asked.
+const THIS_PAGE = 'Admin/Account/TwoFactor';
 // The name Fortify gives the error bag of a wrong confirmation code.
 const CONFIRM_ERROR_BAG = 'confirmTwoFactorAuthentication';
 
@@ -85,6 +89,36 @@ const loadingSetup = ref(false);
 const codes = ref<string[] | null>(null);
 const codesFailed = ref(false);
 
+/**
+ * Sends the person through the password confirmation and back to this page (the server remembers it as the place to
+ * return to, for every role). Fortify's own redirect for a form post would too, but a JSON read has no redirect.
+ */
+function confirmPasswordFirst(): void {
+    router.visit(twoFactorPage.url({ query: { 'confirm-password': 1 } }));
+}
+
+/** Whether what a visit was for happened: a visit that was sent on to the password form is a success to Inertia, too. */
+function stayedHere(): boolean {
+    return page.component === THIS_PAGE;
+}
+
+/**
+ * Asks whether the password was confirmed lately (`password.confirmation`) before something that needs it is posted: if
+ * not, the person is sent to confirm it instead of posting into a redirect. Not knowing is not a reason to stop: the
+ * server decides, and `stayedHere` keeps a redirect from looking like a success.
+ */
+async function ensureConfirmed(): Promise<boolean> {
+    const status = await getJson<{ confirmed: boolean }>(passwordStatus.url());
+
+    if (status !== null && !status.confirmed) {
+        confirmPasswordFirst();
+
+        return false;
+    }
+
+    return true;
+}
+
 /** Fortify's JSON routes. `null` when they could not answer; a stale password confirmation sends the person to confirm it. */
 async function getJson<T>(url: string): Promise<T | null> {
     try {
@@ -97,7 +131,7 @@ async function getJson<T>(url: string): Promise<T | null> {
         });
 
         if (response.status === PASSWORD_CONFIRMATION_REQUIRED) {
-            router.visit(confirmPassword.url());
+            confirmPasswordFirst();
 
             return null;
         }
@@ -144,7 +178,11 @@ async function showCodes(): Promise<void> {
     codes.value = list;
 }
 
-function start(): void {
+async function start(): Promise<void> {
+    if (starting.value || !(await ensureConfirmed())) {
+        return;
+    }
+
     router.post(
         enable.url(),
         {},
@@ -156,8 +194,12 @@ function start(): void {
     );
 }
 
-function submitCode(): void {
+async function submitCode(): Promise<void> {
     if (confirming.value || code.value.length !== 6) {
+        return;
+    }
+
+    if (!(await ensureConfirmed())) {
         return;
     }
 
@@ -173,6 +215,10 @@ function submitCode(): void {
             },
             onFinish: () => (confirming.value = false),
             onSuccess: () => {
+                if (!stayedHere()) {
+                    return;
+                }
+
                 code.value = '';
                 toast.success(t('account.two_factor.toasts.enabled'));
                 void showCodes();
@@ -187,6 +233,10 @@ function submitCode(): void {
 }
 
 async function regenerate(): Promise<void> {
+    if (!(await ensureConfirmed())) {
+        return;
+    }
+
     const confirmed = await confirm({
         title: t('account.two_factor.confirm.regenerate.title'),
         description: t('account.two_factor.confirm.regenerate.description'),
@@ -206,18 +256,26 @@ async function regenerate(): Promise<void> {
             onStart: () => (working.value = true),
             onFinish: () => (working.value = false),
             onSuccess: () => {
-                toast.success(t('account.two_factor.toasts.regenerated'));
-                void showCodes();
+                if (stayedHere()) {
+                    toast.success(t('account.two_factor.toasts.regenerated'));
+                    void showCodes();
+                }
             },
         },
     );
 }
 
-async function turnOff(): Promise<void> {
+/** Disable, or cancel a setup that was never confirmed: the same route, different words. */
+async function turnOff(cancelling: boolean): Promise<void> {
+    if (!(await ensureConfirmed())) {
+        return;
+    }
+
+    const key = cancelling ? 'cancel' : 'disable';
     const confirmed = await confirm({
-        title: t('account.two_factor.confirm.disable.title'),
-        description: t('account.two_factor.confirm.disable.description'),
-        confirmLabel: t('account.two_factor.confirm.disable.action'),
+        title: t(`account.two_factor.confirm.${key}.title`),
+        description: t(`account.two_factor.confirm.${key}.description`),
+        confirmLabel: t(`account.two_factor.confirm.${key}.action`),
         tone: 'destructive',
     });
 
@@ -229,7 +287,17 @@ async function turnOff(): Promise<void> {
         preserveScroll: true,
         onStart: () => (working.value = true),
         onFinish: () => (working.value = false),
-        onSuccess: () => toast.success(t('account.two_factor.toasts.disabled')),
+        onSuccess: () => {
+            if (stayedHere()) {
+                toast.success(
+                    t(
+                        cancelling
+                            ? 'account.two_factor.toasts.cancelled'
+                            : 'account.two_factor.toasts.disabled',
+                    ),
+                );
+            }
+        },
     });
 }
 
@@ -407,15 +475,28 @@ function codesDone(): void {
                                 :message="errors.code"
                             />
                         </div>
-                        <Button
-                            type="submit"
-                            :size="size"
-                            :disabled="confirming || code.length !== 6"
-                            data-test="confirm-button"
-                        >
-                            <Spinner v-if="confirming" />
-                            {{ t('account.two_factor.setup.confirm') }}
-                        </Button>
+                        <div class="flex flex-wrap items-center gap-3">
+                            <Button
+                                type="submit"
+                                :size="size"
+                                :disabled="confirming || code.length !== 6"
+                                data-test="confirm-button"
+                            >
+                                <Spinner v-if="confirming" />
+                                {{ t('account.two_factor.setup.confirm') }}
+                            </Button>
+                            <Button
+                                v-if="!required"
+                                type="button"
+                                variant="ghost"
+                                :size="size"
+                                :disabled="working"
+                                data-test="cancel-setup-button"
+                                @click="turnOff(true)"
+                            >
+                                {{ t('account.two_factor.setup.cancel') }}
+                            </Button>
+                        </div>
                     </form>
                 </div>
 
@@ -452,7 +533,7 @@ function codesDone(): void {
                             :size="size"
                             :disabled="working"
                             data-test="disable-button"
-                            @click="turnOff"
+                            @click="turnOff(false)"
                         >
                             {{ t('account.two_factor.manage.disable') }}
                         </Button>

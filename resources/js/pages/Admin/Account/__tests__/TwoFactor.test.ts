@@ -29,10 +29,13 @@ vi.mock('@/composables/useConfirm', () => ({
     useConfirm: () => ({ confirm }),
 }));
 
+import { toast } from 'vue-sonner';
 import TwoFactor from '@/pages/Admin/Account/TwoFactor.vue';
-import { resetPage } from '@/test/inertiaPage';
+import { page, resetPage } from '@/test/inertiaPage';
 
 let mounted: VueWrapper | null = null;
+
+const PASSWORD_PAGE = '/admin/account/two-factor?confirm-password=1';
 
 const CODES = Array.from(
     { length: 8 },
@@ -53,6 +56,7 @@ function answer(overrides: Answers = {}) {
             body: { secretKey: 'JBSWY3DPEHPK3PXP' },
         },
         '/user/two-factor-recovery-codes': { body: CODES },
+        '/user/confirmed-password-status': { body: { confirmed: true } },
         ...overrides,
     };
     const fetchMock = vi.fn((url: string) => {
@@ -129,6 +133,8 @@ beforeEach(() => {
         },
         errors: {},
     });
+    page.component = 'Admin/Account/TwoFactor';
+    vi.spyOn(toast, 'success').mockImplementation(() => 1);
 });
 
 afterEach(() => {
@@ -136,6 +142,7 @@ afterEach(() => {
     mounted = null;
     document.body.innerHTML = '';
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
 });
 
 describe('Admin/Account/TwoFactor (11 §18, 13 §5.10)', () => {
@@ -167,6 +174,7 @@ describe('Admin/Account/TwoFactor (11 §18, 13 §5.10)', () => {
             const wrapper = twoFactor();
 
             await wrapper.get('[data-test="enable-button"]').trigger('click');
+            await flushPromises();
 
             expect(router.post).toHaveBeenCalledWith(
                 '/user/two-factor-authentication',
@@ -230,6 +238,7 @@ describe('Admin/Account/TwoFactor (11 §18, 13 §5.10)', () => {
             type('#code', '123456');
             await flushPromises();
             await wrapper.get('[data-test="confirm-form"]').trigger('submit');
+            await flushPromises();
 
             expect(router.post).toHaveBeenCalledWith(
                 '/user/confirmed-two-factor-authentication',
@@ -275,7 +284,7 @@ describe('Admin/Account/TwoFactor (11 §18, 13 §5.10)', () => {
             twoFactor({ enabled: true });
             await flushPromises();
 
-            expect(router.visit).toHaveBeenCalledWith('/user/confirm-password');
+            expect(router.visit).toHaveBeenCalledWith(PASSWORD_PAGE);
         });
 
         it('says so, with a retry, when the QR code cannot be loaded', async () => {
@@ -386,6 +395,9 @@ describe('Admin/Account/TwoFactor (11 §18, 13 §5.10)', () => {
             expect(clicked[0]?.href).toBe('blob:codes');
             expect(blobs[0]?.type).toBe('text/plain');
             expect(await blobs[0]?.text()).toBe(`${CODES.join('\n')}\n`);
+            // Not before the browser has taken the file: later, in a task of its own.
+            expect(revokeObjectURL).not.toHaveBeenCalled();
+            await new Promise((resolve) => setTimeout(resolve, 5));
             expect(revokeObjectURL).toHaveBeenCalledWith('blob:codes');
 
             click.mockRestore();
@@ -520,6 +532,219 @@ describe('Admin/Account/TwoFactor (11 §18, 13 §5.10)', () => {
             await flushPromises();
 
             expect(router.post).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('when the password has to be confirmed again', () => {
+        /** A visit that lands on the password form: Inertia follows Fortify's redirect and calls `onSuccess`. */
+        function landsOnPasswordForm(mock: ReturnType<typeof vi.fn>): void {
+            mock.mockImplementation(
+                (
+                    _url: string,
+                    dataOrOptions: unknown,
+                    options?: { onSuccess?: () => void },
+                ) => {
+                    page.component = 'Auth/ConfirmPassword';
+                    (
+                        (options ?? dataOrOptions) as { onSuccess?: () => void }
+                    ).onSuccess?.();
+                },
+            );
+        }
+
+        const stale = {
+            '/user/confirmed-password-status': { body: { confirmed: false } },
+        };
+
+        it('does not say the setup is confirmed, nor show codes, when the confirm visit lands on the form', async () => {
+            const fetchMock = answer();
+            landsOnPasswordForm(router.post);
+            const wrapper = twoFactor({ enabled: true });
+            await flushPromises();
+
+            type('#code', '123456');
+            await flushPromises();
+            await wrapper.get('[data-test="confirm-form"]').trigger('submit');
+            await flushPromises();
+
+            expect(toast.success).not.toHaveBeenCalled();
+            expect(fetchMock).not.toHaveBeenCalledWith(
+                '/user/two-factor-recovery-codes',
+                expect.anything(),
+            );
+            expect(wrapper.find('[data-test="recovery-code"]').exists()).toBe(
+                false,
+            );
+        });
+
+        it('does not say the codes are new, nor show codes, when the regenerate visit lands on the form', async () => {
+            const fetchMock = answer();
+            confirm.mockResolvedValue(true);
+            landsOnPasswordForm(router.post);
+            const wrapper = twoFactor({
+                enabled: true,
+                confirmed: true,
+                required: true,
+                enforced: false,
+            });
+
+            await wrapper
+                .get('[data-test="regenerate-button"]')
+                .trigger('click');
+            await flushPromises();
+
+            expect(toast.success).not.toHaveBeenCalled();
+            expect(fetchMock).not.toHaveBeenCalledWith(
+                '/user/two-factor-recovery-codes',
+                expect.anything(),
+            );
+        });
+
+        it('does not say it is off when the disable visit lands on the form', async () => {
+            answer();
+            confirm.mockResolvedValue(true);
+            landsOnPasswordForm(router.delete);
+            const wrapper = twoFactor({
+                enabled: true,
+                confirmed: true,
+                required: false,
+                enforced: false,
+            });
+
+            await wrapper.get('[data-test="disable-button"]').trigger('click');
+            await flushPromises();
+
+            expect(router.delete).toHaveBeenCalled();
+            expect(toast.success).not.toHaveBeenCalled();
+        });
+
+        it('does not say it is off when the cancel-setup visit lands on the form', async () => {
+            answer();
+            confirm.mockResolvedValue(true);
+            landsOnPasswordForm(router.delete);
+            const wrapper = twoFactor({
+                enabled: true,
+                required: false,
+                enforced: false,
+            });
+            await flushPromises();
+
+            await wrapper
+                .get('[data-test="cancel-setup-button"]')
+                .trigger('click');
+            await flushPromises();
+
+            expect(toast.success).not.toHaveBeenCalled();
+        });
+
+        it('still says so when the visit stays on the page', async () => {
+            answer();
+            confirm.mockResolvedValue(true);
+            succeeds(router.delete);
+            const wrapper = twoFactor({
+                enabled: true,
+                confirmed: true,
+                required: false,
+                enforced: false,
+            });
+
+            await wrapper.get('[data-test="disable-button"]').trigger('click');
+            await flushPromises();
+
+            expect(toast.success).toHaveBeenCalledWith(
+                'Two-factor authentication is off.',
+            );
+        });
+
+        it.each([
+            [
+                'enable',
+                { enabled: false },
+                '[data-test="enable-button"]',
+                'post',
+            ],
+            [
+                'regenerate',
+                { enabled: true, confirmed: true },
+                '[data-test="regenerate-button"]',
+                'post',
+            ],
+            [
+                'disable',
+                {
+                    enabled: true,
+                    confirmed: true,
+                    required: false,
+                    enforced: false,
+                },
+                '[data-test="disable-button"]',
+                'delete',
+            ],
+        ] as const)(
+            'sends the person to confirm it before %s, and does not post',
+            async (_name, props, button, method) => {
+                answer(stale);
+                confirm.mockResolvedValue(true);
+                const wrapper = twoFactor(props);
+                await flushPromises();
+
+                await wrapper.get(button).trigger('click');
+                await flushPromises();
+
+                expect(router[method]).not.toHaveBeenCalled();
+                expect(router.visit).toHaveBeenCalledWith(PASSWORD_PAGE);
+            },
+        );
+
+        it('sends the person to confirm it before sending the code, and keeps the code', async () => {
+            answer(stale);
+            const wrapper = twoFactor({ enabled: true });
+            await flushPromises();
+            // The QR code reads are behind the same confirmation; only the status says it ran out.
+            router.visit.mockClear();
+
+            type('#code', '123456');
+            await flushPromises();
+            await wrapper.get('[data-test="confirm-form"]').trigger('submit');
+            await flushPromises();
+
+            expect(router.post).not.toHaveBeenCalled();
+            expect(router.visit).toHaveBeenCalledWith(PASSWORD_PAGE);
+        });
+    });
+
+    describe('cancelling a setup that was never confirmed', () => {
+        it('is offered to a role that does not need the second factor, after a confirmation', async () => {
+            answer();
+            confirm.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+            const wrapper = twoFactor({
+                enabled: true,
+                required: false,
+                enforced: false,
+            });
+            await flushPromises();
+            const cancel = wrapper.get('[data-test="cancel-setup-button"]');
+
+            await cancel.trigger('click');
+            await flushPromises();
+            expect(router.delete).not.toHaveBeenCalled();
+
+            await cancel.trigger('click');
+            await flushPromises();
+            expect(router.delete).toHaveBeenCalledWith(
+                '/user/two-factor-authentication',
+                expect.objectContaining({ preserveScroll: true }),
+            );
+        });
+
+        it('is not offered to an owner or an admin, who have to finish the setup', async () => {
+            answer();
+            const wrapper = twoFactor({ enabled: true });
+            await flushPromises();
+
+            expect(
+                wrapper.find('[data-test="cancel-setup-button"]').exists(),
+            ).toBe(false);
         });
     });
 });

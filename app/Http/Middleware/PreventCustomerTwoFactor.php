@@ -13,7 +13,9 @@ use Symfony\Component\HttpFoundation\Response;
  * Customers have no two-factor authentication (13 §5.10): every Fortify `two-factor.*` route answers 403 for them.
  * Fortify's routes stay registered as they are (no `Fortify::ignoreRoutes()`), so the check sits in the `web` group and
  * matches the routes by name. It runs before the route's own `password.confirm`, so a customer is not even asked for a
- * password. The challenge (`two-factor.login*`) is for visitors who are not signed in yet and is not touched.
+ * password. The challenge routes (`two-factor.login*`) are `two-factor.*` too: a customer who is signed in gets 403
+ * there as well (13 §5.10, 14 §3.1: every `two-factor.*` route). A visitor who is not signed in has no user, and is not
+ * touched.
  */
 final class PreventCustomerTwoFactor
 {

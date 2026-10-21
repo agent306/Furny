@@ -47,6 +47,7 @@ return [
             'step_code' => 'Then enter the 6-digit code your app shows.',
             'code' => '6-digit code',
             'confirm' => 'Confirm and turn on',
+            'cancel' => 'Cancel setup',
         ],
         'codes' => [
             'title' => 'Save your recovery codes',
@@ -71,6 +72,11 @@ return [
                 'description' => 'The codes you have now stop working. You get eight new ones to save.',
                 'action' => 'Regenerate',
             ],
+            'cancel' => [
+                'title' => 'Cancel the setup?',
+                'description' => 'The QR code stops working. You can start again whenever you like.',
+                'action' => 'Cancel setup',
+            ],
             'disable' => [
                 'title' => 'Turn off two-factor authentication?',
                 'description' => 'Your account will be protected by your password alone.',
@@ -80,6 +86,7 @@ return [
         'toasts' => [
             'enabled' => 'Two-factor authentication is on.',
             'disabled' => 'Two-factor authentication is off.',
+            'cancelled' => 'The setup was cancelled.',
             'regenerated' => 'You have new recovery codes.',
         ],
     ],

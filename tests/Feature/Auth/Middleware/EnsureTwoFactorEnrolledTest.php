@@ -19,6 +19,27 @@ it('sends an admin without a confirmed 2FA to the enrolment page with the banner
         ->assertRedirectToRoute('admin.security.two-factor');
 });
 
+it('answers a JSON client with 403 and the code two_factor_required, not a redirect (14 section 1.2)', function (): void {
+    $this->actingAs(User::factory()->owner()->withoutTwoFactor()->create())
+        ->getJson(route('admin.dashboard'))
+        ->assertForbidden()
+        ->assertExactJson(['code' => 'two_factor_required']);
+
+    $this->postJson(route('admin.staff.invitations.store'))->assertForbidden()->assertExactJson(['code' => 'two_factor_required']);
+});
+
+it('keeps the redirect for an Inertia visit, which also accepts JSON', function (): void {
+    $this->actingAs(User::factory()->owner()->withoutTwoFactor()->create())
+        ->get(route('admin.dashboard'), ['Accept' => 'text/html, application/json', ...InertiaRequest::headers()])
+        ->assertRedirectToRoute('admin.security.two-factor');
+});
+
+it('lets a JSON client through the exempt routes', function (): void {
+    $this->actingAs(User::factory()->owner()->withoutTwoFactor()->create())
+        ->getJson(route('admin.security.two-factor'))
+        ->assertOk();
+});
+
 it('carries the 2FA banner as the flash of the next page', function (): void {
     $this->actingAs(User::factory()->owner()->withoutTwoFactor()->create())
         ->get(route('admin.dashboard'))
