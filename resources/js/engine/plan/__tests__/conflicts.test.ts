@@ -50,6 +50,10 @@ const SIZES: Record<string, FootprintSize> = {
     h900: { width: 800, depth: 600, height: 900 },
     h901: { width: 800, depth: 600, height: 901 },
     pair: { width: 700, depth: 600, height: 750 },
+    headExact: { width: 800, depth: 600, height: 2100 },
+    headPlus1: { width: 800, depth: 600, height: 2101 },
+    windowFit: { width: 800, depth: 350, height: 1200 },
+    windowOver: { width: 800, depth: 350, height: 1201 },
 };
 const provider: FootprintProvider = (id) => SIZES[id] ?? null;
 
@@ -194,6 +198,34 @@ describe('wall overlap', () => {
         open(doc, { type: 'sliding' }); // head at 2100
         place(doc, 'tallDoor', 2500, -85); // 0..2200
         expect(kinds(run(doc))).toEqual(['overlaps_wall']);
+    });
+
+    it('exempts an item whose top is exactly at the door head and flags one 1 mm above', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        open(doc, { type: 'sliding' }); // head at 2100
+        const id = place(doc, 'headExact', 2500, -85); // 0..2100
+        expect(run(doc)).toEqual([]);
+        doc.placements[id]!.designId = 'headPlus1'; // 0..2101
+        expect(run(doc).map((c) => [c.kind, c.entityId, c.otherId])).toEqual([
+            ['overlaps_wall', id, TOP],
+        ]);
+    });
+
+    it('exempts an item whose top is exactly at the window head and flags one 1 mm above', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        open(doc, {
+            kind: 'window',
+            type: 'casement',
+            width: 1500,
+            height: 1200,
+            sillHeight: 900,
+        }); // 900..2100
+        const id = place(doc, 'windowFit', 2500, -85, { elevation: 900 }); // 900..2100
+        expect(run(doc).filter((c) => c.kind === 'overlaps_wall')).toEqual([]);
+        doc.placements[id]!.designId = 'windowOver'; // 900..2101
+        expect(
+            run(doc).filter((c) => c.kind === 'overlaps_wall'),
+        ).toMatchObject([{ entityId: id, otherId: TOP }]);
     });
 
     it('flags a floor cabinet pushed into the wall under a window sill', () => {
@@ -783,6 +815,41 @@ describe('doorSwingSectors', () => {
                     ),
                 ).toBe(true);
                 expect(signedArea(polygon)).toBeGreaterThan(0);
+            },
+        );
+
+        it.each([
+            ['left', 1],
+            ['right', -1],
+        ] as const)(
+            'pins both leaves of a double_swing door on the 30 degree wall (swing %s)',
+            (swing, sign) => {
+                const doc = wallDoc({
+                    type: 'double_swing',
+                    offset: 2500,
+                    swing,
+                });
+                const sectors = sectorsOf(doc);
+                expect(sectors).toHaveLength(2);
+                const leaves = [
+                    // leaf 1 hinges at u0, closes at the door centre
+                    { hingeU: u0, closedU: 2500 },
+                    // leaf 2 hinges at u1, closes at the door centre
+                    { hingeU: u1, closedU: 2500 },
+                ];
+                sectors.forEach((s, i) => {
+                    const leaf = leaves[i]!;
+                    const hinge = point(leaf.hingeU, sign * 115);
+                    const closedEnd = point(leaf.closedU, sign * 115);
+                    const openEnd = point(leaf.hingeU, sign * (115 + 450));
+                    close(s.polygon[0]!, hinge);
+                    const ends = [s.polygon[1]!, s.polygon[17]!];
+                    const near = (p: Vec2, q: Vec2): boolean =>
+                        Math.hypot(p.x - q.x, p.y - q.y) < 1e-6;
+                    expect(ends.some((p) => near(p, closedEnd))).toBe(true);
+                    expect(ends.some((p) => near(p, openEnd))).toBe(true);
+                    expect(signedArea(s.polygon)).toBeGreaterThan(0);
+                });
             },
         );
     });
