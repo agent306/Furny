@@ -519,7 +519,7 @@ export function createPlanDeriver(): PlanDeriver {
             const { endA, endB } = e;
             const list = openingsByWall.get(id) ?? [];
             const prev = wallCache.get(id);
-            const prevShape =
+            const reusableEntry =
                 prev !== undefined &&
                 prev.wall === info.wall &&
                 prev.endA === endA &&
@@ -527,11 +527,12 @@ export function createPlanDeriver(): PlanDeriver {
                     ? prev
                     : null;
             let entry: WallEntry;
-            if (prevShape && sameRefs(prevShape.openings, list)) {
-                entry = prevShape;
+            if (reusableEntry && sameRefs(reusableEntry.openings, list)) {
+                entry = reusableEntry;
             } else {
                 stats.outlines += 1;
-                const built = prevShape ?? buildWallShape(id, info, endA, endB);
+                const built =
+                    reusableEntry ?? buildWallShape(id, info, endA, endB);
                 const shape = built.shape;
                 const derived = list
                     .map((o) => buildOpening(o, info, shape.safeU))
@@ -541,7 +542,7 @@ export function createPlanDeriver(): PlanDeriver {
                     endA,
                     endB,
                     shape,
-                    bbox: prevShape?.bbox ?? ringBBox(shape.outline),
+                    bbox: reusableEntry?.bbox ?? ringBBox(shape.outline),
                     fallbackIssue: built.fallbackIssue,
                     openings: list,
                     derived,
@@ -563,12 +564,11 @@ export function createPlanDeriver(): PlanDeriver {
                     },
                 };
             }
-            const cached = entry;
-            nextWalls.set(id, cached);
-            if (cached.fallbackIssue) issues.push(cached.fallbackIssue);
-            for (const o of cached.derived) openings[o.id] = o;
-            openingIssues.push(...cached.openingIssues);
-            walls[id] = { ...cached.base };
+            nextWalls.set(id, entry);
+            if (entry.fallbackIssue) issues.push(entry.fallbackIssue);
+            for (const o of entry.derived) openings[o.id] = o;
+            openingIssues.push(...entry.openingIssues);
+            walls[id] = { ...entry.base };
         }
         issues.push(...skippedOpenings, ...openingIssues);
 
@@ -603,8 +603,8 @@ export function createPlanDeriver(): PlanDeriver {
         // Union, exterior outline, bbox (04 §7.2-7).
         const wallIds = Object.keys(walls).sort(cmpId);
         const outlines = wallIds.map((id) => walls[id]!.outline);
-        let union_ = unionCache;
-        if (!union_ || !sameRefs(union_.outlines, outlines)) {
+        let unionEntry = unionCache;
+        if (!unionEntry || !sameRefs(unionEntry.outlines, outlines)) {
             const wallsUnion =
                 outlines.length === 0
                     ? []
@@ -618,7 +618,7 @@ export function createPlanDeriver(): PlanDeriver {
                     exteriorOutline = p.outer;
                 }
             }
-            union_ = {
+            unionEntry = {
                 outlines,
                 wallsUnion,
                 exteriorOutline,
@@ -628,7 +628,7 @@ export function createPlanDeriver(): PlanDeriver {
         }
         const bbox =
             outlines.length > 0
-                ? union_.bbox
+                ? unionEntry.bbox
                 : bboxOf(
                       Object.values(doc.nodes).map((nd) =>
                           clean({ x: nd.x, y: nd.y }),
@@ -662,7 +662,12 @@ export function createPlanDeriver(): PlanDeriver {
             nextNets.set(key, entry);
             return entry.resolved;
         };
-        const analysis = analyzeRooms(g, union_.wallsUnion, walls, resolveNet);
+        const analysis = analyzeRooms(
+            g,
+            unionEntry.wallsUnion,
+            walls,
+            resolveNet,
+        );
         for (const [wallId, sides] of analysis.wallSides) {
             const w = walls[wallId];
             if (!w) continue;
@@ -674,15 +679,15 @@ export function createPlanDeriver(): PlanDeriver {
         nodeCache = nextNodes;
         wallCache = nextWalls;
         netCache = nextNets;
-        unionCache = union_;
+        unionCache = unionEntry;
         return {
             walls,
             openings,
             nodes,
             nodeCaps,
-            wallsUnion: union_.wallsUnion,
+            wallsUnion: unionEntry.wallsUnion,
             bbox,
-            exteriorOutline: union_.exteriorOutline,
+            exteriorOutline: unionEntry.exteriorOutline,
             issues,
             rooms: analysis.rooms,
         };

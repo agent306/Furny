@@ -194,15 +194,8 @@ export {
     computeRoomNet,
     detectRooms,
     faceKeyFor,
-    resolveRoomNet,
 } from './plan/rooms';
-export type {
-    ResolvedRoomNet,
-    RoomAnalysis,
-    RoomNet,
-    RoomNetResolver,
-    WallRoomSides,
-} from './plan/rooms';
+export type { RoomAnalysis, RoomNet, WallRoomSides } from './plan/rooms';
 export type {
     DerivedOpening,
     DerivedPlan,
