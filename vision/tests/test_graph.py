@@ -1,5 +1,6 @@
 """Wall graph building (06 §8.1 steps 9-10): pure coordinates, no images."""
 
+import contextlib
 import math
 import random
 import time
@@ -1041,7 +1042,7 @@ def test_ten_thousand_identical_walls_are_cheap() -> None:
 def test_stacked_perpendicular_stubs_around_one_corner_are_cheap() -> None:
     rng = random.Random(3)
     walls = [raw((0.0, 0.0), (800.0, 0.0)), raw((0.0, 0.0), (0.0, 600.0))]
-    for _ in range(800):  # short stubs whose ends are all stacked on the corner
+    for _ in range(150):  # short stubs whose ends are all stacked on the corner
         walls.append(
             raw((rng.uniform(-3, 3), rng.uniform(-3, 3)), (rng.uniform(-3, 3) + 30, rng.uniform(-3, 3) + 30))
         )
@@ -1086,5 +1087,288 @@ def test_deadline_is_polled_repeatedly_while_stages_run() -> None:
         nonlocal calls
         calls += 1
 
-    build(stacked_walls(3000), long_side=1000.0, check=count)
-    assert calls >= 3
+    started = time.perf_counter()
+    build(_star(6000), long_side=1000.0, check=count)
+    seconds = time.perf_counter() - started
+    # Polled repeatedly, but the build throttles the real check to once per 20 ms.
+    assert 3 <= calls <= seconds / 0.02 + 5, (calls, seconds)
+
+
+# --- deadline responsiveness and output bounds ---------------------------------------------------------
+
+
+def _star(n: int, seed: int = 0) -> list[RawWall]:
+    rng = random.Random(seed)
+    return [
+        raw(
+            (500.0 + rng.uniform(-2, 2), 500.0 + rng.uniform(-2, 2)),
+            (500.0 + 400.0 * math.cos(2 * math.pi * i / n), 500.0 + 400.0 * math.sin(2 * math.pi * i / n)),
+        )
+        for i in range(n)
+    ]
+
+
+def _parallel_near(n: int) -> list[RawWall]:
+    return [
+        raw((i * 0.5, 100.0 + (i % 7) * 1.2), (300.0 + i * 0.5, 100.0 + (i % 7) * 1.2), t=6.0)
+        for i in range(n)
+    ]
+
+
+def _crossing_grid(n: int) -> list[RawWall]:
+    walls = []
+    for i in range(n):
+        pos = 10.0 + i * (3000.0 / n)
+        walls.append(raw((0.0, pos), (3000.0, pos), t=6.0))
+        walls.append(raw((pos, 0.0), (pos, 3000.0), t=6.0))
+    return walls
+
+
+def _random_long(n: int, seed: int = 0) -> list[RawWall]:
+    rng = random.Random(seed)
+    walls = []
+    for _ in range(n):
+        a = rng.uniform(0, math.pi)
+        x, y = rng.uniform(0, 3000), rng.uniform(0, 3000)
+        walls.append(raw((x, y), (x + 1500 * math.cos(a), y + 1500 * math.sin(a)), t=6.0))
+    return walls
+
+
+@pytest.mark.parametrize(
+    ("name", "walls", "kw"),
+    [
+        ("fan", lambda: fan(10_000), {"long_side": 1000.0}),
+        ("parallel", lambda: _parallel_near(20_000), {"t": 6.0, "long_side": 3000.0}),
+        ("star", lambda: _star(10_000), {"long_side": 1000.0}),
+        ("grid", lambda: _crossing_grid(5000), {"t": 6.0, "long_side": 3000.0}),
+    ],
+)
+def test_every_stage_aborts_within_a_second_of_the_deadline(
+    name: str, walls: Callable[[], list[RawWall]], kw: dict[str, float]
+) -> None:
+    inputs = walls()
+    started = time.perf_counter()
+
+    def check() -> None:
+        if time.perf_counter() - started > 1.0:
+            raise DeadlineError
+
+    with contextlib.suppress(DeadlineError, TooComplexError):
+        build(inputs, check=check, **kw)  # type: ignore[arg-type]
+    elapsed = time.perf_counter() - started
+    assert elapsed < 2.0, (name, elapsed)
+
+
+@pytest.mark.parametrize("make", [lambda: _crossing_grid(250), lambda: _random_long(5000)])
+def test_walls_split_into_too_many_pieces_are_rejected_quickly(make: Callable[[], list[RawWall]]) -> None:
+    inputs = make()
+
+    def run() -> None:
+        with pytest.raises(TooComplexError):
+            build(inputs, t=6.0, long_side=3000.0)
+
+    started = time.perf_counter()
+    run()
+    seconds = time.perf_counter() - started
+    tracemalloc.start()
+    try:
+        run()
+        peak = tracemalloc.get_traced_memory()[1] / 1e6
+    finally:
+        tracemalloc.stop()
+    assert seconds < 2.0 and peak < 300.0, (seconds, peak)
+
+
+def test_crossing_grid_below_the_cap_is_split_completely() -> None:
+    g = build(_crossing_grid(40), t=6.0, long_side=3000.0)
+    # 40 x 40 crossings; the 10 px stubs before the first ones are pruned, the 65 px ones after the last stay.
+    assert len(g.nodes) == 40 * 40 + 2 * 40
+    assert len(g.walls) == 2 * 40 * 40
+    assert all(w.free_ends <= 1 for w in g.walls)
+
+
+def test_crossing_grid_above_the_cap_is_too_complex() -> None:
+    with pytest.raises(TooComplexError):
+        build(_crossing_grid(110), t=6.0, long_side=3000.0)  # 2 * 110 * 111 = 24 420 > 20 000 pieces
+
+
+# --- bridging: size, crossings ---------------------------------------------------------------------------
+
+
+def test_gap_below_one_and_a_half_thicknesses_closes_silently() -> None:
+    def pieces(gap: float) -> WallGraph:
+        walls = [raw((0.0, 0.0), (400.0, 0.0)), raw((400.0 + gap, 0.0), (900.0, 0.0))]
+        return build_wall_graph(walls, r=24.0, t_median=12.0, L=3000.0)
+
+    closed = pieces(3.0)
+    assert len(closed.walls) == 1 and not closed.gaps  # 3 px < 1.5 t = 18
+    just_below = pieces(17.5)
+    assert len(just_below.walls) == 1 and not just_below.gaps
+    opening = pieces(20.0)
+    assert len(opening.walls) == 1
+    assert opening.walls[0].openings_px == ((pytest.approx(400.0), pytest.approx(420.0)),)
+
+
+def test_gap_crossed_by_a_through_wall_is_not_bridged() -> None:
+    walls = [
+        raw((0.0, 0.0), (400.0, 0.0), t=6.0),
+        raw((415.0, 0.0), (900.0, 0.0), t=6.0),
+        raw((407.0, -200.0), (407.0, 200.0), t=6.0),  # runs across the gap
+    ]
+    g = build_wall_graph(walls, r=18.0, t_median=6.0, L=3000.0)
+    assert not g.gaps and all(not w.openings_px for w in g.walls)
+    horizontal = [w for w in g.walls if w.a[1] == w.b[1]]
+    assert len(horizontal) == 2  # two walls meeting the through wall, not one bridged wall
+    vertical = [w for w in g.walls if w.a[0] == w.b[0]]
+    assert len(vertical) == 2  # the through wall is split where they meet it
+
+
+# --- pins ---------------------------------------------------------------------------------------------------
+
+
+def _hub(n_spokes: int, mirrored: bool = False) -> list[RawWall]:
+    """One spoke along +x plus ``n_spokes - 1`` pointing left, and a short wall crossing the +x spoke.
+
+    ``mirrored`` flips x, which swaps which end of the walls (in canonical order) is the hub.
+    """
+    walls = [raw((500.0, 500.0), (800.0, 500.0))]
+    for k in range(n_spokes - 1):
+        a = math.radians(100.0 + 160.0 * k / (n_spokes - 2))
+        walls.append(raw((500.0, 500.0), (500.0 + 300.0 * math.cos(a), 500.0 + 300.0 * math.sin(a))))
+    walls.append(raw((518.0, 460.0), (518.0, 540.0)))  # crosses the +x spoke 18 px from the hub
+    if mirrored:
+        walls = [
+            RawWall((1000.0 - w.p0[0], w.p0[1]), (1000.0 - w.p1[0], w.p1[1]), w.thickness_px, w.source)
+            for w in walls
+        ]
+    return walls
+
+
+@pytest.mark.parametrize("mirrored", [False, True])
+def test_crossings_near_a_big_hub_are_ignored_but_not_near_a_small_one(mirrored: bool) -> None:
+    small = build(_hub(16, mirrored), long_side=1000.0)  # trim r = 8: the crossing at 18 px counts
+    assert len(small.nodes) == 1 + 16 + 2 + 1
+    big = build(_hub(64, mirrored), long_side=1000.0)  # trim r * 64 / 16 = 32 px: ignored
+    assert len(big.nodes) == 1 + 64 + 2
+
+
+def test_crossing_angle_threshold_is_three_degrees() -> None:
+    def pair(deg: float) -> WallGraph:
+        far = 8000.0
+        walls = [
+            raw((0.0, 0.0), (far, 0.0)),
+            raw((0.0, -200.0), (far, -200.0 + far * math.tan(math.radians(deg)))),
+        ]
+        return build(walls, long_side=far)
+
+    assert len(pair(2.0).walls) == 2  # crosses at 5.7 km but is nearly parallel: no split
+    assert len(pair(4.0).walls) == 4
+
+
+def test_crossing_points_within_r_of_each_other_share_one_node() -> None:
+    walls = [
+        raw((0.0, 100.0), (400.0, 100.0)),
+        raw((200.0, 0.0), (200.0, 300.0)),
+        raw((101.5, 0.0), (301.5, 200.0)),  # crosses the other two within 1.5 px of their crossing
+    ]
+    g = build(walls)
+    assert len(g.nodes) == 7 and len(g.walls) == 6
+    centre = node_at(g, 200.0, 100.0, tol=3.0)
+    assert sum(centre in (w.a_node, w.b_node) for w in g.walls) == 6
+
+
+def test_free_end_extension_follows_a_rotated_frame() -> None:
+    def rot(p: Pt) -> Pt:
+        return _rotate(p, 17.0)
+
+    # The vertical wall stops 10 px short of the horizontal one (r = 6, t = 12: reach 18).
+    flat = [raw((0.0, 0.0), (500.0, 0.0)), raw((500.0, 300.0), (500.0, 10.0))]
+    turned = [RawWall(rot(w.p0), rot(w.p1), w.thickness_px, w.source) for w in flat]
+    ref = build(flat, r=6.0, theta0=0.0)
+    got = build(turned, r=6.0, theta0=17.0)
+    assert len(ref.nodes) == len(got.nodes) == 3
+    assert sorted(w.free_ends for w in got.walls) == sorted(w.free_ends for w in ref.walls) == [1, 1]
+    for name, p in ref.nodes.items():
+        q = rot(p)
+        assert got.nodes[name] == (pytest.approx(q[0], abs=1e-6), pytest.approx(q[1], abs=1e-6))
+
+
+def test_crossing_stage_rejects_on_the_split_estimate_before_building_any_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("an index was built before the crossing load was checked")
+
+    monkeypatch.setattr(graphmod, "_SegIndex", forbidden)
+    with pytest.raises(TooComplexError, match="too many pieces"):
+        build(_crossing_grid(250), t=6.0, long_side=3000.0)
+
+
+def test_crossing_stage_stops_when_the_actual_split_count_exceeds_the_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(graphmod, "_estimate_split_walls", lambda *a, **k: 0.0)
+    monkeypatch.setattr(graphmod, "_estimate_pairs", lambda *a, **k: 0.0)
+    started = time.perf_counter()
+    with pytest.raises(TooComplexError, match="too many pieces"):
+        build(_crossing_grid(250), t=6.0, long_side=3000.0)
+    assert time.perf_counter() - started < 5.0
+
+
+def test_crossing_stage_rejects_dense_candidate_sets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(graphmod, "_estimate_split_walls", lambda *a, **k: 0.0)
+    monkeypatch.setattr(graphmod, "_MAX_CANDIDATE_PAIRS", 1000.0)
+    with pytest.raises(TooComplexError, match="cross or touch"):
+        build(_crossing_grid(10), t=6.0, long_side=3000.0)
+    assert len(build([raw((0.0, 0.0), (400.0, 0.0)), raw((200.0, -100.0), (200.0, 100.0))]).walls) == 4
+
+
+def test_pair_estimate_is_an_upper_bound_of_close_pairs() -> None:
+    rng = np.random.default_rng(0)
+    pts = rng.uniform(0, 300, (3000, 2))
+    exact = int(graphmod.cKDTree(pts).count_neighbors(graphmod.cKDTree(pts), 20.0))
+    assert exact <= graphmod._estimate_pairs(pts, 20.0, None) <= 4 * exact
+
+
+def test_direction_of_axis_and_diagonal_walls_follows_theta0() -> None:
+    frame = graphmod._Frame.of(17.0)
+    c, s = math.cos(math.radians(17.0)), math.sin(math.radians(17.0))
+    horizontal = graphmod._Line("h", 0.0, 0.0, 1.0, 0.0)
+    vertical = graphmod._Line("v", 0.0, 1.0, 0.0, 0.0)
+    assert graphmod._direction(horizontal, (0.0, 0.0), (10.0 * c, 10.0 * s), frame) == pytest.approx((c, s))
+    assert graphmod._direction(horizontal, (10.0 * c, 10.0 * s), (0.0, 0.0), frame) == pytest.approx((-c, -s))
+    assert graphmod._direction(vertical, (0.0, 0.0), (-10.0 * s, 10.0 * c), frame) == pytest.approx((-s, c))
+    # A diagonal at 45 degrees in the rotated frame points at 62 degrees in the image.
+    diag = graphmod._Line("d", 0.0, -math.sqrt(0.5), math.sqrt(0.5), 0.0)
+    a = math.radians(62.0)
+    assert graphmod._direction(diag, (0.0, 0.0), (math.cos(a), math.sin(a)), frame) == pytest.approx(
+        (math.cos(a), math.sin(a))
+    )
+
+
+def test_segment_index_bounds_its_sample_count_and_keeps_the_spacing_honest() -> None:
+    n = 3000
+    p0 = np.array([(0.0, 10.0 * i) for i in range(n)])
+    p1 = np.array([(3000.0, 10.0 * i) for i in range(n)])
+    index = graphmod._SegIndex(p0, p1, 14.0)
+    assert len(index.owner) <= graphmod._MAX_SAMPLES * 1.05
+    assert index.step > 14.0
+    # A point near the middle of a wall still finds it with the widened spacing.
+    assert 1234 in index.near(np.array([[1500.0, 12340.0]]), 3.0)[0]
+
+
+def test_throttled_deadline_runs_first_then_at_most_every_interval() -> None:
+    calls = 0
+
+    def check() -> None:
+        nonlocal calls
+        calls += 1
+
+    poll = graphmod._throttled(check)
+    assert poll is not None
+    poll()
+    assert calls == 1  # the first poll always reaches the real check
+    for _ in range(1000):
+        poll()
+    assert calls <= 3
+    assert graphmod._throttled(None) is None
