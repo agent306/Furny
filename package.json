@@ -21,6 +21,7 @@
         "@fontsource-variable/jetbrains-mono": "^5.2",
         "@inertiajs/vite": "^3.9",
         "@inertiajs/vue3": "^3.9",
+        "@internationalized/date": "^3.12.4",
         "@laravel/echo-vue": "^2.6",
         "@lucide/vue": "^1.59.0",
         "@tarikjabiri/dxf": "^2.9",
