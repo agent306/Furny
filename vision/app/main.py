@@ -15,11 +15,12 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app import __version__
-from app.api import health
+from app.api import capabilities, health, providers
 from app.api.errors import install_exception_handlers, unexpected_error_response
 from app.config import Settings, get_settings
 from app.logging import RedactionFilter, configure_logging, request_id_var
 from app.ocr.engine import OcrEngine
+from app.providers import registry
 from app.utils.http import HttpIO
 
 logger = logging.getLogger("furny.vision.app")
@@ -141,11 +142,13 @@ def create_app(settings: Settings | None = None, *, ocr_factory: Callable[[], An
     app.state.settings = settings
     app.state.ocr = None
     app.state.ocr_loaded = False
-    app.state.provider_factory = None  # filled in Task 22
+    app.state.provider_factory = lambda name, model: registry.get_provider(name, model, settings)
     app.state.io_factory = lambda: HttpIO()
     app.add_middleware(RequestContextMiddleware)
     install_exception_handlers(app)
     app.include_router(health.router)
+    app.include_router(capabilities.router)
+    app.include_router(providers.router)
     return app
 
 
