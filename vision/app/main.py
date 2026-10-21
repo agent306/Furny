@@ -19,6 +19,7 @@ from app.api import health
 from app.api.errors import install_exception_handlers, unexpected_error_response
 from app.config import Settings, get_settings
 from app.logging import RedactionFilter, configure_logging, request_id_var
+from app.utils.http import HttpIO
 
 logger = logging.getLogger("furny.vision.app")
 access_logger = logging.getLogger("furny.vision.access")
@@ -143,7 +144,7 @@ def create_app(settings: Settings | None = None, *, ocr_factory: Callable[[], An
     app.state.ocr = None
     app.state.ocr_loaded = False
     app.state.provider_factory = None  # filled in Task 22
-    app.state.io_factory = None  # filled in Task 6
+    app.state.io_factory = lambda: HttpIO()
     app.add_middleware(RequestContextMiddleware)
     install_exception_handlers(app)
     app.include_router(health.router)
