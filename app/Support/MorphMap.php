@@ -21,6 +21,10 @@ use App\Domain\Identity\Models\OtpCode;
 use App\Domain\Identity\Models\StaffInvitation;
 use App\Domain\Identity\Models\User;
 use App\Domain\Imports\Models\BlueprintImport;
+use App\Domain\Orders\Models\ChangeProposal;
+use App\Domain\Orders\Models\ChangeProposalItem;
+use App\Domain\Orders\Models\Order;
+use App\Domain\Orders\Models\OrderItem;
 use App\Domain\Projects\Models\Plan;
 use App\Domain\Projects\Models\PlanRevision;
 use App\Domain\Projects\Models\Project;
@@ -61,5 +65,9 @@ final class MorphMap
         'furniture_preset' => FurniturePreset::class,
         'furniture_template_setting' => FurnitureTemplateSetting::class,
         'blueprint_import' => BlueprintImport::class,
+        'order' => Order::class,
+        'order_item' => OrderItem::class,
+        'change_proposal' => ChangeProposal::class,
+        'change_proposal_item' => ChangeProposalItem::class,
     ];
 }

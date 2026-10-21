@@ -8,6 +8,7 @@ use App\Domain\Furniture\Models\FurnitureDesign;
 use App\Domain\Identity\Models\Address;
 use App\Domain\Identity\Models\User;
 use App\Domain\Imports\Models\BlueprintImport;
+use App\Domain\Orders\Models\Order;
 use App\Domain\Projects\Enums\ProjectStatus;
 use App\Domain\Projects\Enums\PropertyType;
 use Carbon\CarbonImmutable;
@@ -104,6 +105,14 @@ final class Project extends Model implements HasMedia
     public function blueprintImports(): HasMany
     {
         return $this->hasMany(BlueprintImport::class);
+    }
+
+    /**
+     * @return HasMany<Order, $this>
+     */
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class);
     }
 
     /** 02 §10: one auto-generated 3D cover (png, webp) on the public disk. */

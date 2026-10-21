@@ -7,6 +7,7 @@ namespace App\Domain\Identity\Models;
 use App\Domain\Identity\Enums\LengthUnit;
 use App\Domain\Identity\Enums\UnitSystem;
 use App\Domain\Identity\Enums\UserType;
+use App\Domain\Orders\Models\Order;
 use App\Domain\Projects\Models\Project;
 use App\Domain\Shared\Models\UploadIntent;
 use Carbon\CarbonImmutable;
@@ -140,6 +141,16 @@ final class User extends Authenticatable implements HasLocalePreference, HasMedi
     public function projects(): HasMany
     {
         return $this->hasMany(Project::class, 'owner_id');
+    }
+
+    /**
+     * Orders this user placed as the customer (`orders.customer_id`).
+     *
+     * @return HasMany<Order, $this>
+     */
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class, 'customer_id');
     }
 
     /** 02 §10: one avatar (jpg, png, webp) on the public disk with a 128 px `thumb`. */

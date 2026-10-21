@@ -42,6 +42,14 @@ export type ImportSourceKind = 'raster' | 'pdf_vector' | 'pdf_raster' | 'dxf' | 
 export type ImportStatus = 'uploaded' | 'queued' | 'preprocessing' | 'recognizing' | 'ready_for_review' | 'accepted' | 'discarded' | 'failed' | 'cancelled';
 }
 }
+namespace Orders {
+namespace Enums {
+export type CancelReason = 'customer_withdrew' | 'quote_declined' | 'declined_on_call' | 'unresponsive' | 'staff_cancelled' | 'duplicate' | 'other';
+export type ChangeProposalStatus = 'draft' | 'sent' | 'resolved' | 'withdrawn';
+export type OrderStateKey = 'draft' | 'submitted' | 'in_review' | 'changes_proposed' | 'quoted' | 'negotiating' | 'accepted' | 'confirmed' | 'in_production' | 'completed' | 'rework' | 'ready_for_delivery' | 'delivered' | 'closed' | 'cancelled' | 'on_hold';
+export type ProposalItemDecision = 'pending' | 'approved' | 'rejected';
+}
+}
 namespace Projects {
 namespace Enums {
 export type PlanRevisionReason = 'manual_checkpoint' | 'import_accepted' | 'before_restore' | 'staff_edit' | 'auto_daily';
