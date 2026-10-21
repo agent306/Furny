@@ -7,7 +7,8 @@
  */
 import { CommandAbort } from '../../commands/types';
 import { MAX_COORD, roundMm } from '../../geometry/tolerance';
-import { MAX_WALLS } from '../limits';
+import { MAX_OPENINGS, MAX_WALLS } from '../limits';
+import { cmpId } from '../../compare';
 import type { PlanDocument } from '../schema';
 import type { EngineMessage } from '../types';
 import type { EndpointRef } from './helpers';
@@ -72,6 +73,33 @@ export function checkCapacity(
     return walls + count > MAX_WALLS
         ? message('too_large', { kind: 'walls', count: walls, max: MAX_WALLS })
         : null;
+}
+
+/** `too_large` when one more opening would not fit in the plan (`plan.too_large`). */
+export function checkOpeningCapacity(
+    doc: Pick<PlanDocument, 'openings'>,
+): EngineMessage | null {
+    const openings = Object.keys(doc.openings).length;
+    return openings + 1 > MAX_OPENINGS
+        ? message('too_large', {
+              kind: 'openings',
+              count: openings,
+              max: MAX_OPENINGS,
+          })
+        : null;
+}
+
+/** The distinct ids of a selection, in id order. */
+export const uniqueSorted = (ids: readonly string[]): string[] =>
+    [...new Set(ids)].sort(cmpId);
+
+/** `not_found` for the first id that is not a key of `record`. */
+export function checkIds(
+    record: object,
+    ids: readonly string[],
+): EngineMessage | null {
+    for (const id of ids) if (!has(record, id)) return notFound(id);
+    return null;
 }
 
 /**

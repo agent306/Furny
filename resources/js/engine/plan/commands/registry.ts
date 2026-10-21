@@ -13,6 +13,7 @@ import {
     type PlanDefaults,
 } from './pipeline';
 import { MOVE_COMMANDS } from './moves';
+import { OPENING_COMMANDS } from './openings';
 import { WALL_COMMANDS } from './walls';
 
 /** Results `createPlanBus` remembers by document identity. */
@@ -27,6 +28,7 @@ type PlanCommandRegistry = Record<
 export const PLAN_COMMANDS = {
     ...WALL_COMMANDS,
     ...MOVE_COMMANDS,
+    ...OPENING_COMMANDS,
 } satisfies PlanCommandRegistry;
 
 export type PlanCommandType = keyof typeof PLAN_COMMANDS & string;

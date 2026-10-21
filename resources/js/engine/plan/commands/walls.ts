@@ -63,6 +63,7 @@ import {
     message,
     mm,
     notFound,
+    uniqueSorted,
 } from './validators';
 
 type Doc = Draft<PlanDocument>;
@@ -180,9 +181,6 @@ function newWallProps(
         colorHex: null,
     };
 }
-
-const uniqueSorted = (ids: readonly string[]): string[] =>
-    [...new Set(ids)].sort(cmpId);
 
 function checkWallIds(doc: PlanDocument, ids: readonly string[]) {
     for (const id of ids) if (!has(doc.walls, id)) return notFound(id);

@@ -21,5 +21,7 @@ export const WALL_THICKNESS_RANGE = [50, 1000] as const;
 export const WALL_HEIGHT_RANGE = [300, 10_000] as const;
 /** `[min, max]` of an opening's width, mm. */
 export const OPENING_WIDTH_RANGE = [300, 6000] as const;
+/** `[min, max]` of an opening's height, mm (its upper limit is the wall height above the sill). */
+export const OPENING_HEIGHT_RANGE = [300, 10_000] as const;
 /** `[min, max]` of an opening's sill height, mm. */
 export const OPENING_SILL_RANGE = [0, 3000] as const;

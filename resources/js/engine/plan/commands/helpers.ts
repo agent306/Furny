@@ -792,8 +792,12 @@ export function mergeNodeInto(
 // ---- reclampOpenings ---------------------------------------------------------------
 
 /** Two openings overlap when their spans share more than a point (doubled coordinates keep half millimetres integral). */
-const overlaps = (o1: number, w1: number, o2: number, w2: number): boolean =>
-    2 * o1 + w1 > 2 * o2 - w2 && 2 * o2 + w2 > 2 * o1 - w1;
+export const overlaps = (
+    o1: number,
+    w1: number,
+    o2: number,
+    w2: number,
+): boolean => 2 * o1 + w1 > 2 * o2 - w2 && 2 * o2 + w2 > 2 * o1 - w1;
 
 /**
  * Re-fits the openings of a wall whose length changed (04 §6.5): after node
