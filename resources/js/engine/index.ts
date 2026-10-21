@@ -173,3 +173,16 @@ export {
     PLAN_SCHEMA_VERSION,
     migratePlan,
 } from './plan/migrate';
+export {
+    DERIVE_ISSUE_CODES,
+    buildWallGraph,
+    buildWallOutline,
+    computeAllWallEnds,
+    computeNodeJoins,
+} from './plan/walls';
+export type {
+    DeriveIssueCode,
+    WallEnd,
+    WallGraph,
+    WallInfo,
+} from './plan/walls';
