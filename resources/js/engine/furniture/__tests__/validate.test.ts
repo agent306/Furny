@@ -1023,9 +1023,9 @@ describe('dedupeIssues (07 §7.1)', () => {
 });
 
 describe('FURNITURE_ISSUE_CODES (07 §7.3)', () => {
-    it('lists the 69 codes of the catalogue, in table order, without duplicates', () => {
-        expect(FURNITURE_ISSUE_CODES).toHaveLength(69);
-        expect(new Set(FURNITURE_ISSUE_CODES).size).toBe(69);
+    it('lists the 69 codes of the catalogue in table order, then the 2 spec-19 additions, without duplicates', () => {
+        expect(FURNITURE_ISSUE_CODES).toHaveLength(71);
+        expect(new Set(FURNITURE_ISSUE_CODES).size).toBe(71);
         expect(FURNITURE_ISSUE_CODES.slice(0, 11)).toEqual([
             'furniture.dims_range',
             'furniture.family_mismatch',
@@ -1039,12 +1039,13 @@ describe('FURNITURE_ISSUE_CODES (07 §7.3)', () => {
             'furniture.envelope_too_small',
             'furniture.part_exceeds_sheet',
         ]);
-        expect(FURNITURE_ISSUE_CODES.at(-2)).toBe(
+        expect(FURNITURE_ISSUE_CODES.slice(-4)).toEqual([
             'furniture.override_orphaned',
-        );
-        expect(FURNITURE_ISSUE_CODES.at(-1)).toBe(
             'furniture.part_exceeds_sheet_back',
-        );
+            // spec 19 additions (Task 38 fix round 2)
+            'furniture.table_drawers_dont_fit',
+            'furniture.apron_inset_clamped',
+        ]);
         expect(
             FURNITURE_ISSUE_CODES.every((c) => /^furniture\.[a-z_]+$/.test(c)),
         ).toBe(true);

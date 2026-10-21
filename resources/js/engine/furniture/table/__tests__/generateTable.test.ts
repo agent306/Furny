@@ -797,8 +797,8 @@ describe('under-top drawers on four legs', () => {
         expect(lineOf(model, 'table.connectors.corner')?.qty).toBe(4);
     });
 
-    it('side aprons reaching past thin legs bound the bay (inset + t_c > s)', () => {
-        // LEG-CAB-ADJ has a 40 mm section; aprons inset 30 end at 50 + 30 + 18 = 98
+    it('clamps the apron inset to s - t_c when inset + t_c > s, so the aprons never cross', () => {
+        // LEG-CAB-ADJ has a 40 mm section: inset 30 + 18 > 40 -> inset 22
         const model = run(
             diningTable((d) => {
                 d.table.base.legSource = 'hardware';
@@ -807,17 +807,122 @@ describe('under-top drawers on four legs', () => {
                 d.table.storage.drawers = withCount(3, 'front');
             }),
         );
-        // ws = fl((1568 - 100) / 3) = 489 leaves 1 mm, split on both sides
-        expect(boxOf(model, 'table.drawer.1.runner.left').min[0]).toBe(98.5);
-        expect(boxOf(model, 'table.apron.left')).toMatchObject({
-            min: [80, 635, 90],
-        });
-        // The drawers touch nothing. The 07 §3.13 apron formulas themselves
-        // cross at the back corners when inset + t_c > s (reported for a ruling).
-        expect(partOverlaps(model.parts)).toEqual([
-            'table.apron.back x table.apron.left: 8 x 90 x 8',
-            'table.apron.back x table.apron.right: 8 x 90 x 8',
+        expect(issuesOf(model, 'furniture.apron_inset_clamped')).toEqual([
+            {
+                code: 'furniture.apron_inset_clamped',
+                severity: 'info',
+                messageKey: 'engine.furniture.issue.apron_inset_clamped',
+                params: { requested: 30, applied: 22 },
+                entityIds: [],
+            },
         ]);
+        expect(boxOf(model, 'table.apron.left')).toMatchObject({
+            min: [72, 635, 90],
+        });
+        expect(boxOf(model, 'table.apron.back').min[2]).toBe(72);
+        // the drawers sit in the clamped apron plane: 850 - 22
+        expect(boxOf(model, 'table.drawer.1.front').min[2]).toBe(810);
+        expect(
+            boxOf(model, 'table.drawer.1.runner.left').min[0],
+        ).toBeGreaterThanOrEqual(90);
+        expect(partOverlaps(model.parts)).toEqual([]);
+        // inset + t_c = s exactly is kept
+        const exact = run(
+            diningTable((d) => {
+                d.table.base.legSource = 'hardware';
+                d.table.base.legCode = 'LEG-CAB-ADJ';
+                d.table.base.apron.inset = 22;
+            }),
+        );
+        expect(issuesOf(exact, 'furniture.apron_inset_clamped')).toEqual([]);
+        expect(
+            issuesOf(run(diningTable()), 'furniture.apron_inset_clamped'),
+        ).toEqual([]);
+    });
+
+    it('legs thinner than the apron board: inset 0, the bay starts at the apron face', () => {
+        const model = run(
+            diningTable((d) => {
+                d.table.base.legSection = 10;
+                d.table.base.apron.inset = 5;
+                d.table.storage.drawers = withCount(3, 'front');
+            }),
+        );
+        expect(issuesOf(model, 'furniture.apron_inset_clamped')).toMatchObject([
+            { params: { requested: 5, applied: 0 } },
+        ]);
+        // left apron x [50, 68] reaches past the 10 mm leg
+        expect(
+            boxOf(model, 'table.drawer.1.runner.left').min[0],
+        ).toBeGreaterThanOrEqual(68);
+    });
+
+    it('warns table_drawers_dont_fit when the bay cannot take the drawers, and builds none', () => {
+        // W 200: Wb 100 = the two legs, bay 0
+        const none = run(
+            diningTable((d) => {
+                d.dims.width = 200;
+                d.table.storage.drawers = withCount(1, 'front');
+            }),
+        );
+        // required: 2 runners + one box of fl(Wo - 25.4) - 24 >= 1 -> Wo 51
+        expect(issuesOf(none, 'furniture.table_drawers_dont_fit')).toEqual([
+            {
+                code: 'furniture.table_drawers_dont_fit',
+                severity: 'warning',
+                messageKey: 'engine.furniture.issue.table_drawers_dont_fit',
+                params: { available: 0, required: 87 },
+                entityIds: ['table.drawer'],
+            },
+        ]);
+        expect(keys(none).filter((k) => k.includes('drawer'))).toEqual([]);
+        // a bay with room for the front but not for a box with inner width
+        const narrow = (W: number, count: number) =>
+            run(
+                diningTable((d) => {
+                    d.dims.width = W;
+                    d.table.storage.drawers = withCount(count, 'front');
+                }),
+            );
+        // W 286: bay 86 -> ws 50 < 51
+        expect(
+            issuesOf(narrow(286, 1), 'furniture.table_drawers_dont_fit'),
+        ).toMatchObject([{ params: { available: 86, required: 87 } }]);
+        expect(
+            keys(narrow(286, 1)).filter((k) => k.includes('drawer')),
+        ).toEqual([]);
+        // W 287: bay 87 -> ws 51 builds a box 1 mm wide inside
+        expect(
+            issuesOf(narrow(287, 1), 'furniture.table_drawers_dont_fit'),
+        ).toEqual([]);
+        expect(partOf(narrow(287, 1), 'table.drawer.1.back').width).toBe(1);
+        // 3 drawers need 2 x 18 + 3 x 51 + 2 x 50 = 289
+        expect(
+            issuesOf(narrow(488, 3), 'furniture.table_drawers_dont_fit'),
+        ).toMatchObject([{ params: { available: 288, required: 289 } }]);
+        expect(
+            issuesOf(narrow(489, 3), 'furniture.table_drawers_dont_fit'),
+        ).toEqual([]);
+    });
+
+    it('measures the undermount minimum by its inner width deduction (42 + 1)', () => {
+        const model = (W: number) =>
+            run(
+                diningTable((d) => {
+                    d.dims.width = W;
+                    d.table.storage.drawers = {
+                        count: 1,
+                        side: 'front',
+                        slideCode: 'SLD-UM-450',
+                    };
+                }),
+            );
+        expect(
+            issuesOf(model(278), 'furniture.table_drawers_dont_fit'),
+        ).toMatchObject([{ params: { available: 78, required: 79 } }]);
+        expect(
+            issuesOf(model(279), 'furniture.table_drawers_dont_fit'),
+        ).toEqual([]);
     });
 
     it('keeps neighbouring runners apart when 2 t_c exceeds the 50 mm spacing', () => {
@@ -974,17 +1079,6 @@ describe('under-top drawers on four legs', () => {
                 /^table\.drawer\.1\.(side|back|bottom)/.test(k),
             ),
         ).toEqual([]);
-    });
-
-    it('drawers that cannot fit the bay at all build nothing (no 07 §7.3 code for it)', () => {
-        // W 200: Wb 100 = the two legs; no room for runners
-        const model = run(
-            diningTable((d) => {
-                d.dims.width = 200;
-                d.table.storage.drawers = withCount(1, 'front');
-            }),
-        );
-        expect(keys(model).filter((k) => k.includes('drawer'))).toEqual([]);
     });
 
     it('count 0 is no drawers', () => {

@@ -7,6 +7,7 @@ import {
     boxSizes,
     drawerBox,
     drawerIssueRef,
+    minDrawerOpening,
     selectSlide,
     type LeafBoxes,
 } from '../carcass/drawers';
@@ -118,7 +119,8 @@ interface DrawerRow {
  * The drawer row of the base, or null when the base has no room for
  * under-top drawers. On four legs the bay is bounded by the legs (section
  * `s`, solid or hardware) and by the aprons across the drawer side (their
- * inner face at `inset + t_c`), whichever reaches further in; on panel ends
+ * inner face at the clamped `inset + t_c`; past `s` only when `s < t_c`),
+ * whichever reaches further in; on panel ends
  * by the end panels; on cabinet ends by the left end and the cabinet.
  */
 function drawerRow(
@@ -127,7 +129,7 @@ function drawerRow(
     cabinetX0: number,
 ): DrawerRow | null {
     const { T, Wb, Db, bx0, bz0, s, tc } = f;
-    const inset = T.base.apron.inset;
+    const inset = f.apronInset;
     // From the base's outer face to the inner face bounding the bay.
     const reach = Math.max(s, T.base.apron.enabled ? inset + tc : 0);
     switch (T.base.type) {
@@ -296,7 +298,10 @@ function underTopDrawer(
  * runner on each side, with `TABLE_DRAWER_SPACING` between them (at least
  * the two runners between neighbours), each at most `TABLE_DRAWER_MAX_WIDTH`
  * wide. A side the base does not support is error
- * `furniture.table_drawer_side_unsupported` and builds nothing.
+ * `furniture.table_drawer_side_unsupported`; a bay too narrow for drawers
+ * whose boxes keep an inner width is warning
+ * `furniture.table_drawers_dont_fit { available, required }` (bay widths,
+ * spec 19). Both build nothing.
  */
 export function underTopDrawers(
     ctx: GenContext,
@@ -319,8 +324,25 @@ export function underTopDrawers(
         TABLE_DRAWER_MAX_WIDTH,
         fl((span - (k - 1) * spacing) / k),
     );
-    // Too narrow for any drawer: 07 §7.3 has no code for it (reported, not invented).
-    if (ws <= 0) return;
+    // The slide every drawer of the row gets (same depth and code); its
+    // issues are recorded per drawer by `underTopDrawer`.
+    const { slide } = selectSlide(ctx, {
+        slideCode: drawers.slideCode,
+        maxLen: row.depthAvail - f.tf - DRAWER_REAR_CLEARANCE,
+    });
+    const wsMin = minDrawerOpening(ctx, slide);
+    if (ws < wsMin) {
+        ctx.issue(
+            'furniture.table_drawers_dont_fit',
+            'warning',
+            {
+                available: fl(row.bay[1] - row.bay[0]),
+                required: 2 * f.tc + k * wsMin + (k - 1) * spacing,
+            },
+            ['table.drawer'],
+        );
+        return;
+    }
     const total = k * ws + (k - 1) * spacing;
     const start = from + (span - total) / 2;
     for (let j = 1; j <= k; j++) {

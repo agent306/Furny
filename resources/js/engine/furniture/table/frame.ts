@@ -43,6 +43,11 @@ export interface Frame {
     bz0: number;
     /** Leg section `s` and the leg, carcass, shelf, front, back board thicknesses. */
     s: number;
+    /**
+     * Apron inset from the base faces: `apron.inset`, clamped to
+     * `max(0, s − t_c)` on four legs so the aprons never cross (spec 19).
+     */
+    apronInset: number;
     tLeg: number;
     tc: number;
     ts: number;
@@ -172,6 +177,17 @@ export function tableFrame(ctx: GenContext, T: TableSpec): Frame | null {
         s = num(leg?.specs.sectionMm) ?? DEFAULT_LEG_SECTION;
     }
 
+    const tc = ctx.t('carcass');
+    const apron = T.base.apron;
+    let apronInset = apron.inset;
+    if (T.base.type === 'four_legs' && apron.enabled && apron.inset + tc > s) {
+        apronInset = Math.max(0, s - tc);
+        ctx.issue('furniture.apron_inset_clamped', 'info', {
+            requested: apron.inset,
+            applied: apronInset,
+        });
+    }
+
     let handle: { code: string | null } | undefined;
     const handleCode = (): string | null => {
         if (!handle) {
@@ -201,8 +217,9 @@ export function tableFrame(ctx: GenContext, T: TableSpec): Frame | null {
         bx0: (W - Wb) / 2,
         bz0: (D - Db) / 2,
         s,
+        apronInset,
         tLeg: ctx.t('leg'),
-        tc: ctx.t('carcass'),
+        tc,
         ts: ctx.t('shelf'),
         tf: ctx.t('front'),
         tb: ctx.t('back'),

@@ -13,7 +13,10 @@ import { frontCoverageIssues } from './fronts/openings';
 import { generateFurniture } from './generate';
 import type { FurnitureDocument, Section } from './schema';
 
-/** Every issue code of 07 §7.3, in table order (`part_exceeds_sheet_back` is the reserved last one). */
+/**
+ * Every issue code of 07 §7.3, in table order (`part_exceeds_sheet_back` is
+ * the reserved last one), then the spec 19 additions.
+ */
 export const FURNITURE_ISSUE_CODES = [
     'furniture.dims_range',
     'furniture.family_mismatch',
@@ -84,6 +87,11 @@ export const FURNITURE_ISSUE_CODES = [
     'furniture.drawer_box_thickness',
     'furniture.override_orphaned',
     'furniture.part_exceeds_sheet_back',
+    // Spec 19 additions (Task 38 fix round 2), after the 07 §7.3 table:
+    // warning { available, required }: under-top drawers do not fit their bay.
+    'furniture.table_drawers_dont_fit',
+    // info { requested, applied }: apron inset clamped to s - t_c.
+    'furniture.apron_inset_clamped',
 ] as const;
 
 export type FurnitureIssueCode = (typeof FURNITURE_ISSUE_CODES)[number];

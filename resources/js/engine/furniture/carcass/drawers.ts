@@ -368,6 +368,28 @@ export function boxSizes(
 }
 
 /**
+ * The narrowest opening `Wo` (whole mm) whose box keeps an inner width of at
+ * least 1 mm with `slide` (07 §3.12 box table): side mount
+ * `fl(Wo − 2 × clearance) − 2·t_db >= 1`, undermount
+ * `Wo − innerWidthDeduction >= 1`. Without a slide the side-mount defaults apply.
+ */
+export function minDrawerOpening(
+    ctx: GenContext,
+    slide: CatalogHardware | null,
+): number {
+    const specs = slide?.specs ?? {};
+    if (specs.type === 'undermount') {
+        return (
+            (num(specs.innerWidthDeductionMm) ??
+                DEFAULT_INNER_WIDTH_DEDUCTION) + 1
+        );
+    }
+    const clearance =
+        num(specs.clearancePerSideMm) ?? DEFAULT_CLEARANCE_PER_SIDE;
+    return Math.ceil(2 * clearance + 2 * ctx.t('drawer_box') + 1 - 1e-6);
+}
+
+/**
  * Drawer `j` (1 = top) of a leaf in the slot `[slotY0, slotY1]`: the box
  * (sides, back, bottom, and an inner front behind a door) keyed `{prefix}.…`,
  * its slides `{prefix}.slides` and the slide screws in the bounding verticals.

@@ -99,7 +99,7 @@ export function fourLegs(ctx: GenContext, f: Frame): void {
     const drawerSide = drawerSideOf(T);
     if (base.apron.enabled) {
         const ah = base.apron.height;
-        const inset = base.apron.inset;
+        const inset = f.apronInset;
         const y: [number, number] = [Hb - ah, Hb];
         const alongX: [number, number] = [bx0 + s, bx0 + Wb - s];
         const alongZ: [number, number] = [bz0 + s, bz0 + Db - s];
