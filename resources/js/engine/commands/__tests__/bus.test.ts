@@ -555,7 +555,7 @@ describe('history: false and commands that change nothing', () => {
         expect(bus.getDoc().items).toEqual({});
     });
 
-    it('a no-op execute adds no entry and no event, keeps redo, seals the top', () => {
+    it('a no-op execute adds no entry and no event, keeps the document', () => {
         const { bus, events } = setup();
         bus.execute('inc', { id: 'a', by: 1 });
         bus.execute('inc', { id: 'b', by: 1 });
@@ -570,7 +570,21 @@ describe('history: false and commands that change nothing', () => {
         expect(bus.history().undo).toHaveLength(1);
         expect(bus.canRedo()).toBe(true);
         expect(events).toEqual([]);
+    });
+
+    it('a no-op execute seals an unsealed top entry', () => {
+        const { bus, events } = setup();
+        bus.execute('inc', { id: 'a', by: 1 });
+        // the top entry is fresh: a single execute leaves it open for merging
+        expect(bus.history().undo[0]!.sealed).toBe(false);
+        events.length = 0;
+        bus.execute('zoom', { zoom: 1 }); // already 1: no patches
+        expect(events).toEqual([]);
+        expect(bus.history().undo).toHaveLength(1);
         expect(bus.history().undo[0]!.sealed).toBe(true);
+        // so the next relative step starts a new entry instead of merging
+        bus.execute('inc', { id: 'a', by: 1 }, { merge: true });
+        expect(bus.history().undo).toHaveLength(2);
     });
 });
 

@@ -273,10 +273,10 @@ interface Reached {
     commits: number;
     rollbacks: number;
     resets: number;
-    capHit: boolean;
+    undoAtCap: boolean;
 }
 
-const MINIMUM: Omit<Reached, 'capHit'> = {
+const MINIMUM: Omit<Reached, 'undoAtCap'> = {
     replaceMerges: 10,
     composeMerges: 10,
     droppedMerges: 1,
@@ -400,7 +400,7 @@ describe.each([
                 commits: 0,
                 rollbacks: 0,
                 resets: 0,
-                capHit: false,
+                undoAtCap: false,
             };
             const drain = (): void => {
                 for (const e of events.splice(0)) {
@@ -450,7 +450,7 @@ describe.each([
                 ).toEqual(ref.undoStack.map((e) => [e.key, e.sealed]));
                 expect(h.redo, step).toHaveLength(ref.redoStack.length);
                 expect(h.undo.length, step).toBeLessThanOrEqual(cap);
-                if (h.undo.length === cap) reached.capHit = true;
+                if (h.undo.length === cap) reached.undoAtCap = true;
                 drain();
             };
 
@@ -623,7 +623,7 @@ describe.each([
                 ).toBeGreaterThanOrEqual(min);
             }
             if (hitsCap)
-                expect(reached.capHit, 'history cap reached').toBe(true);
+                expect(reached.undoAtCap, 'history cap reached').toBe(true);
         });
     },
 );
