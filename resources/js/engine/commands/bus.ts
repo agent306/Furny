@@ -223,8 +223,16 @@ export function createCommandBus<
         return Object.freeze(e);
     }
 
-    const withSealed = (e: Readonly<HistoryEntry>): Readonly<HistoryEntry> =>
-        e.sealed ? e : Object.freeze({ ...e, sealed: true });
+    /**
+     * `e` sealed. A sealed entry never merges again, so its `runState`, which
+     * only a `replace` re-run reads, is dropped with the seal.
+     */
+    const withSealed = (e: Readonly<HistoryEntry>): Readonly<HistoryEntry> => {
+        if (e.sealed) return e;
+        const sealed: HistoryEntry = { ...e, sealed: true };
+        delete sealed.runState;
+        return Object.freeze(sealed);
+    };
 
     function sealTop(): void {
         const top = undoStack.at(-1);

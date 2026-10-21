@@ -41,3 +41,9 @@ export const ROOM_NAME_RANGE = [0, 80] as const;
 export const DIMENSION_OFFSET_MAX = 50_000;
 /** Shortest dimension, mm. */
 export const DIMENSION_MIN_LENGTH = 10;
+/** `[min, max]` of a background image's scale, mm per pixel. */
+export const BACKGROUND_SCALE_RANGE = [0.01, 1000] as const;
+/** `[min, max]` of a background image's opacity. */
+export const BACKGROUND_OPACITY_RANGE = [0, 1] as const;
+/** `[min, max]` of the floor thickness, mm. */
+export const FLOOR_THICKNESS_RANGE = [0, 1000] as const;

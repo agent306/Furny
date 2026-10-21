@@ -13,10 +13,12 @@ import {
     type PlanDefaults,
 } from './pipeline';
 import { ANNOTATION_COMMANDS } from './annotations';
+import { BACKGROUND_COMMANDS } from './background';
 import { FIXTURE_COMMANDS } from './fixtures';
 import { MOVE_COMMANDS } from './moves';
 import { OPENING_COMMANDS } from './openings';
 import { PLACEMENT_COMMANDS } from './placements';
+import { PLAN_WIDE_COMMANDS } from './plan';
 import { ROOM_COMMANDS } from './rooms';
 import { WALL_COMMANDS } from './walls';
 
@@ -37,6 +39,8 @@ export const PLAN_COMMANDS = {
     ...PLACEMENT_COMMANDS,
     ...FIXTURE_COMMANDS,
     ...ANNOTATION_COMMANDS,
+    ...BACKGROUND_COMMANDS,
+    ...PLAN_WIDE_COMMANDS,
 } satisfies PlanCommandRegistry;
 
 export type PlanCommandType = keyof typeof PLAN_COMMANDS & string;

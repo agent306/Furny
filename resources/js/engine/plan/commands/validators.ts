@@ -7,12 +7,15 @@
  */
 import { CommandAbort } from '../../commands/types';
 import { MAX_COORD, roundMm } from '../../geometry/tolerance';
-import { MAX_OPENINGS, MAX_WALLS } from '../limits';
+import { BACKGROUND_SCALE_RANGE, MAX_OPENINGS, MAX_WALLS } from '../limits';
 import { cmpId } from '../../compare';
 import type { PlanDocument } from '../schema';
 import type { EngineMessage } from '../types';
 import type { EndpointRef } from './helpers';
 import { planCommandMessage, type PlanCommandErrorCode } from './pipeline';
+
+/** The most a distance or length param may be: the full width of the coordinate range. */
+export const MAX_SPAN = 2 * MAX_COORD;
 
 /** A planner's result: the values to write, or the refusal. */
 export type Planned<T> = T | { error: EngineMessage };
@@ -56,6 +59,12 @@ export function checkRange(
         ? message('out_of_range', { field, min, max })
         : null;
 }
+
+/** `out_of_range` unless a background's `mmPerPixel` is 0.01 to 1000. */
+export const checkBackgroundScale = (
+    field: string,
+    value: number,
+): EngineMessage | null => checkRange(field, value, ...BACKGROUND_SCALE_RANGE);
 
 /** A node that must exist, or a free point inside the coordinate range. */
 export function checkRef(

@@ -9,6 +9,7 @@ import { testIds } from '../../testing/ids';
 import { createPlanBus } from '../commands/registry';
 import type { WallProps } from '../commands/helpers';
 import type {
+    BackgroundImage,
     DimensionAnnotation,
     FurniturePlacement,
     Opening,
@@ -132,6 +133,25 @@ export class Graph {
         return id;
     }
 
+    /** An unlocked 1000 x 800 px background at 10 mm per pixel, top-left at the origin. */
+    background(over: Partial<BackgroundImage> = {}): BackgroundImage {
+        const background: BackgroundImage = {
+            importId: null,
+            mediaUuid: 'media-1',
+            pixelWidth: 1000,
+            pixelHeight: 800,
+            mmPerPixel: 10,
+            position: { x: 0, y: 0 },
+            rotation: 0,
+            opacity: 0.5,
+            visible: true,
+            locked: false,
+            ...over,
+        };
+        this.doc.background = background;
+        return background;
+    }
+
     /** The graph after `recipe` ran on a mutative draft with this factory. */
     run<T>(recipe: (d: GraphDoc, ctx: { newId: NewId }, out: GraphOut) => T): {
         doc: PlanDocument;
@@ -204,4 +224,89 @@ export function oneWall(over: Partial<WallProps> = {}) {
         ...over,
     });
     return { g, a, b, w };
+}
+
+/**
+ * A closed 5000 x 3000 room at (1000, 500) with 200 mm walls, a door and a
+ * window on its north wall, one of everything the scaling commands move, and a
+ * background that is not at the origin. The north wall's right face (y = 600)
+ * is the room side; a placement and a dimension are attached to it.
+ */
+export function scaleWorld() {
+    const g = new Graph();
+    const n1 = g.node(1000, 500);
+    const n2 = g.node(6000, 500);
+    const n3 = g.node(6000, 3500);
+    const n4 = g.node(1000, 3500);
+    const north = g.wall(n1, n2, { thickness: 200 });
+    g.wall(n2, n3, { thickness: 200 });
+    g.wall(n3, n4, { thickness: 200 });
+    g.wall(n4, n1, { thickness: 200 });
+    const door = g.opening(north, 1000, 900);
+    const window = g.opening(north, 3500, 1200, {
+        kind: 'window',
+        type: 'casement',
+        sillHeight: 900,
+        height: 1200,
+    });
+    const attachedPlacement = g.placement(north, 'right', 2000, 600);
+    const freePlacement = g.ids('f');
+    g.doc.placements[freePlacement] = {
+        id: freePlacement,
+        designId: 'des_x',
+        x: 3000,
+        y: 2000,
+        rotation: 90,
+        elevation: 150,
+        mirrored: false,
+        wallAttachment: null,
+    };
+    const fixture = g.ids('x');
+    g.doc.fixtures[fixture] = {
+        id: fixture,
+        libraryKey: 'wc',
+        x: 5000,
+        y: 3000,
+        rotation: 0,
+        width: 400,
+        depth: 700,
+        height: 800,
+        elevation: 0,
+        label: null,
+    };
+    const label = g.ids('t');
+    g.doc.annotations.labels[label] = {
+        id: label,
+        position: { x: 2000, y: 1000 },
+        text: 'Hall',
+        fontSize: 250,
+        rotation: 0,
+    };
+    const freeDimension = g.ids('d');
+    g.doc.annotations.dimensions[freeDimension] = {
+        id: freeDimension,
+        a: { x: 1000, y: 4000 },
+        b: { x: 6000, y: 4000 },
+        offset: 300,
+        attachedTo: null,
+    };
+    const attachedDimension = g.dimension(north, 'right');
+    const meta = g.meta('Living', 3000, 2000);
+    g.doc.rooms[meta]!.labelOffset = { x: 100, y: -200 };
+    const background = g.background({ position: { x: 500, y: 200 } });
+    return {
+        g,
+        nodes: [n1, n2, n3, n4],
+        north,
+        door,
+        window,
+        attachedPlacement,
+        freePlacement,
+        fixture,
+        label,
+        freeDimension,
+        attachedDimension,
+        meta,
+        background,
+    };
 }

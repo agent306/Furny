@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { CommandAbort } from '../../../commands/types';
 import type { PlanDocument } from '../../schema';
+import { createPlanDeriver } from '../../derive';
+import { definePlanCommand } from '../define';
+import {
+    defaultPlanDefaults,
+    executePlanCommand,
+    planCommandMessage,
+    type PlanRunState,
+} from '../pipeline';
 import { Graph, busOf, ok, planBus } from '../../testing/graph';
 import { derivePlanGeometry } from '../../derive';
 import { makeRectPlan } from '../../testing/fixtures';
@@ -126,5 +135,51 @@ describe('id replay across a replace merge', () => {
         expect(added(start.nodes, bus.getDoc().nodes)).toEqual(ids);
         expect(bus.undo()).toBe(true);
         expect(bus.getDoc()).toEqual(start);
+    });
+});
+
+describe('replayingNewId, through executePlanCommand', () => {
+    /** Issues two `n` ids and a `w` id, then aborts: a re-run that fails after drawing. */
+    const drawThenAbort = definePlanCommand<Record<string, never>>({
+        type: 'drawThenAbort',
+        labelKey: 'engine.plan.command.label.draw_then_abort',
+        validate: () => null,
+        run(_d, _p, ctx) {
+            ctx.newId('n');
+            ctx.newId('n');
+            ctx.newId('w');
+            throw new CommandAbort(planCommandMessage('wall_too_short'));
+        },
+        touchesGeometry: false,
+    });
+
+    it('a re-run that issues ids and then aborts leaves the recorded ids unchanged', () => {
+        const doc = makeRectPlan(4000, 3000, 200, testIds());
+        const deriver = createPlanDeriver();
+        const drawn: string[] = [];
+        const recorded: PlanRunState = { ids: { n: ['n_recorded1'] } };
+        const snapshot = structuredClone(recorded);
+        const result = executePlanCommand(
+            doc,
+            drawThenAbort,
+            {},
+            {
+                geometry: deriver.derive(doc),
+                derive: (d) => deriver.derive(d),
+                footprints: () => null,
+                defaults: defaultPlanDefaults(doc),
+                newId: (prefix) => {
+                    drawn.push(prefix);
+                    return `${prefix}_drawn${String(drawn.length)}`;
+                },
+            },
+            recorded,
+        );
+        expect(result.ok).toBe(false);
+        // the first n id came from the record, the rest were drawn fresh
+        expect(drawn).toEqual(['n', 'w']);
+        // the failed run must not have appended to the entry's own lists
+        expect(recorded).toEqual(snapshot);
+        expect(recorded.ids.n).toEqual(['n_recorded1']);
     });
 });

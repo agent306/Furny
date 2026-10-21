@@ -79,7 +79,7 @@ import {
     wallLength,
 } from './helpers';
 import type { PlanCommandContext } from './pipeline';
-import { checkRange, has, message, mm, notFound } from './validators';
+import { MAX_SPAN, checkRange, has, message, mm, notFound } from './validators';
 
 type Doc = Draft<PlanDocument>;
 type Graph = Pick<PlanDocument, 'nodes' | 'walls'>;
@@ -109,9 +109,6 @@ const SetWallLengthSchema = z.object({
 type SetWallLengthParams = z.infer<typeof SetWallLengthSchema>;
 
 // ---- shared helpers -----------------------------------------------------------------------------
-
-/** The most a distance or length param may be: the full width of the coordinate range. */
-const MAX_SPAN = 2 * MAX_COORD;
 
 /** `roundPoint` without a negative zero. */
 function roundedPoint(p: Vec2): Vec2 {
