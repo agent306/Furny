@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from app.pipeline.segments import merge_collinear
 from app.schemas.candidates import DimensionLine, Segment
 from app.utils.geometry import Rect
 
@@ -41,6 +42,7 @@ DOUBLE_D_MIN_THIN, DOUBLE_D_MAX_FRAC = 1.5, 0.02  # line distance: >= 1.5 t_thin
 DOUBLE_OVERLAP = 0.6  # of the shorter segment
 HOLLOW_MAX, FILLED_MIN = 0.15, 0.85  # ink share of the strip between the two lines
 DOUBLE_CLAIM_TOL_PX = 1.0  # claims of one segment side may touch by this much
+REJOIN_GAP_THIN = 3.0  # thin pieces cut by a dimension line: within this many t_thin of it, this far apart
 
 _MAX_SAMPLES = 400_000  # vectorised work per block between polls
 _ANGLE_BUCKET_DEG = 2.0
@@ -61,15 +63,29 @@ def sample(img: np.ndarray, pts: np.ndarray) -> np.ndarray:
 
 
 def candidate_segments(
-    segments: Sequence[Segment], dimension_lines: Sequence[DimensionLine], t_thin: float, ink: np.ndarray
+    segments: Sequence[Segment],
+    dimension_lines: Sequence[DimensionLine],
+    t_thin: float,
+    ink: np.ndarray,
+    faces: frozenset[str] | set[str] = frozenset(),
 ) -> list[Segment]:
     """Segments minus dimension lines (06 §8.1 step 2), including collinear copies of a dimension line, and
-    minus their extension lines (ruling R6, see ``is_extension``; ``ink`` is the page's text-free ink)."""
+    minus their extension lines (ruling R6, see ``is_extension``; ``ink`` is the page's text-free ink).
+
+    A dimension line is never a wall candidate. For the dimension lines in ``faces`` (``wall_face_dims``:
+    drawn beside a wall face, pairing with it) only the extension-line exclusion is skipped, so a face
+    touching one of their ticks is not cut (Task 16c: re-admitting their own segments paired them with the
+    face beside them into a wall, the HDB toilet-3 wall at the "3200" line)."""
     dim_ids = {d.segment_id for d in dimension_lines}
+    cut = [d for d in dimension_lines if d.segment_id not in faces]
     out: list[Segment] = []
     for s in segments:
         if s.id in dim_ids or (
-            s.is_thin and any(_on_line(s, d) or is_extension(s, d, t_thin, ink) for d in dimension_lines)
+            s.is_thin
+            and (
+                any(_on_line(s, d) for d in dimension_lines)
+                or any(is_extension(s, d, t_thin, ink) for d in cut)
+            )
         ):
             continue
         out.append(s)
@@ -89,8 +105,8 @@ def wall_face_dims(
     ``find_dimension_lines`` drops candidates that pair as wall faces itself (Task 14b), with the walls
     stage's pair rules, one pair per stretch and the stacked-chain exception for two dimension lines. This
     guard stays for the dimension lines drawn closer than 0.02 L beside a single face line (an interior
-    dimension along a partition): their segments stay wall candidates, so excluding them and their
-    extension lines does not cut the partition (on HDB the toilet-3 wall).
+    dimension along a partition): their extension lines are not excluded (``candidate_segments``), so
+    they do not cut the partition. Their own segments are no wall candidates (Task 16c).
     """
     by_id = {s.id: s for s in segments}
     dim_ids = {d.segment_id for d in dimension_lines}
@@ -221,8 +237,12 @@ def double_mask(
     t_thin: float,
     poll: Check,
     envelope: np.ndarray | None = None,
+    dims: np.ndarray | None = None,
 ) -> np.ndarray:
     """Quadrilaterals between paired parallel thin lines (06 §8.1 step 3).
+
+    ``dims`` (k, 4; page px) are the dimension lines' end points: thin lines cut by one are rejoined first
+    (``_rejoined``).
 
     Pairs (ruling R6): both lines at least ``0.03 L`` long, angle difference <= 2 degrees, distance ``d`` in
     ``[1.5 t_thin, 0.02 L]``, projection overlap >= 60 % of the shorter segment and a hollow (< 15 % ink) or
@@ -235,7 +255,10 @@ def double_mask(
     door jamb), so corners close without narrowing openings.
     """
     mask = np.zeros((crop.h, crop.w), np.uint8)
-    thin = [s for s in cands if s.is_thin and s.length >= DOUBLE_MIN_LEN_FRAC * L]
+    thin = [s for s in cands if s.is_thin]
+    if dims is not None and dims.size and thin:
+        thin = _rejoined(thin, dims, t_thin)
+    thin = [s for s in thin if s.length >= DOUBLE_MIN_LEN_FRAC * L]
     if len(thin) < 2:
         return mask
     origin = np.array((crop.x, crop.y), np.float64)
@@ -270,6 +293,54 @@ def double_mask(
         claims[pr.j].append((t0j, t1j))
         _fill_pair(mask, pr.i, pr.j, s0, s1, pr.d, p0, p1, length, unit)
     return mask
+
+
+def _rejoined(thin: list[Segment], dims: np.ndarray, t_thin: float) -> list[Segment]:
+    """Thin lines rejoined where a dimension line or its tick cut them (Task 16c). A piece with an end
+    within ``3 t_thin`` of a dimension line (``dims``: (k, 4) end points), and the pieces collinear with it
+    (within 1.5 degrees and 2 px) that overlap it or end at most ``3 t_thin`` from it, fuse whatever their
+    measured widths: the segment stage keeps strokes more than 1.5x apart in width separate, and a thin
+    line's width reads 1.9 or 3.8 px by chance. On HDB the "3200" line's end and tick cut both faces of the
+    bedroom-2 wall 25 px short of the wall they meet."""
+    reach = REJOIN_GAP_THIN * t_thin
+    ends = np.array([[s.p0, s.p1] for s in thin], np.float64).reshape(-1, 2)
+    d = _point_segment_distances(ends, dims[:, :2], dims[:, 2:]).min(axis=1).reshape(-1, 2)
+    picked = set(np.flatnonzero(d.min(axis=1) <= reach).tolist())
+    if not picked:
+        return thin
+    for i in sorted(picked):  # one round of collinear neighbours
+        for j, s in enumerate(thin):
+            if j not in picked and _continues(thin[i], s, reach):
+                picked.add(j)
+    if len(picked) < 2:
+        return thin
+    cut = [Segment(thin[k].id, thin[k].p0, thin[k].p1, t_thin, True, thin[k].source) for k in sorted(picked)]
+    keep = [s for k, s in enumerate(thin) if k not in picked]
+    return [*keep, *merge_collinear(cut, gap_tol=reach)]
+
+
+def _continues(a: Segment, b: Segment, reach: float) -> bool:
+    """``b`` lies on ``a``'s line (within 1.5 degrees and 2 px) and overlaps it or ends within ``reach``."""
+    u = np.subtract(a.p1, a.p0) / max(a.length, 1e-9)
+    v = np.subtract(b.p1, b.p0) / max(b.length, 1e-9)
+    if abs(float(u @ v)) < math.cos(math.radians(1.5)):
+        return False
+    n = np.array((-u[1], u[0]))
+    q0, q1 = np.subtract(b.p0, a.p0), np.subtract(b.p1, a.p0)
+    if max(abs(float(q0 @ n)), abs(float(q1 @ n))) > 2.0:
+        return False
+    lo, hi = sorted((float(q0 @ u), float(q1 @ u)))
+    return lo <= a.length + reach and hi >= -reach
+
+
+def _point_segment_distances(pts: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """(n_pts, n_segs) distances of points to segments ``a``-``b``."""
+    d = b - a
+    ll = np.maximum((d * d).sum(axis=1), 1e-12)
+    r = pts[:, None, :] - a[None, :, :]
+    t = np.clip((r * d[None]).sum(axis=2) / ll[None], 0.0, 1.0)
+    q = a[None] + t[..., None] * d[None]
+    return np.asarray(np.hypot(*(pts[:, None, :] - q).transpose(2, 0, 1)))
 
 
 def _pair_candidates(

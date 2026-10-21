@@ -261,3 +261,25 @@ def test_extension_lines_outside_the_outline_are_no_walls(monkeypatch: pytest.Mo
     monkeypatch.setattr(wallmod, "_drop_dangling_extensions", lambda raw, *a, **k: raw)
     ext = extract_walls(r.page, r.pre, r.segments, [dim], make_ctx(), ink=r.pre.ink)
     assert len(above(walls_to_graph(ext, r.pre.region))) == 1
+
+
+def test_face_lines_cut_by_a_dimension_line_are_rejoined() -> None:
+    """A dimension line ending on a wall's faces cut both (the HDB "3200" line at the bedroom-2 wall): the
+    pieces, measured 1.9 and 3.8 px wide so the segment stage kept them apart, fuse again before pairing.
+    Pieces far from any dimension line are left as they are."""
+    from app.pipeline import wall_candidates as candmod
+    from app.schemas.candidates import Segment
+
+    pieces = [
+        Segment("S1", (300.0, 475.0), (955.0, 475.0), 1.9, True, "lsd"),
+        Segment("S2", (937.0, 475.0), (974.0, 475.0), 3.8, True, "lsd"),  # overlaps S1
+        Segment("S3", (300.0, 485.0), (955.0, 485.0), 1.9, True, "lsd"),
+        Segment("S4", (962.0, 485.0), (983.0, 485.0), 3.8, True, "lsd"),  # 7 px gap
+    ]
+    dim = np.array([[958.0, 180.0, 958.0, 482.0]])  # ends between the two faces
+    fused = sorted(
+        (round(s.p0[0]), round(s.p1[0]), round(s.p0[1])) for s in candmod._rejoined(pieces, dim, 3.75)
+    )
+    assert fused == [(300, 974, 475), (300, 983, 485)]
+    far = np.array([[1500.0, 180.0, 1500.0, 482.0]])
+    assert candmod._rejoined(pieces, far, 3.75) == pieces

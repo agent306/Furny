@@ -13,6 +13,12 @@
    "Jogs: X8 (bold 805.25 with the thin inner face 795.75, midpoint 800.5) jogs at x 427 to the block (X8j); X7 (slider frame lines 801 / 805.5, centre 803) jogs at x 575 (X7j); B2 (bold stroke 922.2-924.1, centre line (575, 921.5)-(832, 925)) jogs at x 575 (B2j).",
    "X9 (left wall) follows the drawing: corner column x 136-156.5 (centre 146, y 182-228), bold stroke 155 (y 228-548), block x 137-158 (centre 147, y 548-592), bold outer 145.5 with thin inner face 154.5 below (midpoint 150, y 592-800.5); jogs X9j1-X9j3. A moved to (146, 182), F to (150, 800.5).",
    "Balcony black stub x 427-505 at y 912 (left of M, 78 px >= 0.03 L): a wall (B2a). The pier x 558-576, y 922-950 under the bottom block protrudes 28 px < 0.03 L from the block's face: a pier, not a wall."
+  ],
+  "judgement_calls": [
+   "X8 and X9 (lower part): the thin line 9-10 px inside the bold outer stroke (y 795.75 along x 150-427, x 154.5 along y 592-800, meeting at an inner corner) is read as the wall's inner face, so the centre line is the midpoint (y 800.5, x 150). Read as a window sill line instead, the centre would be the bold stroke (y 805.25, x 145.5), 4.75 px away.",
+   "Pier rule: the pier x 558-576, y 922-950 under the bottom black block protrudes 28 px from the block's face (38 px from its centre line); measured from the face it is below 0.03 L (33 px), so it is a pier, not a wall stub. Measured from the centre line it would be a stub.",
+   "X4 (bay's right wall, y 115-171) and X5 (bedroom 3's bottom wall) stay at the bold stroke (x 1115 from the 16b trace; y 811.5) as the Task 16 review verified them. Under the bold-outer-plus-thin-inner-face reading they would be at x 1118.4 (thin line at 1115 beside the bold at 1121.75) and y 807.5 (thin line at 803.5); both are within the 9.9 px exterior tolerance.",
+   "B2 right of the bottom block stays at the bold stroke: the thin double line 9 px inside it (y 913-916) is read as the balcony's window or railing frame, not an inner face."
   ]
  },
  "units": "source_px",

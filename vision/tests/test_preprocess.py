@@ -429,3 +429,31 @@ def test_region_grouping_of_many_components_is_bounded_and_polls_the_deadline() 
     with pytest.raises(VisionError) as err:
         detect_plan_region(thick, np.zeros_like(thick), ctx)
     assert err.value.code == "deadline_exceeded"
+
+
+def test_region_of_a_double_line_plan_with_one_column_holds_the_plan() -> None:
+    """Task 16c: the plan's only thick stroke is one solid column; the region is found from the double-line
+    walls' strips as well (`double_line_strips`), not collapsed onto the column."""
+    pts = [(300, 300), (1700, 300), (1700, 1200), (300, 1200)]
+    walls = [SWall(pts[i], pts[(i + 1) % 4], 14, style="double") for i in range(4)]
+    walls.append(SWall((700, 700), (700, 780), 40))
+    pre = preprocess(page_of(render_plan(SIZE, walls)), make_ctx())
+    r = pre.region
+    assert r.x < 300 and r.y < 300 and r.x + r.w > 1700 and r.y + r.h > 1200
+    # Discriminating: thick and bold strokes alone (the R4 rule) give the column's box.
+    alone = detect_plan_region(
+        pre.thick, pre.ink, make_ctx(), bold=binarize.bold_strokes(pre.ink, pre.t_thin, 80)
+    )
+    assert alone.w < 400 and alone.h < 400
+
+
+def test_lone_double_line_strip_does_not_grow_the_region() -> None:
+    """A straight pair of thin lines in the margin (two extension lines, a stacked chain) leaves no strip:
+    only strips joined into a structure spanning both directions count."""
+    ink = np.zeros((1500, 2000), np.uint8)
+    ink[100:102, 300:1500] = 255
+    ink[112:114, 300:1500] = 255
+    assert not binarize.double_line_strips(ink, 2.0, 2000).any()
+    ink[100:1000, 300:302] = 255  # the pair turns a corner into a vertical pair: a wall outline
+    ink[112:1000, 312:314] = 255
+    assert binarize.double_line_strips(ink, 2.0, 2000).any()

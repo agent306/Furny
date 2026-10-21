@@ -30,6 +30,9 @@ SAUVOLA_R = 127.5  # half the uint8 dynamic range: skimage's default `r` for uin
 MIN_BLOB_KERNELS = 3  # components smaller than (3k)^2 px are dropped from `thick`
 BOLD_FACTOR = 1.8  # bold strokes are at least this many t_thin wide (= segments' is_thin limit, ruling R2)
 BOLD_MIN_LEN_FRAC = 0.04  # ... and at least this long (fraction of the page's long edge here, of L in walls)
+DOUBLE_MIN_LEN_FRAC = 0.03  # double-line walls for the plan region: two thin lines at least this long ...
+DOUBLE_MAX_GAP_FRAC = 0.02  # ... at most this far apart (fractions of the long edge; walls' pair limits, R6)
+DOUBLE_MIN_SPAN_FRAC = 0.1  # ... in joined strips spanning at least this much both across and down
 
 
 @dataclass(frozen=True, eq=False)
@@ -117,6 +120,32 @@ def bold_strokes(ink: np.ndarray, t_thin: float, min_len: float) -> np.ndarray:
     return out
 
 
+def double_line_strips(ink: np.ndarray, t_thin: float, long_edge: int) -> np.ndarray:
+    """The strips between pairs of parallel thin lines (horizontal or vertical), each at least ``0.03`` of
+    the long edge long and at most ``0.02`` of it apart: the extent of double-line walls, before segments
+    exist (Task 16c; the walls stage pairs the segments themselves), in connected structures spanning at
+    least ``0.1`` of the long edge both ways. Thin line work is the ink minus its opening with a
+    ``1.8 t_thin`` square; text, hatching shorter than the length and single lines leave no strip."""
+    k = odd(round(BOLD_FACTOR * t_thin))
+    thin = cv2.subtract(ink, cv2.morphologyEx(ink, cv2.MORPH_OPEN, np.ones((k, k), np.uint8)))
+    length = max(3, round(DOUBLE_MIN_LEN_FRAC * long_edge))
+    gap = max(3, round(DOUBLE_MAX_GAP_FRAC * long_edge))
+    out = np.zeros_like(ink)
+    for along, across in (((1, length), (gap, 1)), ((length, 1), (1, gap))):
+        lines = cv2.morphologyEx(thin, cv2.MORPH_OPEN, np.ones(along, np.uint8))
+        band = cv2.morphologyEx(lines, cv2.MORPH_CLOSE, np.ones(across, np.uint8))
+        strip = cv2.subtract(band, lines)
+        out |= cv2.morphologyEx(strip, cv2.MORPH_OPEN, np.ones(along, np.uint8))
+    # Walls meet at corners and junctions: keep strips joined into structures spanning both directions
+    # (a lone straight pair is a pair of extension lines or a stacked chain as often as a wall).
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(out, connectivity=8)
+    span = DOUBLE_MIN_SPAN_FRAC * long_edge
+    keep = np.zeros(n, bool)
+    keep[1:] = np.minimum(stats[1:, cv2.CC_STAT_WIDTH], stats[1:, cv2.CC_STAT_HEIGHT]) >= span
+    kept: np.ndarray = keep[labels].astype(np.uint8) * 255
+    return kept
+
+
 def sauvola_ink(gray: np.ndarray, window: int, k: float = SAUVOLA_K) -> np.ndarray:
     """Sauvola binarization of a uint8 image: 255 where `gray < m * (1 + k * (s / R - 1))`, else 0.
 
@@ -190,6 +219,7 @@ def preprocess(page: NormalizedPage, ctx: PipelineContext) -> Preprocessed:
     thick = _remove_small_blobs(thick, (MIN_BLOB_KERNELS * k) ** 2)
 
     bold = bold_strokes(ink, t_thin, BOLD_MIN_LEN_FRAC * long_edge)
+    bold |= double_line_strips(ink, t_thin, long_edge)  # walls drawn as double lines count too (Task 16c)
     region = detect_plan_region(thick, ink, ctx, bold=bold)
     return Preprocessed(
         gray=gray,

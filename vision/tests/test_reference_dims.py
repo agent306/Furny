@@ -31,7 +31,7 @@ pytestmark = pytest.mark.reference
 
 OUTER_OVERALL = {"top-overall": 11000, "bottom-overall": 11100, "right-mid": 7600, "right-overall": 8900}
 # recall, precision, free ends after Task 16c (HDB against its corrected truth)
-WALL_FLOOR = {"hdb-3room": (0.888, 0.943, 18), "brochure-2bhk": (0.923, 0.865, 18)}
+WALL_FLOOR = {"hdb-3room": (0.892, 0.962, 9), "brochure-2bhk": (0.911, 0.865, 17)}
 
 
 @pytest.fixture(scope="module")

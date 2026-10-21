@@ -60,16 +60,12 @@ def run(
     page: NormalizedPage | None = None,
     t_thin: float | None = None,
     use_dimensions: bool = True,
-    region: Rect | None = None,
 ) -> Run:
-    """The pipeline up to the wall graph on a synthetic render (tokens stand in for OCR); ``region``
-    overrides the detected plan region."""
+    """The pipeline up to the wall graph on a synthetic render (tokens stand in for OCR)."""
     page = page or page_of(img)
     pre = preprocess(page, make_ctx())
     if t_thin is not None:
         pre = dataclasses.replace(pre, t_thin=t_thin)
-    if region is not None:
-        pre = dataclasses.replace(pre, region=region)
     tokens = tokens or []
     mask = np.zeros(pre.ink.shape, np.uint8)
     for tk in tokens:
@@ -187,10 +183,10 @@ def test_small_break_is_closed() -> None:
     assert_plan_topology(r.graph)
 
 
-@pytest.mark.parametrize(("width", "gaps"), [(32, 0), (38, 1), (240, 1), (260, 0)])
+@pytest.mark.parametrize(("width", "gaps"), [(26, 1), (32, 1), (38, 1), (240, 1), (260, 0)])
 def test_gap_width_limits(width: int, gaps: int) -> None:
-    """Gap candidates need 2.5 t <= g <= 18 t (t = 14: 35 .. 252 px); breaks between 1.5 t and 2.5 t and
-    beyond 18 t split the wall instead."""
+    """Gap candidates need 1.5 t < g <= 18 t (t = 14: 21 .. 252 px; Task 16c ruling R-a, 06 said 2.5 t and
+    left breaks of 1.5 .. 2.5 t splitting the wall); breaks beyond 18 t split the wall."""
     r = run(render_plan(SIZE, plan("filled"), gaps=[SGap(PARTITION, 400, width)]))
     assert len(r.graph.gaps) == gaps
     partition = vertical_at(r.graph, 1200)
@@ -730,19 +726,37 @@ def test_extension_lines_do_not_pair_into_walls() -> None:
     assert not [w for w in ext.raw if w.source == "double_line" and abs((w.p0[0] + w.p1[0]) / 2 - 1006) < 4]
 
 
-def test_wall_face_taken_for_a_dimension_line_stays_a_wall(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A face of a double-line partition passed in as a "dimension line" pairs with the other face: it is
-    a wall face, so neither it nor the walls ending on it are removed."""
+def test_line_taken_for_a_dimension_line_is_never_a_wall_piece() -> None:
+    """Task 16c (controller ruling): a dimension line never survives as a wall piece, even when it pairs
+    with a face beside it (`wall_face_dims`). A partition face passed in as a dimension line takes its
+    partition with it; the other walls stay."""
     r = run(render_plan(SIZE, plan("double")), use_dimensions=False)
     face = next(
         s for s in r.segments if abs(s.p0[0] - 1193) <= 2 and abs(s.p1[0] - 1193) <= 2 and s.length > 900
     )
     dim = DimensionLine("L1", face.p0, face.p1, [0.0, face.length], face.id)
-    ext = extract_walls(r.page, r.pre, r.segments, [dim], make_ctx(), ink=r.pre.ink)
-    assert_plan_topology(walls_to_graph(ext, r.pre.region))
-    monkeypatch.setattr(wallmod, "wall_face_dims", lambda *a, **k: set())
-    ext = extract_walls(r.page, r.pre, r.segments, [dim], make_ctx(), ink=r.pre.ink)
-    assert len(walls_to_graph(ext, r.pre.region).walls) < 7
+    L = float(r.pre.region.long_side)
+    assert candmod.wall_face_dims(r.segments, [dim], r.pre.ink, r.pre.t_thin, L) == {face.id}  # it pairs
+    graph = walls_to_graph(
+        extract_walls(r.page, r.pre, r.segments, [dim], make_ctx(), ink=r.pre.ink), r.pre.region
+    )
+    assert vertical_at(graph, 1200, tol=10) == []
+    assert _exterior_walls(graph) == 4
+
+
+def test_extension_lines_of_a_dimension_line_beside_a_face_are_kept() -> None:
+    """`wall_face_dims` (defence in depth): the extension lines of a dimension line drawn beside a wall face
+    stay wall candidates, so a face touching its tick is not cut; the dimension line itself never is one."""
+    ink = np.zeros((400, 600), np.uint8)
+    ink[99:101, 100:501] = 255
+    ink[93:300, 299:301] = 255
+    dim = DimensionLine("L1", (100.0, 99.5), (500.0, 99.5), [0.0, 200.0, 400.0], "S1")
+    line = _seg("S1", (100.0, 99.5), (500.0, 99.5))
+    ext = _seg("S2", (299.5, 98.4), (299.5, 299.5))  # an extension line by R6 (see the parametrized cases)
+    ids = [s.id for s in candmod.candidate_segments([line, ext], [dim], 2.0, ink)]
+    assert ids == []
+    ids = [s.id for s in candmod.candidate_segments([line, ext], [dim], 2.0, ink, {"S1"})]
+    assert ids == ["S2"]
 
 
 def test_face_line_pairs_on_one_side_only() -> None:
@@ -816,20 +830,16 @@ def test_double_line_plan_with_one_solid_column_keeps_its_exterior_walls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Task 16c (ratified `solid_envelope`): one solid column's hull covers far less than half of the
-    region, so it sets no envelope and the double-line exterior walls stay.
-
-    The region is given as the whole page: `detect_plan_region` (06 §7.6 step 7, ruling R4) finds a plan by
-    its thick and bold strokes, and this plan's only thick stroke is the column, so the detected region
-    is the column's box (a Task 16c finding, reported to the controller)."""
+    region, so it sets no envelope and the double-line exterior walls stay. The plan region holds the
+    whole plan: it is found from the double-line strips too, not from the column alone."""
     column = SWall((700, 700), (700, 780), 40, "filled")
     img = render_plan(SIZE, [*plan("double"), column])
-    page = Rect(0, 0, SIZE[0], SIZE[1])
-    r = run(img, region=page)
+    r = run(img)
     assert _exterior_walls(r.graph) == 4
     assert any(w.source == "filled" for w in r.ext.raw)  # precondition: the column is a solid wall
     # Discriminating: were the column's hull taken as the outline, the exterior walls would be dropped.
     monkeypatch.setattr(candmod, "ENVELOPE_MIN_COVER", 0.0)
-    assert _exterior_walls(run(img, region=page).graph) == 0
+    assert _exterior_walls(run(img).graph) == 0
 
 
 def test_dimension_line_beside_a_partition_is_readmitted_but_makes_no_wall() -> None:

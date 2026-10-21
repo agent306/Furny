@@ -120,24 +120,34 @@ def test_hdb_outline_is_closed(chains: dict[str, ChainResult]) -> None:
     assert enclosed_share(r.graph, truth) >= 0.95
 
 
+def test_hdb_rooms_are_faces(chains: dict[str, ChainResult]) -> None:
+    """Task 16c acceptance: at least 5 bounded faces (rulings B2 and R-a). They are toilet 1, bedroom 1,
+    the balcony, the 600 recess and the rest of the dwelling (living, kitchen, store, toilets 2 and 3,
+    bedrooms 2 and 3, the bay) as one face."""
+    r = chains["hdb-3room"]
+    L = r.pre.region.long_side
+    assert len([f for f in bounded_faces(r.graph) if f.area >= (0.03 * L) ** 2]) >= 5
+
+
 @pytest.mark.xfail(
     strict=True,
-    reason="Task 16c blocker (NEEDS_CONTEXT): 3 bounded faces. The interior partitions break on rules beyond "
-    "ruling B2: 1.5-2.5 t gaps (neither merged nor openings: the living-room slider, the brochure's toilet "
-    "window), doors at a partition's end against a perpendicular wall (bedroom 3), face lines erased under "
-    "labels (toilets 1 and 2) and dimension ticks or lines cutting partition faces (bedroom 2, toilet 3)",
+    reason="Task 18 acceptance target (controller ruling on Task 16c): the 10 room-like spaces as faces need "
+    "doors at a partition's end against a perpendicular wall (Task 17), face lines under labels and the "
+    "remaining toilet-3 / store partitions",
 )
-def test_hdb_rooms_are_faces(chains: dict[str, ChainResult]) -> None:
+def test_hdb_seven_rooms_are_faces(chains: dict[str, ChainResult]) -> None:
     r = chains["hdb-3room"]
     L = r.pre.region.long_side
     assert len([f for f in bounded_faces(r.graph) if f.area >= (0.03 * L) ** 2]) >= 7
 
 
-def test_brochure_outline_free_ends(chains: dict[str, ChainResult]) -> None:
-    """The brief: brochure outer-cycle free ends <= 7 (the count before Task 16c, on Task 16b's definition);
-    on the outer-outline definition the brochure has 2 (the toilet window's jambs, a 1.5-2.5 t gap)."""
+def test_brochure_outline_is_closed(chains: dict[str, ChainResult]) -> None:
+    """Ruling R-a closes the brochure's outline (its toilet window was a 1.5-2.5 t gap): no free end on the
+    outer cycle, and the faces enclose the flat."""
     r = chains["brochure-2bhk"]
-    assert outer_cycle_free_ends(r.graph, load_truth("brochure-2bhk", r.page, "drawing-walls")) <= 2
+    truth = load_truth("brochure-2bhk", r.page, "drawing-walls")
+    assert outer_cycle_free_ends(r.graph, truth) == 0
+    assert enclosed_share(r.graph, truth) >= 0.95
 
 
 def test_metrics_score_a_perfect_extraction() -> None:

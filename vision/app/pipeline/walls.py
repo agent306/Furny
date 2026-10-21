@@ -13,7 +13,7 @@
 
 then (5) closes it, (6) skeletonises it and traces the 8-neighbourhood pixel graph into straight pieces,
 (7) snaps them onto the dominant orientation ``theta0`` (short off-axis pieces are dropped) and (8) merges
-collinear pieces into one raw wall per wall run: tiny breaks close, empty gaps of ``2.5 t .. 18 t``
+collinear pieces into one raw wall per wall run: tiny breaks close, empty gaps of ``1.5 t .. 18 t``
 between walls of similar thickness become ``openings_px`` of that raw wall (a bold stroke's gaps are
 measured against the drawing's wall thickness ``t_wall``, ruling B2). A thin piece that leaves a gap's jamb
 and is as long as the gap is wide (``0.8 g .. 1.1 g``) is a door leaf, not a wall. Facing ends of runs the
@@ -94,7 +94,9 @@ DIAGONAL_MIN_FRAC = 0.03  # off-axis pieces at least 0.03 L long are diagonal wa
 MERGE_OFFSET = 0.5  # collinear: perpendicular offset <= 0.5 t ...
 MERGE_OFFSET_MIN_PX = 1.5  # ... but at least this (skeleton jitter)
 MERGE_GAP = 1.5  # gaps up to 1.5 t close
-GAP_MIN, GAP_MAX = 2.5, 18.0  # gap candidates: 2.5 t <= g <= 18 t
+# Gap candidates: 1.5 t < g <= 18 t (Task 16c ruling R-a: 06's 2.5 t left breaks of 1.5 .. 2.5 t neither
+# closed nor openings, ending the run; graph building already records bridged gaps >= 1.5 t as openings)
+GAP_MIN, GAP_MAX = MERGE_GAP, 18.0
 SIMILAR_THICKNESS = 1.5  # thickness ratio of the two walls beside a gap candidate
 GAP_WALL_MAX = 0.1  # a gap whose centre line is more than 10 % wall is crossed by a wall: no opening
 GAP_BAND = 0.45  # ... tested on lines up to 0.45 t (the thinner wall's) to either side of it too
@@ -812,8 +814,8 @@ def _runs(
     pieces: list[_Piece], theta0: float, wall: np.ndarray, poll: Check, t_wall: float | None = None
 ) -> list[_Run]:
     """Collinear pieces (same direction, offset within ``0.5 t``) joined along their line: breaks up to
-    ``1.5 t`` close, empty gaps of ``2.5 t .. 18 t`` between walls of similar thickness become openings,
-    anything else ends the run.
+    ``1.5 t`` close, empty gaps of ``1.5 t .. 18 t`` (ruling R-a; 06 says ``2.5 t``) between walls of similar
+    thickness become openings, anything else ends the run.
 
     A bold stroke's ``t`` in these gap rules is ``t_wall`` (ruling B2, a deviation from 06 §8.1 step 8):
     an outline drawn as a bold stroke stands for a wall of the drawing's wall thickness, so its windows and
@@ -1208,7 +1210,7 @@ def extract_walls(
     L = float(crop.long_side)
     faces = wall_face_dims(segments, dimension_lines, ink, pre.t_thin, L) if crop.w and crop.h else set()
     dims = [d for d in dimension_lines if d.segment_id not in faces]
-    cands = candidate_segments(segments, dims, pre.t_thin, ink)
+    cands = candidate_segments(segments, dimension_lines, pre.t_thin, ink, faces)
     theta0 = dominant_orientation(cands)
     if crop.w <= 0 or crop.h <= 0:
         return WallExtraction(mask, source_full, [], theta0, max(1.0, 2.0 * pre.t_thin))
@@ -1226,7 +1228,8 @@ def extract_walls(
         else np.zeros_like(filled)
     )
     envelope = solid_envelope(filled, L)
-    double = double_mask(cands, ink[ys, xs], crop, L, pre.t_thin, poll, envelope)
+    dim_ends = np.array([(*d.p0, *d.p1) for d in dimension_lines], np.float64).reshape(-1, 4)
+    double = double_mask(cands, ink[ys, xs], crop, L, pre.t_thin, poll, envelope, dim_ends)
     poll()
     covered = int(np.count_nonzero(filled | double | vector))
     single = (
