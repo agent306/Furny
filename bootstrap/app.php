@@ -5,7 +5,9 @@ declare(strict_types=1);
 use App\Http\Controllers\PlainNotFoundController;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\SecurityHeaders;
 use App\Support\Http\ErrorPage;
+use App\Support\Http\RateLimitedResponse;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -45,6 +47,13 @@ $app = Application::configure(basePath: dirname(__DIR__))
 
         $middleware->encryptCookies(except: ['appearance']);
 
+        // Outermost, so every response gets the headers: the bare 404s, health checks, stateless routes,
+        // 405s and the maintenance page, not only the `web` group (13 §12.1).
+        $middleware->prepend(SecurityHeaders::class);
+
+        // Signature-verified webhooks (13 §14) and the browser's CSP reports carry no CSRF token (13 §12.3).
+        $middleware->preventRequestForgery(except: ['csp-report', 'webhooks/*']);
+
         $middleware->web(append: [
             HandleAppearance::class,
             HandleInertiaRequests::class,
@@ -53,8 +62,20 @@ $app = Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
+            fn (Request $request) => $request->is(...ErrorPage::MACHINE_PATHS) || $request->expectsJson(),
         );
+
+        // Never write secrets back into the form after a validation error (13 §16 rule 3).
+        $exceptions->dontFlash([
+            'password',
+            'password_confirmation',
+            'current_password',
+            'code',
+            'cf_turnstile_response',
+        ]);
+
+        // 429: JSON for machines, a flash and a redirect back for Inertia visits (13 §10).
+        $exceptions->render(RateLimitedResponse::render(...));
 
         // 403/404/405/419/429/503, and 500 outside debug mode, render the Inertia `Error` page (10 §4.10).
         $exceptions->respond(ErrorPage::render(...));

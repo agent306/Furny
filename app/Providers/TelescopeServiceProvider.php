@@ -31,16 +31,23 @@ final class TelescopeServiceProvider extends TelescopeApplicationServiceProvider
             || $entry->hasMonitoredTag());
     }
 
-    /** Prevent sensitive request details from being recorded outside local development. */
+    /**
+     * Keeps secrets out of Telescope's entries (13 §16 rule 4): the `dontFlash` keys as request
+     * parameters and the credential-bearing headers.
+     */
     protected function hideSensitiveRequestDetails(): void
     {
-        if ($this->app->environment('local')) {
-            return;
-        }
-
-        Telescope::hideRequestParameters(['_token']);
+        Telescope::hideRequestParameters([
+            '_token',
+            'password',
+            'password_confirmation',
+            'current_password',
+            'code',
+            'cf_turnstile_response',
+        ]);
 
         Telescope::hideRequestHeaders([
+            'authorization',
             'cookie',
             'set-cookie',
             'x-csrf-token',

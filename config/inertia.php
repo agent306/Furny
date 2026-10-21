@@ -26,6 +26,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | History Encryption
+    |--------------------------------------------------------------------------
+    |
+    | Page data kept in the browser's history state is encrypted, so the back
+    | button on a shared device cannot show pages after logout (13 §12.4).
+    | Inertia::clearHistory() rotates the key on logout and session revocation.
+    |
+    */
+
+    'history' => [
+
+        'encrypt' => true,
+
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Pages
     |--------------------------------------------------------------------------
     |

@@ -47,6 +47,9 @@
         </x-inertia::head>
     </head>
     <body class="font-sans antialiased">
-        <x-inertia::app />
+        {{-- <x-inertia::app /> without SSR (not used in v1, 01 §3), written out so the page data block carries
+             the CSP nonce like every other script of the document (13 §12.1). --}}
+        <script data-page="app" type="application/json" @isset($csp_nonce) nonce="{{ $csp_nonce }}" @endisset>{!! json_encode($page, JSON_HEX_TAG) !!}</script>
+        <div id="app"></div>
     </body>
 </html>

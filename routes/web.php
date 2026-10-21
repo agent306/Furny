@@ -2,16 +2,13 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\CspReportController;
 use App\Http\Controllers\LegalController;
 use App\Http\Controllers\ManifestController;
 use App\Http\Controllers\NotFoundController;
 use App\Http\Controllers\WelcomeController;
-use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
-use Illuminate\Cookie\Middleware\EncryptCookies;
-use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
-use Illuminate\Session\Middleware\StartSession;
+use App\Support\Http\StatelessRoute;
 use Illuminate\Support\Facades\Route;
-use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 // Public pages (14 §2). The customer and admin route files are registered in bootstrap/app.php.
 Route::get('/', WelcomeController::class)->name('welcome');
@@ -21,13 +18,13 @@ Route::get('privacy', [LegalController::class, 'privacy'])->name('legal.privacy'
 // session or set a cookie.
 Route::get('manifest.webmanifest', ManifestController::class)
     ->name('manifest')
-    ->withoutMiddleware([
-        EncryptCookies::class,
-        AddQueuedCookiesToResponse::class,
-        StartSession::class,
-        ShareErrorsFromSession::class,
-        PreventRequestForgery::class,
-    ]);
+    ->withoutMiddleware(StatelessRoute::WITHOUT);
+
+// Browsers post CSP violation reports here (13 §12.1): no session, no cookie, no CSRF token.
+Route::post('csp-report', CspReportController::class)
+    ->name('csp.report')
+    ->middleware('throttle:csp-report')
+    ->withoutMiddleware(StatelessRoute::WITHOUT);
 
 // A URL that matches nothing is a 404 raised inside the `web` group, so the Error page renders in the
 // layout of the signed-in user, with their session and the shared props (10 §4.10).

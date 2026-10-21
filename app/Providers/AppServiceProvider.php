@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Domain\Identity\Models\User;
 use App\Support\MorphMap;
 use App\Support\Settings\Settings;
 use Carbon\CarbonImmutable;
@@ -11,8 +12,10 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
+use Laravel\Pulse\Facades\Pulse;
 
 final class AppServiceProvider extends ServiceProvider
 {
@@ -39,6 +42,29 @@ final class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
         Relation::enforceMorphMap(MorphMap::MAP);
         $this->warnWhenAppNameIsTooLongForSms();
+        $this->configureTransport();
+        $this->configurePulseUsers();
+    }
+
+    /** Behind Traefik the app is always reached over HTTPS in production (13 §12.8). */
+    private function configureTransport(): void
+    {
+        if ($this->app->isProduction()) {
+            URL::forceScheme('https');
+        }
+    }
+
+    /**
+     * Pulse shows staff by name and customers only as `Customer …` plus the last six characters of
+     * their id: no customer e-mail address or name reaches the dashboard (13 §16 rule 5).
+     */
+    private function configurePulseUsers(): void
+    {
+        Pulse::user(fn (User $user): array => [
+            'name' => $user->isStaff() ? $user->name : 'Customer …'.substr((string) $user->getKey(), -6),
+            'extra' => '',
+            'avatar' => null,
+        ]);
     }
 
     /**

@@ -6,6 +6,7 @@ return [
     'copy_failed' => 'Could not copy. Please copy it by hand.',
     'load_failed' => "We couldn't load this.",
     'status_code' => 'Error {status}',
+    'rate_limited' => 'Too many attempts. Try again in {seconds, plural, one {# second} other {# seconds}}.',
 
     // The Error page (10 §4.10); the key segment is the HTTP status.
     'pages' => [

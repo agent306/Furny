@@ -105,14 +105,20 @@ it('exempts the appearance cookie from encryption', function () {
         ->and($encrypter->isDisabled('laravel_session'))->toBeFalse();
 });
 
-it('gives the inline theme script the CSP nonce when one is shared, and none otherwise', function () {
+it('gives the inline theme script the CSP nonce SecurityHeaders announces, and none when no nonce is shared', function () {
     $inlineScript = fn (string $document): string => preg_match('/<script(?![^>]*\bsrc=)[^>]*>\s*\(function \(\) \{/', $document, $match) ? $match[0] : '';
 
-    expect($inlineScript(renderedRoot(null)))->not->toContain('nonce');
+    $response = $this->get('/')->assertOk();
+    preg_match("/'nonce-([^']+)'/", (string) $response->headers->get('Content-Security-Policy'), $nonce);
 
-    view()->share('csp_nonce', 'abc123');
+    expect($nonce)->not->toBeEmpty()
+        ->and($inlineScript((string) $response->getContent()))->toContain('nonce="'.$nonce[1].'"');
 
-    expect($inlineScript(renderedRoot(null)))->toContain('nonce="abc123"');
+    // Rendered where no nonce was shared (SecurityHeaders did not run): no nonce attribute, no failure.
+    view()->share('csp_nonce', null);
+    $bare = view('app', ['page' => ['component' => 'Welcome', 'props' => [], 'url' => '/', 'version' => null]])->render();
+
+    expect($inlineScript($bare))->not->toContain('nonce');
 });
 
 it('renders the root view with safe defaults outside the web group', function () {
