@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { defineComponent, h } from 'vue';
+import { h } from 'vue';
 import { page, resetPage } from '@/test/inertiaPage';
 
 vi.mock('@inertiajs/vue3', async (importOriginal) => ({
@@ -201,7 +201,7 @@ describe('AddressFields', () => {
     });
 
     describe('country', () => {
-        it('defaults to business.defaultCountryCode: shown and emitted', async () => {
+        it('an empty country shows business.defaultCountryCode without writing it into the model', async () => {
             resetPage({ business: { defaultCountryCode: 'AE' } });
 
             const wrapper = mountFields({
@@ -210,16 +210,14 @@ describe('AddressFields', () => {
 
             await flushPromises();
 
-            expect(lastEmitted(wrapper)).toEqual({
-                ...empty,
-                countryCode: 'AE',
-            });
             expect(
                 field(wrapper, 'countryCode').get('[role="combobox"]').text(),
             ).toContain('United Arab Emirates');
+            // The form must not go dirty on mount.
+            expect(wrapper.emitted('update:modelValue')).toBeUndefined();
         });
 
-        it('falls back to IN when the business shares no country', async () => {
+        it('shows IN when the business shares no country', async () => {
             resetPage({});
 
             const wrapper = mountFields({
@@ -228,7 +226,38 @@ describe('AddressFields', () => {
 
             await flushPromises();
 
-            expect(lastEmitted(wrapper)?.countryCode).toBe('IN');
+            expect(
+                field(wrapper, 'countryCode').get('[role="combobox"]').text(),
+            ).toContain('India');
+            expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+        });
+
+        it('typing in another field while the country is empty still leaves it to the parent', async () => {
+            const wrapper = mountFields({
+                modelValue: { ...empty, countryCode: '' },
+            });
+
+            await field(wrapper, 'city').get('input').setValue('Pune');
+
+            expect(lastEmitted(wrapper)).toEqual({
+                ...empty,
+                countryCode: '',
+                city: 'Pune',
+            });
+        });
+
+        it('tells the browser it is a country (autocomplete="country" on the form control)', () => {
+            // Reka renders its native <select> only inside a <form>.
+            const InForm = () =>
+                h('form', null, [h(AddressFields, { modelValue: empty })]);
+
+            mount(InForm, { attachTo: document.body });
+
+            expect(
+                document.body
+                    .querySelector('select[autocomplete="country"]')
+                    ?.getAttribute('autocomplete'),
+            ).toBe('country');
         });
 
         it('keeps a country that is already set', async () => {
@@ -396,12 +425,10 @@ describe('AddressFields', () => {
         });
 
         it('two instances in one page never share an id', () => {
-            const Both = defineComponent({
-                render: () => [
-                    h(AddressFields, { modelValue: empty }),
-                    h(AddressFields, { modelValue: empty }),
-                ],
-            });
+            const Both = () => [
+                h(AddressFields, { modelValue: empty }),
+                h(AddressFields, { modelValue: empty }),
+            ];
 
             mount(Both, { attachTo: document.body });
 

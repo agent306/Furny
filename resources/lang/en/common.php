@@ -31,6 +31,11 @@ return [
         'region' => 'State / region',
     ],
 
+    'pagination' => [
+        'next' => 'Next',
+        'previous' => 'Previous',
+    ],
+
     'confirm' => [
         'type_to_confirm' => 'Type {text} to confirm.',
     ],

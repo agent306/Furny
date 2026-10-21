@@ -621,7 +621,7 @@ describe('LengthInput', () => {
             expect(input.attributes('aria-valuetext')).toBe('240 cm');
         });
 
-        it('omits value and bounds that do not exist', () => {
+        it('omits the value and the max that do not exist', () => {
             const input = mountInput({
                 modelValue: null,
                 min: undefined,
@@ -630,8 +630,21 @@ describe('LengthInput', () => {
 
             expect(input.attributes('aria-valuenow')).toBeUndefined();
             expect(input.attributes('aria-valuetext')).toBeUndefined();
-            expect(input.attributes('aria-valuemin')).toBeUndefined();
             expect(input.attributes('aria-valuemax')).toBeUndefined();
+        });
+
+        it('aria-valuemin is the implicit floor of 0 when there is no min', () => {
+            const input = mountInput({ min: undefined }).get('input');
+
+            expect(input.attributes('aria-valuemin')).toBe('0');
+        });
+
+        it('a negative min is the floor', () => {
+            expect(
+                mountInput({ min: -100 })
+                    .get('input')
+                    .attributes('aria-valuemin'),
+            ).toBe('-100');
         });
 
         it('aria-valuenow follows a committed change', async () => {

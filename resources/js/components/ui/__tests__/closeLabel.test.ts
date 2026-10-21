@@ -11,6 +11,12 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import {
+    Pagination,
+    PaginationContent,
+    PaginationNext,
+    PaginationPrevious,
+} from '@/components/ui/pagination';
+import {
     Sheet,
     SheetContent,
     SheetDescription,
@@ -133,5 +139,55 @@ describe('overlay close labels use t()', () => {
             document.body.querySelector('[data-slot="dialog-close"]')
                 ?.textContent,
         ).toBe('Close');
+    });
+});
+
+describe('pagination labels use t()', () => {
+    function mountPagination(catalogue: I18n | null) {
+        return mount(
+            defineComponent({
+                setup() {
+                    if (catalogue !== null) {
+                        provide(I18N_KEY, catalogue);
+                    }
+                },
+                render: () =>
+                    h(Pagination, { total: 50, itemsPerPage: 10, page: 2 }, () =>
+                        h(PaginationContent, null, () => [
+                            h(PaginationPrevious),
+                            h(PaginationNext),
+                        ]),
+                    ),
+            }),
+        );
+    }
+
+    it('Previous and Next come from the catalogue, as visible text and name', () => {
+        const wrapper = mountPagination(
+            createI18n({
+                locale: 'xx',
+                messages: {
+                    'common.pagination.previous': 'Zurueck',
+                    'common.pagination.next': 'Weiter',
+                },
+            }),
+        );
+        const previous = wrapper.get('[data-slot="pagination-previous"]');
+        const next = wrapper.get('[data-slot="pagination-next"]');
+
+        expect(previous.text()).toBe('Zurueck');
+        expect(next.text()).toBe('Weiter');
+        // The text is hidden below sm, so the button needs its own name.
+        expect(previous.attributes('aria-label')).toBe('Zurueck');
+        expect(next.attributes('aria-label')).toBe('Weiter');
+    });
+
+    it('English comes from the real catalogue', () => {
+        const wrapper = mountPagination(null);
+
+        expect(wrapper.get('[data-slot="pagination-previous"]').text()).toBe(
+            'Previous',
+        );
+        expect(wrapper.get('[data-slot="pagination-next"]').text()).toBe('Next');
     });
 });

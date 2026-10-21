@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, useId } from 'vue';
+import { computed, useId } from 'vue';
 import InputError from '@/components/common/InputError.vue';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,8 +20,12 @@ import type { AddressFormData } from '@/types/forms';
 // 15 §9.26. One address as a form: label, line1*, line2, city*, region,
 // postalCode and countryCode* (a `Select`). `errors` is keyed by wire name
 // behind `errorPrefix`, e.g. `siteAddress.line1`. Max lengths are 02 §1.2's
-// column sizes. An empty `countryCode` becomes `business.defaultCountryCode`
-// (both shown and emitted, so the form really submits it).
+// column sizes. An empty `countryCode` is *shown* as `business.defaultCountryCode`
+// but never written into the model on mount (the form must not go dirty by
+// itself): the parent should start the form with that default, e.g.
+// `countryCode: business.defaultCountryCode`, or the field submits empty
+// until the user picks one. Inside a <form> the Select also renders a native
+// <select> (autocomplete="country", named after the field) for browser autofill.
 const props = withDefaults(
     defineProps<{
         modelValue: AddressFormData;
@@ -126,12 +130,6 @@ const errorFor = (key: string): string | undefined =>
 function update(key: keyof AddressFormData, value: string): void {
     emit('update:modelValue', { ...props.modelValue, [key]: value });
 }
-
-onMounted(() => {
-    if (!props.modelValue.countryCode) {
-        update('countryCode', businessCountry.value);
-    }
-});
 </script>
 
 <template>
@@ -157,6 +155,8 @@ onMounted(() => {
                 :model-value="country"
                 :disabled="disabled"
                 required
+                autocomplete="country"
+                :name="`${errorPrefix}countryCode`"
                 @update:model-value="update('countryCode', String($event))"
             >
                 <SelectTrigger

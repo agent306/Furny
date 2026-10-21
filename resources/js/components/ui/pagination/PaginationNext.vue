@@ -4,6 +4,7 @@ import type { HTMLAttributes } from "vue"
 import type { ButtonVariants } from "@/components/ui/button"
 import { ChevronRightIcon } from "@lucide/vue"
 import { reactiveOmit } from "@vueuse/core"
+import { useI18n } from "@/composables/useI18n"
 import { cn } from "@/lib/utils"
 import { PaginationNext, useForwardProps } from "reka-ui"
 import { buttonVariants } from "@/components/ui/button"
@@ -17,16 +18,19 @@ const props = withDefaults(defineProps<PaginationNextProps & {
 
 const delegatedProps = reactiveOmit(props, "class", "size")
 const forwarded = useForwardProps(delegatedProps)
+
+const { t } = useI18n()
 </script>
 
 <template>
   <PaginationNext
     data-slot="pagination-next"
     :class="cn(buttonVariants({ variant: 'ghost', size }), 'gap-1 px-2.5 sm:pr-2.5', props.class)"
+    :aria-label="t('common.pagination.next')"
     v-bind="forwarded"
   >
     <slot>
-      <span class="hidden sm:block">Next</span>
+      <span class="hidden sm:block">{{ t("common.pagination.next") }}</span>
       <ChevronRightIcon />
     </slot>
   </PaginationNext>

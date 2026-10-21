@@ -317,7 +317,7 @@ const valueText = computed(() =>
                 :placeholder="placeholder"
                 :aria-valuenow="lastValid ?? undefined"
                 :aria-valuetext="valueText"
-                :aria-valuemin="min"
+                :aria-valuemin="floor"
                 :aria-valuemax="max"
                 :aria-required="required ? 'true' : undefined"
                 :aria-invalid="invalid || message ? 'true' : undefined"

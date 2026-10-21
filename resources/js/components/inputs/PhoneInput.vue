@@ -63,7 +63,6 @@ const size = useControlSize();
 const context = useFormatContext();
 const businessCountry = useBusinessCountry();
 const errorId = useId();
-const listId = useId();
 
 function fallbackCountry(): CountryCode {
     const wanted = (
@@ -238,9 +237,6 @@ const triggerLabel = computed(
                         type="button"
                         variant="outline"
                         role="combobox"
-                        aria-haspopup="listbox"
-                        :aria-expanded="open ? 'true' : 'false'"
-                        :aria-controls="open ? listId : undefined"
                         :aria-label="triggerLabel"
                         :disabled="disabled"
                         :size="size"
@@ -254,11 +250,7 @@ const triggerLabel = computed(
                     </Button>
                 </PopoverTrigger>
                 <PopoverContent align="start" class="w-80 p-0">
-                    <Command
-                        :id="listId"
-                        :model-value="country"
-                        @update:model-value="pick"
-                    >
+                    <Command :model-value="country" @update:model-value="pick">
                         <CommandInput
                             :placeholder="t('phone.search_country')"
                             :aria-label="t('phone.search_country')"

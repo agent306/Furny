@@ -2,8 +2,10 @@ import { getCountries, getCountryCallingCode } from 'libphonenumber-js/min';
 import type { CountryCode } from 'libphonenumber-js/min';
 
 // Country lists for `PhoneInput` and `AddressFields` (15 §9.25, §9.26). The
-// codes are the regions `libphonenumber-js/min` has metadata for, which is
-// every ISO-3166-1 region with a calling code; names come from `Intl`.
+// codes are the regions with a calling code (from libphonenumber metadata):
+// not every ISO-3166-1 alpha-2 code, and it also holds a few non-ISO ones
+// (AC, TA, XK). Names come from `Intl`; the regions Intl cannot name show
+// their code.
 
 export type { CountryCode };
 

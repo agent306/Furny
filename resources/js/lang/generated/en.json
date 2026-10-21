@@ -20,6 +20,8 @@
     "common.copied": "Copied",
     "common.counts.items": "{count, plural, one {# item} other {# items}}",
     "common.loading": "Loading",
+    "common.pagination.next": "Next",
+    "common.pagination.previous": "Previous",
     "common.photo_n": "Photo {n}",
     "common.screen_too_small.body": "Open it on a tablet or computer to continue.",
     "common.screen_too_small.title": "This screen needs a larger display",

@@ -367,6 +367,29 @@ describe('PhoneInput', () => {
             ).toContain('h-9');
         });
 
+        it('popover semantics: haspopup dialog, expanded flips, controls points at the popup', async () => {
+            const wrapper = mountInput();
+            const trigger = wrapper.get('[data-slot="phone-country"]');
+
+            expect(trigger.attributes('aria-haspopup')).toBe('dialog');
+            expect(trigger.attributes('aria-expanded')).toBe('false');
+
+            await trigger.trigger('click');
+            await flushPromises();
+
+            expect(trigger.attributes('aria-expanded')).toBe('true');
+
+            const controls = trigger.attributes('aria-controls') ?? '';
+
+            expect(controls).not.toBe('');
+            expect(document.getElementById(controls)).not.toBeNull();
+            expect(
+                document
+                    .getElementById(controls)
+                    ?.querySelector('[data-slot="command"]'),
+            ).not.toBeNull();
+        });
+
         it('the selector is a labelled combobox naming the country', () => {
             const trigger = mountInput().get('[data-slot="phone-country"]');
 
