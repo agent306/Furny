@@ -584,7 +584,7 @@ def _trace_raw_walls(
     runs = [r for r in _drop_leaves(_runs(pieces, theta0, wall, poll, t_wall)) if r.s1 - r.s0 > 1e-6]
     linked: set[tuple[int, int]] = set()
     links = _link_runs(runs, thin, ink, t_wall, poll, origin, linked)
-    doors = _partition_doors(runs, ink, t_wall, poll, origin, linked)
+    doors = _partition_doors(runs, ink, t_wall, poll, origin, linked, thin)
     return [*(r.wall() for r in runs), *links, *doors]
 
 

@@ -80,7 +80,12 @@ def test_double_swing() -> None:
 
 
 def test_window_casement() -> None:
-    img = render_plan(SIZE, room(), windows=[SWindow(TOP, 300, 120, lines=2)])
+    """Frame lines on both faces and a glass line between them (04 §8.2's casement). The window is a break
+    in the solid wall, not a gap of the graph: two lines on the faces alone would be a hollow stretch of
+    wall (Task 17 review I1), the glass line inside the strip makes it a window."""
+    img = render_plan(
+        SIZE, room(24), windows=[SWindow(TOP, 300, 120, lines=3)]
+    )  # 24: LSD keeps 3 lines apart
     _, _, ops = openings_on_top(img)
     (o,) = ops
     assert (o.kind, o.type) == ("window", "casement")
@@ -210,13 +215,11 @@ def test_door_at_a_partitions_free_end_extends_it_to_the_wall(hinge: str, side: 
     assert max(max(w.a[1], w.b[1]) for w in part) == pytest.approx(1500, abs=5)
     ops = find_openings(r.graph, r.pre, r.segments, r.pre.ink)
     (o,) = [o for o in ops if o.wall_id in {w.id for w in part}]
-    w = next(w for w in part if w.id == o.wall_id)
     assert (o.kind, o.type) == ("door", "single_swing")
     assert o.u1 - o.u0 == pytest.approx(93, abs=8)
     x, y = _swing_point(r.graph, o)
     assert y == pytest.approx(1400 if hinge == "start" else 1493, abs=8)
     assert (x > 1200) == (side == 1)  # the partition runs down the screen: +n is screen right
-    del w
 
 
 def test_partition_end_without_a_door_stays_free() -> None:
@@ -314,8 +317,8 @@ def test_clear_arc_outranks_threshold_lines() -> None:
 def test_window_across_a_junction_is_one_window() -> None:
     """A thin partition meets the solid top wall in the middle of a window: the window's solid-ink break is
     read along the wall line through the junction, not per graph wall."""
-    walls = [*room(), SWall((460, 500), (460, 1100), 6, style="double")]
-    img = render_plan(SIZE, walls, windows=[SWindow(TOP, 300, 120, lines=2)])
+    walls = [*room(24), SWall((460, 500), (460, 1100), 6, style="double")]
+    img = render_plan(SIZE, walls, windows=[SWindow(TOP, 300, 120, lines=3)])
     r = run(img)
     ops = [o for o in find_openings(r.graph, r.pre, r.segments, r.pre.ink) if o.kind == "window"]
     assert len(ops) == 1
@@ -379,14 +382,14 @@ def test_leaf_without_an_arc_is_no_door() -> None:
     assert ops == []
 
 
-def grey_wall_room(panel: bool = True) -> np.ndarray:
+def grey_wall_room(panel: bool = True, grey: int = 128) -> np.ndarray:
     """A colour brochure's walls: slate grey (RGB 109 102 85) with, in the top wall over x 400 .. 460, a
     neutral grey panel (RGB 128 128 128) between black end lines."""
     slate = (85, 102, 109)  # BGR
     pts = [(100, 500), (900, 500), (900, 1100), (100, 1100)]
     img = render_plan(SIZE, [SWall(pts[i], pts[(i + 1) % 4], 20, color=slate) for i in range(4)])
     if panel:
-        img[490:511, 400:461] = (128, 128, 128)
+        img[490:511, 400:461] = (grey, grey, grey)
         img[490:511, 399:401] = img[490:511, 460:462] = (0, 0, 0)
     return img
 
@@ -413,3 +416,133 @@ def test_uniform_grey_wall_has_no_panel() -> None:
     r = run(grey_wall_room(panel=False))
     pre = dataclasses.replace(r.pre, drawing_kind="colored_brochure")
     assert find_openings(r.graph, pre, r.segments, r.pre.ink) == []
+
+
+# --- Task 17 review counter-cases ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("t", "span"), [(14, (350, 550)), (20, (300, 600))])
+def test_hollow_stretch_of_a_solid_wall_is_no_window(t: int, span: tuple[int, int]) -> None:
+    """Review I1: a solid wall line with a hollow (double-line) stretch, brick infill between solid piers.
+    Its two faces run along the break like a window's frame lines, but nothing is inside the strip and no
+    jamb crosses it: a change of drawing style, not an opening."""
+    walls = room(t)
+    walls[0] = SWall((100, 500), (span[0], 500), t)
+    extra = [SWall((span[0], 500), (span[1], 500), t, style="double"), SWall((span[1], 500), (900, 500), t)]
+    r = run(render_plan(SIZE, [*walls, *extra]))
+    assert find_openings(r.graph, r.pre, r.segments, r.pre.ink) == []
+
+
+@pytest.mark.parametrize(
+    ("grey", "kind"),
+    [(110, "colored_brochure"), (110, "architectural_line_drawing"), (125, "architectural_line_drawing")],
+)
+def test_lighter_stretch_of_a_grey_wall_without_end_lines_is_no_window(grey: int, kind: str) -> None:
+    """Review I1: a stretch of a slate wall (RGB 109 102 85, grey about 104) filled a lighter grey, with no
+    end lines: the fill shifts across the dark-mask threshold, and the solid-ink break that leaves keeps the
+    wall's outline as two lines along it. It is no window, on a colour plan (a 6-level shift is no grey
+    panel) or on a line drawing (where a 125 panel is no symbol either)."""
+    slate = (85, 102, 109)
+    pts = [(100, 500), (900, 500), (900, 1100), (100, 1100)]
+    img = render_plan(SIZE, [SWall(pts[i], pts[(i + 1) % 4], 20, color=slate) for i in range(4)])
+    img[490:511, 400:600] = (grey, grey, grey)
+    r = run(img)
+    pre = dataclasses.replace(r.pre, drawing_kind=kind)
+    assert find_openings(r.graph, pre, r.segments, r.pre.ink) == []
+
+
+@pytest.mark.parametrize("inset", [3, 6])
+def test_quadrant_shower_tray_in_a_corner_is_no_door(inset: int) -> None:
+    """Review I2: a quadrant shower tray in a corner, its two straight edges along the walls' faces and its
+    arc between them (and a drain). Each edge is a leaf with that arc about the corner, the other edge
+    lying where the closed leaf would: a closed quarter sector is a fixture, no door."""
+    img = render_plan(SIZE, room())
+    c = (107 + inset, 507 + inset)  # the room's top-left inner corner is (107, 507)
+    cv2.line(img, c, (c[0] + 90, c[1]), (0, 0, 0), 2)
+    cv2.line(img, c, (c[0], c[1] + 90), (0, 0, 0), 2)
+    cv2.ellipse(img, c, (90, 90), 0, 0, 90, (0, 0, 0), 2)
+    cv2.circle(img, (c[0] + 30, c[1] + 30), 4, (0, 0, 0), 1)
+    r = run(img)
+    assert find_openings(r.graph, r.pre, r.segments, r.pre.ink) == []
+
+
+def test_quarter_round_corner_shelf_is_no_door() -> None:
+    """Review I2: a quarter-round corner shelf: one free edge along the left wall's face and an arc to the
+    top wall's face. The edge is a leaf only as a leaf laid against a wall's face would be; no door."""
+    img = render_plan(SIZE, room())
+    c = (110, 510)
+    cv2.line(img, c, (c[0], c[1] + 80), (0, 0, 0), 2)
+    cv2.ellipse(img, c, (80, 80), 0, 0, 90, (0, 0, 0), 2)
+    r = run(img)
+    assert find_openings(r.graph, r.pre, r.segments, r.pre.ink) == []
+
+
+def test_leaf_door_reports_its_measured_support() -> None:
+    """Review I2: a door inferred from a leaf reports its arc's measured support (24 samples, plus the
+    leaf bonus), not a constant: with two thirds of the arc drawn, about 0.67 + 0.15."""
+    img = render_plan(SIZE, room())
+    hinge = (400, 507)
+    cv2.line(img, hinge, (400, 507 + 90), (0, 0, 0), 2)
+    cv2.ellipse(img, hinge, (90, 90), 0, 30, 90, (0, 0, 0), 2)  # the arc's 30 .. 90 degrees from the wall
+    _, _, ops = openings_on_top(img)
+    (o,) = ops
+    assert o.kind == "door"
+    assert o.support == pytest.approx(0.67 + 0.15, abs=0.1)
+
+
+@pytest.mark.parametrize(("u0", "hinge"), [(803, "end"), (907, "start")])
+def test_door_in_the_crossing_wall_does_not_extend_a_partition(u0: int, hinge: str) -> None:
+    """Review minor 4: the partition stops 93 px short of the bottom wall (a passage), and a door IN the
+    bottom wall is hinged beside the partition's line (x 1207 or 1193), its leaf open up along that line.
+    Its arc fills the quadrant a partition-end door's would, but its open leaf runs along the partition's
+    line: the arc closes along the crossing wall. The passage stays one, and the arc makes one door."""
+    walls = plan("filled")
+    walls[PARTITION] = SWall((1200, 300), (1200, 1400), 14)
+    door = SDoor(2, u0, 90, hinge=hinge, side=-1)  # the bottom wall runs (2100, 1500) -> (300, 1500)
+    r = run(render_plan(SIZE_PLAN, walls, doors=[door]))
+    part = [w for w in r.graph.walls if abs(w.a[0] - 1200) < 5 and abs(w.b[0] - 1200) < 5]
+    assert max(max(w.a[1], w.b[1]) for w in part) == pytest.approx(1400, abs=8)
+    assert sum(w.free_ends for w in r.graph.walls) == 1
+    ops = find_openings(r.graph, r.pre, r.segments, r.pre.ink)
+    assert [(o.kind, o.type) for o in ops] == [("door", "single_swing")]
+
+
+def test_inferred_openings_are_not_found_again_beyond_a_junction() -> None:
+    """Review minor 8: an opening found in a gap of W1 is not inferred again (rulings R17-a, R17-b) on the
+    collinear W2 beyond their shared node; a separate one on W2 is kept."""
+    from app.pipeline import openings as om
+
+    def wall(wid: str, a: tuple[float, float], b: tuple[float, float], na: str, nb: str) -> WallCandidate:
+        return WallCandidate(wid, a, b, na, nb, 14.0, "filled", 1.0, 0, ())
+
+    graph = WallGraph(
+        {"N1": (0.0, 0.0), "N2": (300.0, 0.0), "N3": (600.0, 0.0), "N4": (300.0, 300.0)},
+        [
+            wall("W1", (0.0, 0.0), (300.0, 0.0), "N1", "N2"),
+            wall("W2", (600.0, 0.0), (300.0, 0.0), "N3", "N2"),  # runs back toward N2
+            wall("W3", (300.0, 0.0), (300.0, 300.0), "N2", "N4"),
+        ],
+        [],
+    )
+    frames = {w.id: om._frame(w) for w in graph.walls}
+    door = om._Found(250.0, 340.0, "door", "single_swing", "start", "left", 0.9)
+    found = [("W1", dataclasses.replace(door, u1=300.0))]
+    again = ("W2", dataclasses.replace(door, u0=260.0, u1=350.0))  # x 340 .. 250 on W2
+    other = ("W2", dataclasses.replace(door, u0=50.0, u1=140.0))  # x 550 .. 460
+    assert om._new_on_their_lines(graph, frames, found, [again, other]) == [other]
+
+
+@pytest.mark.parametrize(("grey", "panel"), [(205, True), (240, False)])
+def test_grey_panel_ceiling_follows_the_paper(grey: int, panel: bool) -> None:
+    """Review minor 9: a panel is darker than paper by 40 levels, paper being the region's commonest grey
+    (here 255): a light panel at 205 (the brochure's light panels read 190) is a panel with margin, a
+    stretch at 240 is paper, no panel."""
+    from app.pipeline import openings as om
+
+    r = run(grey_wall_room(grey=grey))
+    paper = om._paper_level(r.pre)
+    assert paper == 255.0
+    frames = {w.id: om._frame(w) for w in r.graph.walls}
+    found = [(w, o.u0, o.u1) for w, o in om._grey_panels(r.graph, frames, r.pre.gray, paper)]
+    wall = top_wall(r.graph)
+    assert [w for w, _, _ in found] == ([wall.id] if panel else [])

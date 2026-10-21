@@ -186,11 +186,16 @@ class OpeningCandidate:
     line from the wall's ``a`` end.
 
     ``type`` is a ``DoorType`` for doors (``single_swing``, ``double_swing``, ``bifold``), a ``WindowType``
-    for windows (``casement``, ``sliding_window``) and ``"opening"`` for passages. ``hinge`` is the jamb the
-    leaf turns on (``start`` = ``u0``) and ``swing`` the side it opens to (``left`` = ``+n``, the wall's left
-    normal, 04 section 2.1); both keep their defaults (``start``, ``left``) when nothing is hinged.
-    ``support`` is the door evidence (arc support plus the leaf bonus), the window's frame-line coverage, or
-    0.0 for a passage.
+    for windows (``casement``, ``sliding_window``, or ``fixed`` for a grey wall panel, ruling R17-b) and
+    ``"opening"`` for passages. ``hinge`` is the jamb the leaf turns on (``start`` = ``u0``) and ``swing``
+    the side it opens to (``left`` = ``+n``, the wall's left normal, 04 section 2.1); both keep their
+    defaults (``start``, ``left``) when nothing is hinged.
+
+    ``support`` (0..1) is the measured evidence: for a swing door, the share of its arc's 24 samples on
+    thin ink plus 0.15 for a straight leaf (a door inferred from its leaf, ruling R17-a, always has the
+    leaf); for a double swing door, the mean of its two arcs'; 1.0 for a bi-fold (its V of leaves is the
+    evidence); for a window, the mean coverage of its two best frame lines, or for a grey panel its
+    contrast (its grey above the wall's, as a share of paper above the wall's); 0.0 for a passage.
     """
 
     id: str

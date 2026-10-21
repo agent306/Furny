@@ -30,10 +30,11 @@ pytestmark = pytest.mark.reference
 
 STEMS = sorted(IMAGES)
 HINGE_SWING_MIN = 0.8
-# Regression floors (recall, precision): the values Task 17 reached with rulings R17-a and R17-b. The
-# brief's targets (HDB 0.75 / 0.85, brochure 0.70 / 0.80) moved to the Task 33/34 evaluation of the
+# Regression floors (recall, precision): the values Task 17 reached with rulings R17-a and R17-b, re-based
+# in its fix round on the corrected truth (HDB: window G6 added, 6 / 13; G1 a sliding door). The brief's
+# targets (HDB 0.75 / 0.85, brochure 0.70 / 0.80) moved to the Task 33/34 evaluation of the
 # AI-assisted path (controller ruling on Task 17's NEEDS_CONTEXT): the heuristic path is the fallback.
-OPENING_FLOOR = {"hdb-3room": (0.5, 0.666), "brochure-2bhk": (0.625, 1.0)}
+OPENING_FLOOR = {"hdb-3room": (0.461, 0.666), "brochure-2bhk": (0.625, 1.0)}
 FACES_FLOOR = {"hdb-3room": 6, "brochure-2bhk": 4}  # bounded faces may not drop below Task 17's
 
 
@@ -48,8 +49,8 @@ def chains() -> dict[str, ChainResult]:
 @pytest.mark.parametrize("stem", STEMS)
 def test_truth_openings_lie_on_their_walls(stem: str) -> None:
     """Every traced opening names a traced wall and an interval on it (a grey panel crossing a junction may
-    run a few px past its wall's end, recorded in its method), a kind with a type of that kind, and a
-    hinge and swing when it is a hinged door."""
+    run a few px past its wall's end, recorded in its method), a kind with a type of that kind, a hinge
+    and swing when it is a hinged door (a bi-fold's hinge may be unscored) and neither for a sliding one."""
     raw = json.loads((REFERENCE_DIR / f"{stem}.drawing-openings.json").read_text())
     walls = json.loads((REFERENCE_DIR / f"{stem}.drawing-walls.json").read_text())
     nodes = walls["nodes"]
@@ -69,8 +70,11 @@ def test_truth_openings_lie_on_their_walls(stem: str) -> None:
                 "pocket",
                 "main_entrance",
             }
-            assert o["swing"] in {"left", "right"}, o["id"]
-            assert o["hinge"] in {"start", "end"} or o["type"] == "bifold", o["id"]
+            if o["type"] in {"sliding", "pocket"}:  # neither hinged nor swinging
+                assert o["hinge"] is None and o["swing"] is None, o["id"]
+            else:
+                assert o["swing"] in {"left", "right"}, o["id"]
+                assert o["hinge"] in {"start", "end"} or o["type"] == "bifold", o["id"]
         elif o["kind"] == "window":
             assert o["type"] in {"casement", "sliding_window", "fixed", "french_window", "bay", "ventilator"}
             assert o["hinge"] is None and o["swing"] is None

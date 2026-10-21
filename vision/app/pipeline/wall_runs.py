@@ -43,6 +43,8 @@ EVIDENCE_STRIP = (
 )
 PARTITION_DOOR_CROSS_DEG = 60.0  # a partition-end door closes against a run crossing its line this steeply
 PARTITION_DOOR_NIB = 0.15  # its hinge may sit behind a jamb nib up to 0.15 g deep
+LEAF_ALONG_DEG = 10.0  # a leaf along the partition's line from the hinge: the crossing wall's door ...
+LEAF_ALONG_START, LEAF_ALONG_MAX = 0.2, 1.2  # ... starting within 0.2 r of the hinge, ending 0.8 .. 1.2 r out
 JOG_MIN_PX = 1.0  # a bridge's line this far from a run's line gets a connector
 LEAF_MIN, LEAF_MAX = 0.8, 1.1  # door leaf length, fractions of the gap width
 LEAF_MIN_ANGLE_DEG = 30.0  # a leaf leaves its wall at least this steeply
@@ -501,6 +503,7 @@ def _partition_doors(
     poll: Check,
     origin: tuple[float, float] = (0.0, 0.0),
     linked: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+    thin: np.ndarray | None = None,
 ) -> list[RawWall]:
     """Raw walls that carry a partition through the door at its free end to the wall the door closes
     against (Task 16c ruling R-b, Task 17; a deviation from 06 §8.1 step 8, which only links collinear
@@ -515,7 +518,12 @@ def _partition_doors(
     runs from the end to the crossing run's centre line, with ``(0, g)`` as its opening. The jambs are the
     partition's end and the crossing run's face; as drawn, the leaf may close on that run's face or on its
     centre line (``r = g`` or the distance to the centre line), and the hinge may sit behind a nib up to
-    ``0.15 g`` deep (the HDB bedroom-3 door)."""
+    ``0.15 g`` deep (the HDB bedroom-3 door).
+
+    An arc whose hinge has a straight leaf (a ``thin`` segment, (k, 4) in the runs' coordinates, ``0.8 ..
+    1.1 r`` long within 10 degrees) running from it along the partition's line closes along the crossing
+    wall: it is that wall's door, hinged beside the partition's line, and the partition's end stays free
+    (Task 17 review, minor 4)."""
     origin_xy = np.asarray(origin)
     lines = []
     for r in runs:
@@ -563,6 +571,7 @@ def _partition_doors(
             )
             if any(
                 door_arc(ink, c + origin_xy, toward, n * side, radius, t_k)
+                and not _leaf_along(thin, c, toward, radius, 0.5 * t_k + 2.0)
                 for c, toward, radius in hinges
                 for side in (1.0, -1.0)
             ):
@@ -577,6 +586,28 @@ def _partition_doors(
                     )
                 )
     return out
+
+
+def _leaf_along(thin: np.ndarray | None, hinge: np.ndarray, d: np.ndarray, r: float, reach: float) -> bool:
+    """A straight thin line (within 10 degrees of ``d``) runs from the hinge out along ``d``: both of its
+    ends within ``reach`` of the line through ``hinge``, one within ``0.2 r`` of the hinge along it and the
+    other ``0.8 .. 1.2 r`` out (a leaf drawn on into the wall's face overruns its arc a little)."""
+    if thin is None or not thin.size:
+        return False
+    cos_tol = math.cos(math.radians(LEAF_ALONG_DEG))
+    n = np.array((-d[1], d[0]))
+    for row in thin:
+        p, q = row[:2] - hinge, row[2:] - hinge
+        v = q - p
+        length = float(np.hypot(*v))
+        if length < 1e-9 or abs(float(v @ d)) < cos_tol * length:
+            continue
+        if max(abs(float(p @ n)), abs(float(q @ n))) > reach:
+            continue
+        near, far = sorted((float(p @ d), float(q @ d)))
+        if abs(near) <= LEAF_ALONG_START * r and LEAF_MIN * r <= far <= LEAF_ALONG_MAX * r:
+            return True
+    return False
 
 
 def _opening_line(

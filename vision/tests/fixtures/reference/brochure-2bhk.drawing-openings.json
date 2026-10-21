@@ -13,7 +13,7 @@
    "G11 (grey panel between the right toilet and the living room) is ignored: the window symbol, but a toilet window into the living room is not plausible (a duct or niche panel?).",
    "The kitchen's open side toward the living room (x 152, y 215-245) is a passage with no traced host wall (W24 ends at b13, W25 starts at b22): not scored (method.not_listed).",
    "D6, the deck's folding doors, is one bi-fold opening with leaves stacked at both jambs: its hinge is not scored.",
-   "D1 and D3 (bedrooms) draw no leaf line: the open leaf lies along the face of the wall below (W20 / W18); the hinge is read from the arc's centre.",
+   "D1 and D3 (bedrooms) draw no leaf line: the open leaf lies along the face of the wall below (W20 for D1, W8 for D3: from (247, 161) to +x; Task 17 review T4); the hinge is read from the arc's centre.",
    "G3 (left toilet window): its frame lines lie under the two size labels beside it and are erased by the text mask; kept, as the drawing shows it."
   ]
  },
