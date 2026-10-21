@@ -1,0 +1,13 @@
+{
+    "cold derive 7x6": { "median": 30 },
+    "warm derive after moveNode": { "median": 8 },
+    "cold derive 22x22": { "median": 400 },
+    "snapPoint 511 walls": { "median": 1 },
+    "buildSnapIndex + buildHitIndex 511 walls": { "median": 6 },
+    "moveNode non-finalize 97 walls": { "median": 12 },
+    "validatePlan 97 walls": { "median": 6 },
+    "generateFurniture wardrobe": { "median": 15 },
+    "estimateFurniture wardrobe": { "median": 60, "p95": 100 },
+    "computeBom without nesting wardrobe": { "median": 20 },
+    "nestSheets 300 random parts": { "median": 200 }
+}

@@ -10,6 +10,7 @@
         "build": "vite build && yarn build:engine-cli",
         "build:engine-cli": "vite build --config engine-cli/vite.config.ts",
         "test": "vitest run",
+        "bench:check": "vitest bench --run --outputJson build/bench.json && node scripts/check-bench.mjs build/bench.json resources/js/engine/bench-thresholds.json",
         "lint": "eslint . --max-warnings=0",
         "format": "prettier --write resources/ engine-cli/",
         "format:check": "prettier --check resources/ engine-cli/",

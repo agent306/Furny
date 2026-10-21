@@ -30,6 +30,10 @@ export default defineConfig({
                     environment: 'node',
                     include: ENGINE_TESTS,
                     exclude: ['**/node_modules/**', '**/__perf__/**'],
+                    // 16 §10: yarn bench:check runs these and asserts bench-thresholds.json.
+                    benchmark: {
+                        include: ['resources/js/engine/**/*.bench.ts'],
+                    },
                 },
             },
             {
@@ -40,6 +44,7 @@ export default defineConfig({
                     include: ['resources/js/**/*.test.ts'],
                     exclude: ['**/node_modules/**', ...ENGINE_TESTS],
                     setupFiles: ['resources/js/test/setup.ts'],
+                    benchmark: { include: [] },
                 },
             },
         ],
