@@ -292,3 +292,6 @@ Task 51: review ffa2dca..14c30c1: spec ✅ (all 11 carries; key patterns; covera
 Task 51: minor (deferred): publicApi test doesn't fail on unexpected extra exports (add Object.keys(engine) − PUBLIC_NAMES == []); hardware.php reason.sliding_track drops {length}; parts.php "– piece N" only for 1–9 in UI; changes.php dims_changed adds " mm" / capitalises (spec-19 note); plan-issue key test covers node_missing only; engine testTimeout 20 s blanket.
 Task 51: complete (commits ffa2dca..14c30c1, review clean)
 ALL P2 TASKS COMPLETE (43–51 this session). Next: final whole-branch review.
+FINAL REVIEW (opus, b2c3243..HEAD; report _ctl/p2-final/final-review.md): With fixes. Gates all green (5241 vitest, coverage, bench 12/12 ≥2.7× margin). Critical C1: validate-furniture has no work budget (width 1e8 → >60 s; 20k columns 21.7 s; 5000 fronts → stack overflow). Important I1: 2000 mutually crossing walls stall validate-plan/plan-summary (>60 s); I3: negative extraHardware qty removes billed hardware (valid:true). I2: spec 19 not updated — scheduled controller step after P1–P3 (user instruction). Deferred triage: no must-fix; cheap batch folded into the fix dispatch.
+Ruling: ENGINE_VERSION stays 1.0.0 (no persisted engine output yet); the bump rule applies from merge onward — cost if wrong: a cache key not invalidated once.
+Final fix wave dispatched (fresh sonnet).
