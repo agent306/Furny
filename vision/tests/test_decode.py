@@ -1,6 +1,10 @@
 """Magic-byte sniffing, raster/HEIC decode and pixel guards (06 §2.1, §2.2, §7.2)."""
 
 import io
+import json
+import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -14,6 +18,7 @@ from app.pipeline.decode import (
     canonical_mime,
     decode_raster,
     sniff_kind,
+    sniff_mime,
 )
 
 
@@ -95,11 +100,36 @@ def test_riff_without_webp_is_unsupported() -> None:
         sniff_kind(b"RIFF\x00\x00\x00\x00WAVEfmt ", "a.webp")
 
 
-def test_canonical_mime() -> None:
-    assert canonical_mime("raster") == "image/png"
+@pytest.mark.parametrize(
+    ("data", "mime"),
+    [
+        (encode("JPEG"), "image/jpeg"),
+        (encode("PNG"), "image/png"),
+        (encode("WEBP"), "image/webp"),
+        (b"\x00\x00\x00\x18ftypheic" + b"\x00" * 20, "image/heic"),
+        (b"%PDF-1.7", "application/pdf"),
+        (b"  0\nSECTION\n  2\nHEADER\n", "image/vnd.dxf"),
+    ],
+)
+def test_sniff_mime_per_subtype(data: bytes, mime: str) -> None:
+    """06 §4.5: the sniffed canonical MIME keeps the raster sub-type."""
+    assert sniff_mime(data, "upload.bin") == mime
+    assert canonical_mime(sniff_kind(data, "upload.bin"), data) == mime
+
+
+def test_canonical_mime_raster_needs_bytes() -> None:
     assert canonical_mime("heic") == "image/heic"
     assert canonical_mime("pdf") == "application/pdf"
     assert canonical_mime("dxf") == "image/vnd.dxf"
+    with raises_code("unsupported_type", 415):
+        canonical_mime("raster")
+
+
+def test_sniff_mime_rejections() -> None:
+    with raises_code("dwg_not_supported", 415):
+        sniff_mime(encode("PNG"), "x.dwg")
+    with raises_code("unsupported_type", 415):
+        sniff_mime(b"GIF89a", "x.gif")
 
 
 # --- decode -----------------------------------------------------------------------------------
@@ -187,6 +217,45 @@ def test_truncated_is_corrupt() -> None:
     data = encode("PNG", (300, 300))
     with raises_code("corrupt_file", 422):
         decode_raster(data[: len(data) // 2])
+
+
+_PEAK_SCRIPT = """
+import json, sys
+from app.pipeline.decode import decode_raster
+
+def status(key):
+    for line in open("/proc/self/status"):
+        if line.startswith(key + ":"):
+            return int(line.split()[1]) * 1024
+
+data = open(sys.argv[1], "rb").read()
+before = status("VmRSS")
+image = decode_raster(data).image
+print(json.dumps({"peak_delta": status("VmHWM") - before, "nbytes": image.nbytes, "shape": image.shape}))
+"""
+
+
+@pytest.mark.skipif(not Path("/proc/self/status").exists(), reason="needs /proc for peak RSS")
+def test_decode_peak_memory_is_bounded(tmp_path: Path) -> None:
+    """06 §5.2 budget: decoding must not keep several full-size copies alive (RGBA used to need ~5)."""
+    path = tmp_path / "big.png"
+    im = Image.new("RGBA", (5000, 4000), (10, 20, 30, 255))
+    im.paste((200, 100, 50, 128), (0, 0, 2500, 2000))
+    im.save(path, format="PNG")
+    del im
+    root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        [sys.executable, "-c", _PEAK_SCRIPT, str(path)],
+        cwd=root,
+        env={"PYTHONPATH": str(root), "PATH": ""},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    result = json.loads(proc.stdout)
+    assert result["shape"] == [4000, 5000, 3]
+    # Loaded RGBA (4 B/px) + the BGR output (3 B/px) is ~2.3x the output; 3x leaves headroom for noise.
+    assert result["peak_delta"] < 3 * result["nbytes"], result
 
 
 def test_heic_opener_registered() -> None:
