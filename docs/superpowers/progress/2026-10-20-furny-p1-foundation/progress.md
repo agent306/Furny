@@ -217,3 +217,8 @@ Carry Task 34/37 (browser pass): mount ImageUploader/FileDropzone/Lightbox in a 
 Note: OtpConcurrencyTest "ten sends an hour of one IP" race flaked once in a full run under machine load (passes alone) — final review.
 Task 33: complete (commits e65506a..d9f97da, 1 fix round)
 Merged main 8a5518f (host baseline) → 334038f; pest 3872/3872, vitest 5045/5045.
+Task 34: impl 49ab1d6..ddd7f0a (DONE_WITH_CONCERNS; pest 3923, vitest 5062, browser 109). Carry 7 root cause: AppShell.test.ts left shells mounted (useRouteFocus already cleared timers). UpdateDisplayPreferences per C10; UserMenu stays on phones; Delete account nav → Task 35; GoogleController::securityPage fallback removed (12 GoogleOAuthTest tests updated). Browser runner never returns non-GET Inertia responses (= T40 harness 3xx carry).
+Task 34: review 662e47a..ddd7f0a: authorization, C10 action + validation, avatar intent ownership, GoogleOAuth retargeting (not weakened), i18n, a11y, carries ✅; quality Needs fixes — Important: 10 §13.3 Phone sign-in section missing on Security pages (orphan account.security.phone.* keys), unreported. Fix round 1 dispatched (resume a9667a08e6671e2f0) + Admin TwoFactor AccountNav + dangling aria-describedby.
+Task 34: minor (deferred): auth_ui register.terms duplicates legal titles; PreferencesForm hard-codes UNITS map (server owns LengthUnit::allowedFor).
+Task 34: fix round 1/5 commit 8b31837 (3 addressed, 0 open): PhoneSignInCard (customer only; staff sign in by email per 11 §18), TwoFactor inside AccountPage, aria-describedby fixed; extra: AccountNav overflow at 375/820 px fixed (browser 118). Re-review clean. pest 3924, vitest 5072.
+Task 34: complete (commits 662e47a..8b31837, 1 fix round)
