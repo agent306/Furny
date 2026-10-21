@@ -4,6 +4,8 @@
  * `noUncheckedIndexedAccess`, preflight C7): control flow and order are
  * unchanged. The 08 §10.4 cases and the property tests prove equivalence.
  */
+import { cmpId } from '../../compare';
+
 type Mm = number; // integer millimetres
 
 export type NestRotation = 'free' | 'length_along_sheet' | 'width_along_sheet';
@@ -79,10 +81,6 @@ export const NEST_PASSES: ReadonlyArray<readonly [SortRule, SplitRule]> = [
     ['area', 'max_area'],
 ];
 
-function compareStr(a: string, b: string): number {
-    return a < b ? -1 : a > b ? 1 : 0;
-}
-
 function sortItems(items: NestItem[], rule: SortRule): NestItem[] {
     return [...items].sort((a, b) => {
         const aMax = Math.max(a.length, a.width),
@@ -98,7 +96,7 @@ function sortItems(items: NestItem[], rule: SortRule): NestItem[] {
             if (aArea !== bArea) return bArea - aArea;
             if (aMax !== bMax) return bMax - aMax;
         }
-        return compareStr(a.partKey, b.partKey);
+        return cmpId(a.partKey, b.partKey);
     });
 }
 
@@ -322,6 +320,6 @@ export function nestMaterial(
             cuts: s.cuts,
             utilization: Math.round((s.usedArea / sheetArea) * 10000) / 10000,
         })),
-        unplaced: [...out.unplaced].sort(compareStr),
+        unplaced: [...out.unplaced].sort(cmpId),
     };
 }
