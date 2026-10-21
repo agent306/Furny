@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "templateKey": "base_cabinet",
+  "family": "carcass",
+  "dims": { "width": 600, "height": 850, "depth": 560 },
+  "materials": {
+    "carcass": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "back": {
+      "materialCode": "HDF3-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "shelf": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "front": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "top": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "drawer_box": {
+      "materialCode": "PLY12-BWR",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "drawer_bottom": {
+      "materialCode": "HDF3-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "plinth": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "leg": {
+      "materialCode": "SW50-RUBBER",
+      "edgeBandCode": null,
+      "finishCode": null
+    }
+  },
+  "carcass": {
+    "construction": { "top": "between_sides", "bottom": "between_sides" },
+    "mounting": "floor",
+    "plinth": { "type": "legs", "height": 100, "setback": 50, "legCode": null },
+    "back": { "type": "grooved" },
+    "countertop": null,
+    "handles": {
+      "code": "HDL-BAR-160",
+      "orientation": "auto",
+      "placement": "auto"
+    },
+    "interior": {
+      "id": "s_0000000001",
+      "split": "none",
+      "children": [],
+      "content": {
+        "type": "shelves",
+        "count": 1,
+        "adjustable": true,
+        "frontSetback": 20
+      }
+    },
+    "fronts": [
+      {
+        "id": "fr_0000000001",
+        "kind": "hinged",
+        "covers": ["s_0000000001"],
+        "leaves": "auto",
+        "hingeSide": "auto",
+        "overlay": "full",
+        "glass": false,
+        "handleCode": "inherit",
+        "hingeCode": "auto",
+        "slidingTrackCode": null
+      }
+    ]
+  },
+  "table": null,
+  "overrides": {
+    "parts": {},
+    "extraParts": [],
+    "hardware": {},
+    "extraHardware": []
+  },
+  "notes": null
+}

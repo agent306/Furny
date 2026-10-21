@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "templateKey": "study_desk",
+  "family": "table",
+  "dims": { "width": 1200, "height": 750, "depth": 600 },
+  "materials": {
+    "carcass": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "back": {
+      "materialCode": "HDF3-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "shelf": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "front": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "top": {
+      "materialCode": "PB25-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "drawer_box": {
+      "materialCode": "PLY12-BWR",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "drawer_bottom": {
+      "materialCode": "HDF3-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "plinth": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "leg": {
+      "materialCode": "SW50-RUBBER",
+      "edgeBandCode": null,
+      "finishCode": null
+    }
+  },
+  "carcass": null,
+  "table": {
+    "top": {
+      "shape": "rectangle",
+      "thickness": "material",
+      "cornerRadius": 0,
+      "overhang": 0
+    },
+    "base": {
+      "type": "cabinet_ends",
+      "legSource": "hardware",
+      "legCode": null,
+      "legSection": 50,
+      "apron": { "enabled": false, "height": 80, "inset": 15 },
+      "stretcher": true
+    },
+    "storage": {
+      "drawers": null,
+      "lowerShelf": false,
+      "endCabinets": {
+        "width": 400,
+        "content": {
+          "type": "drawers",
+          "count": 3,
+          "frontHeights": "equal",
+          "slideCode": null,
+          "behindDoor": false
+        }
+      }
+    }
+  },
+  "overrides": {
+    "parts": {},
+    "extraParts": [],
+    "hardware": {},
+    "extraHardware": []
+  },
+  "notes": null
+}

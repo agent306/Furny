@@ -8,5 +8,11 @@
     "htmlWhitespaceSensitivity": "css",
     "plugins": ["prettier-plugin-tailwindcss"],
     "tailwindFunctions": ["clsx", "cn", "cva"],
-    "tailwindStylesheet": "resources/css/app.css"
+    "tailwindStylesheet": "resources/css/app.css",
+    "overrides": [
+        {
+            "files": "database/fixtures/**/*.json",
+            "options": { "tabWidth": 2 }
+        }
+    ]
 }

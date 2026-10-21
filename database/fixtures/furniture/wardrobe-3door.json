@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "templateKey": "wardrobe_hinged",
+  "family": "carcass",
+  "dims": { "width": 1800, "height": 2100, "depth": 600 },
+  "materials": {
+    "carcass": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "back": {
+      "materialCode": "HDF3-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "shelf": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "front": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "top": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "drawer_box": {
+      "materialCode": "PLY12-BWR",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "drawer_bottom": {
+      "materialCode": "HDF3-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "plinth": {
+      "materialCode": "PB18-WHITE",
+      "edgeBandCode": null,
+      "finishCode": null
+    },
+    "leg": {
+      "materialCode": "SW50-RUBBER",
+      "edgeBandCode": null,
+      "finishCode": null
+    }
+  },
+  "carcass": {
+    "construction": { "top": "between_sides", "bottom": "between_sides" },
+    "mounting": "floor",
+    "plinth": {
+      "type": "plinth",
+      "height": 100,
+      "setback": 20,
+      "legCode": null
+    },
+    "back": { "type": "grooved" },
+    "countertop": null,
+    "interior": {
+      "id": "s_0000000001",
+      "split": "columns",
+      "content": null,
+      "children": [
+        {
+          "size": { "mode": "flex", "weight": 1 },
+          "section": {
+            "id": "s_0000000002",
+            "split": "none",
+            "children": [],
+            "content": {
+              "type": "shelves",
+              "count": 4,
+              "adjustable": true,
+              "frontSetback": 20
+            }
+          }
+        },
+        {
+          "size": { "mode": "flex", "weight": 2 },
+          "section": {
+            "id": "s_0000000003",
+            "split": "rows",
+            "content": null,
+            "children": [
+              {
+                "size": { "mode": "fixed", "mm": 350 },
+                "section": {
+                  "id": "s_0000000004",
+                  "split": "none",
+                  "children": [],
+                  "content": { "type": "empty" }
+                }
+              },
+              {
+                "size": { "mode": "flex", "weight": 1 },
+                "section": {
+                  "id": "s_0000000005",
+                  "split": "none",
+                  "children": [],
+                  "content": {
+                    "type": "hanging_rod",
+                    "topClearance": 60,
+                    "rodCode": null
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "fronts": [
+      {
+        "id": "fr_0000000001",
+        "kind": "hinged",
+        "covers": ["s_0000000002"],
+        "leaves": 1,
+        "hingeSide": "left",
+        "overlay": "full",
+        "glass": false,
+        "handleCode": "inherit",
+        "hingeCode": "auto",
+        "slidingTrackCode": null
+      },
+      {
+        "id": "fr_0000000002",
+        "kind": "hinged",
+        "covers": ["s_0000000003"],
+        "leaves": 2,
+        "hingeSide": "auto",
+        "overlay": "full",
+        "glass": false,
+        "handleCode": "inherit",
+        "hingeCode": "auto",
+        "slidingTrackCode": null
+      }
+    ],
+    "handles": {
+      "code": "HDL-BAR-160",
+      "orientation": "auto",
+      "placement": "auto"
+    }
+  },
+  "table": null,
+  "overrides": {
+    "parts": {},
+    "extraParts": [],
+    "hardware": {},
+    "extraHardware": []
+  },
+  "notes": null
+}
