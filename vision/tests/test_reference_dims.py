@@ -5,10 +5,10 @@ Truth: ``hdb-3room.drawing-dims.json``, every dimension line of the HDB drawing 
 profile checks). A traced and a detected line match when they are parallel within 2 degrees and at least
 80 % of the traced centre line lies within 4 normalized px of the detected segment.
 
-Five traced lines (the overall 11000, 7000, 7600 and 8900 lines and the left chain) lie outside the plan
-region (06 §7.6 step 7: wall bounding box + 6 %), where the segment and OCR stages see nothing, so the
-brief's recall and overall-line targets are strict xfails until a ruling on the region. The same targets
-are checked on the traced lines inside the region.
+The outer chains lie up to ~0.15 L beyond the walls, outside the plan region; the OCR and segment stages
+read the annotation region (the plan region grown by 0.15 L, Task 14b ruling B1) for the dimension stage.
+The brief's recall target (>= 0.80 of all 24 traced lines, with every outer overall line matched) is a
+strict xfail while two lines stay out of reach (see the xfail's reason and the Task 14b report).
 """
 
 import numpy as np
@@ -29,23 +29,19 @@ from tests.support.reference import (
 
 pytestmark = pytest.mark.reference
 
-OUTER_OVERALL = {"top-overall": 11000, "bottom-overall": 11100, "left-overall": 7000, "right-overall": 8900}
-WALL_FLOOR = {"hdb-3room": (0.868, 0.893, 36), "brochure-2bhk": (0.908, 0.856, 18)}  # recall, precision, ends
+OUTER_OVERALL = {
+    "top-overall": 11000,
+    "bottom-overall": 11100,
+    "left-overall": 7000,
+    "right-mid": 7600,
+    "right-overall": 8900,
+}
+WALL_FLOOR = {"hdb-3room": (0.868, 0.893, 34), "brochure-2bhk": (0.908, 0.856, 18)}  # recall, precision, ends
 
 
 @pytest.fixture(scope="module")
 def chains() -> dict[str, ChainResult]:
     return {stem: run_chain(stem) for stem in IMAGES}
-
-
-def _in_region(result: ChainResult, ids: set[str] | None = None) -> set[str]:
-    """Traced lines with at least 80 % of their length inside the plan region."""
-    out = set()
-    for t in load_dim_truth(result.stem, result.page):
-        inside = np.mean([result.pre.region.contains((x, y)) for x, y in _polyline_samples(t.points)])
-        if inside >= 0.8 and (ids is None or t.id in ids):
-            out.add(t.id)
-    return out
 
 
 def test_dimension_truth_is_traced_and_profile_checked(chains: dict[str, ChainResult]) -> None:
@@ -100,21 +96,20 @@ def test_hdb_dimension_precision(chains: dict[str, ChainResult]) -> None:
     assert m.precision >= 0.90, m.false_lines
 
 
-def test_hdb_dimension_recall_inside_the_plan_region(chains: dict[str, ChainResult]) -> None:
-    """The recall target on the traced lines the segment and OCR stages can see (inside the region)."""
-    r = chains["hdb-3room"]
-    m = chain_dim_metrics(r)
-    inside = _in_region(r)
-    missed = inside & set(m.unmatched)
-    assert 1.0 - len(missed) / len(inside) >= 0.80, sorted(missed)
-    assert "bottom-overall" not in m.unmatched  # the one outer overall line inside the region (11100)
+def test_hdb_outer_lines_beyond_the_plan_region_are_found(chains: dict[str, ChainResult]) -> None:
+    """Ruling B1: the outer chains and overall lines read through the annotation region are matched (the
+    11000 and 7600 overall lines lie wholly outside the plan region)."""
+    m = chain_dim_metrics(chains["hdb-3room"])
+    found = {"top", "right", "right-mid", "bottom", "top-overall", "bottom-overall"}
+    assert not found & set(m.unmatched), m.unmatched
+    assert m.recall >= 0.79, m.unmatched  # 19 of 24; see the strict xfail below
 
 
 @pytest.mark.xfail(
     strict=True,
-    reason="Task 14b blocker: 11000, 7000, 7600, 8900 and the left chain lie outside the plan region "
-    "(06 §7.6 step 7 grows the walls' box by 6 %; HDB's outer chains reach ~0.13 L out), so no segment or "
-    "token exists there; needs a ruling on the region",
+    reason="Task 14b: 8900's top tick is erased by a one-character OCR token ('1', the tick read as text) "
+    "in the text mask, and the 7000 line's upper fifth is below the photo's contrast (gray 228-252 on 254 "
+    "paper: no segment, no gray evidence); 19 / 24 matched, needs a ruling (see the report)",
 )
 def test_hdb_dimension_recall_and_outer_overall_lines(chains: dict[str, ChainResult]) -> None:
     m = chain_dim_metrics(chains["hdb-3room"])

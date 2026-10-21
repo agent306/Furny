@@ -1,5 +1,19 @@
 {
  "source": "Hand-traced from hdb-3room.webp (Task 14b dimension truth), source pixels. Each line was located on 6-8x gridded crops; its centre line is a robust least-squares fit of the darkness-weighted ink centroid across the stroke (gray < 235, one sample per px, crossings and labels rejected; the 600 line by column profiles, its fit is pulled by the faint face lines beside it). Its ends are the ends of the dimension stroke itself (interior lines: where they meet the wall or face line they dimension; a chain interrupted by a black wall, 3100 | 3600, and a chain whose middle is only a faint face line, 300 | 600, are two lines). Ticks (u = px along p0 -> p1 from p0) are the slash ticks / extension-line crossings, verified one by one on zoomed contact sheets; lines merely crossing a dimension line are not ticks. labels[i] is the text of the interval ticks[i] .. ticks[i+1] (null: an unlabelled wall-thickness interval). Lines bowed by the photograph (peak offset > 0.75 px: the long outer lines and 7600 | 3100) also carry 'points', the measured ink centre at 0/25/50/75/100 % of the length (median offset within +-8 %); matching uses that polyline. profile_check: a perpendicular ink profile (median of 5 profiles 1 px apart, +-3 px across) at 20/50/80 % of the length, moved by up to 3 % off a tick, crossing or label: offset of the ink centroid from the traced centre line (polyline where given) and the darkest gray. Every |offset| <= 0.5 px.",
+ "method": {
+  "lines": "One traced line per drawn dimension stroke: a chain whose stroke runs on through its ticks (and through crossing extension lines, partitions or door arcs) is one line, with all its ticks and one label per interval (null: an unlabelled wall-thickness interval).",
+  "splits": {
+   "i3100-bed1 | i3600": "The 3100 and 3600 intervals lie on one row (src y ~454) but the black wall between bedroom 1 and bedroom 2 (src x ~644-661) interrupts the stroke: no line ink runs through the wall. Traced as two lines, each ending at the wall face with its end tick there (3100: x 373-644, 3600: x 661-976).",
+   "i300 | i600": "The 300 interval (src x 659-681, ticks at the black wall's face and at x 681) and the 600 interval (x 769-822) are drawn on one row (src y ~208), but between x ~721 and ~765 the row holds only faint face lines (gray ~205-225 against ~130-180 for the dimension strokes), no dimension stroke and no tick; the '300' text sits outside its 22 px interval, over x 687-721, where the 300 stroke ends. Traced as two lines: 300 from x 657 to 721, 600 from x 765 to 826.",
+   "i1900-1200": "The kitchen-side 1900 and 1200 intervals (src x ~326) are one stroke from the top wall to y ~483 with a wall-thickness interval (y 360-369) between them: one line.",
+   "i7600-3100": "The living-room 7600 and bedroom-3 3100 intervals (src y ~771-779) are one continuous stroke from the left wall to the black corner block, with the bedroom-3 partition's two faces (x ~820/828) as a wall-thickness interval: one line.",
+   "right / right-mid / right-overall": "Three separate vertical strokes (src x ~1164, ~1205, ~1246): 600/1700/400/3200/1500/-/400/900, 7600/1300 and 8900."
+  },
+  "additions": {
+   "i400": "The vertical 400 at the AC ledge (src x ~799, y 133-184, ticks at y ~139 and ~176) is drawn with slash ticks and a label like every other dimension line but is not in the brief's list; traced as a dimension line."
+  },
+  "residuals": "i400 and i600 have no line segment: their labels' OCR boxes (with the text-mask dilation) cover the stroke, so LSD never sees it (Task 14b ruling B2: carried to Task 34)."
+ },
  "units": "source_px",
  "lines": [
   {

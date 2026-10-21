@@ -12,6 +12,7 @@ SIBLING_MIN_SHARE = 0.30  # another drawing with this share of the main plan's w
 MAX_COMPONENTS = 2000  # pairwise grouping bound
 INK_LINK_FRAC = 0.005  # ink closing kernel for linking wall components, fraction of the long edge
 EXPAND_FRAC = 0.06  # dimension chains live outside the walls
+ANNOTATION_GROW_FRAC = 0.15  # ... and reach up to ~0.15 L beyond them (Task 14b ruling B1)
 
 
 def _groups(boxes: np.ndarray, near: float, linked: np.ndarray) -> np.ndarray:
@@ -50,6 +51,19 @@ def _ink_links(labels: np.ndarray, comps: np.ndarray, walls: np.ndarray, ink: np
     pairs = np.unique(np.stack([ink_of[keep], comp_of[keep]], axis=1), axis=0)  # sorted by ink label
     same = pairs[1:, 0] == pairs[:-1, 0]
     return np.stack([pairs[:-1, 1][same], pairs[1:, 1][same]], axis=1).astype(np.intp)
+
+
+def annotation_region(region: Rect, w: int, h: int) -> Rect:
+    """The annotation region (Task 14b ruling B1): the plan region grown by 0.15 of its long side on every
+    side, clamped to the `w` x `h` page. Outer dimension chains and their overall lines are drawn up to
+    ~0.15 L beyond the walls, past the plan region's 6 % margin. The OCR and segment stages read this
+    region and the dimension stage uses all of it; walls, rooms and every other stage keep the plan region
+    (they select their segments and tokens inside it, see `segments.in_region` and `ocr_stage.in_region`).
+    """
+    region = region.clip(w, h)
+    if region.w <= 0 or region.h <= 0:
+        return region
+    return region.expand(round(ANNOTATION_GROW_FRAC * region.long_side)).clip(w, h)
 
 
 def detect_plan_region(

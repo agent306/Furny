@@ -1,6 +1,7 @@
 """OCR stage (06 §7.7): tiled two-pass reading, vector-word bypass, text tokens and the text mask."""
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -13,6 +14,7 @@ from app.pipeline.binarize import Preprocessed
 from app.pipeline.context import PipelineContext
 from app.pipeline.normalize import NormalizedPage
 from app.pipeline.pdf import VectorPage
+from app.pipeline.region import annotation_region
 from app.pipeline.textparse import parse_token
 from app.schemas.candidates import TextToken
 from app.utils.geometry import Rect
@@ -202,10 +204,21 @@ def _text_mask(shape: tuple[int, int], tokens: list[TextToken]) -> np.ndarray:
     return mask
 
 
+def in_region(tokens: Sequence[TextToken], region: Rect) -> list[TextToken]:
+    """The tokens centred inside `region` (ids unchanged): the plan region's text for the stages that work
+    on the plan region only (rooms, labeling)."""
+    return [t for t in tokens if region.contains(((t.box[0] + t.box[2]) / 2, (t.box[1] + t.box[3]) / 2))]
+
+
 def run_ocr(page: NormalizedPage, pre: Preprocessed, ocr: OcrLike, ctx: PipelineContext) -> OcrResult:
-    """Text tokens of the plan region, the text mask and `ink_notext` (06 §7.7)."""
+    """Text tokens of the annotation region, the text mask and `ink_notext` (06 §7.7).
+
+    The tokens cover the annotation region (`region.annotation_region`: the plan region grown by 0.15 L,
+    Task 14b ruling B1), where the outer dimension chains' labels lie; ids `T1..Tn` run over all of them.
+    Stages working on the plan region select theirs with `in_region(tokens, pre.region)`.
+    """
     h, w = pre.ink.shape[:2]
-    region = pre.region.clip(w, h)
+    region = annotation_region(pre.region, w, h)
     vector = page.vector
     if page.source_kind == "pdf_vector" and vector is not None and len(vector.words) >= MIN_VECTOR_WORDS:
         tokens = tokens_from_vector_words(vector, page.transform, region)

@@ -17,6 +17,7 @@ from app.pipeline.binarize import Preprocessed
 from app.pipeline.context import PipelineContext
 from app.pipeline.normalize import NormalizedPage
 from app.pipeline.ocr_stage import OcrResult
+from app.pipeline.region import annotation_region
 from app.schemas.candidates import Segment, SegmentSource
 from app.utils.geometry import Pt, Rect, detect_line_segments
 
@@ -65,8 +66,8 @@ def _canonical(p0: np.ndarray, p1: np.ndarray) -> tuple[tuple[float, float], tup
     return (float(p0[0]), float(p0[1])), (float(p1[0]), float(p1[1]))
 
 
-def _renumber(segs: list[Segment]) -> list[Segment]:
-    """Sort by (min y, min x) and number `S1..Sn`."""
+def _renumber(segs: list[Segment], prefix: str = "S") -> list[Segment]:
+    """Sort by (min y, min x) and number `S1..Sn` (`prefix` instead of `S`)."""
     segs = sorted(
         segs,
         key=lambda s: (
@@ -76,7 +77,9 @@ def _renumber(segs: list[Segment]) -> list[Segment]:
             max(s.p0[0], s.p1[0]),
         ),
     )
-    return [Segment(f"S{n}", s.p0, s.p1, s.width_px, s.is_thin, s.source) for n, s in enumerate(segs, 1)]
+    return [
+        Segment(f"{prefix}{n}", s.p0, s.p1, s.width_px, s.is_thin, s.source) for n, s in enumerate(segs, 1)
+    ]
 
 
 def _gather_candidates(
@@ -423,14 +426,15 @@ def _trim_to_stroke(p0: Pt, p1: Pt, width: float, dt: np.ndarray) -> tuple[Pt, P
     return (float(q0[0]), float(q0[1])), (float(q1[0]), float(q1[1]))
 
 
-def _raster_segments(pre: Preprocessed, ocr: OcrResult, ctx: PipelineContext) -> list[Segment]:
+def _raster_segments(pre: Preprocessed, ocr: OcrResult, ctx: PipelineContext, region: Rect) -> list[Segment]:
+    """Raster segments of `region` (merged, widths attached), unnumbered; `L` is the plan region's."""
     h, w = pre.gray.shape[:2]
-    region = pre.region.clip(w, h)
+    plan = pre.region.clip(w, h)
     if region.w <= 0 or region.h <= 0:
         return []
     raw = _lsd_page_segments(pre, ocr.text_mask, region, ctx)
     length = np.hypot(raw[:, 2] - raw[:, 0], raw[:, 3] - raw[:, 1])
-    raw = raw[length >= max(MIN_LENGTH_PX, MIN_LENGTH_FRAC * region.long_side)]
+    raw = raw[length >= max(MIN_LENGTH_PX, MIN_LENGTH_FRAC * plan.long_side)]
     if raw.shape[0] == 0:
         return []
     ctx.check_deadline()
@@ -445,17 +449,16 @@ def _raster_segments(pre: Preprocessed, ocr: OcrResult, ctx: PipelineContext) ->
     merged = merge_collinear(centre_lines, check_deadline=ctx.check_deadline)
     merged_others = merge_collinear(others, check_deadline=ctx.check_deadline)
     ctx.check_deadline()
-    return _renumber([*_attach_widths(merged, pre), *merged_others])
+    return [*_attach_widths(merged, pre), *merged_others]
 
 
-def _vector_segments(page: NormalizedPage, pre: Preprocessed) -> list[Segment]:
-    """PDF line work mapped to normalized px; width is the PDF line width scaled by the transform."""
+def _vector_segments(page: NormalizedPage, pre: Preprocessed, region: Rect) -> list[Segment]:
+    """PDF line work centred in `region`, mapped to normalized px; width is the PDF line width scaled by the
+    transform."""
     vector = page.vector
     assert vector is not None
     a = np.asarray(page.transform, np.float64)
     scale = math.sqrt(abs(float(np.linalg.det(a[:2, :2]))))
-    h, w = pre.gray.shape[:2]
-    region = pre.region.clip(w, h)
     pts = np.array([(*s.p0, 1.0, *s.p1, 1.0) for s in vector.segments], np.float64).reshape(-1, 2, 3)
     mapped = pts @ a.T
     mapped = mapped[..., :2] / mapped[..., 2:3]
@@ -470,6 +473,16 @@ def _vector_segments(page: NormalizedPage, pre: Preprocessed) -> list[Segment]:
     return out
 
 
+def _segments_of(
+    page: NormalizedPage, pre: Preprocessed, ocr: OcrResult, ctx: PipelineContext, region: Rect
+) -> list[Segment]:
+    if page.source_kind == "pdf_vector" and page.vector is not None and page.vector.segments:
+        merged = merge_collinear(_vector_segments(page, pre, region), check_deadline=ctx.check_deadline)
+        limit = THIN_FACTOR * pre.t_thin  # merging changed the widths
+        return [Segment(m.id, m.p0, m.p1, m.width_px, m.width_px <= limit, m.source) for m in merged]
+    return _raster_segments(pre, ocr, ctx, region)
+
+
 def detect_segments(
     page: NormalizedPage, pre: Preprocessed, ocr: OcrResult, ctx: PipelineContext
 ) -> list[Segment]:
@@ -479,8 +492,25 @@ def detect_segments(
     unavailable), segments shorter than `max(8 px, 0.008 L)` dropped. `pdf_vector` pages use the PDF
     strokes instead (widths from the PDF line width). Ids are `S1..Sn` by (min y, min x).
     """
-    if page.source_kind == "pdf_vector" and page.vector is not None and page.vector.segments:
-        merged = merge_collinear(_vector_segments(page, pre), check_deadline=ctx.check_deadline)
-        limit = THIN_FACTOR * pre.t_thin  # merging changed the widths
-        return [Segment(m.id, m.p0, m.p1, m.width_px, m.width_px <= limit, m.source) for m in merged]
-    return _raster_segments(pre, ocr, ctx)
+    h, w = pre.gray.shape[:2]
+    return _renumber(_segments_of(page, pre, ocr, ctx, pre.region.clip(w, h)))
+
+
+def detect_annotation_segments(
+    page: NormalizedPage, pre: Preprocessed, ocr: OcrResult, ctx: PipelineContext
+) -> list[Segment]:
+    """The line segments of the annotation region that do not lie wholly inside the plan region (Task 14b
+    ruling B1), detected like `detect_segments` over the annotation region (`region.annotation_region`,
+    the plan region grown by 0.15 L; `L` stays the plan region's), ids `A1..An` by (min y, min x).
+
+    Only the dimension stage reads them, together with the plan region's segments: the outer dimension
+    chains lie up to ~0.15 L beyond the walls. The plan region's own segments come from `detect_segments`
+    alone (LSD's detection depends on the size of the image it runs on, so the plan region's line work is
+    not taken from this larger run), and walls and every other stage keep using only those. A line crossing
+    the plan region's border appears in both lists; the dimension stage chains the overlapping copies.
+    """
+    h, w = pre.gray.shape[:2]
+    plan = pre.region.clip(w, h)
+    found = _segments_of(page, pre, ocr, ctx, annotation_region(pre.region, w, h))
+    outside = [s for s in found if not (plan.contains(s.p0) and plan.contains(s.p1))]
+    return _renumber(outside, "A")

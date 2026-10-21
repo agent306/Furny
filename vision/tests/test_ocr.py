@@ -7,8 +7,9 @@ from app.ocr.engine import OcrEngine, RawOcrBox
 from app.ocr.tiling import dedupe, map_rotated_cw, tile_origins
 from app.pipeline.binarize import Preprocessed, preprocess
 from app.pipeline.normalize import NormalizedPage
-from app.pipeline.ocr_stage import run_ocr, tokens_from_vector_words
+from app.pipeline.ocr_stage import in_region, run_ocr, tokens_from_vector_words
 from app.pipeline.pdf import VectorPage, VWord
+from app.pipeline.region import annotation_region
 from app.schemas.meta import PageImage, SourceKind
 from app.utils.geometry import Rect
 from tests.support.synth import SText, render_plan
@@ -145,15 +146,19 @@ def test_tiling_dedupe_with_fake_engine() -> None:
 
 
 def test_rotated_pass_maps_back_with_region_offset() -> None:
+    """OCR reads the annotation region (Task 14b: the plan region grown by 0.15 L, clamped to the page);
+    pass B's boxes map back through the rotation and the crop's offset."""
     w, h = 1000, 700
     region = Rect(200, 100, 600, 400)
+    read = annotation_region(region, w, h)
+    assert read == Rect(110, 10, 780, 580)
     target = raw(300, 150, 340, 330, "3300", 0.9)  # a tall box: vertical text, absolute coordinates
 
     def fn(img: np.ndarray, n: int) -> list[RawOcrBox]:
-        if img.shape[:2] == (400, 600):  # pass A on the region crop
+        if img.shape[:2] == (read.h, read.w):  # pass A on the crop
             return []
-        crop = raw(100, 50, 140, 230, "3300", 0.9)  # the target in crop coordinates
-        return [rot_raw(crop, 400)]
+        crop = raw(300 - read.x, 150 - read.y, 340 - read.x, 330 - read.y, "3300", 0.9)  # in crop coordinates
+        return [rot_raw(crop, read.h)]
 
     result = read_page(FakeOcr(fn), w, h, region=region)
     assert [t.text for t in result.tokens] == ["3300"]
@@ -416,3 +421,25 @@ def test_real_rapidocr_vertical_narrow_digits_are_angle_90() -> None:
 @pytest.mark.slow
 def test_real_engine_blank_image_reads_nothing() -> None:
     assert OcrEngine().read(np.full((300, 300, 3), 255, np.uint8)) == []
+
+
+def test_tokens_cover_the_annotation_region_and_in_region_selects_the_plan_text() -> None:
+    """Task 14b ruling B1: a label beyond the plan region (an outer dimension chain's) is read; the plan
+    region's own text is selected with `in_region`, ids unchanged."""
+    w, h = 1000, 700
+    region = Rect(200, 100, 600, 400)  # annotation region: Rect(110, 10, 780, 580)
+    outside = raw(130, 30, 190, 60, "7000", 0.9)  # in the annotation region, not in the plan region
+    inside = raw(400, 300, 460, 330, "3300", 0.9)
+
+    def fn(img: np.ndarray, n: int) -> list[RawOcrBox]:
+        if img.shape[:2] != (580, 780):
+            return []
+        return [
+            raw(b.quad[0][0] - 110, b.quad[0][1] - 10, b.quad[2][0] - 110, b.quad[2][1] - 10, b.text, 0.9)
+            for b in (outside, inside)
+        ]
+
+    result = read_page(FakeOcr(fn), w, h, region=region)
+    assert [t.text for t in result.tokens] == ["7000", "3300"]
+    assert [t.text for t in in_region(result.tokens, region)] == ["3300"]
+    assert in_region(result.tokens, region)[0].id == result.tokens[1].id

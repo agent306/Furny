@@ -528,3 +528,27 @@ def test_theta0_is_refined_below_the_bin_width(angle: float) -> None:
     rotated = cv2.warpAffine(img, m, (1400, 1000), flags=cv2.INTER_LINEAR, borderValue=(255, 255, 255))
     segs, _ = run(rotated)
     assert dominant_orientation(segs) == pytest.approx(angle, abs=0.15)
+
+
+def test_annotation_segments_cover_the_ring_around_the_plan_region() -> None:
+    """Task 14b ruling B1: `detect_annotation_segments` reads the plan region grown by 0.15 L and returns
+    the segments not wholly inside the plan region (ids A1..); `detect_segments` is unchanged (plan
+    region only)."""
+    img = np.full((1000, 1600, 3), 255, np.uint8)
+    cv2.line(img, (500, 400), (900, 400), (0, 0, 0), 3)  # inside the plan region
+    cv2.line(img, (450, 240), (850, 240), (0, 0, 0), 3)  # outside it, inside the annotation region
+    cv2.line(img, (700, 250), (700, 350), (0, 0, 0), 3)  # across the plan region's top edge
+    cv2.line(img, (450, 60), (850, 60), (0, 0, 0), 3)  # beyond the annotation region
+    page = page_of(img)
+    pre = dataclasses.replace(preprocess(page, make_ctx()), region=Rect(400, 300, 600, 400))
+    ocr = OcrResult(tokens=[], text_mask=np.zeros(pre.ink.shape, np.uint8), ink_notext=pre.ink.copy())
+    plan = detect_segments(page, pre, ocr, make_ctx())
+    ring = segmod.detect_annotation_segments(page, pre, ocr, make_ctx())
+
+    def ys(segs: list[Segment]) -> list[float]:
+        spans = sorted((min(s.p0[1], s.p1[1]), max(s.p0[1], s.p1[1])) for s in segs)
+        return [v for span in spans for v in span]
+
+    assert ys(plan) == pytest.approx([300, 350, 400, 400], abs=3)
+    assert ys(ring) == pytest.approx([240, 240, 250, 350], abs=3)
+    assert sorted(s.id for s in ring) == ["A1", "A2"]

@@ -5,9 +5,10 @@ Chain: decode -> normalize -> preprocess -> OCR (replayed from ``<stem>.ocr.json
 dimension lines -> walls -> wall graph.
 
 **OCR replay.** Real RapidOCR takes seconds per page and its output may drift between onnxruntime builds,
-so the tokens are recorded once (``record_ocr``, real engine over the whole normalized page) and replayed:
-the tokens whose box centre lies in the plan region are kept, renumbered like ``run_ocr`` does, and the
-text mask / ``ink_notext`` are rebuilt exactly as ``run_ocr`` builds them.
+so the tokens are recorded once (``record_ocr``, the real OCR stage over the annotation region) and replayed:
+the tokens whose box centre lies in the annotation region (the region ``run_ocr`` reads) are kept,
+renumbered like ``run_ocr`` does, and the text mask / ``ink_notext`` are rebuilt exactly as ``run_ocr``
+builds them.
 
 **Truth.** ``<stem>.walls.json`` holds the wall centre lines (``nodes`` / ``walls``) and the registration
 landmarks: the four outer plan corners in the truth's own units and their positions in *source* image
@@ -40,7 +41,8 @@ from app.pipeline.decode import decode_raster
 from app.pipeline.dimensions import associate_dimension_texts, find_dimension_lines, find_dimension_spans
 from app.pipeline.normalize import NormalizedPage, normalize
 from app.pipeline.ocr_stage import MASK_DILATE_PX, OcrResult
-from app.pipeline.segments import detect_segments
+from app.pipeline.region import annotation_region
+from app.pipeline.segments import detect_annotation_segments, detect_segments
 from app.pipeline.textparse import parse_token
 from app.pipeline.walls import WallExtraction, debug_walls_png, extract_walls, walls_to_graph
 from app.schemas.candidates import DimensionLine, DimensionSpan, Segment, TextToken, WallGraph
@@ -74,18 +76,19 @@ def _quad_box(quad: list[list[float]]) -> tuple[float, float, float, float]:
 
 
 def record_ocr(stem: str) -> Path:
-    """Run the real OCR engine over the whole normalized page and write ``<stem>.ocr.json``."""
-    import dataclasses
-
+    """Run the real OCR stage (``run_ocr``: the annotation region, Task 14b) and write ``<stem>.ocr.json``,
+    with the region it read and its wall-clock seconds."""
     from app.ocr.engine import OcrEngine
     from app.pipeline.ocr_stage import run_ocr
-    from app.utils.geometry import Rect
 
     page = load_page(stem)
     pre = preprocess(page, make_ctx())
     h, w = page.image.shape[:2]
-    full = dataclasses.replace(pre, region=Rect(0, 0, w, h))
-    result = run_ocr(page, full, OcrEngine(), make_ctx())
+    engine = OcrEngine()
+    start = time.perf_counter()
+    result = run_ocr(page, pre, engine, make_ctx())
+    seconds = time.perf_counter() - start
+    read = annotation_region(pre.region, w, h)
     rows = [
         {
             "text": t.text,
@@ -96,15 +99,22 @@ def record_ocr(stem: str) -> Path:
         for t in result.tokens
     ]
     path = REFERENCE_DIR / f"{stem}.ocr.json"
-    path.write_text(json.dumps({"page": [w, h], "tokens": rows}, indent=1) + "\n")
+    doc = {
+        "page": [w, h],
+        "read_region": [read.x, read.y, read.w, read.h],
+        "seconds": round(seconds, 1),
+        "tokens": rows,
+    }
+    path.write_text(json.dumps(doc, indent=1) + "\n")
     return path
 
 
 def replay_ocr(stem: str, pre: Preprocessed) -> OcrResult:
-    """Recorded tokens inside the plan region, with the text mask and ``ink_notext`` of ``run_ocr``."""
+    """Recorded tokens inside the annotation region (as ``run_ocr`` reads it: the plan region grown by
+    0.15 L), with the text mask and ``ink_notext`` of ``run_ocr``."""
     rows = json.loads((REFERENCE_DIR / f"{stem}.ocr.json").read_text())["tokens"]
     h, w = pre.ink.shape[:2]
-    region = pre.region.clip(w, h)
+    region = annotation_region(pre.region, w, h)
     kept = []
     for r in rows:
         x0, y0, x1, y1 = _quad_box(r["quad"])
@@ -170,9 +180,10 @@ def run_chain(stem: str) -> ChainResult:
     ocr = replay_ocr(stem, pre)
     lap("ocr_replay")
     segs = detect_segments(page, pre, ocr, ctx)
+    outer = detect_annotation_segments(page, pre, ocr, ctx)  # the dimension stage reads both
     lap("segments")
     dims = find_dimension_lines(
-        segs,
+        [*segs, *outer],
         ocr.tokens,
         pre.region,
         ink=ocr.ink_notext,
