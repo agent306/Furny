@@ -39,3 +39,8 @@ Tests added (engineRpc: 5, useEngineWorker: 1):
 
 RED (before implementation, `yarn vitest run resources/js/editor`): 5 failed (error/messageerror tests timed out at 5000 ms because the promises never settled; the useEngineWorker wiring test failed with `instances[0].onerror is not a function`), 15 passed.
 GREEN: `yarn vitest run resources/js/editor` -> 2 files, 20 tests passed. `yarn eslint resources/js/editor` clean; `yarn prettier --check resources/js/editor` clean; `yarn vue-tsc --noEmit` exit 0.
+
+## Fix round 2
+- Round 1 claimed the `useEngineWorker` JSDoc change but the edit had not applied (my replace silently matched nothing) and the file was not in 7220545. Fixed now: JSDoc states stale rejection (callers must catch `EngineWorkerStaleError`), `error` fatal for the client (later calls reject `EngineWorkerError` until a new `useEngineWorker()`), `messageerror` rejects pending but keeps the client usable.
+- `engineRpc.ts` comments corrected: an uncaught worker exception fires `error` while the worker stays alive (HTML spec); fatal is a safe policy because the event cannot distinguish that from a script-load failure.
+- Comment/JSDoc-only change. Re-ran: eslint, prettier --check, vue-tsc --noEmit clean; editor tests 2 files / 20 passed.
