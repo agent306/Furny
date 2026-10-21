@@ -67,6 +67,18 @@ const square = (x: number, y: number, s: number) => [
     { x, y: y + s },
 ];
 
+const textItem0 = (): DrawItem => ({
+    t: 'text',
+    at: { x: 0, y: 0 },
+    text: 'x',
+    sizeMm: 100,
+    dyEm: 0,
+    rotationDeg: 0,
+    anchor: 'start',
+    baseline: 'middle',
+    style: 'room_name',
+});
+
 const svg = (d: PlanDrawing, over: Parameters<typeof testSvgOptions>[0] = {}) =>
     svgFromDrawing(d, testSvgOptions(over));
 
@@ -306,13 +318,39 @@ describe('svgFromDrawing text', () => {
         expect(xml).toContain('dominant-baseline="hanging"');
     });
 
-    it('draws a halo when the text style has a stroke', () => {
+    it('draws a halo as a stroke-only underlay before the fill text', () => {
         const xml = svg(
             drawingWith('DIMS', group([textItem({ style: 'dim_text' })])),
         );
-        const el = xml.match(/<text [^>]*>/)![0];
-        expect(el).toContain('paint-order="stroke"');
-        expect(el).toContain('stroke="#FBFAF8"');
+        const els = xml.match(/<text [^>]*>[^<]*<\/text>/g)!;
+        expect(els).toHaveLength(2);
+        const [halo, main] = els as [string, string];
+        expect(halo).toContain('fill="none"');
+        expect(halo).toContain('stroke="#FBFAF8"');
+        expect(halo).toContain('stroke-width="0.8"');
+        expect(halo).toContain('stroke-linejoin="round"');
+        expect(main).toContain('fill="#374151"');
+        expect(main).not.toContain('stroke');
+        expect(xml).not.toContain('paint-order');
+        // same geometry, same text
+        expect(halo.replace(/ fill="none".*?stroke-linejoin="round"/, '')).toBe(
+            main.replace(/ fill="#374151"/, ''),
+        );
+    });
+
+    it('writes alignment-baseline next to dominant-baseline', () => {
+        for (const baseline of ['middle', 'top', 'bottom'] as const) {
+            const xml = svg(
+                drawingWith('TEXT', group([textItem({ baseline })])),
+            );
+            const dom = xml.match(/dominant-baseline="([^"]+)"/)![1];
+            expect(xml).toContain(`alignment-baseline="${dom}"`);
+        }
+    });
+
+    it('writes a plain text style as a single text element', () => {
+        const xml = svg(drawingWith('TEXT', group([textItem()])));
+        expect(xml.match(/<text /g)).toHaveLength(1);
     });
 
     it('drops characters that XML cannot carry', () => {
@@ -410,16 +448,17 @@ describe('svgFromDrawing escaping (04 §8.3)', () => {
                 },
             ]),
         );
-        expect(() => svg(d, { palette: {} })).toThrow(/room-living/);
+        const without = Object.fromEntries(
+            Object.entries(TEST_PALETTE).filter(([k]) => k !== 'room-living'),
+        );
+        expect(() => svg(d, { palette: without })).toThrow(/room-living/);
+        expect(() => svg(d, { palette: without })).toThrow(/fill key/);
         // inherited object properties are not palette entries
         expect(() =>
             svg(d, {
-                palette: Object.create({ 'room-living': '#fff' }) as Record<
-                    string,
-                    string
-                >,
+                palette: Object.create(TEST_PALETTE) as Record<string, string>,
             }),
-        ).toThrow(/room-living/);
+        ).toThrow(/palette entry/);
     });
 
     it('escapes palette values, literal fills and the font family in attributes', () => {
@@ -466,11 +505,134 @@ describe('svgFromDrawing escaping (04 §8.3)', () => {
         expect(xml).not.toMatch(/" onload=/);
     });
 
-    it('escapes style colours that are not palette keys', () => {
+    it('resolves a style colour through the palette and escapes the value', () => {
         const styles = {
             ...TEST_STYLES,
-            wall: { ...TEST_STYLES.wall, fill: '#000" x="y' },
+            wall: { ...TEST_STYLES.wall, fill: 'evil' },
         };
+        const d = drawingWith(
+            'WALLS',
+            group([
+                {
+                    t: 'poly',
+                    pts: square(0, 0, 10),
+                    closed: true,
+                    style: 'wall',
+                },
+            ]),
+        );
+        const xml = svg(d, {
+            styles,
+            palette: { ...TEST_PALETTE, evil: '#000" x="y' },
+        });
+        assertWellFormedXml(xml);
+        expect(xml).toContain('fill="#000&quot; x=&quot;y"');
+    });
+
+    it('throws on a style colour that is not a palette key', () => {
+        const d = drawingWith(
+            'WALLS',
+            group([
+                {
+                    t: 'poly',
+                    pts: square(0, 0, 10),
+                    closed: true,
+                    style: 'wall',
+                },
+            ]),
+        );
+        const withColour = (patch: Partial<SvgStyle>) => ({
+            styles: { ...TEST_STYLES, wall: { ...TEST_STYLES.wall, ...patch } },
+        });
+        // a literal CSS colour is not a token
+        expect(() => svg(d, withColour({ fill: '#3B3B3B' }))).toThrow(
+            /palette entry for colour "#3B3B3B"/,
+        );
+        expect(() =>
+            svg(d, withColour({ stroke: 'nope', strokeWidthMm: 1 })),
+        ).toThrow(/"nope"/);
+        // inherited properties are not tokens either
+        expect(() => svg(d, withColour({ fill: 'constructor' }))).toThrow(
+            /"constructor"/,
+        );
+        expect(() => svg(d, withColour({ fill: 'toString' }))).toThrow(
+            /"toString"/,
+        );
+        // known token: fine
+        expect(svg(d, withColour({ fill: 'cFFFFFF' }))).toContain(
+            'fill="#FFFFFF"',
+        );
+    });
+
+    it('throws on an unknown hatch colour token', () => {
+        const styles = {
+            ...TEST_STYLES,
+            wall_exterior: {
+                ...TEST_STYLES.wall_exterior,
+                hatch: { angleDeg: 45, spacingMm: 60, color: '#5A5A5A' },
+            },
+        };
+        expect(() => svg(drawingWith('WALLS'), { styles })).toThrow(
+            /"#5A5A5A"/,
+        );
+    });
+
+    it('throws cleanly on a style key that is not an own property', () => {
+        const d = drawingWith(
+            'WALLS',
+            group([
+                {
+                    t: 'line',
+                    a: { x: 0, y: 0 },
+                    b: { x: 1, y: 1 },
+                    style: 'constructor' as StyleKey,
+                },
+            ]),
+        );
+        expect(() => svg(d)).toThrow(/no style for constructor/);
+    });
+
+    it('rejects a font weight that is not a number', () => {
+        const styles = {
+            ...TEST_STYLES,
+            room_name: {
+                ...TEST_STYLES.room_name,
+                fontWeight: '600" onload="alert(1)' as unknown as 600,
+            },
+        };
+        const d = drawingWith('TEXT', group([textItem0()]));
+        expect(() => svg(d, { styles })).toThrow(/not finite/);
+    });
+
+    it('writes a numeric font weight verbatim', () => {
+        const xml = svg(drawingWith('TEXT', group([textItem0()])));
+        expect(xml).toContain('font-weight="600"');
+    });
+
+    it('writes attribute tab, CR and LF as character references', () => {
+        const xml = svg(
+            drawingWith(
+                'WALLS',
+                group(
+                    [
+                        {
+                            t: 'line',
+                            a: { x: 0, y: 0 },
+                            b: { x: 1, y: 1 },
+                            style: 'wall_outline',
+                        },
+                    ],
+                    'a\nb\rc\td',
+                ),
+            ),
+        );
+        assertWellFormedXml(xml);
+        expect(xml).toContain('data-entity="a&#10;b&#13;c&#9;d"');
+        expect(xml).not.toMatch(/data-entity="[^"]*[\t\r\n]/);
+    });
+
+    it('does not interpolate any option string raw into an attribute', () => {
+        const nasty = '" onload="alert(1)';
         const xml = svg(
             drawingWith(
                 'WALLS',
@@ -479,14 +641,14 @@ describe('svgFromDrawing escaping (04 §8.3)', () => {
                         t: 'poly',
                         pts: square(0, 0, 10),
                         closed: true,
-                        style: 'wall',
+                        style: 'wall_exterior',
                     },
                 ]),
             ),
-            { styles },
+            { fontFamily: nasty, background: nasty },
         );
         assertWellFormedXml(xml);
-        expect(xml).toContain('fill="#000&quot; x=&quot;y"');
+        expect(xml).not.toMatch(/" onload=/);
     });
 });
 
@@ -669,7 +831,7 @@ describe('svgFromDrawing strokes, dashes and hatches', () => {
     });
 
     it('writes one pattern for each hatch style, in style order', () => {
-        const hatch = { angleDeg: 0, spacingMm: 40, color: '#00f' };
+        const hatch = { angleDeg: 0, spacingMm: 40, color: 'cFFFFFF' };
         const styles = {
             ...TEST_STYLES,
             wall_half: { ...TEST_STYLES.wall_half, hatch },
@@ -678,6 +840,43 @@ describe('svgFromDrawing strokes, dashes and hatches', () => {
         expect(
             attrValues(xml, 'id').filter((v) => v.startsWith('hatch-')),
         ).toEqual(['hatch-wall_exterior', 'hatch-wall_half']);
+    });
+
+    it('writes the hatch tile: base rect, one centred line, 10 % of the spacing wide', () => {
+        const hatch = { angleDeg: 0, spacingMm: 40, color: 'c5A5A5A' };
+        const styles = {
+            ...TEST_STYLES,
+            wall_exterior: {
+                ...TEST_STYLES.wall_exterior,
+                hatch: undefined,
+            } as SvgStyle,
+            wall_half: { ...TEST_STYLES.wall_half, hatch },
+        };
+        const xml = svg(drawingWith('WALLS'), { styles });
+        expect(xml).toContain(
+            [
+                '<defs>',
+                '<pattern id="hatch-wall_half" patternUnits="userSpaceOnUse" width="40" height="40">',
+                '<rect width="40" height="40" fill="#8C8C8C"/>',
+                '<line x1="0" y1="20" x2="40" y2="20" stroke="#5A5A5A" stroke-width="4"/>',
+                '</pattern>',
+                '</defs>',
+            ].join('\n'),
+        );
+    });
+
+    it('omits the tile base for an unfilled hatch style', () => {
+        const styles = {
+            ...TEST_STYLES,
+            wall_exterior: {
+                ...TEST_STYLES.wall_exterior,
+                fill: null,
+            },
+        };
+        const xml = svg(drawingWith('WALLS'), { styles });
+        expect(xml).toContain(
+            '<pattern id="hatch-wall_exterior" patternUnits="userSpaceOnUse" width="60" height="60" patternTransform="rotate(45)">\n<line',
+        );
     });
 
     it('writes no defs when no style has a hatch', () => {
@@ -706,13 +905,18 @@ describe('svgFromDrawing background image', () => {
         opacity: 1,
         ...over,
     });
-    const drawImage = (href: string, over = {}) =>
+    const drawImage = (
+        href: string,
+        over = {},
+        options: Parameters<typeof testSvgOptions>[0] = {},
+    ) =>
         svg(
             drawingWith('BACKGROUND', {
                 entityId: null,
                 entityKind: 'background',
                 items: [image(href, over)],
             }),
+            options,
         );
     const DATA = 'data:image/png;base64,iVBORw0KGgo=';
 
@@ -744,16 +948,48 @@ describe('svgFromDrawing background image', () => {
         expect(el).not.toContain('opacity');
     });
 
-    it('accepts http and https URLs and escapes them like any attribute', () => {
+    it('drops http and https URLs by default, so exports never leak signed URLs', () => {
+        for (const url of [
+            'https://cdn.example.com/p.png?sig=abc',
+            'http://example.com/a.png',
+        ]) {
+            const xml = drawImage(url);
+            assertWellFormedXml(xml);
+            expect(xml).not.toContain('<image');
+            expect(xml).not.toContain('href');
+        }
+    });
+
+    it('accepts http and https URLs with allowRemoteHref, escaped like any attribute', () => {
         const url = 'https://cdn.example.com/p.png?a=1&b="2"';
-        const xml = drawImage(url);
+        const xml = drawImage(url, {}, { allowRemoteHref: true });
         assertWellFormedXml(xml);
         expect(xml).toContain(
             'href="https://cdn.example.com/p.png?a=1&amp;b=&quot;2&quot;"',
         );
-        expect(drawImage('http://example.com/a.png')).toContain(
-            'href="http://example.com/a.png"',
-        );
+        expect(
+            drawImage(
+                'http://example.com/a.png',
+                {},
+                { allowRemoteHref: true },
+            ),
+        ).toContain('href="http://example.com/a.png"');
+        // the opt-in does not widen the other schemes
+        expect(
+            drawImage('javascript:alert(1)', {}, { allowRemoteHref: true }),
+        ).not.toContain('href');
+        // data URIs keep working without it
+        expect(drawImage(DATA)).toContain('href=');
+    });
+
+    it('clamps the opacity to 0..1', () => {
+        const op = (v: number): string[] =>
+            drawImage(DATA, { opacity: v })
+                .match(/<image [^>]*>/)![0]
+                .match(/opacity="[^"]*"/g) ?? [];
+        expect(op(1.5)).toEqual([]);
+        expect(op(-0.5)).toEqual(['opacity="0"']);
+        expect(op(0.25)).toEqual(['opacity="0.25"']);
     });
 
     it.each([
@@ -770,7 +1006,7 @@ describe('svgFromDrawing background image', () => {
         'https://exa mple.com/x.png',
         '',
     ])('drops the image for %j', (href) => {
-        const xml = drawImage(href);
+        const xml = drawImage(href, {}, { allowRemoteHref: true });
         assertWellFormedXml(xml);
         expect(xml).not.toContain('<image');
         expect(xml).not.toContain('href');
@@ -857,6 +1093,73 @@ describe('svgFromDrawing determinism and reference plans', () => {
     });
 });
 
+describe('svgFromDrawing id prefix', () => {
+    const doc = makeRectPlan(5000, 4000, 230);
+    const drawing = drawingOf(doc);
+
+    it('defaults to no prefix', () => {
+        const xml = svg(drawing);
+        expect(xml).toContain('<g id="layer-WALLS">');
+        expect(xml).toContain('<pattern id="hatch-wall_exterior"');
+        expect(xml).toContain('fill="url(#hatch-wall_exterior)"');
+    });
+
+    it('prefixes layer and hatch ids and the hatch references', () => {
+        const xml = svg(drawing, { idPrefix: 'p1-' });
+        assertWellFormedXml(xml);
+        for (const l of LAYER_ORDER) {
+            expect(xml).toContain(`<g id="p1-layer-${l}">`);
+        }
+        expect(xml).toContain('<pattern id="p1-hatch-wall_exterior"');
+        expect(xml).toContain('fill="url(#p1-hatch-wall_exterior)"');
+        // nothing is left unprefixed
+        expect(xml).not.toMatch(/id="(?!p1-)/);
+        expect(xml).not.toMatch(/url\(#(?!p1-)/);
+    });
+
+    it('keeps two prefixed exports free of id clashes', () => {
+        const ids = (x: string): string[] => attrValues(x, 'id');
+        const a = ids(svg(drawing, { idPrefix: 'a-' }));
+        const b = ids(svg(drawing, { idPrefix: 'b-' }));
+        expect(a.filter((id) => b.includes(id))).toEqual([]);
+    });
+
+    it.each(['1x', 'a b', 'a"b', '-x', 'a<b', 'a)'])(
+        'rejects the prefix %j',
+        (idPrefix) => {
+            expect(() => svg(drawing, { idPrefix })).toThrow(/idPrefix/);
+        },
+    );
+});
+
+describe('svgFromDrawing number format', () => {
+    const lineAt = (x: number): PlanDrawing =>
+        drawingWith(
+            'WALLS',
+            group([
+                {
+                    t: 'line',
+                    a: { x: 0, y: 0 },
+                    b: { x, y: 1 },
+                    style: 'wall_outline',
+                },
+            ]),
+        );
+
+    it('never writes exponent notation', () => {
+        for (const x of [1e14, -1e14, 123456789012345, 1e-9, -1e-9]) {
+            const xml = svg(lineAt(x));
+            expect(xml).not.toMatch(/\de[+-]?\d/i);
+        }
+        expect(svg(lineAt(1e14))).toContain('x2="100000000000000"');
+        expect(svg(lineAt(1e-9))).toContain('x2="0"');
+    });
+
+    it.each([1e15, -1e15, 1e21, 5e300])('throws on %s', (x) => {
+        expect(() => svg(lineAt(x))).toThrow(/too large/);
+    });
+});
+
 describe('assertWellFormedXml (the strict check the smoke test relies on)', () => {
     it.each([
         ['<svg><g></svg>', 'unmatched'],
@@ -869,8 +1172,24 @@ describe('assertWellFormedXml (the strict check the smoke test relies on)', () =
         ['<svg><!-- c --></svg>', 'comments'],
         ['<svg>\u0001</svg>', 'character'],
         ['<svg>', 'unclosed'],
+        ['<svg>&#0;</svg>', 'non-XML character'],
+        ['<svg>&#1;</svg>', 'non-XML character'],
+        ['<svg>&#x8;</svg>', 'non-XML character'],
+        ['<svg>&#xD800;</svg>', 'non-XML character'],
+        ['<svg>&#xDFFF;</svg>', 'non-XML character'],
+        ['<svg>&#xFFFE;</svg>', 'non-XML character'],
+        ['<svg>&#x110000;</svg>', 'non-XML character'],
+        ['<svg a="&#0;"/>', 'non-XML character'],
     ])('rejects %j', (xml, why) => {
         expect(() => assertWellFormedXml(xml)).toThrow(why);
+    });
+
+    it('accepts references to tab, LF, CR and astral characters', () => {
+        expect(() =>
+            assertWellFormedXml(
+                '<svg a="&#9;&#10;&#13;&#x20;&#x1F600;&#xFFFD;"/>',
+            ),
+        ).not.toThrow();
     });
 
     it('accepts entities and self-closing elements', () => {

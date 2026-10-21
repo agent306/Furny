@@ -25,6 +25,33 @@ export function assertWellFormedXml(xml: string): void {
     let sawRoot = false;
     let i = 0;
 
+    /** Length of the reference at `at`; numeric ones must name an XML 1.0 Char. */
+    const refLength = (at: number): number => {
+        ENTITY.lastIndex = at;
+        const m = ENTITY.exec(xml);
+        if (!m) return fail(at, 'invalid entity reference');
+        const body = m[0].slice(2, -1);
+        if (m[0][1] === '#') {
+            const code =
+                body[0] === 'x'
+                    ? parseInt(body.slice(1), 16)
+                    : parseInt(body, 10);
+            const ok =
+                code === 0x9 ||
+                code === 0xa ||
+                code === 0xd ||
+                (code >= 0x20 && code <= 0xd7ff) ||
+                (code >= 0xe000 && code <= 0xfffd) ||
+                (code >= 0x10000 && code <= 0x10ffff);
+            if (!ok)
+                fail(
+                    at,
+                    `character reference to a non-XML character (${m[0]})`,
+                );
+        }
+        return m[0].length;
+    };
+
     const readName = (): string => {
         NAME.lastIndex = i;
         const m = NAME.exec(xml);
@@ -44,10 +71,7 @@ export function assertWellFormedXml(xml: string): void {
             const start = i;
             while (i < xml.length && xml[i] !== '<') {
                 if (xml[i] === '&') {
-                    ENTITY.lastIndex = i;
-                    const m = ENTITY.exec(xml);
-                    if (!m) fail(i, 'invalid entity reference');
-                    i += m![0].length;
+                    i += refLength(i);
                 } else i += 1;
             }
             const data = xml.slice(start, i);
@@ -95,10 +119,7 @@ export function assertWellFormedXml(xml: string): void {
                 if (i >= xml.length) fail(i, 'unterminated attribute value');
                 if (xml[i] === '<') fail(i, 'raw < in an attribute value');
                 if (xml[i] === '&') {
-                    ENTITY.lastIndex = i;
-                    const m = ENTITY.exec(xml);
-                    if (!m) fail(i, 'invalid entity reference');
-                    i += m![0].length;
+                    i += refLength(i);
                 } else i += 1;
             }
             i += 1;

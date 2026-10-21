@@ -39,15 +39,27 @@ export interface SvgExportOptions {
     widthPx: number;
     heightPx: number;
     styles: Record<StyleKey, SvgStyle>;
-    /** Page background colour; `null` = transparent. */
+    /** Page background as a literal CSS colour (`'#ffffff'`); `null` = transparent. */
     background: string | null;
     fontFamily: string;
     /**
-     * Colour tokens to colours, e.g. the light export palette. Resolves the
-     * `fillKey` of room fills (a missing key throws) and any style colour that
-     * names a token; other style colours are used as literal CSS colours.
+     * Colour tokens to CSS colours, e.g. the light export palette. Every
+     * style colour (stroke, fill, hatch colour) and every `fillKey` is a
+     * token of this palette; an unknown token throws. Only the page
+     * `background` and a poly's literal `fill` override are CSS colours.
      */
     palette: Readonly<Record<string, string>>;
+    /**
+     * Accept http(s) hrefs for the background image. Off by default, so an
+     * export never leaks a signed URL; only `data:image` URIs are written.
+     */
+    allowRemoteHref?: boolean;
+    /**
+     * Prefix of the generated ids (`layer-*`, `hatch-*`), so several SVGs can
+     * be inlined into one page without id clashes. Default `''`; letters,
+     * digits, `_`, `-` and `.`, starting with a letter or `_`.
+     */
+    idPrefix?: string;
 }
 
 /** Default dash (multiples of the stroke width) for a dashed item whose style has no dash array. */
@@ -59,10 +71,16 @@ const DATA_IMAGE_HREF =
     /^data:image\/(?:png|jpe?g|gif|webp)(?:;[A-Za-z0-9=.+-]+)*,[A-Za-z0-9+/=%._~-]*$/;
 const HTTP_HREF = /^https?:\/\/\S+$/i;
 
-/** Formats a number with at most two decimals, trailing zeros stripped, never `-0`. */
+/** Largest magnitude written; beyond it `toFixed` would risk exponent notation. */
+const MAX_ABS = 1e15;
+
+/** Formats a number with at most two decimals, trailing zeros stripped, never `-0` or an exponent. */
 function num(n: number): string {
     if (!Number.isFinite(n)) {
         throw new RangeError(`svgFromDrawing: number is not finite (${n})`);
+    }
+    if (Math.abs(n) >= MAX_ABS) {
+        throw new RangeError(`svgFromDrawing: number is too large (${n})`);
     }
     const s = n.toFixed(2);
     const t = s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s;
@@ -71,7 +89,7 @@ function num(n: number): string {
 
 // Characters XML 1.0 cannot carry at all (control codes, lone surrogates, U+FFFE/F).
 const INVALID_XML =
-    /[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+    /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
 const ESCAPES: Record<string, string> = {
     '&': '&amp;',
@@ -99,30 +117,39 @@ const attr = (name: string, value: string): string => `${name}="${esc(value)}"`;
 const nattr = (name: string, value: number): string =>
     `${name}="${num(value)}"`;
 
-const hasOwn = (o: object, key: string): boolean =>
-    Object.prototype.hasOwnProperty.call(o, key);
+const ID_PREFIX = /^(?:[A-Za-z_][\w.-]*)?$/;
 
 class Writer {
-    constructor(private readonly o: SvgExportOptions) {}
+    readonly prefix: string;
 
-    /** A style colour: a palette token, else a literal CSS colour. */
-    colour(c: string): string {
-        return hasOwn(this.o.palette, c) ? this.o.palette[c]! : c;
+    constructor(private readonly o: SvgExportOptions) {
+        this.prefix = o.idPrefix ?? '';
+        if (!ID_PREFIX.test(this.prefix)) {
+            throw new Error(
+                `svgFromDrawing: invalid idPrefix ${JSON.stringify(this.prefix)}`,
+            );
+        }
+    }
+
+    /** The CSS colour of a palette token; an unknown token throws. */
+    colour(token: string, what = 'colour'): string {
+        if (!Object.hasOwn(this.o.palette, token)) {
+            throw new Error(
+                `svgFromDrawing: no palette entry for ${what} ${JSON.stringify(token)}`,
+            );
+        }
+        return this.o.palette[token]!;
     }
 
     fillKey(key: string): string {
-        if (!hasOwn(this.o.palette, key)) {
-            throw new Error(
-                `svgFromDrawing: no palette entry for fill key ${JSON.stringify(key)}`,
-            );
-        }
-        return this.o.palette[key]!;
+        return this.colour(key, 'fill key');
     }
 
     style(key: StyleKey): SvgStyle {
-        const s = this.o.styles[key];
-        if (!s) throw new Error(`svgFromDrawing: no style for ${key}`);
-        return s;
+        if (!Object.hasOwn(this.o.styles, key)) {
+            throw new Error(`svgFromDrawing: no style for ${key}`);
+        }
+        return this.o.styles[key];
     }
 
     /** Stroke attributes of `style`, with the dash array when it applies. */
@@ -150,7 +177,7 @@ class Writer {
         if (item.fillKey !== undefined) return this.fillKey(item.fillKey);
         if (item.fill !== undefined) return item.fill;
         const s = this.style(style);
-        if (s.hatch) return `url(#hatch-${style})`;
+        if (s.hatch) return `url(#${this.prefix}hatch-${style})`;
         return s.fill === null ? 'none' : this.colour(s.fill);
     }
 
@@ -205,7 +232,7 @@ class Writer {
             case 'text':
                 return this.text(item);
             case 'image':
-                return image(item);
+                return this.image(item);
         }
     }
 
@@ -215,21 +242,34 @@ class Writer {
             item.rotationDeg === 0
                 ? `translate(${num(item.at.x)} ${num(item.at.y)})`
                 : `translate(${num(item.at.x)} ${num(item.at.y)}) rotate(${num(item.rotationDeg)})`;
-        const attrs = [
+        const shared = [
             attr('transform', transform),
             ...(item.dyEm === 0 ? [] : [nattr('dy', item.dyEm * item.sizeMm)]),
             attr('text-anchor', item.anchor),
+            // svg2pdf.js reads alignment-baseline, browsers dominant-baseline.
             attr('dominant-baseline', BASELINE[item.baseline]),
+            attr('alignment-baseline', BASELINE[item.baseline]),
             nattr('font-size', item.sizeMm),
             attr('font-family', this.o.fontFamily),
-            ...(s.fontWeight ? [`font-weight="${s.fontWeight}"`] : []),
-            attr('fill', s.fill === null ? 'none' : this.colour(s.fill)),
-            // A stroked text style is a halo: painted first, under the fill.
-            ...(s.stroke === null
+            ...(s.fontWeight === undefined
                 ? []
-                : [...this.stroke(s, false), 'paint-order="stroke"']),
+                : [nattr('font-weight', s.fontWeight)]),
         ];
-        return `<text ${attrs.join(' ')}>${escText(item.text)}</text>`;
+        const content = escText(item.text);
+        const main = `<text ${[
+            ...shared,
+            attr('fill', s.fill === null ? 'none' : this.colour(s.fill)),
+        ].join(' ')}>${content}</text>`;
+        if (s.stroke === null) return main;
+        // A stroked text style is a halo: a stroke-only copy under the fill
+        // (no paint-order, which PDF export does not support).
+        const halo = `<text ${[
+            ...shared,
+            'fill="none"',
+            ...this.stroke(s, false),
+            'stroke-linejoin="round"',
+        ].join(' ')}>${content}</text>`;
+        return `${halo}\n${main}`;
     }
 
     group(g: DrawGroup): string {
@@ -265,7 +305,7 @@ class Writer {
         ].join(' ')}/>`;
         return [
             `<pattern ${[
-                attr('id', `hatch-${key}`),
+                attr('id', `${this.prefix}hatch-${key}`),
                 'patternUnits="userSpaceOnUse"',
                 nattr('width', sp),
                 nattr('height', sp),
@@ -275,6 +315,35 @@ class Writer {
             stroke,
             '</pattern>',
         ].join('\n');
+    }
+
+    /** The background image, or `''` when its source is not an allowed `href`. */
+    image(item: Extract<DrawItem, { t: 'image' }>): string {
+        const remote =
+            this.o.allowRemoteHref === true && HTTP_HREF.test(item.href);
+        if (!DATA_IMAGE_HREF.test(item.href) && !remote) {
+            return '';
+        }
+        const cx = item.at.x + item.width / 2;
+        const cy = item.at.y + item.height / 2;
+        const opacity = Math.min(1, Math.max(0, item.opacity));
+        return `<image ${[
+            attr('href', item.href),
+            nattr('x', item.at.x),
+            nattr('y', item.at.y),
+            nattr('width', item.width),
+            nattr('height', item.height),
+            'preserveAspectRatio="none"',
+            ...(opacity === 1 ? [] : [nattr('opacity', opacity)]),
+            ...(item.rotationDeg === 0
+                ? []
+                : [
+                      attr(
+                          'transform',
+                          `rotate(${num(item.rotationDeg)} ${num(cx)} ${num(cy)})`,
+                      ),
+                  ]),
+        ].join(' ')}/>`;
     }
 }
 
@@ -311,33 +380,6 @@ function arcPath(a: Extract<DrawItem, { t: 'arc' }>): string {
     return `M ${at(a.startDeg)} A ${r} ${r} 0 ${large} 1 ${at(a.endDeg)}`;
 }
 
-/** The background image, or `''` when its source is not an allowed `href`. */
-function image(item: Extract<DrawItem, { t: 'image' }>): string {
-    if (!DATA_IMAGE_HREF.test(item.href) && !HTTP_HREF.test(item.href)) {
-        return '';
-    }
-    const cx = item.at.x + item.width / 2;
-    const cy = item.at.y + item.height / 2;
-    const opacity = Math.min(1, Math.max(0, item.opacity));
-    return `<image ${[
-        attr('href', item.href),
-        nattr('x', item.at.x),
-        nattr('y', item.at.y),
-        nattr('width', item.width),
-        nattr('height', item.height),
-        'preserveAspectRatio="none"',
-        ...(opacity === 1 ? [] : [nattr('opacity', opacity)]),
-        ...(item.rotationDeg === 0
-            ? []
-            : [
-                  attr(
-                      'transform',
-                      `rotate(${num(item.rotationDeg)} ${num(cx)} ${num(cy)})`,
-                  ),
-              ]),
-    ].join(' ')}/>`;
-}
-
 /** Serialises `d` to an SVG document (04 §8.3). Throws on a missing palette key or a non-finite number. */
 export function svgFromDrawing(d: PlanDrawing, o: SvgExportOptions): string {
     const w = new Writer(o);
@@ -366,14 +408,18 @@ export function svgFromDrawing(d: PlanDrawing, o: SvgExportOptions): string {
                 nattr('y', min.y),
                 nattr('width', max.x - min.x),
                 nattr('height', max.y - min.y),
-                attr('fill', w.colour(o.background)),
+                attr('fill', o.background),
             ].join(' ')}/>`,
         );
     }
 
     for (const layer of LAYER_ORDER) {
         const groups = d.layers[layer].map((g) => w.group(g));
-        out.push(`<g ${attr('id', `layer-${layer}`)}>`, ...groups, '</g>');
+        out.push(
+            `<g ${attr('id', `${w.prefix}layer-${layer}`)}>`,
+            ...groups,
+            '</g>',
+        );
     }
     out.push('</svg>');
     return out.join('\n');

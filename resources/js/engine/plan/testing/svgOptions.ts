@@ -1,4 +1,4 @@
-import type { RoomColorKey, StyleKey } from '../drawing/types';
+import type { StyleKey } from '../drawing/types';
 import { STYLE_KEYS } from '../drawing/types';
 import type { SvgExportOptions, SvgStyle } from '../drawing/svg';
 
@@ -8,7 +8,12 @@ import type { SvgExportOptions, SvgStyle } from '../drawing/svg';
  * engine index.
  */
 
-export const TEST_PALETTE: Readonly<Record<RoomColorKey, string>> = {
+/**
+ * Palette of the tests: the room fill tokens (15 §3.4) and one token `cRRGGBB`
+ * per style colour, which resolves to `#RRGGBB`. Style colours are palette
+ * tokens (an unknown one throws), so the styles below name tokens only.
+ */
+export const TEST_PALETTE: Readonly<Record<string, string>> = {
     'room-living': '#F5EFE4',
     'room-bedroom': '#E8EEF6',
     'room-kitchen': '#F6ECE3',
@@ -19,9 +24,31 @@ export const TEST_PALETTE: Readonly<Record<RoomColorKey, string>> = {
     'room-pooja': '#F8EDF2',
     'room-circulation': '#F5EFE4',
     'room-other': '#F2F2F2',
+    c111827: '#111827',
+    c1A1A1A: '#1A1A1A',
+    c1F2937: '#1F2937',
+    c262626: '#262626',
+    c374151: '#374151',
+    c3B3B3B: '#3B3B3B',
+    c3C7CC0: '#3C7CC0',
+    c4B5563: '#4B5563',
+    c5A5A5A: '#5A5A5A',
+    c5B8DB8: '#5B8DB8',
+    c5C4630: '#5C4630',
+    c6B7280: '#6B7280',
+    c8A6A43: '#8A6A43',
+    c8C8C8C: '#8C8C8C',
+    c9CA3AF: '#9CA3AF',
+    cCFE3F2: '#CFE3F2',
+    cDC2626: '#DC2626',
+    cF2F2F2: '#F2F2F2',
+    cF3E9DA: '#F3E9DA',
+    cFBFAF8: '#FBFAF8',
+    cFEE2E2: '#FEE2E2',
+    cFFFFFF: '#FFFFFF',
 };
 
-const INK = '#1A1A1A';
+const INK = 'c1A1A1A';
 
 const none: SvgStyle = {
     stroke: null,
@@ -39,41 +66,41 @@ const stroked = (stroke: string, strokeWidthMm: number): SvgStyle => ({
 const filled = (fill: string): SvgStyle => ({ ...none, fill });
 
 export const TEST_STYLES: Readonly<Record<StyleKey, SvgStyle>> = {
-    wall: filled('#3B3B3B'),
+    wall: filled('c3B3B3B'),
     wall_exterior: {
-        ...filled('#262626'),
-        hatch: { angleDeg: 45, spacingMm: 60, color: '#5A5A5A' },
+        ...filled('c262626'),
+        hatch: { angleDeg: 45, spacingMm: 60, color: 'c5A5A5A' },
     },
-    wall_half: filled('#8C8C8C'),
-    wall_glass: { ...stroked('#5B8DB8', 0.26), fill: '#CFE3F2' },
+    wall_half: filled('c8C8C8C'),
+    wall_glass: { ...stroked('c5B8DB8', 0.26), fill: 'cCFE3F2' },
     wall_outline: stroked(INK, 0.33),
     opening_jamb: stroked(INK, 0.26),
     door_leaf: stroked(INK, 0.4),
     door_swing: stroked(INK, 0.2),
     door_main_leaf: stroked(INK, 0.66),
-    sliding_panel: { ...stroked(INK, 0.26), fill: '#FFFFFF' },
+    sliding_panel: { ...stroked(INK, 0.26), fill: 'cFFFFFF' },
     window_frame: stroked(INK, 0.26),
-    window_glass: stroked('#3C7CC0', 0.26),
+    window_glass: stroked('c3C7CC0', 0.26),
     threshold: stroked(INK, 0.26),
-    room_fill: filled('#F2F2F2'),
-    room_name: { ...filled('#1F2937'), fontWeight: 600 },
-    room_area: filled('#4B5563'),
-    room_dims: filled('#6B7280'),
-    furniture: { ...stroked('#8A6A43', 0.33), fill: '#F3E9DA' },
-    furniture_front: { ...stroked('#8A6A43', 0.66), fill: '#8A6A43' },
-    furniture_label: filled('#5C4630'),
+    room_fill: filled('cF2F2F2'),
+    room_name: { ...filled('c1F2937'), fontWeight: 600 },
+    room_area: filled('c4B5563'),
+    room_dims: filled('c6B7280'),
+    furniture: { ...stroked('c8A6A43', 0.33), fill: 'cF3E9DA' },
+    furniture_front: { ...stroked('c8A6A43', 0.66), fill: 'c8A6A43' },
+    furniture_label: filled('c5C4630'),
     furniture_missing: {
-        ...stroked('#DC2626', 0.33),
-        fill: '#FEE2E2',
+        ...stroked('cDC2626', 0.33),
+        fill: 'cFEE2E2',
         dash: [6, 4],
     },
-    fixture: { ...stroked('#6B7280', 0.26), fill: '#FFFFFF' },
-    fixture_detail: stroked('#9CA3AF', 0.2),
-    dim_line: stroked('#6B7280', 0.2),
-    dim_tick: stroked('#6B7280', 0.2),
-    dim_text: { ...filled('#374151'), stroke: '#FBFAF8', strokeWidthMm: 0.8 },
-    dim_ext: stroked('#6B7280', 0.2),
-    label: filled('#111827'),
+    fixture: { ...stroked('c6B7280', 0.26), fill: 'cFFFFFF' },
+    fixture_detail: stroked('c9CA3AF', 0.2),
+    dim_line: stroked('c6B7280', 0.2),
+    dim_tick: stroked('c6B7280', 0.2),
+    dim_text: { ...filled('c374151'), stroke: 'cFBFAF8', strokeWidthMm: 0.8 },
+    dim_ext: stroked('c6B7280', 0.2),
+    label: filled('c111827'),
 };
 
 // Every style key must be covered; a missing one fails the type check above,
