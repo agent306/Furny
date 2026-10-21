@@ -1,0 +1,39 @@
+{
+ "source": "Hand-traced from hdb-3room.webp (Task 17): every door, window and passage of the plan, on the walls of hdb-3room.drawing-walls.json.",
+ "units": "source_px",
+ "walls": "hdb-3room.drawing-walls.json",
+ "method": {
+  "convention": "Each opening lies on one truth wall ('wall'), over [u0, u1] source px along it from the wall's node a toward b. 'hinge' is the jamb the leaf turns on (start = u0) and 'swing' the side it opens to (left = +n with n = (d.y, -d.x), d = the wall's a->b direction; 04 §2.1). kind: door (a swing arc, or a bi-fold's folded leaves), window (frame lines in the wall's place), opening (a gap with no symbol). A door's interval is the leaf's span, hinge jamb to the closing jamb the arc lands on; a window's is the frame's span.",
+  "window_rule": "A window is a stretch of a wall where at least two thin frame lines run along it beside (or in place of) the wall's own line work: a frame rectangle or slider tracks. A bold stroke with one thin line beside it is a wall with its inner face, as the wall truth reads X8, X9 and X4 (method.judgement_calls of the wall truth); the top wall and the bay are single bold strokes with no window drawn.",
+  "profile_check": "Every opening was read on 5-6x crops with a 10 px source grid (leaf, arc ends, jambs) and, for windows, on perpendicular ink profiles every 6-12 px along the wall (median of 3 columns, gray < 225, < 240 for the faint toilet-3 window); the readings are in each opening's 'method'.",
+  "ignore": "An opening marked ignore is ambiguous in the drawing: the metric neither counts it as missed nor counts a detection on it as false."
+ },
+ "openings": [
+  {"id": "D1", "kind": "door", "type": "single_swing", "wall": "I3", "u0": 29.5, "u1": 90.0, "hinge": "start", "swing": "right",
+   "method": "Toilet 1. Open leaf: thin double line y 208.3-210.8 from x 359 to the hinge at (413.3, 209.5) on the wall's left face; arc from (359, 209) to the closing jamb (413.3, 270). No wall drawn above the hinge (the 1000 dimension's extension line runs at x 421.7)."},
+  {"id": "D2", "kind": "door", "type": "single_swing", "wall": "I10", "u0": 28.0, "u1": 90.3, "hinge": "start", "swing": "right",
+   "method": "Toilet 2. Open leaf y 205.8 from x 705.8 to the hinge (761.7, 206) on the left face; arc to the closing jamb (761.7, 268.3)."},
+  {"id": "D3", "kind": "door", "type": "single_swing", "wall": "I14", "u0": 9.0, "u1": 73.3, "hinge": "start", "swing": "left",
+   "method": "Toilet 3. Open leaf: thin double line x 989.7-995 from y 298.3 down to the hinge (992, 358); arc from (1000, 299) to the closing jamb (1053.3, 356.7), where I14's double line (356.7 / 365) starts. Hinge jamb at x 989 beside I13's right face (985)."},
+  {"id": "D4", "kind": "door", "type": "single_swing", "wall": "I6", "u0": 66.5, "u1": 144.7, "hinge": "start", "swing": "left",
+   "method": "Bedroom 1. Leaf x 433.6-439, y 401.8-480; arc from (438, 402) to (512.7, 483.6). Jambs: I6's double line ends at x 434.5 and resumes at x 512.7."},
+  {"id": "D5", "kind": "door", "type": "single_swing", "wall": "I7", "u0": 67.5, "u1": 145.6, "hinge": "start", "swing": "left",
+   "method": "Bedroom 2. Leaf x 714.5-719, y 401.8-481; arc to (793.6, 484.5). Jambs: I7 ends at x 715.5 and resumes at x 793.6."},
+  {"id": "D6", "kind": "door", "type": "single_swing", "wall": "I15", "u0": 16.0, "u1": 94.0, "hinge": "start", "swing": "left",
+   "method": "Bedroom 3, at the free end of partition I15 against I8 (Task 16c R-b). Open leaf: thin double line y 494-497 from the hinge (821, 496) to x 899; arc from (899, 500) to (826, 574), where I15's double line (x 816 / 826) starts. A 10 px jamb nib (y 485-496) under I8."},
+  {"id": "D7", "kind": "door", "type": "single_swing", "wall": "X9", "u0": 105.0, "u1": 186.0, "hinge": "end", "swing": "left",
+   "method": "Main entrance. Open leaf: thin rectangle y 773-788 from the hinge (152, 778) to x 236; arc from (235, 773) up to the closing jamb (155, 697). The wall's thin inner face (x 154.5) stops at y 698; the bold outer stroke (x 143-148) is drawn on across the door."},
+  {"id": "D8", "kind": "door", "type": "bifold", "wall": "I17", "u0": 17.0, "u1": 91.0, "hinge": "start", "swing": "right",
+   "method": "Store bi-fold: hinge circle (296, 385), leaf to the fold (271, 409.5), second leaf back to (296, 437); a V folded toward -x. Jambs: the stub from Q ends at y 381, the stub to U starts at y 455."},
+  {"id": "G1", "kind": "window", "type": "sliding_window", "wall": "X7", "u0": 0.0, "u1": 235.0, "hinge": null, "swing": null,
+   "method": "Living/balcony slider, from the black block (x 575) to x 810 beside I15. Profiles: jamb box x 578-594 (lines 795.5 / 804.5), tracks x 602-754 (lines 800-802 and 804-806), box x 762-808 (lines 797.5 / 806.5)."},
+  {"id": "G2", "kind": "window", "type": "casement", "wall": "X5", "u0": 45.0, "u1": 227.0, "hinge": null, "swing": null,
+   "method": "Bedroom 3. Profiles x 894-1046: bold 806-812 with thin lines at 800 and 803; x 1054-1078 a box (803 / bold 810-815) to the black block at x 1078; the frame starts at O (x 888)."},
+  {"id": "G3", "kind": "window", "type": "casement", "wall": "X8", "u0": 148.0, "u1": 268.0, "hinge": null, "swing": null,
+   "method": "Living room. Profiles x 310-410: bold 802-807 with thin lines at 795.5 and 798.5 (a frame rectangle, ends at x 298 / 418); x 150-300 only the bold stroke and the inner face 795.5 (a wall)."},
+  {"id": "G4", "kind": "window", "type": "casement", "wall": "I16", "u0": 41.0, "u1": 97.0, "hinge": null, "swing": null,
+   "method": "Toilet 3 (faint, gray 200-240). Profiles x 1024-1072: four lines at 172, 175, 178, 181; x 976-1018 only the wall's faces 172 / 182; the black pier from x 1078."},
+  {"id": "G5", "kind": "window", "type": "casement", "wall": "B2", "u0": 0.0, "u1": 257.0, "hinge": null, "swing": null, "ignore": true,
+   "method": "Balcony edge: the bold stroke 919-925 with a thin band 912-917 beside it (the wall truth's judgement call: 'window or railing frame'). A balcony railing, not a window, but drawn like one: ignored."}
+ ]
+}

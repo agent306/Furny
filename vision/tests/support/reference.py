@@ -2,7 +2,7 @@
 the ground-truth wall list onto the page and score the extracted walls.
 
 Chain: decode -> normalize -> preprocess -> OCR (replayed from ``<stem>.ocr.json``) -> segments ->
-dimension lines -> walls -> wall graph.
+dimension lines -> walls -> wall graph -> openings.
 
 **OCR replay.** Real RapidOCR takes seconds per page and its output may drift between onnxruntime builds,
 so the tokens are recorded once (``record_ocr``, the real OCR stage over the annotation region) and replayed:
@@ -42,11 +42,19 @@ from app.pipeline.decode import decode_raster
 from app.pipeline.dimensions import associate_dimension_texts, find_dimension_lines, find_dimension_spans
 from app.pipeline.normalize import NormalizedPage, normalize
 from app.pipeline.ocr_stage import OcrResult, text_mask
+from app.pipeline.openings import find_openings
 from app.pipeline.region import annotation_region
 from app.pipeline.segments import detect_annotation_segments, detect_segments
 from app.pipeline.textparse import parse_token
 from app.pipeline.walls import WallExtraction, debug_walls_png, extract_walls, walls_to_graph
-from app.schemas.candidates import DimensionLine, DimensionSpan, Segment, TextToken, WallGraph
+from app.schemas.candidates import (
+    DimensionLine,
+    DimensionSpan,
+    OpeningCandidate,
+    Segment,
+    TextToken,
+    WallGraph,
+)
 from tests.test_normalize import make_ctx
 
 REFERENCE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "reference"
@@ -155,6 +163,7 @@ class ChainResult:
     ext: WallExtraction
     graph: WallGraph
     seconds: dict[str, float] = field(default_factory=dict)
+    openings: list[OpeningCandidate] = field(default_factory=list)
 
 
 def run_chain(stem: str) -> ChainResult:
@@ -192,8 +201,10 @@ def run_chain(stem: str) -> ChainResult:
     lap("walls")
     graph = walls_to_graph(ext, pre.region, check_deadline=ctx.check_deadline)
     lap("graph")
+    openings = find_openings(graph, pre, segs, ocr.ink_notext)
+    lap("openings")
     times["total"] = sum(times.values())
-    return ChainResult(stem, page, pre, ocr, segs, dims, ext, graph, times)
+    return ChainResult(stem, page, pre, ocr, segs, dims, ext, graph, times, openings)
 
 
 # --- truth and registration ---------------------------------------------------------------------------
@@ -615,6 +626,165 @@ def chain_dim_metrics(result: ChainResult) -> DimMetrics:
     )
 
 
+# --- openings truth (Task 17) ---------------------------------------------------------------------------
+
+OPENING_MATCH_COVER = 0.5  # a detected opening matches a traced one covering half of its width ...
+OPENING_MATCH_DEG = 10.0  # ... on a wall parallel to the traced one's within 10 degrees ...
+OPENING_MATCH_ACROSS = 0.5  # ... whose centre line lies within 0.5 t (the traced wall's) of it
+
+
+@dataclass(frozen=True)
+class TruthOpening:
+    """One traced opening in normalized page px: ``p0`` -> ``p1`` spans it on its wall's centre line (``u0``
+    to ``u1``), ``hinge_end`` says which of them is its hinge jamb (``"start"`` = ``p0``) and ``swing`` is
+    the unit normal toward the side its leaf opens to (None when not scored)."""
+
+    id: str
+    kind: str
+    type: str
+    wall: str
+    p0: np.ndarray
+    p1: np.ndarray
+    hinge_end: str | None
+    swing: np.ndarray | None
+    thickness_px: float
+    ignore: bool
+
+    @property
+    def width(self) -> float:
+        return float(np.hypot(*(self.p1 - self.p0)))
+
+    @property
+    def hinge(self) -> np.ndarray | None:
+        """The hinge jamb point."""
+        return None if self.hinge_end is None else self.p0 if self.hinge_end == "start" else self.p1
+
+    @property
+    def closing(self) -> np.ndarray | None:
+        """The jamb the leaf closes against."""
+        return None if self.hinge_end is None else self.p1 if self.hinge_end == "start" else self.p0
+
+
+def load_openings_truth(stem: str, page: NormalizedPage) -> list[TruthOpening]:
+    """``<stem>.drawing-openings.json`` (source px along the walls of ``<stem>.drawing-walls.json``) mapped
+    through ``page.transform``."""
+    raw = json.loads((REFERENCE_DIR / f"{stem}.drawing-openings.json").read_text())
+    walls_raw = json.loads((REFERENCE_DIR / f"{stem}.drawing-walls.json").read_text())
+    truth = load_truth(stem, page, "drawing-walls")
+    thickness = {w.id: w.thickness_px for w in truth.walls}
+    nodes = {k: np.array(v, np.float64) for k, v in walls_raw["nodes"].items()}
+    ends = {w["id"]: (nodes[w["a"]], nodes[w["b"]]) for w in walls_raw["walls"]}
+    m = np.asarray(page.transform, np.float64)
+    out = []
+    for o in raw["openings"]:
+        a, b = ends[o["wall"]]
+        d = (b - a) / np.linalg.norm(b - a)
+        n = np.array((d[1], -d[0]))
+        src = np.array([a + d * o["u0"], a + d * o["u1"]])
+        p0, p1 = _apply(m, src)
+        swing = None
+        if o.get("swing") is not None:
+            tip = _apply(m, (src[0] + n * (1.0 if o["swing"] == "left" else -1.0))[None, :])[0]
+            swing = (tip - p0) / np.linalg.norm(tip - p0)
+        out.append(
+            TruthOpening(
+                o["id"], o["kind"], o["type"], o["wall"], p0, p1, o.get("hinge"), swing, thickness[o["wall"]],
+                bool(o.get("ignore", False)),
+            )
+        )  # fmt: skip
+    return out
+
+
+@dataclass(frozen=True)
+class OpeningMetrics:
+    recall: float  # scored traced openings matched (same kind)
+    precision: float  # detected openings matched, of those not on an ignored traced opening
+    hinge_swing: float  # matched doors with hinge (when traced) and swing right
+    matched: dict[str, str]  # traced id -> detected id
+    missed: list[str]  # traced ids
+    false: list[str]  # detected ids
+    wrong_hinge_swing: list[str]  # traced door ids
+    n_truth: int
+    n_detected: int
+
+
+def _opening_geometry(
+    graph: WallGraph, o: OpeningCandidate
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Ends (at ``u0``, ``u1``), hinge point and swing normal of a detected opening, in page px."""
+    w = next(w for w in graph.walls if w.id == o.wall_id)
+    a, b = np.array(w.a, np.float64), np.array(w.b, np.float64)
+    d = (b - a) / np.linalg.norm(b - a)
+    n = np.array((d[1], -d[0]))
+    p0, p1 = a + d * o.u0, a + d * o.u1
+    return p0, p1, (p0 if o.hinge == "start" else p1), n * (1.0 if o.swing == "left" else -1.0)
+
+
+def _opening_cover(t: TruthOpening, p0: np.ndarray, p1: np.ndarray) -> float:
+    """Share of the traced opening's width that the detected span ``p0 -> p1`` covers, 0 when it is not on
+    the traced wall (parallel within 10 degrees, its middle within 0.5 t of the traced line)."""
+    u = (t.p1 - t.p0) / t.width
+    v = p1 - p0
+    length = float(np.hypot(*v))
+    if length < 1e-9 or abs(float(v @ u)) < math.cos(math.radians(OPENING_MATCH_DEG)) * length:
+        return 0.0
+    n = np.array((-u[1], u[0]))
+    if abs(float(((p0 + p1) / 2.0 - t.p0) @ n)) > OPENING_MATCH_ACROSS * t.thickness_px:
+        return 0.0
+    s0, s1 = sorted((float((p0 - t.p0) @ u), float((p1 - t.p0) @ u)))
+    return max(0.0, min(s1, t.width) - max(s0, 0.0)) / t.width
+
+
+def opening_metrics(
+    truth: list[TruthOpening], graph: WallGraph, found: Sequence[OpeningCandidate]
+) -> OpeningMetrics:
+    """Openings matched one to one, best cover first: a detected opening matches a traced one of the same
+    kind on the same wall covering >= 50 % of its width. A detection covering half of an ignored traced
+    opening (any kind) is neither true nor false."""
+    geo = {o.id: _opening_geometry(graph, o) for o in found}
+    pairs = sorted(
+        ((_opening_cover(t, geo[o.id][0], geo[o.id][1]), t.id, o.id) for t in truth for o in found),
+        reverse=True,
+    )
+    by_t = {t.id: t for t in truth}
+    by_o = {o.id: o for o in found}
+    matched: dict[str, str] = {}
+    used: set[str] = set()
+    for cover, tid, oid in pairs:
+        if cover < OPENING_MATCH_COVER:
+            break
+        if tid in matched or oid in used:
+            continue
+        if not by_t[tid].ignore and by_t[tid].kind != by_o[oid].kind:
+            continue
+        matched[tid] = oid
+        used.add(oid)
+    scored = [t for t in truth if not t.ignore]
+    hits = [t.id for t in scored if t.id in matched]
+    on_ignored = {matched[t.id] for t in truth if t.ignore and t.id in matched}
+    counted = [o for o in found if o.id not in on_ignored]
+    wrong = []
+    doors = [t for t in scored if t.kind == "door" and t.id in matched]
+    for t in doors:
+        _, _, hinge, swing = geo[matched[t.id]]
+        ok = t.swing is None or float(swing @ t.swing) > 0
+        if t.hinge is not None and t.closing is not None:
+            ok &= math.dist(hinge, t.hinge) < math.dist(hinge, t.closing)
+        if not ok:
+            wrong.append(t.id)
+    return OpeningMetrics(
+        recall=len(hits) / len(scored) if scored else 1.0,
+        precision=len(hits) / len(counted) if counted else 1.0,
+        hinge_swing=1.0 - len(wrong) / len(doors) if doors else 1.0,
+        matched=matched,
+        missed=[t.id for t in scored if t.id not in matched],
+        false=[o.id for o in counted if o.id not in set(matched.values())],
+        wrong_hinge_swing=wrong,
+        n_truth=len(scored),
+        n_detected=len(counted),
+    )
+
+
 # --- debug ----------------------------------------------------------------------------------------------
 
 
@@ -634,4 +804,40 @@ def debug_png(result: ChainResult, truth: Truth | None, path: Path) -> None:
     cv2.rectangle(img, (r.x, r.y), (r.x + r.w - 1, r.y + r.h - 1), (255, 0, 255), 2)
     for d in result.dims:
         cv2.line(img, tuple(round(v) for v in d.p0), tuple(round(v) for v in d.p1), (200, 120, 0), 1)
+    cv2.imwrite(str(path), img)
+
+
+def openings_png(result: ChainResult, truth: list[TruthOpening], path: Path) -> None:
+    """``02-walls`` debug image with the traced openings (green: door, blue: window, grey: passage or
+    ignored; a dot at the hinge, a tick toward the swing) and the detected ones (orange, ids)."""
+    img = debug_walls_png(result.page, result.ext, result.graph)
+    colours = {"door": (0, 160, 0), "window": (200, 80, 0), "opening": (120, 120, 120)}
+    for t in truth:
+        c = (150, 150, 150) if t.ignore else colours[t.kind]
+        a, b = (round(t.p0[0]), round(t.p0[1])), (round(t.p1[0]), round(t.p1[1]))
+        cv2.line(img, a, b, c, 7)
+        cv2.putText(img, t.id, (a[0] + 4, a[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, c, 2)
+        if t.hinge is not None:
+            cv2.circle(img, (round(t.hinge[0]), round(t.hinge[1])), 7, c, -1)
+        if t.swing is not None:
+            mid = (t.p0 + t.p1) / 2.0
+            tip = mid + t.swing * 0.4 * t.width
+            cv2.line(img, (round(mid[0]), round(mid[1])), (round(tip[0]), round(tip[1])), c, 2)
+    for o in result.openings:
+        p0, p1, hinge, swing = _opening_geometry(result.graph, o)
+        cv2.line(img, (round(p0[0]), round(p0[1])), (round(p1[0]), round(p1[1])), (0, 140, 255), 3)
+        cv2.putText(
+            img,
+            f"{o.id} {o.kind[0]}",
+            (round(p1[0]) + 4, round(p1[1]) + 16),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 100, 255),
+            1,
+        )
+        if o.kind == "door":
+            cv2.circle(img, (round(hinge[0]), round(hinge[1])), 4, (0, 100, 255), -1)
+            mid = (p0 + p1) / 2.0
+            tip = mid + swing * 0.3 * float(np.hypot(*(p1 - p0)))
+            cv2.line(img, (round(mid[0]), round(mid[1])), (round(tip[0]), round(tip[1])), (0, 100, 255), 2)
     cv2.imwrite(str(path), img)
