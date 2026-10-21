@@ -246,3 +246,9 @@ Task 43: impl abbde23 (DONE; 105 bom tests; §10.4 + §10.2 exact with verbatim 
 Task 43: review abbde23: spec ✅, quality Approved (guillotine.ts = 08 §5.3 + six `!` only). Controller verified bom tests 105/105 + vue-tsc clean.
 Task 43: minor (deferred): unknown-catalog material gets sheetsNested null (§3.5 literal → 0); nestingIssues '#\d+$' strip assumes keys never end in #digits (comment) + unreachable `?? ''`; BomIssueCode type not re-exported from index.ts; no nestSheets test for grain 'length'.
 Task 43: complete (commits e0cec39..abbde23, review clean)
+Task 44: impl 13628a1 (DONE; 136 bom tests, 5061 full; spec figures exact). Decision: assembly_per_part on mixed drawer/non-drawer rows excludes round(row.qty*drawerKeys/partKeys.length) (exact while all part qty=1).
+Task 44: review 13628a1: spec ✅ (§4.7 lines/totals exact, estimate = quote), quality Approved.
+Ruling: assembly_per_part equal-share drawer exclusion on mixed cut-list rows stands for now — Bom.cutList has no per-key qty; exact while every key in a row has equal qty (all generated parts qty 1); inexact only for override extra parts (qty ≤99) merged into a drawer row → under-bills assembly. Final review: decide per-key qty on CutListRow — cost if wrong: small assembly under-billing on such rows.
+Spec 19 (deviation): 08 §4.3 #7 hinge install says "plates included" but §4.7 worked example bills hinges only (12); implementation follows §4.7.
+Task 44: minor (deferred): pricing.ts quantity not validated positive int; glass labour test mirrors implementation with float ceil/round instead of literal; unknown catalog codes silently skipped in priceBom untested; add shortcut comment at equal-share loop (pricing.ts:884).
+Task 44: complete (commits 76a6009..13628a1, review clean)
