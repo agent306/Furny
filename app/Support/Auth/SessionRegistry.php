@@ -21,9 +21,13 @@ use SessionHandlerInterface;
  *
  *   sess:user:{userId}     ZSET  session id => last activity (unix seconds)
  *   sess:meta:{sessionId}  HASH  user_id, ip_masked, ua_summary, created_at, last_active_at, method, remembered
+ *   sess:revoked:{sessionId}  STRING  tombstone of a revoked session
  *
  * The meta expires with the session (`SESSION_LIFETIME` minutes, 14 days more for a remembered customer). A
- * session id is a credential: it never leaves this class, the device list carries the `SessionKey` instead.
+ * revoked session leaves a tombstone for as long as its payload could live: a request that was in flight when the
+ * session was revoked saves the payload again when it ends, and the tombstone is how the next request knows that
+ * session must stay signed out. A session id is a credential: it never leaves this class, the device list carries
+ * the `SessionKey` instead.
  */
 final class SessionRegistry
 {
@@ -32,6 +36,25 @@ final class SessionRegistry
 
     /** Extra lifetime of the meta of a remembered session: the remember cookie signs the user in again for this long. */
     private const int REMEMBERED_EXTRA_SECONDS = 14 * 86400;
+
+    /** The meta outlives the session payload by this much: `touch()` is throttled, the payload is refreshed on every request. */
+    private const int TTL_MARGIN_SECONDS = self::TOUCH_INTERVAL_SECONDS;
+
+    /** Records activity of a known session; does nothing, and says so, when the meta is gone. KEYS: meta, user's ZSET. */
+    private const string TOUCH_SCRIPT = <<<'LUA'
+        if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+        redis.call('HSET', KEYS[1], 'last_active_at', ARGV[1])
+        redis.call('EXPIRE', KEYS[1], ARGV[2])
+        redis.call('ZADD', KEYS[2], ARGV[1], ARGV[3])
+        if redis.call('TTL', KEYS[2]) < tonumber(ARGV[4]) then redis.call('EXPIRE', KEYS[2], ARGV[4]) end
+        return 1
+        LUA;
+
+    /** Raises the time to live of a key, never shortens it. KEYS: the key. */
+    private const string EXPIRE_AT_LEAST_SCRIPT = <<<'LUA'
+        if redis.call('TTL', KEYS[1]) < tonumber(ARGV[1]) then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+        return 1
+        LUA;
 
     /** Length of the `remember_token` column's value, as Laravel's own `Str::random(60)` makes it. */
     private const int REMEMBER_TOKEN_LENGTH = 60;
@@ -42,6 +65,8 @@ final class SessionRegistry
     {
         $now = CarbonImmutable::now()->getTimestamp();
         $ttl = $this->ttl($remembered);
+
+        $this->pruneExpired($user, $now);
 
         $this->redis()->transaction(function (Redis $redis) use ($user, $sessionId, $request, $method, $remembered, $now, $ttl): void {
             $redis->hMSet($this->metaKey($sessionId), [
@@ -55,8 +80,9 @@ final class SessionRegistry
             ]);
             $redis->expire($this->metaKey($sessionId), $ttl);
             $redis->zAdd($this->userKey($user), $now, $sessionId);
-            $redis->expire($this->userKey($user), $ttl);
         });
+
+        $this->expireAtLeast($this->userKey($user), $ttl);
     }
 
     /**
@@ -65,9 +91,17 @@ final class SessionRegistry
      */
     public function track(User $user, string $sessionId, Request $request, string $method, bool $remembered): void
     {
-        if (! $this->touchIfKnown($sessionId)) {
-            $this->register($user, $sessionId, $request, $method, $remembered);
+        if ($this->touchIfKnown($sessionId) || $this->isRevoked($sessionId)) {
+            return;
         }
+
+        $this->register($user, $sessionId, $request, $method, $remembered);
+    }
+
+    /** Whether the session was revoked: it must not be registered again, and a request on it is signed out. */
+    public function isRevoked(string $sessionId): bool
+    {
+        return (bool) $this->redis()->exists($this->revokedKey($sessionId));
     }
 
     /** Records activity, at most once per `TOUCH_INTERVAL_SECONDS`. A session the registry does not know is ignored. */
@@ -129,15 +163,24 @@ final class SessionRegistry
     /** Signs out one of the user's sessions, named by its key. False when the user has no such session. */
     public function destroy(User $user, string $sessionKey): bool
     {
+        return $this->destroyDevice($user, $sessionKey) !== null;
+    }
+
+    /**
+     * Signs out one of the user's sessions, named by its key.
+     *
+     * @return int|null how many sessions that closed (1, or 0 when the entry was already dead and is only pruned);
+     *                  null when the user has no such session
+     */
+    public function destroyDevice(User $user, string $sessionKey): ?int
+    {
         foreach ($this->sessionIds($user) as $id) {
             if (hash_equals(SessionKey::for($id), $sessionKey)) {
-                $this->revoke($user, [$id]);
-
-                return true;
+                return $this->revoke($user, [$id]);
             }
         }
 
-        return false;
+        return null;
     }
 
     /** Signs out every session of the user except the current one and rotates the remember token. Returns how many were open. */
@@ -179,16 +222,24 @@ final class SessionRegistry
         }
 
         $ttl = $this->ttl(($meta[2] ?? '0') === '1');
-        $userKey = $this->userKeyFor($meta[0]);
 
-        $this->redis()->transaction(function (Redis $redis) use ($sessionId, $userKey, $now, $ttl): void {
-            $redis->hSet($this->metaKey($sessionId), 'last_active_at', (string) $now);
-            $redis->expire($this->metaKey($sessionId), $ttl);
-            $redis->zAdd($userKey, $now, $sessionId);
-            $redis->expire($userKey, $ttl);
-        });
+        // One script, so that a revoke between the read above and the write cannot leave a half-made meta behind.
+        return (int) $this->redis()->eval(
+            self::TOUCH_SCRIPT, 2, $this->metaKey($sessionId), $this->userKeyFor($meta[0]), $now, $ttl, $sessionId, $ttl,
+        ) === 1;
+    }
 
-        return true;
+    /** Removes the sessions that cannot be alive any more from the user's ZSET: no activity for longer than a session lasts. */
+    private function pruneExpired(User $user, int $now): void
+    {
+        $dead = $this->redis()->zrangebyscore($this->userKey($user), '-inf', (string) ($now - $this->ttl(false)));
+
+        $this->forget($user, array_map(strval(...), array_values($dead)));
+    }
+
+    private function expireAtLeast(string $key, int $ttl): void
+    {
+        $this->redis()->eval(self::EXPIRE_AT_LEAST_SCRIPT, 1, $key, $ttl);
     }
 
     /**
@@ -200,6 +251,12 @@ final class SessionRegistry
     private function revoke(User $user, array $ids): int
     {
         $open = 0;
+
+        // The tombstones first: a request that is still running on one of these sessions must find it revoked.
+        foreach ($ids as $id) {
+            $ttl = max((int) $this->redis()->ttl($this->metaKey($id)), $this->ttl(false));
+            $this->redis()->setex($this->revokedKey($id), $ttl, '1');
+        }
 
         foreach ($ids as $id) {
             if ($this->handler()->read($id) !== '') {
@@ -232,8 +289,7 @@ final class SessionRegistry
     /** A remember cookie of a revoked device must not sign the user in again. */
     private function rotateRememberToken(User $user): void
     {
-        $user->setRememberToken(Str::random(self::REMEMBER_TOKEN_LENGTH));
-        $user->save();
+        $user->forceFill(['remember_token' => Str::random(self::REMEMBER_TOKEN_LENGTH)])->saveQuietly();
     }
 
     /** @return list<string> */
@@ -246,7 +302,7 @@ final class SessionRegistry
 
     private function ttl(bool $remembered): int
     {
-        return (int) config('session.lifetime') * 60 + ($remembered ? self::REMEMBERED_EXTRA_SECONDS : 0);
+        return (int) config('session.lifetime') * 60 + self::TTL_MARGIN_SECONDS + ($remembered ? self::REMEMBERED_EXTRA_SECONDS : 0);
     }
 
     private function userKey(User $user): string
@@ -262,6 +318,11 @@ final class SessionRegistry
     private function metaKey(string $sessionId): string
     {
         return 'sess:meta:'.$sessionId;
+    }
+
+    private function revokedKey(string $sessionId): string
+    {
+        return 'sess:revoked:'.$sessionId;
     }
 
     private function handler(): SessionHandlerInterface

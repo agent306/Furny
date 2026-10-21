@@ -5,18 +5,44 @@ declare(strict_types=1);
 use App\Domain\Identity\Models\User;
 use App\Support\Auth\SessionKey;
 use App\Support\Auth\SessionRegistry;
+use Illuminate\Auth\Events\Login;
+use Illuminate\Cookie\CookieValuePrefix;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Str;
 use Spatie\Activitylog\Models\Activity;
 use Tests\Support\SessionStamp;
 
+/**
+ * The ids of the sessions these tests opened, for the cleanup of their registry and tombstone keys.
+ *
+ * @return list<string>
+ */
+function openedSessionIds(?string $add = null, bool $forget = false): array
+{
+    static $ids = [];
+
+    if ($add !== null) {
+        $ids[] = $add;
+    }
+
+    $all = $ids;
+
+    if ($forget) {
+        $ids = [];
+    }
+
+    return $all;
+}
+
 /** Opens a session for `$user` in the handler and the registry and returns its id. */
 function openSessionFor(User $user, string $ip = '203.0.113.45'): string
 {
     $id = Str::random(40);
+    openedSessionIds($id);
     Session::getHandler()->write($id, '[]');
     app(SessionRegistry::class)->register($user, $id, Request::create('/', server: ['REMOTE_ADDR' => $ip, 'HTTP_USER_AGENT' => 'Mozilla/5.0 (X11; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0']), 'password', false);
 
@@ -50,6 +76,10 @@ beforeEach(function (): void {
 
 afterEach(function (): void {
     forgetRegistryOf($this->user, ...($this->others ?? []));
+
+    foreach (openedSessionIds(forget: true) as $id) {
+        Redis::connection('sessions')->del('sess:meta:'.$id, 'sess:revoked:'.$id);
+    }
 });
 
 it('keeps the remember cookie of the web guard for 14 days (13 section 6.1)', function (): void {
@@ -129,24 +159,39 @@ describe('account.sessions.destroy-others', function (): void {
         expect(session('inertia.clear_history'))->toBeTrue();
     });
 
-    it('gives a browser that came in on the remember cookie the rotated token back', function (): void {
+    it('gives a browser that carries the remember cookie the rotated token, without signing in again', function (): void {
+        Event::fake([Login::class]);
         openSessionFor($this->user, '198.51.100.7');
         $this->user->forceFill(['remember_token' => 'old-token'])->save();
-        $recaller = $this->user->getKey().'|old-token|'.$this->user->getAuthPassword();
+        $name = Auth::guard('web')->getRecallerName();
 
-        $response = $this->withCookie(Auth::guard('web')->getRecallerName(), $recaller)
-            ->withSession(SessionStamp::loginHoursAgo(0))
+        $response = ($this->asCurrent)()
+            ->withCookie($name, $this->user->getKey().'|old-token|'.Auth::guard('web')->hashPasswordForCookie($this->user->getAuthPassword()))
             ->delete(route('account.sessions.destroy-others'));
 
-        $cookie = collect($response->headers->getCookies())->first(fn ($cookie): bool => $cookie->getName() === Auth::guard('web')->getRecallerName());
-
-        expect($cookie)->not->toBeNull()
-            ->and($cookie->getExpiresTime())->toBeBetween(now()->addMinutes(20159)->getTimestamp(), now()->addMinutes(20161)->getTimestamp());
-
+        $cookie = collect($response->headers->getCookies())->first(fn ($cookie): bool => $cookie->getName() === $name);
         $token = $this->user->fresh()->remember_token;
 
-        expect($token)->not->toBe('old-token')
-            ->and(decrypt($cookie->getValue(), false))->toContain('|'.$token.'|');
+        expect($cookie)->not->toBeNull()
+            ->and($cookie->getExpiresTime())->toBeBetween(now()->addMinutes(20159)->getTimestamp(), now()->addMinutes(20161)->getTimestamp())
+            ->and($token)->not->toBe('old-token')
+            ->and(CookieValuePrefix::remove(decrypt($cookie->getValue(), false)))->toBe(
+                $this->user->getKey().'|'.$token.'|'.Auth::guard('web')->hashPasswordForCookie($this->user->getAuthPassword()),
+            )
+            // Still the same session: nothing signed the user in again.
+            ->and(Session::getId())->toBe($this->current)
+            ->and(Session::getHandler()->read($this->current))->not->toBe('');
+
+        Event::assertNotDispatched(Login::class);
+    });
+
+    it('queues no remember cookie for a browser that has none', function (): void {
+        openSessionFor($this->user, '198.51.100.7');
+
+        $response = ($this->asCurrent)()->delete(route('account.sessions.destroy-others'));
+
+        expect(collect($response->headers->getCookies())->map(fn ($cookie): string => $cookie->getName())->all())
+            ->not->toContain(Auth::guard('web')->getRecallerName());
     });
 
     it('is for signed-in users only', function (): void {
@@ -169,6 +214,20 @@ describe('account.sessions.destroy', function (): void {
         $activity = Activity::query()->where('event', 'auth.sessions_revoked')->sole();
 
         expect($activity->properties->all())->toBe(['count' => 1, 'reason' => 'signed_out_device']);
+    });
+
+    it('flashes success and writes no audit entry for an entry that was already dead', function (): void {
+        $dead = openSessionFor($this->user, '198.51.100.7');
+        Session::getHandler()->destroy($dead);
+
+        ($this->asCurrent)()
+            ->from('/dashboard')
+            ->delete(route('account.sessions.destroy', SessionKey::for($dead)))
+            ->assertRedirect('/dashboard')
+            ->assertInertiaFlash('success', trans_icu('account.toasts.session_revoked'));
+
+        expect(Activity::query()->where('event', 'auth.sessions_revoked')->count())->toBe(0)
+            ->and(app(SessionRegistry::class)->list($this->user, $this->current))->toHaveCount(1);
     });
 
     it('needs no recent sign-in', function (): void {

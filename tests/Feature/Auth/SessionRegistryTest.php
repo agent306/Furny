@@ -61,9 +61,10 @@ function registerSession(object $test, string $ip = '203.0.113.45', string $user
     return $id;
 }
 
-it('uses a Redis connection of its own that the test environment points at the test database', function (): void {
-    expect(config('database.redis.sessions.database'))->toBe('15')
-        ->and(config('session.connection'))->toBe('sessions');
+it('keeps its keys in a Redis database that is neither the cache nor the default one', function (): void {
+    expect(config('session.connection'))->toBe('sessions')
+        ->and(config('database.redis.sessions.database'))->not->toBe(config('database.redis.cache.database'))
+        ->and(config('database.redis.sessions.database'))->not->toBe(config('database.redis.default.database'));
 });
 
 it('lists the registered sessions with masked address, device summary and the current one flagged', function (): void {
@@ -111,13 +112,46 @@ it('lists the most recently active session first', function (): void {
     expect($keys)->toBe([SessionKey::for($newer), SessionKey::for($older)]);
 });
 
-it('stores the meta with a time to live of the session lifetime, and 14 days more when remembered', function (): void {
+it('stores the meta with a time to live of the session lifetime plus a margin, and 14 days more when remembered', function (): void {
     $plain = registerSession($this);
     $remembered = registerSession($this, remembered: true);
-    $lifetime = (int) config('session.lifetime') * 60;
+    $lifetime = (int) config('session.lifetime') * 60 + SessionRegistry::TOUCH_INTERVAL_SECONDS;
 
     expect(sessionsRedis()->ttl('sess:meta:'.$plain))->toBeBetween($lifetime - 5, $lifetime)
         ->and(sessionsRedis()->ttl('sess:meta:'.$remembered))->toBeBetween($lifetime + 14 * 86400 - 5, $lifetime + 14 * 86400);
+});
+
+it('lets the meta outlive the session by at least the touch throttle', function (): void {
+    $id = registerSession($this);
+
+    expect(sessionsRedis()->ttl('sess:meta:'.$id))->toBeGreaterThanOrEqual((int) config('session.lifetime') * 60 + SessionRegistry::TOUCH_INTERVAL_SECONDS - 5);
+});
+
+it('never shortens the time to live of the user\'s list of sessions', function (): void {
+    $key = 'sess:user:'.$this->user->getKey();
+    registerSession($this, remembered: true);
+    $remembered = sessionsRedis()->ttl($key);
+
+    registerSession($this);
+    $id = registerSession($this, '198.51.100.7');
+    CarbonImmutable::setTestNow(CarbonImmutable::now()->addMinutes(5));
+    $this->registry->touch($id);
+
+    expect($remembered)->toBeGreaterThan(14 * 86400)
+        ->and(sessionsRedis()->ttl($key))->toBeGreaterThanOrEqual($remembered - 5);
+});
+
+it('removes the sessions that cannot be alive any more when it registers a new one', function (): void {
+    CarbonImmutable::setTestNow('2026-10-20 10:00:00');
+    $old = registerSession($this);
+    $metaOfOld = 'sess:meta:'.$old;
+
+    CarbonImmutable::setTestNow('2026-10-20 12:05:00');
+    $new = registerSession($this, '198.51.100.7');
+
+    expect(sessionsRedis()->zscore('sess:user:'.$this->user->getKey(), $old))->toBeFalsy()
+        ->and(sessionsRedis()->zscore('sess:user:'.$this->user->getKey(), $new))->toBeTruthy()
+        ->and(sessionsRedis()->exists($metaOfOld))->toBe(0);
 });
 
 it('drops the entry of a session that was destroyed in the handler', function (): void {
@@ -275,4 +309,77 @@ it('registers a session the first time it tracks it and only touches it afterwar
     expect($meta)->toMatchArray(['ip_masked' => '203.0.113.0', 'ua_summary' => 'Chrome on Windows', 'method' => 'google'])
         ->and((int) $meta['last_active_at'])->toBe(CarbonImmutable::now()->getTimestamp())
         ->and((int) $meta['created_at'])->toBe(CarbonImmutable::now()->subMinutes(5)->getTimestamp());
+});
+
+it('leaves a tombstone for a revoked session, as long as its payload could live', function (): void {
+    $kept = registerSession($this);
+    $target = registerSession($this, '198.51.100.7');
+
+    $this->registry->destroy($this->user, SessionKey::for($target));
+
+    expect($this->registry->isRevoked($target))->toBeTrue()
+        ->and($this->registry->isRevoked($kept))->toBeFalse()
+        ->and(sessionsRedis()->ttl('sess:revoked:'.$target))->toBeGreaterThanOrEqual((int) config('session.lifetime') * 60);
+
+    sessionsRedis()->del('sess:revoked:'.$target);
+});
+
+it('leaves tombstones for the sessions destroyOthers and destroyAll close', function (): void {
+    $current = registerSession($this);
+    $other = registerSession($this, '198.51.100.7');
+
+    $this->registry->destroyOthers($this->user, $current);
+    expect($this->registry->isRevoked($other))->toBeTrue()->and($this->registry->isRevoked($current))->toBeFalse();
+
+    $this->registry->destroyAll($this->user);
+    expect($this->registry->isRevoked($current))->toBeTrue();
+
+    sessionsRedis()->del('sess:revoked:'.$other, 'sess:revoked:'.$current);
+});
+
+it('does not register a revoked session again when it is tracked', function (): void {
+    $id = registerSession($this);
+    $this->registry->destroyAll($this->user);
+
+    $this->registry->track($this->user, $id, registryRequest(), 'password', false);
+
+    expect(sessionsRedis()->exists('sess:meta:'.$id))->toBe(0)
+        ->and(sessionsRedis()->exists('sess:user:'.$this->user->getKey()))->toBe(0);
+
+    sessionsRedis()->del('sess:revoked:'.$id);
+});
+
+it('does not bring back the meta of a session that is revoked while it is touched', function (): void {
+    CarbonImmutable::setTestNow('2026-10-20 10:00:00');
+    $id = registerSession($this);
+    sessionsRedis()->del('sess:meta:'.$id);
+
+    CarbonImmutable::setTestNow('2026-10-20 10:10:00');
+    $this->registry->touch($id);
+
+    expect(sessionsRedis()->exists('sess:meta:'.$id))->toBe(0);
+});
+
+it('reports how many sessions closing a device really closed', function (): void {
+    $live = registerSession($this);
+    $dead = registerSession($this, '198.51.100.7');
+    Session::getHandler()->destroy($dead);
+
+    expect($this->registry->destroyDevice($this->user, SessionKey::for($dead)))->toBe(0)
+        ->and($this->registry->destroyDevice($this->user, SessionKey::for($live)))->toBe(1)
+        ->and($this->registry->destroyDevice($this->user, SessionKey::for($live)))->toBeNull();
+
+    sessionsRedis()->del('sess:revoked:'.$dead, 'sess:revoked:'.$live);
+});
+
+it('rotates the remember token without firing model events', function (): void {
+    $current = registerSession($this);
+    $fired = false;
+    User::updated(function () use (&$fired): void {
+        $fired = true;
+    });
+
+    $this->registry->destroyOthers($this->user, $current);
+
+    expect($fired)->toBeFalse();
 });

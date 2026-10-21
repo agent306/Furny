@@ -21,6 +21,7 @@ return [
 
     // Access middleware (13 §1): shown once on the login page or the enrolment page.
     'inactive' => 'This account is not active. Contact us if you think this is a mistake.',
+    'session_revoked' => 'You were signed out of this device. Please sign in again.',
     'session_expired' => 'Your session has expired. Please sign in again.',
     '2fa_required' => 'Set up two-factor authentication to use the admin area.',
 

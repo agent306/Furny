@@ -17,7 +17,7 @@ use Inertia\Inertia;
  */
 final class ForcedLogout
 {
-    /** @param  string  $reason  `inactive` or `session_expired`: the `auth.{reason}` message and the JSON `code` */
+    /** @param  string  $reason  `inactive`, `session_expired` or `session_revoked`: the `auth.{reason}` message and the JSON `code` */
     public static function toLogin(Request $request, string $reason): RedirectResponse|JsonResponse
     {
         Auth::guard()->logout();

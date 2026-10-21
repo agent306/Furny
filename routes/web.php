@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Http\Controllers\Auth\SessionController;
+use App\Http\Controllers\Account\SessionController;
 use App\Http\Controllers\CspReportController;
 use App\Http\Controllers\LegalController;
 use App\Http\Controllers\ManifestController;

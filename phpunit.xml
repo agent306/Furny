@@ -42,7 +42,9 @@
         <env name="NIGHTWATCH_ENABLED" value="false"/>
         <env name="REDIS_DB" value="14"/>
         <env name="REDIS_CACHE_DB" value="15"/>
-        <env name="REDIS_SESSION_DB" value="15"/>
+        <!-- Its own database: not the default (14) nor the cache (15), so nothing that flushes one of those removes the
+             session registry keys of a test that is running. The registry tests need a real Redis (13 6.3). -->
+        <env name="REDIS_SESSION_DB" value="13"/>
         <env name="VISION_SERVICE_URL" value="http://vision.test"/>
         <env name="VISION_SERVICE_TOKEN" value="test-vision-token-0123456789abcdef0123"/>
         <env name="GOTENBERG_URL" value="http://gotenberg.test"/>
