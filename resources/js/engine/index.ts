@@ -288,3 +288,24 @@ export type {
 export { buildHitIndex } from './plan/hitIndex';
 export type { Hit, HitIndex, HitKind, HitLayerMask } from './plan/hitIndex';
 export { hitTest, hitTestRect } from './plan/hitTest';
+export {
+    createCommandBus,
+    defaultPipeline,
+    shouldAutoFreeze,
+} from './commands/bus';
+export { CommandAbort, CommandFailedError } from './commands/types';
+export type {
+    AnyCommandDef,
+    BusEvent,
+    CommandBus,
+    CommandBusConfig,
+    CommandDef,
+    CommandOutput,
+    ExecuteOptions,
+    ExecuteResult,
+    HistoryEntry,
+    ParamsOf,
+    Pipeline,
+    PipelineOutput,
+    ResultOf,
+} from './commands/types';
