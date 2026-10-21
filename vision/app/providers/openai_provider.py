@@ -14,7 +14,6 @@ import openai
 
 from app.config import Settings
 from app.providers import registry
-from app.providers.anthropic_provider import _new_images
 from app.providers.base import (
     AssistantMessage,
     Effort,
@@ -30,6 +29,7 @@ from app.providers.base import (
     UsageCall,
     UsagePurpose,
     UserMessage,
+    new_images,
 )
 from app.providers.errors import (
     ProviderAuthError,
@@ -230,7 +230,7 @@ class OpenAIProvider(LLMProvider):
         started = time.perf_counter()
         try:
             resp = self._request(kwargs, self._timeout(timeout_s))
-            return self._parse(resp, purpose, _new_images(conversation), started)
+            return self._parse(resp, purpose, new_images(conversation), started)
         except ProviderError as err:
             registry.record_provider_error(self.name, err.code)
             raise

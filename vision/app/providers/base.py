@@ -29,6 +29,7 @@ __all__ = [
     "UsageCall",
     "UsagePurpose",
     "UserMessage",
+    "new_images",
 ]
 
 UsagePurpose = Literal["labeling", "agent_turn", "finalize", "repair", "dxf_layers", "provider_test"]
@@ -145,3 +146,15 @@ class LLMProvider(ABC):
         timeout_s: float,
         purpose: str,
     ) -> TurnResult: ...
+
+
+def new_images(conversation: list[Message]) -> int:
+    """Images in the newest message (overview images or the latest tool results)."""
+    if not conversation:
+        return 0
+    last = conversation[-1]
+    if isinstance(last, UserMessage):
+        return sum(isinstance(p, ImagePart) for p in last.parts)
+    if isinstance(last, ToolResultsMessage):
+        return sum(isinstance(p, ImagePart) for r in last.results for p in r.content)
+    return 0

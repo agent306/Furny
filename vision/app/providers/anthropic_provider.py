@@ -23,12 +23,12 @@ from app.providers.base import (
     Message,
     Part,
     ToolCall,
-    ToolResultsMessage,
     ToolSpec,
     TurnResult,
     UsageCall,
     UsagePurpose,
     UserMessage,
+    new_images,
 )
 from app.providers.errors import (
     ProviderAuthError,
@@ -95,18 +95,6 @@ def to_anthropic_messages(conversation: list[Message]) -> list[dict[str, Any]]:
         else:
             out.append({"role": "user", "content": blocks})
     return out
-
-
-def _new_images(conversation: list[Message]) -> int:
-    """Images in the newest message (overview images or the latest tool results)."""
-    if not conversation:
-        return 0
-    last = conversation[-1]
-    if isinstance(last, UserMessage):
-        return sum(isinstance(p, ImagePart) for p in last.parts)
-    if isinstance(last, ToolResultsMessage):
-        return sum(isinstance(p, ImagePart) for r in last.results for p in r.content)
-    return 0
 
 
 def _map_error(exc: anthropic.APIError) -> ProviderError:
@@ -195,7 +183,7 @@ class AnthropicProvider(LLMProvider):
         started = time.perf_counter()
         try:
             msg = self._request(params, timeout)
-            return self._parse(msg, purpose, _new_images(conversation), started)
+            return self._parse(msg, purpose, new_images(conversation), started)
         except ProviderError as err:
             registry.record_provider_error(self.name, err.code)
             raise
