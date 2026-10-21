@@ -317,6 +317,32 @@ def test_sentry_only_initialised_with_dsn(
     assert calls[0]["dsn"] == "https://key@example.invalid/1"
     assert calls[0]["send_default_pii"] is False
     assert calls[0]["max_request_body_size"] == "never"
+    assert calls[0]["include_local_variables"] is False
+
+
+def test_sentry_before_send_scrubs_secrets_and_presigned_urls(
+    make_client: Callable[..., TestClient], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sentry_sdk
+
+    secret = "sk-test-0123456789abcdef"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", secret)
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(sentry_sdk, "init", lambda **kw: calls.append(kw))
+    make_client(sentry_dsn="https://key@example.invalid/1")
+    url = "https://bucket.s3.example/plan.png?X-Amz-Signature=abc123&X-Amz-Credential=cred"
+    event = {
+        "message": f"fetch failed: {url}",
+        "exception": {"values": [{"type": "HTTPStatusError", "value": f"404 for url '{url}' key={secret}"}]},
+        "request": {"url": "http://vision/v1/recognize", "data": {"sourceUrl": url}},
+        "extra": {"n": 3},
+    }
+    scrubbed = calls[0]["before_send"](event, {})
+    dumped = json.dumps(scrubbed)
+    assert "X-Amz" not in dumped and "abc123" not in dumped and secret not in dumped
+    assert "[REDACTED]" in scrubbed["exception"]["values"][0]["value"]
+    assert scrubbed["extra"] == {"n": 3}
+    assert scrubbed["request"]["url"] == "http://vision/v1/recognize"
 
 
 def test_module_app_is_lazy(monkeypatch: pytest.MonkeyPatch) -> None:

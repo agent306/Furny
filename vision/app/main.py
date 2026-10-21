@@ -18,7 +18,7 @@ from app import __version__
 from app.api import health
 from app.api.errors import install_exception_handlers, unexpected_error_response
 from app.config import Settings, get_settings
-from app.logging import configure_logging, request_id_var
+from app.logging import RedactionFilter, configure_logging, request_id_var
 
 logger = logging.getLogger("furny.vision.app")
 access_logger = logging.getLogger("furny.vision.access")
@@ -80,12 +80,20 @@ def _init_sentry(settings: Settings) -> None:
         return
     import sentry_sdk
 
-    # No request bodies: they carry presigned URLs (06 §5.3).
+    redactor = RedactionFilter()
+
+    def scrub(event: Any, _hint: Any) -> Any:
+        # Exception messages (e.g. an httpx error with the full URL) can carry secrets or presigned URLs.
+        return redactor.redact_value(event)
+
+    # No request bodies and no frame locals: they carry presigned URLs (06 §5.3).
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
         release=__version__,
         send_default_pii=False,
         max_request_body_size="never",
+        include_local_variables=False,
+        before_send=scrub,
     )
 
 
