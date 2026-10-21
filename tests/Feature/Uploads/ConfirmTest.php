@@ -138,7 +138,14 @@ describe('api.uploads.show', function (): void {
 
         $this->actingAs($user)->getJson(route('api.uploads.show', $intent))
             ->assertOk()
-            ->assertExactJson(['status' => 'pending', 'reasonCode' => null, 'previewUrl' => null]);
+            ->assertExactJson(['uploadId' => $intent->id, 'status' => 'pending', 'reasonCode' => null, 'previewUrl' => null, 'width' => null, 'height' => null]);
+    });
+
+    it('reports an uploaded file as processing', function (): void {
+        $user = User::factory()->create();
+        $intent = UploadIntent::factory()->for($user)->uploaded()->create();
+
+        $this->actingAs($user)->getJson(route('api.uploads.show', $intent))->assertOk()->assertJsonPath('status', 'processing');
     });
 
     it('reports the reason of a rejection', function (): void {
@@ -147,7 +154,7 @@ describe('api.uploads.show', function (): void {
 
         $this->actingAs($user)->getJson(route('api.uploads.show', $intent))
             ->assertOk()
-            ->assertExactJson(['status' => 'rejected', 'reasonCode' => 'upload_type_mismatch', 'previewUrl' => null]);
+            ->assertExactJson(['uploadId' => $intent->id, 'status' => 'rejected', 'reasonCode' => 'upload_type_mismatch', 'previewUrl' => null, 'width' => null, 'height' => null]);
     });
 
     it('gives a ready image a preview URL that expires in 15 minutes', function (): void {
@@ -160,9 +167,12 @@ describe('api.uploads.show', function (): void {
         $this->actingAs($user)->getJson(route('api.uploads.show', $intent))
             ->assertOk()
             ->assertExactJson([
+                'uploadId' => $intent->id,
                 'status' => 'ready',
                 'reasonCode' => null,
                 'previewUrl' => 'https://s3.test/'.$intent->processed_key.'?until='.now()->addMinutes(15)->getTimestamp(),
+                'width' => 800,
+                'height' => 600,
             ]);
     });
 

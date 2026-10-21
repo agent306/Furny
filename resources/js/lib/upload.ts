@@ -68,13 +68,18 @@ function xsrfToken(): string {
         : decodeURIComponent(cookie.slice('XSRF-TOKEN='.length));
 }
 
-async function api(url: string, body?: unknown): Promise<unknown> {
+async function api(
+    url: string,
+    signal: AbortSignal,
+    body?: unknown,
+): Promise<unknown> {
     let response: Response;
 
     try {
         response = await fetch(url, {
             method: body === undefined ? 'GET' : 'POST',
             credentials: 'same-origin',
+            signal,
             headers: {
                 Accept: 'application/json',
                 'X-Requested-With': 'XMLHttpRequest',
@@ -86,7 +91,7 @@ async function api(url: string, body?: unknown): Promise<unknown> {
             body: body === undefined ? undefined : JSON.stringify(body),
         });
     } catch {
-        throw new UploadError('network');
+        throw new UploadError(signal.aborted ? 'aborted' : 'network');
     }
 
     const json: unknown = await response.json().catch(() => ({}));
@@ -112,6 +117,12 @@ function put(
     signal: AbortSignal,
 ): Promise<void> {
     return new Promise((resolve, reject) => {
+        if (signal.aborted) {
+            reject(new UploadError('aborted'));
+
+            return;
+        }
+
         const xhr = new XMLHttpRequest();
         const stop = (): void => xhr.abort();
 
@@ -149,6 +160,12 @@ function put(
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
+        if (signal.aborted) {
+            reject(new UploadError('aborted'));
+
+            return;
+        }
+
         const timer = setTimeout(() => {
             signal.removeEventListener('abort', onAbort);
             resolve();
@@ -178,25 +195,24 @@ export async function uploadWithIntent(
     }
 
     const mime = mimeOf(file);
-    const intent = (await api(presign.url(), {
+    const intent = (await api(presign.url(), signal, {
         purpose,
         filename: file.name,
         size: file.size,
         contentType: mime,
         target,
-    })) as { uploadId: string; url: string; headers: Record<string, string> };
+    })) as App.Domain.Shared.Data.UploadPresignData;
 
     await put(intent.url, intent.headers, file, onProgress, signal);
-    await api(confirm.url(intent.uploadId), {});
+    await api(confirm.url(intent.uploadId), signal, {});
 
     const started = Date.now();
 
     for (;;) {
-        const status = (await api(show.url(intent.uploadId))) as {
-            status: string;
-            reasonCode: string | null;
-            previewUrl: string | null;
-        };
+        const status = (await api(
+            show.url(intent.uploadId),
+            signal,
+        )) as App.Domain.Shared.Data.UploadIntentStatusData;
 
         if (status.status === 'ready') {
             return {

@@ -6,6 +6,7 @@ namespace App\Domain\Shared\Actions;
 
 use App\Domain\Identity\Models\User;
 use App\Domain\Shared\Data\PresignUploadData;
+use App\Domain\Shared\Data\UploadPresignData;
 use App\Domain\Shared\Enums\UploadPurpose;
 use App\Domain\Shared\Enums\UploadStatus;
 use App\Domain\Shared\Models\UploadIntent;
@@ -31,13 +32,11 @@ final class CreateUploadIntent
     public function __construct(private readonly UploadPresigner $presigner) {}
 
     /**
-     * @return array{uploadId: string, url: string, headers: array<string, string>}
-     *
      * @throws AuthorizationException 403, or 404 where the policy hides the target
      * @throws ModelNotFoundException the target does not exist
      * @throws CodedValidationException `invalid_target`, `upload_type_not_allowed`, `unsupported_type`, `dwg_not_supported`, `file_too_large`
      */
-    public function handle(User $user, PresignUploadData $data): array
+    public function handle(User $user, PresignUploadData $data): UploadPresignData
     {
         $purpose = $data->purpose;
         $target = $this->target($purpose, $data);
@@ -70,7 +69,7 @@ final class CreateUploadIntent
         $intent->id = $id;
         $intent->save();
 
-        return ['uploadId' => $id, 'url' => $presigned->url, 'headers' => $presigned->headers];
+        return new UploadPresignData($id, $presigned->url, $presigned->headers, $expiresAt->toIso8601String());
     }
 
     /**

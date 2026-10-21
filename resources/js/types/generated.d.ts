@@ -185,9 +185,18 @@ contentType: string,
 target: App.Domain.Shared.Data.PresignTargetData | null,
 };
 export type UploadIntentStatusData = {
-status: App.Domain.Shared.Enums.UploadStatus,
+uploadId: string,
+status: 'pending' | 'processing' | 'ready' | 'rejected' | 'consumed' | 'expired',
 reasonCode: string | null,
 previewUrl: string | null,
+width: number | null,
+height: number | null,
+};
+export type UploadPresignData = {
+uploadId: string,
+url: string,
+headers: Record<string, string>,
+expiresAt: string,
 };
 }
 namespace Enums {

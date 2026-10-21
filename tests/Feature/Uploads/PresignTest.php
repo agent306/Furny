@@ -48,11 +48,12 @@ it('presigns an avatar upload and records a pending intent', function (): void {
     $response = presign($user, presignBody(filename: 'My Face.PNG'));
     $intent = UploadIntent::query()->sole();
 
-    $response->assertOk()
+    $response->assertCreated()
         ->assertExactJson([
             'uploadId' => $intent->id,
             'url' => FakeUploadPresigner::HOST.'/'.$intent->object_key.'?op=put&expires='.CarbonImmutable::parse('2030-06-15 12:15:00', 'UTC')->getTimestamp(),
             'headers' => ['Content-Type' => 'image/png', 'Content-Length' => '1048576'],
+            'expiresAt' => '2030-06-15T12:15:00+00:00',
         ]);
 
     expect($intent->user_id)->toBe($user->id)
@@ -90,7 +91,7 @@ it('refuses a type outside the purpose allowlist', function (string $contentType
 })->with(['image/svg+xml', 'image/gif', 'application/pdf', 'text/html', 'application/octet-stream', 'IMAGE/PNG; charset=binary']);
 
 it('accepts the declared type whatever its case', function (): void {
-    presign(User::factory()->create(), presignBody(contentType: 'Image/PNG'))->assertOk();
+    presign(User::factory()->create(), presignBody(contentType: 'Image/PNG'))->assertCreated();
 
     expect(UploadIntent::query()->sole()->declared_mime)->toBe('image/png');
 });
@@ -104,7 +105,7 @@ it('refuses an empty file and a file over the limit of the purpose', function (i
 })->with([0, -1, 5 * PRESIGN_MB + 1]);
 
 it('accepts a file of exactly the limit', function (): void {
-    presign(User::factory()->create(), presignBody(size: 5 * PRESIGN_MB))->assertOk()
+    presign(User::factory()->create(), presignBody(size: 5 * PRESIGN_MB))->assertCreated()
         ->assertJsonPath('headers.Content-Length', (string) (5 * PRESIGN_MB));
 });
 
@@ -146,7 +147,7 @@ describe('blueprint_source', function (): void {
         $response = presign($this->customer, presignBody(UploadPurpose::BlueprintSource, $filename, $contentType, PRESIGN_MB, $this->project));
 
         if ($code === null) {
-            $response->assertOk();
+            $response->assertCreated();
         } else {
             $response->assertUnprocessable()->assertJsonPath('code', $code);
         }
@@ -170,7 +171,7 @@ describe('blueprint_source', function (): void {
         $response = presign($this->customer, presignBody(UploadPurpose::BlueprintSource, $filename, $contentType, $size, $this->project));
 
         if ($accepted) {
-            $response->assertOk();
+            $response->assertCreated();
         } else {
             $response->assertUnprocessable()->assertJsonPath('code', 'file_too_large');
         }
@@ -184,7 +185,7 @@ describe('blueprint_source', function (): void {
     ]);
 
     it('stores the project as the target of the intent', function (): void {
-        presign($this->customer, presignBody(UploadPurpose::BlueprintSource, 'plan.pdf', 'application/pdf', PRESIGN_MB, $this->project))->assertOk();
+        presign($this->customer, presignBody(UploadPurpose::BlueprintSource, 'plan.pdf', 'application/pdf', PRESIGN_MB, $this->project))->assertCreated();
 
         $intent = UploadIntent::query()->sole();
         expect($intent->target_type)->toBe('project')->and($intent->target_id)->toBe($this->project->id)
@@ -205,7 +206,7 @@ describe('targets', function (): void {
         $project = Project::factory()->create();
         $user = $actor === 'owner' ? $project->owner : User::factory()->admin()->create();
 
-        presign($user, presignBody(UploadPurpose::ProjectCover, 'cover.webp', 'image/webp', PRESIGN_MB, $project))->assertOk();
+        presign($user, presignBody(UploadPurpose::ProjectCover, 'cover.webp', 'image/webp', PRESIGN_MB, $project))->assertCreated();
     })->with(['owner', 'admin']);
 
     it('answers 404 for a target that does not exist and 422 for a missing or wrong one', function (): void {
@@ -225,7 +226,7 @@ describe('targets', function (): void {
     it('ignores a target on a purpose that has none', function (): void {
         $project = Project::factory()->create();
 
-        presign(User::factory()->create(), presignBody(target: $project))->assertOk();
+        presign(User::factory()->create(), presignBody(target: $project))->assertCreated();
 
         expect(UploadIntent::query()->sole())->target_type->toBeNull()->target_id->toBeNull();
     });
@@ -235,12 +236,12 @@ describe('targets', function (): void {
         $stranger = User::factory()->create();
 
         presign($stranger, presignBody(UploadPurpose::MessageAttachment, 'a.pdf', 'application/pdf', PRESIGN_MB, $order))->assertNotFound();
-        presign($order->customer, presignBody(UploadPurpose::MessageAttachment, 'a.pdf', 'application/pdf', PRESIGN_MB, $order))->assertOk();
+        presign($order->customer, presignBody(UploadPurpose::MessageAttachment, 'a.pdf', 'application/pdf', PRESIGN_MB, $order))->assertCreated();
         presign($order->customer, presignBody(UploadPurpose::ProductionPhoto, 'a.jpg', 'image/jpeg', PRESIGN_MB, $order))->assertForbidden();
-        presign(User::factory()->production()->create(), presignBody(UploadPurpose::ProductionPhoto, 'a.jpg', 'image/jpeg', PRESIGN_MB, $order))->assertOk();
-        presign($order->customer, presignBody(UploadPurpose::IssuePhoto, 'a.heic', 'image/heic', PRESIGN_MB, $order))->assertOk();
+        presign(User::factory()->production()->create(), presignBody(UploadPurpose::ProductionPhoto, 'a.jpg', 'image/jpeg', PRESIGN_MB, $order))->assertCreated();
+        presign($order->customer, presignBody(UploadPurpose::IssuePhoto, 'a.heic', 'image/heic', PRESIGN_MB, $order))->assertCreated();
         presign(User::factory()->production()->create(), presignBody(UploadPurpose::IssuePhoto, 'a.heic', 'image/heic', PRESIGN_MB, $order))->assertForbidden();
-        presign(User::factory()->admin()->create(), presignBody(UploadPurpose::IssuePhoto, 'a.heic', 'image/heic', PRESIGN_MB, $order))->assertOk();
+        presign(User::factory()->admin()->create(), presignBody(UploadPurpose::IssuePhoto, 'a.heic', 'image/heic', PRESIGN_MB, $order))->assertCreated();
     });
 
     it('checks the plan, the furniture design and the project for thumbnails and covers', function (): void {
@@ -248,9 +249,9 @@ describe('targets', function (): void {
         $design = FurnitureDesign::factory()->create();
 
         presign(User::factory()->create(), presignBody(UploadPurpose::PlanThumbnail, 't.png', 'image/png', PRESIGN_MB, $plan))->assertNotFound();
-        presign($plan->project->owner, presignBody(UploadPurpose::PlanThumbnail, 't.png', 'image/png', PRESIGN_MB, $plan))->assertOk();
+        presign($plan->project->owner, presignBody(UploadPurpose::PlanThumbnail, 't.png', 'image/png', PRESIGN_MB, $plan))->assertCreated();
         presign(User::factory()->create(), presignBody(UploadPurpose::FurnitureThumbnail, 't.png', 'image/png', PRESIGN_MB, $design))->assertNotFound();
-        presign($design->project->owner, presignBody(UploadPurpose::FurnitureThumbnail, 't.png', 'image/png', PRESIGN_MB, $design))->assertOk();
+        presign($design->project->owner, presignBody(UploadPurpose::FurnitureThumbnail, 't.png', 'image/png', PRESIGN_MB, $design))->assertCreated();
     });
 });
 
@@ -264,11 +265,11 @@ describe('staff purposes', function (): void {
 
         presign($user, presignBody(UploadPurpose::BusinessLogo, 'logo.png', 'image/png', PRESIGN_MB))->assertStatus($status);
 
-        expect(UploadIntent::query()->count())->toBe($status === 200 ? 1 : 0);
-    })->with([['admin', 200], ['estimator', 403], ['customer', 403]]);
+        expect(UploadIntent::query()->count())->toBe($status === 201 ? 1 : 0);
+    })->with([['admin', 201], ['estimator', 403], ['customer', 403]]);
 
     it('lets the staff with the permission upload catalogue images', function (UploadPurpose $purpose, string $contentType): void {
-        presign(User::factory()->admin()->create(), presignBody($purpose, 'texture.jpg', $contentType, PRESIGN_MB))->assertOk();
+        presign(User::factory()->admin()->create(), presignBody($purpose, 'texture.jpg', $contentType, PRESIGN_MB))->assertCreated();
         presign(User::factory()->estimator()->create(), presignBody($purpose, 'texture.jpg', $contentType, PRESIGN_MB))->assertForbidden();
         presign(User::factory()->create(), presignBody($purpose, 'texture.jpg', $contentType, PRESIGN_MB))->assertForbidden();
     })->with([
@@ -278,7 +279,7 @@ describe('staff purposes', function (): void {
     ]);
 
     it('lets the staff with presets.manage upload a preset thumbnail', function (): void {
-        presign(User::factory()->estimator()->create(), presignBody(UploadPurpose::PresetThumbnail, 't.png', 'image/png', PRESIGN_MB))->assertOk();
+        presign(User::factory()->estimator()->create(), presignBody(UploadPurpose::PresetThumbnail, 't.png', 'image/png', PRESIGN_MB))->assertCreated();
         presign(User::factory()->production()->create(), presignBody(UploadPurpose::PresetThumbnail, 't.png', 'image/png', PRESIGN_MB))->assertForbidden();
     });
 });
@@ -288,17 +289,17 @@ it('limits presigns to 30 a minute per user', function (): void {
     $other = User::factory()->create();
 
     foreach (range(1, 30) as $_) {
-        presign($user, presignBody(size: 1000))->assertOk();
+        presign($user, presignBody(size: 1000))->assertCreated();
     }
 
     presign($user, presignBody(size: 1000))
         ->assertTooManyRequests()
         ->assertJsonPath('code', 'rate_limited')
         ->assertHeader('Retry-After');
-    presign($other, presignBody(size: 1000))->assertOk();
+    presign($other, presignBody(size: 1000))->assertCreated();
 
     expect(UploadIntent::query()->where('user_id', $user->id)->count())->toBe(30);
 
     $this->travel(61)->seconds();
-    presign($user, presignBody(size: 1000))->assertOk();
+    presign($user, presignBody(size: 1000))->assertCreated();
 });

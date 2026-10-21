@@ -12,6 +12,11 @@ import { UploadError } from '@/lib/upload';
 import type { UploadedFileRef } from '@/lib/upload';
 
 const upload = vi.hoisted(() => ({ run: vi.fn() }));
+const compress = vi.hoisted(() => ({ run: vi.fn() }));
+
+vi.mock('@/composables/useImageCompression', () => ({
+    compressImage: compress.run,
+}));
 
 vi.mock('@/lib/upload', async (importOriginal) => {
     const original = await importOriginal<typeof import('@/lib/upload')>();
@@ -59,6 +64,8 @@ function ref(name: string): UploadedFileRef {
 
 beforeEach(() => {
     resetPage();
+    compress.run.mockReset();
+    compress.run.mockImplementation((picked: File) => Promise.resolve(picked));
     upload.run.mockReset();
     upload.run.mockImplementation((picked: File) =>
         Promise.resolve(ref(picked.name)),
@@ -193,4 +200,59 @@ describe('FileDropzone (15 §9.10)', () => {
         });
         expect(upload.run).toHaveBeenCalledTimes(1);
     });
+
+    it('checks the size of a photo after it is shrunk, not before', async () => {
+        const small = file('big.jpg', 'image/jpeg', 500_000);
+        compress.run.mockResolvedValueOnce(small);
+        const wrapper = dropzone({
+            compressImages: true,
+            accept: ['image/jpeg'],
+        });
+
+        await pick(wrapper, [file('big.jpg', 'image/jpeg', 5_000_000)]);
+        await flushPromises();
+
+        expect(wrapper.text()).not.toContain('is larger than');
+        expect(upload.run.mock.calls[0]?.[0]).toBe(small);
+    });
+
+    it('refuses a photo that is still too large after it is shrunk', async () => {
+        const wrapper = dropzone({
+            compressImages: true,
+            accept: ['image/jpeg'],
+        });
+
+        await pick(wrapper, [file('big.jpg', 'image/jpeg', 5_000_000)]);
+        await flushPromises();
+
+        expect(wrapper.text()).toContain('larger than the limit of 1 MB');
+        expect(upload.run).not.toHaveBeenCalled();
+    });
+
+    it('still refuses a large file that is not a photo before anything happens', async () => {
+        const wrapper = dropzone({ compressImages: true });
+
+        await pick(wrapper, [file('big.pdf', 'application/pdf', 5_000_000)]);
+
+        expect(wrapper.text()).toContain('big.pdf is larger than 1 MB.');
+        expect(compress.run).not.toHaveBeenCalled();
+    });
+
+    it.each(['list', 'grid'] as const)(
+        'keeps every control at least 44 px (%s layout)',
+        async (layout) => {
+            upload.run.mockRejectedValueOnce(new UploadError('network'));
+            const wrapper = dropzone({ layout });
+
+            await pick(wrapper, [file('a.png', 'image/png')]);
+            await flushPromises();
+
+            expect(
+                wrapper.get('button[aria-label="Remove a.png"]').classes(),
+            ).toContain('size-11');
+            expect(
+                wrapper.get('[data-slot="upload-retry"]').classes().join(' '),
+            ).toMatch(/size-11|h-11/);
+        },
+    );
 });

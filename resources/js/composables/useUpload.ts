@@ -35,6 +35,7 @@ export function useUpload(options: {
     purpose: () => UploadPurpose;
     target: () => UploadTarget;
     compress: () => boolean;
+    maxSizeBytes: () => number;
 }) {
     const items = ref<UploadItem[]>([]);
     const controllers = new Map<number, AbortController>();
@@ -67,6 +68,14 @@ export function useUpload(options: {
             const file = options.compress()
                 ? await compressImage(item.file)
                 : item.file;
+
+            // The size that counts is the one that is sent (15 §9.10): a photo may be over the limit until it is shrunk.
+            if (file.size > options.maxSizeBytes()) {
+                item.status = 'error';
+                item.error = { code: 'file_too_large', message: null };
+
+                return;
+            }
 
             item.status = 'uploading';
             item.ref = await uploadWithIntent(

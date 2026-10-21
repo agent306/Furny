@@ -161,6 +161,36 @@ it('answers 404 for something that is not a media id', function (): void {
     $this->actingAs(User::factory()->create())->get('/media/not-a-uuid')->assertNotFound();
 });
 
+it('hands a DXF over as an attachment although its type starts with image/', function (): void {
+    $import = BlueprintImport::factory()->create();
+    $media = attach($import, 'source', 'plan.dxf');
+    $media->forceFill(['mime_type' => 'image/vnd.dxf'])->save();
+
+    $response = openMedia($media, $import->project->owner)->assertRedirect();
+
+    expect(signedOptions($response))->toMatchArray([
+        'ResponseContentDisposition' => 'attachment; filename="plan.dxf"',
+        'ResponseContentType' => 'image/vnd.dxf',
+    ]);
+});
+
+it('serves only JPEG, PNG and WebP inline', function (string $mime, bool $inline): void {
+    $plan = Plan::factory()->withThumbnail()->create();
+    $media = $plan->getFirstMedia('thumbnail');
+    $media->forceFill(['mime_type' => $mime])->save();
+
+    $options = signedOptions(openMedia($media, $plan->project->owner));
+
+    expect(array_key_exists('ResponseContentDisposition', $options))->toBe(! $inline);
+})->with([['image/jpeg', true], ['image/png', true], ['image/webp', true], ['image/heic', false], ['image/svg+xml', false], ['application/pdf', false]]);
+
+it('refuses a conversion that is not one of the known names', function (string $conversion): void {
+    $order = Order::factory()->inState(Submitted::class)->create();
+    $media = attach(ProductionUpdate::factory()->for($order)->create(), 'photos');
+
+    openMedia($media, $order->customer, '?conversion='.$conversion)->assertUnprocessable();
+})->with(['nope', '../thumb', 'THUMB']);
+
 it('serves a conversion that exists and the file itself otherwise', function (): void {
     $order = Order::factory()->inState(Submitted::class)->create();
     $media = attach(ProductionUpdate::factory()->for($order)->create(), 'photos');
@@ -168,5 +198,5 @@ it('serves a conversion that exists and the file itself otherwise', function ():
 
     expect(openMedia($media, $order->customer, '?conversion=thumb')->headers->get('Location'))->toContain('conversions/')
         ->and(openMedia($media, $order->customer, '?conversion=large')->headers->get('Location'))->not->toContain('conversions/')
-        ->and(openMedia($media, $order->customer, '?conversion=nope')->headers->get('Location'))->not->toContain('conversions/');
+        ->and(openMedia($media, $order->customer, '?conversion=small')->headers->get('Location'))->not->toContain('conversions/');
 });

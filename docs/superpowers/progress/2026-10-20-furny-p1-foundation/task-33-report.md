@@ -63,3 +63,28 @@ GREEN:
 - `MediaAccess` loads the record's order with a query per request (one extra query); fine for a redirect endpoint.
 - The Task 32 concern still stands: the `S3UploadPresigner` signed `Content-Length` has not been tried against real R2.
 - The full vitest run is sensitive to machine load (two scanning tests time out when pest runs at the same time); not changed.
+
+## Fix round 1
+
+Review finding 1 and controller rulings 2 to 7. One commit on top of 85e3734.
+
+### Changes
+1. **Touch targets (15 §9, rule 6).** Every control of the media components is 44 px: remove buttons `size="icon-lg"` (`size-11`) in both layouts, Retry `size="lg"` (`h-11`) in the list and an `icon-lg` rotate icon (with an sr-only label) in the grid, "Take photo" `size="lg"`, `AttachmentList` chips `min-h-11`. Fixed sizes, not `useControlSize`, because that gives `h-9` in compact admin density. Tests: "keeps every control at least 44 px (list / grid layout)" and the chip class in `AttachmentList.test.ts`.
+2. **Presign is 201 `UploadPresignData {uploadId, url, headers, expiresAt}`** (new `#[TypeScript]` Data, `expiresAt` ISO 8601 from `CreateUploadIntent`, which now returns the Data; controller answers 201). `PresignTest` moved to `assertCreated` and the exact body with `expiresAt`.
+3. **`UploadIntentStatusData {uploadId, status, reasonCode, previewUrl, width, height}`**, DB `uploaded` reported as `processing`; `status` is the string union of 14 §18.1 (`LiteralTypeScriptType`, so the TS type is `'pending' | 'processing' | ...`). `ConfirmTest`: exact shapes, plus "reports an uploaded file as processing". `upload.test.ts` uses the C10 shapes (201 presign with `expiresAt`, `processing` polls with `uploadId/width/height`); `upload.ts` types the answers with the generated types. Types regenerated and committed.
+4. **Size after compression.** `FileDropzone` no longer refuses an image over the limit when `compressImages` is on; `useUpload.run` checks the compressed file and fails the item with `file_too_large` (shown with the limit). Non-image files are still refused up front. Tests: a 5 MB JPEG that compresses to 500 KB uploads the compressed file; one that stays too large is refused without a request; a large PDF is still refused before anything happens.
+5. **Abort everywhere.** `put()` and `wait()` reject at once when the signal is already aborted; `api()` passes `signal` to `fetch` and reports `aborted` (not `network`) when it was aborted. Tests: abort during presign (answer arrives anyway) creates no XHR; every request carries the signal.
+6. **Inline only for `image/jpeg|png|webp`**; any other type (DXF as `image/vnd.dxf`, SVG, HEIC, PDF) is an attachment with its type. Tests: DXF source downloads; dataset of six MIME types.
+7. **`conversion` validated** as `nullable|string|in:thumb,small,large,preview`; anything else is 422 (`abort(422)` after a `Validator`, so it is a 422 for browsers and JSON alike). An allowed name that is not generated still falls back to the original. Tests: `nope`, `../thumb`, `THUMB` -> 422; `large`/`small` not generated -> original.
+
+### TDD evidence
+- RED PHP (tests changed first): `vendor/bin/pest tests/Feature/Media tests/Feature/Uploads/PresignTest.php tests/Feature/Uploads/ConfirmTest.php` -> `Tests: 34 failed, 80 passed`.
+- RED JS (new tests against the old sources, via `git stash` of the four source files): `yarn vitest run resources/js/lib/__tests__/upload.test.ts resources/js/components/media` -> `7 failed | 29 passed` (AttachmentList 44 px, FileDropzone size x2 and 44 px x2, abort during presign, signal passed).
+- GREEN: same PHP command -> `Tests: 114 passed`; JS command -> all pass.
+
+### Gates (final tree)
+- `vendor/bin/pint --test` passed; `vendor/bin/phpstan analyse` `[OK] No errors`.
+- `vendor/bin/pest tests/Unit tests/Feature` -> `Tests: 6 failed, 3865 passed (16350 assertions)`: the 5 baseline failures of ENV.md plus `OtpConcurrencyTest > sends > it never goes past the ten sends an hour of one IP`, a race test that failed under the full run; `vendor/bin/pest tests/Feature/Auth/Otp/OtpConcurrencyTest.php tests/Feature/Security` alone -> `338 passed`. Unrelated to this change.
+- `yarn lint`, `yarn format:check`, `yarn typecheck` clean; `yarn vitest run` -> `5041 passed, 3 failed` (the 3 baseline: furniture `validate.test.ts`, `format.test.ts` de-CH x2).
+- Gates-Gen (`typescript:transform`, `i18n:export`, `git diff --exit-code` on the generated files) clean after the commit.
+- No background process of mine is left running.

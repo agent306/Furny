@@ -20,7 +20,7 @@ const { formatFileSize } = useFormat();
                 :aria-label="
                     t('uploads.attachment.download', { name: file.name })
                 "
-                class="inline-flex max-w-full items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                class="inline-flex min-h-11 max-w-full items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
                 <component
                     :is="ICONS['file-text']"

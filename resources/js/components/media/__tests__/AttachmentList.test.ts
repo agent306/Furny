@@ -39,5 +39,6 @@ describe('AttachmentList (15 §9.31)', () => {
         });
         expect(link.text()).toContain('Quote.pdf');
         expect(link.text()).toContain('1.5 KB');
+        expect(link.classes()).toContain('min-h-11');
     });
 });

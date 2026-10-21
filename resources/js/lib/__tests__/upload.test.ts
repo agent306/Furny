@@ -52,7 +52,21 @@ const PRESIGN = {
     uploadId: '01JUPLOAD',
     url: 'https://storage.test/tmp/x',
     headers: { 'Content-Type': 'image/png', 'Content-Length': '3' },
+    expiresAt: '2030-06-15T12:15:00+00:00',
 };
+
+/** An `UploadIntentStatusData` (14 §18.1). */
+function state(fields: Record<string, unknown>) {
+    return {
+        uploadId: '01JUPLOAD',
+        status: 'processing',
+        reasonCode: null,
+        previewUrl: null,
+        width: null,
+        height: null,
+        ...fields,
+    };
+}
 
 let replies: Reply[];
 let requests: { url: string; init: RequestInit }[];
@@ -110,21 +124,19 @@ describe('uploadWithIntent (13 §11, 15 §9.10)', () => {
     it('presigns, puts with the returned headers, confirms and polls until ready', async () => {
         vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
         replies = [
-            { body: PRESIGN },
-            { status: 202, body: { uploadId: '01JUPLOAD' } },
+            { status: 201, body: PRESIGN },
             {
-                body: {
-                    status: 'uploaded',
-                    reasonCode: null,
-                    previewUrl: null,
-                },
+                status: 202,
+                body: { uploadId: '01JUPLOAD', status: 'processing' },
             },
+            { body: state({}) },
             {
-                body: {
+                body: state({
                     status: 'ready',
-                    reasonCode: null,
                     previewUrl: 'https://storage.test/preview',
-                },
+                    width: 800,
+                    height: 600,
+                }),
             },
         ];
         const progress = vi.fn();
@@ -174,9 +186,9 @@ describe('uploadWithIntent (13 §11, 15 §9.10)', () => {
 
     it('sends exactly the presigned headers, except the two the browser owns', async () => {
         replies = [
-            { body: PRESIGN },
+            { status: 201, body: PRESIGN },
             { status: 202, body: {} },
-            { body: { status: 'ready', reasonCode: null, previewUrl: null } },
+            { body: state({ status: 'ready' }) },
         ];
         const result = uploadWithIntent(
             file(),
@@ -197,14 +209,13 @@ describe('uploadWithIntent (13 §11, 15 §9.10)', () => {
 
     it('refuses with the reason code of a rejected upload', async () => {
         replies = [
-            { body: PRESIGN },
+            { status: 201, body: PRESIGN },
             { status: 202, body: {} },
             {
-                body: {
+                body: state({
                     status: 'rejected',
                     reasonCode: 'upload_type_not_allowed',
-                    previewUrl: null,
-                },
+                }),
             },
         ];
         const result = uploadWithIntent(
@@ -244,7 +255,7 @@ describe('uploadWithIntent (13 §11, 15 §9.10)', () => {
     });
 
     it('cancels the transfer when aborted', async () => {
-        replies = [{ body: PRESIGN }];
+        replies = [{ status: 201, body: PRESIGN }];
         const controller = new AbortController();
         const failure = rejection(
             uploadWithIntent(
@@ -263,17 +274,74 @@ describe('uploadWithIntent (13 §11, 15 §9.10)', () => {
         expect((await failure).code).toBe('aborted');
     });
 
+    it('does not put anything when aborted while it is still presigning', async () => {
+        const controller = new AbortController();
+        let answer: (response: Response) => void = () => undefined;
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(
+                () =>
+                    new Promise<Response>((resolve) => {
+                        answer = resolve;
+                    }),
+            ),
+        );
+        const failure = rejection(
+            uploadWithIntent(
+                file(),
+                'avatar',
+                null,
+                vi.fn(),
+                controller.signal,
+            ),
+        );
+
+        controller.abort();
+        // A fetch that ignores the signal (or answers just before it) must not start the transfer either.
+        answer(
+            new Response(JSON.stringify(PRESIGN), {
+                status: 201,
+                headers: { 'Content-Type': 'application/json' },
+            }),
+        );
+
+        expect((await failure).code).toBe('aborted');
+        expect(FakeXhr.instances).toHaveLength(0);
+    });
+
+    it('passes the abort signal to every request', async () => {
+        replies = [
+            { status: 201, body: PRESIGN },
+            { status: 202, body: {} },
+            { body: state({ status: 'ready' }) },
+        ];
+        const controller = new AbortController();
+        const result = uploadWithIntent(
+            file(),
+            'avatar',
+            null,
+            vi.fn(),
+            controller.signal,
+        );
+
+        (await nextXhr()).finish();
+        await result;
+
+        expect(requests.map((request) => request.init.signal)).toEqual([
+            controller.signal,
+            controller.signal,
+            controller.signal,
+        ]);
+    });
+
     it('gives up after 60 seconds of waiting for the server', async () => {
         vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
-        replies = [{ body: PRESIGN }, { status: 202, body: {} }];
+        replies = [
+            { status: 201, body: PRESIGN },
+            { status: 202, body: {} },
+        ];
         for (let i = 0; i < 80; i++) {
-            replies.push({
-                body: {
-                    status: 'uploaded',
-                    reasonCode: null,
-                    previewUrl: null,
-                },
-            });
+            replies.push({ body: state({}) });
         }
         const failure = rejection(
             uploadWithIntent(
@@ -294,7 +362,7 @@ describe('uploadWithIntent (13 §11, 15 §9.10)', () => {
     });
 
     it('answers a failed transfer with the network code', async () => {
-        replies = [{ body: PRESIGN }];
+        replies = [{ status: 201, body: PRESIGN }];
         const failure = rejection(
             uploadWithIntent(
                 file(),

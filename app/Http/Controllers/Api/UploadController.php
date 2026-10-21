@@ -20,7 +20,7 @@ final class UploadController extends Controller
 {
     public function presign(PresignUploadRequest $request, CreateUploadIntent $create): JsonResponse
     {
-        return response()->json($create->handle($this->user($request), $request->presignData()));
+        return response()->json($create->handle($this->user($request), $request->presignData()), 201);
     }
 
     public function confirm(Request $request, UploadIntent $upload, ConfirmUploadIntent $confirm): JsonResponse

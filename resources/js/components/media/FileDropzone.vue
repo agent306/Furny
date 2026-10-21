@@ -68,6 +68,7 @@ const { items, uploading, add, retry, remove, clear } = useUpload({
     purpose: () => props.purpose,
     target: () => props.target,
     compress: () => props.compressImages ?? false,
+    maxSizeBytes: () => props.maxSizeBytes,
 });
 
 watch(uploading, (busy) => emit('uploading', busy));
@@ -101,6 +102,11 @@ function typeAllowed(file: File): boolean {
     );
 }
 
+/** A photo that is shrunk before it is sent is checked against the limit after that, not before (`useUpload`). */
+function compressible(file: File): boolean {
+    return (props.compressImages ?? false) && file.type.startsWith('image/');
+}
+
 function take(files: File[]): void {
     if (props.disabled) {
         return;
@@ -113,7 +119,7 @@ function take(files: File[]): void {
     for (const file of files) {
         if (!typeAllowed(file)) {
             problems.value.push(t('uploads.errors.type', { name: file.name }));
-        } else if (file.size > props.maxSizeBytes) {
+        } else if (file.size > props.maxSizeBytes && !compressible(file)) {
             problems.value.push(
                 t('uploads.errors.size', {
                     name: file.name,
@@ -259,6 +265,7 @@ function previewOf(item: UploadItem): string | null {
             <Button
                 type="button"
                 variant="outline"
+                size="lg"
                 :disabled="disabled"
                 @click="camera?.click()"
             >
@@ -361,20 +368,31 @@ function previewOf(item: UploadItem): string | null {
                     type="button"
                     data-slot="upload-retry"
                     variant="ghost"
-                    size="sm"
-                    :class="layout === 'grid' ? 'absolute top-1 left-1' : ''"
+                    :size="layout === 'grid' ? 'icon-lg' : 'lg'"
+                    :class="
+                        layout === 'grid'
+                            ? 'absolute top-0 left-0 bg-background/80'
+                            : 'shrink-0'
+                    "
                     @click="retry(item)"
                 >
-                    {{ t('common.actions.retry') }}
+                    <component
+                        :is="ICONS['rotate-ccw']"
+                        v-if="layout === 'grid'"
+                        aria-hidden="true"
+                    />
+                    <span :class="layout === 'grid' ? 'sr-only' : ''">{{
+                        t('common.actions.retry')
+                    }}</span>
                 </Button>
                 <Button
                     type="button"
                     variant="ghost"
-                    size="icon"
+                    size="icon-lg"
                     :aria-label="t('uploads.remove', { name: item.file.name })"
                     :class="
                         layout === 'grid'
-                            ? 'absolute top-1 right-1 size-7 bg-background/80'
+                            ? 'absolute top-0 right-0 bg-background/80'
                             : 'shrink-0'
                     "
                     @click="remove(item)"
