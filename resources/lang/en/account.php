@@ -105,10 +105,16 @@ return [
         'preferences_saved' => 'Preferences saved.',
     ],
 
-    // 10 §13.4: the refusals of the preferences form.
+    // 13 §9.1, 10 §13.7: the word the customer types to confirm a deletion (case-insensitive).
+    'delete_word' => 'DELETE',
+
+    // 10 §13.4: the refusals of the preferences form; 13 §9.1: the refusals of the deletion.
     'errors' => [
         'length_unit' => 'Choose a length unit that fits the measurement system.',
         'timezone' => 'Choose a valid time zone.',
+        'active_orders' => 'Finish or cancel these orders first: {numbers}.',
+        'confirmation' => 'Type {word} to confirm.',
+        'restore_window_passed' => 'This account was deleted more than 30 days ago, or is already anonymised, and cannot be restored.',
     ],
 
     // 10 §13.1, 11 §18: the sections of the account area.
@@ -118,6 +124,7 @@ return [
         'security' => 'Security',
         'preferences' => 'Preferences',
         'two_factor' => 'Two-factor',
+        'delete' => 'Delete account',
     ],
 
     // 10 §13.2: the page of the details.
@@ -231,5 +238,37 @@ return [
             'title' => 'Appearance',
             'description' => 'Saved on this device.',
         ],
+    ],
+
+    // 10 §13.7: the page of the data download and the deletion.
+    'delete' => [
+        'title' => 'Delete account',
+        'description' => 'Download your data, or delete your account.',
+        'export' => [
+            'title' => 'Download my data',
+            'description' => 'A file with your profile, projects, designs, orders, quotes and messages. Your photos and plan files are not in it: download them from the app or ask us.',
+            'action' => 'Download',
+            'verify' => 'Verify',
+        ],
+        'danger' => [
+            'title' => 'Delete account',
+            'description' => 'Your account is deleted at once and you are signed out everywhere.',
+            'kept' => 'We keep your orders and quotes for accounting and warranty, without your name or contact details.',
+            'removed' => 'We delete your sign-in details, your addresses, your projects and plans, your photos, your notifications and your preferences.',
+            'recovery' => 'For 30 days we can restore the account if you contact us. After that it is anonymised for good.',
+            'blocked' => 'Finish or cancel these orders first:',
+            'confirm_label' => 'Type {word} to confirm',
+            'confirm_hint' => 'This cannot be undone after 30 days.',
+            'action' => 'Delete my account',
+        ],
+    ],
+
+    // 13 §9.1: the page the customer lands on after asking for the deletion.
+    'deleted' => [
+        'title' => 'Your account is scheduled for deletion',
+        'body_dated' => 'You are signed out. We will permanently anonymise your account on {date}.',
+        'body_undated' => 'If you asked us to delete your account, we will permanently anonymise it 30 days after the request.',
+        'restore' => 'Changed your mind, or was this not you? Write to {email} before then and we will restore it.',
+        'home' => 'Back to the home page',
     ],
 ];

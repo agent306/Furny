@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin\Account\PreferencesController;
 use App\Http\Controllers\Admin\Account\ProfileController;
 use App\Http\Controllers\Admin\Account\SecurityController;
 use App\Http\Controllers\Admin\Account\TwoFactorController;
+use App\Http\Controllers\Admin\CustomerController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\StaffController;
 use App\Http\Controllers\Admin\StaffInvitationController;
@@ -43,3 +44,8 @@ Route::middleware('can:staff.manage')->prefix('staff')->name('staff.')->group(fu
     Route::post('{user}/activate', [StaffController::class, 'activate'])->name('activate');
     Route::delete('{user}/two-factor', [StaffController::class, 'resetTwoFactor'])->name('two-factor.reset');
 });
+
+// The lifecycle of a customer account (13 §9, 14 §9): restore within the 30 days (`customers.manage`), anonymise at once (the
+// owner gate `data.delete`). `{user}` includes deleted accounts. The rest of the customer routes arrive with the customer pages (P5).
+Route::post('customers/{user}/restore', [CustomerController::class, 'restore'])->middleware('can:customers.manage')->withTrashed()->name('customers.restore');
+Route::post('customers/{user}/anonymise', [CustomerController::class, 'anonymise'])->middleware('can:data.delete')->withTrashed()->name('customers.anonymise');

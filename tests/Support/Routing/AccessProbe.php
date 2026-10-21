@@ -8,6 +8,7 @@ use App\Domain\Identity\Enums\PermissionName;
 use App\Domain\Identity\Enums\StaffRole;
 use App\Domain\Identity\Models\User;
 use App\Http\Middleware\EnsureUserType;
+use App\Http\Middleware\RequireRecentAuthentication;
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Auth\Middleware\RedirectIfAuthenticated;
 use Illuminate\Auth\Middleware\RequirePassword;
@@ -191,7 +192,7 @@ final class AccessProbe
     {
         $this->assert($this->redirectsTo($this->get($name), route('login')), "{$name}: a guest is not sent to login.");
         $this->assert($this->redirectsTo($this->get($name, User::factory()->owner()->create()), route('admin.dashboard')), "{$name}: staff are not sent to the admin dashboard.");
-        $this->assert($this->opened($this->get($name, User::factory()->create())), "{$name}: a customer does not get the page.");
+        $this->assert($this->opened($this->get($name, User::factory()->create()), $name), "{$name}: a customer does not get the page.");
     }
 
     private function checkStaff(string $name, ?string $permission, ?string $gate): void
@@ -315,7 +316,7 @@ final class AccessProbe
         }
 
         foreach (app(Router::class)->gatherRouteMiddleware($route) as $middleware) {
-            if (is_string($middleware) && str_starts_with($middleware, RequirePassword::class)) {
+            if (is_string($middleware) && (str_starts_with($middleware, RequirePassword::class) || str_starts_with($middleware, RequireRecentAuthentication::class))) {
                 return true;
             }
         }

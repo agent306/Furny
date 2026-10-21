@@ -27,13 +27,19 @@ describe('AccountNav (10 §13.1, 11 §18)', () => {
     it('lists the customer sections', () => {
         const wrapper = mount(AccountNav, { props: { audience: 'customer' } });
 
-        expect(labels(wrapper)).toEqual(['Profile', 'Security', 'Preferences']);
+        expect(labels(wrapper)).toEqual([
+            'Profile',
+            'Security',
+            'Preferences',
+            'Delete account',
+        ]);
         expect(
             wrapper.findAll('a').map((link) => link.attributes('href')),
         ).toEqual([
             '/account/profile',
             '/account/security',
             '/account/preferences',
+            '/account',
         ]);
     });
 

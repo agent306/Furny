@@ -18,6 +18,12 @@ return [
                 'body' => 'Start by uploading your floor plan or drawing it yourself.',
             ],
         ],
+        'deletion_scheduled' => [
+            'customer' => [
+                'title' => 'Your account will be deleted',
+                'body' => "We received a request to delete your account. It will be permanently anonymised on {date}. If this wasn't you, contact us at {businessEmail} immediately.",
+            ],
+        ],
     ],
 
     // 12 §3.3, P1-D5: the transactional mails of the sign-in flows. `minutes` is how long the link works.

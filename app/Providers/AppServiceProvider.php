@@ -7,6 +7,7 @@ namespace App\Providers;
 use App\Domain\Identity\Models\User;
 use App\Domain\Identity\Otp\LogOtpDelivery;
 use App\Domain\Identity\Otp\OtpDelivery;
+use App\Domain\Orders\Support\DeleteNeverSubmittedDraftOrders;
 use App\Support\MorphMap;
 use App\Support\Settings\Settings;
 use App\Support\Uploads\HeicConverter;
@@ -41,6 +42,9 @@ final class AppServiceProvider extends ServiceProvider
         // vision service (13 §11). The Feature suite binds stand-ins.
         $this->app->bind(UploadPresigner::class, static fn (): UploadPresigner => new S3UploadPresigner(Storage::disk('s3')));
         $this->app->bind(HeicConverter::class, VisionHeicConverter::class);
+
+        // What must happen when a customer deletes their account (13 §9.1); P6 and P7 tag their own steps (imports, orders).
+        $this->app->tag([DeleteNeverSubmittedDraftOrders::class], 'account.deletion_steps');
 
         // Telescope is kept out of package discovery (composer.json) and runs only where the
         // dev dependency is installed and TELESCOPE_ENABLED is on (17 §5.11 item 10).

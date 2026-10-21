@@ -38,6 +38,8 @@ return [
     // Private files (13 §8.9): any signed-in user; the policy of the file's owner decides, with 404 for the rest.
     'media.show' => $entry('any'),
     'csp.report' => $entry('public'),
+    // Where a customer lands after asking to delete the account (13 §9.1): signed out by then.
+    'account.deletion-scheduled' => $entry('public'),
     'fallback' => $entry('public'),
     'unmatched.plain' => $entry('public'),
 
@@ -106,6 +108,10 @@ return [
     'customer.account.security' => $entry('customer'),
     'customer.account.preferences' => $entry('customer'),
     'customer.account.preferences.update' => $entry('customer'),
+    // Deleting the account and the data download (13 §9, 10 §13.7): `recent.auth`; the download also `verified.contact`.
+    'customer.account.delete' => $entry('customer'),
+    'customer.account.destroy' => $entry('customer'),
+    'customer.account.export' => $entry('customer'),
 
     // Admin app (11 §2).
     'admin.dashboard' => $entry('staff'),
@@ -116,6 +122,10 @@ return [
     'admin.account.security' => $entry('staff'),
     'admin.account.preferences' => $entry('staff'),
     'admin.account.preferences.update' => $entry('staff'),
+
+    // The lifecycle of a customer account (13 §9): restore within the 30 days, anonymise at once (the owner's gate).
+    'admin.customers.restore' => $entry('staff', 'customers.manage'),
+    'admin.customers.anonymise' => $entry('staff', null, 'data.delete'),
 
     // The page of the staff member's second factor (13 §5.10): any staff, and exempt from `2fa.enrolled`.
     'admin.security.two-factor' => $entry('staff'),

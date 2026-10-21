@@ -7,6 +7,7 @@ import { update as updateAdminAvatar } from '@/routes/admin/account/avatar';
 import { update as updateAdminPreferences } from '@/routes/admin/account/preferences';
 import { twoFactor } from '@/routes/admin/security';
 import {
+    deleteMethod as customerDelete,
     preferences as customerPreferences,
     profile as customerProfile,
     security as customerSecurity,
@@ -19,14 +20,14 @@ import { update as updateCustomerPreferences } from '@/routes/customer/account/p
 export type AccountAudience = 'customer' | 'admin';
 
 export type AccountNavItem = {
-    key: 'profile' | 'security' | 'two-factor' | 'preferences';
+    key: 'profile' | 'security' | 'two-factor' | 'preferences' | 'delete';
     labelKey: string;
     href: string;
 };
 
 /**
- * The sections of the account area, in order. The customer's Notifications, AI credits and Delete account join with the
- * tasks that build those pages; the staff member's Notifications joins with theirs (11 §18).
+ * The sections of the account area, in order. The customer's Notifications and AI credits join with the tasks that
+ * build those pages (Delete account is the last section, 10 §13.1); the staff member's Notifications joins with theirs (11 §18).
  */
 export function accountNavItems(audience: AccountAudience): AccountNavItem[] {
     if (audience === 'admin') {
@@ -69,6 +70,11 @@ export function accountNavItems(audience: AccountAudience): AccountNavItem[] {
             key: 'preferences',
             labelKey: 'account.nav.preferences',
             href: customerPreferences.url(),
+        },
+        {
+            key: 'delete',
+            labelKey: 'account.nav.delete',
+            href: customerDelete.url(),
         },
     ];
 }

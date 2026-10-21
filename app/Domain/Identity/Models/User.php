@@ -11,6 +11,7 @@ use App\Domain\Identity\Enums\StaffRole;
 use App\Domain\Identity\Enums\UnitSystem;
 use App\Domain\Identity\Enums\UserType;
 use App\Domain\Identity\Support\ContactVerification;
+use App\Domain\Orders\Enums\OrderStateKey;
 use App\Domain\Orders\Models\Order;
 use App\Domain\Projects\Models\Project;
 use App\Domain\Shared\Models\UploadIntent;
@@ -163,6 +164,16 @@ final class User extends Authenticatable implements HasLocalePreference, HasMedi
     public function orders(): HasMany
     {
         return $this->hasMany(Order::class, 'customer_id');
+    }
+
+    /**
+     * Orders in an Active state (09 §1: every state but `draft`, `closed` and `cancelled`): what blocks a deletion.
+     *
+     * @return HasMany<Order, $this>
+     */
+    public function activeOrders(): HasMany
+    {
+        return $this->orders()->whereNotIn('state', [OrderStateKey::Draft->value, OrderStateKey::Closed->value, OrderStateKey::Cancelled->value]);
     }
 
     /**

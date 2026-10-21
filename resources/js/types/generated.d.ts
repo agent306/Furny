@@ -28,6 +28,14 @@ export type PresetCategory = 'wardrobe' | 'kitchen' | 'storage' | 'shelving' | '
 }
 namespace Identity {
 namespace Data {
+export type AccountDeleteProps = {
+activeOrders: App.Domain.Identity.Data.ActiveOrderRefData[],
+canExport: boolean,
+};
+export type AccountDeletionScheduledProps = {
+anonymiseOn: string | null,
+supportEmail: string,
+};
 export type AccountPreferencesProps = {
 unitSystem: App.Domain.Identity.Enums.UnitSystem,
 lengthUnit: App.Domain.Identity.Enums.LengthUnit,
@@ -44,6 +52,10 @@ hasPassword: boolean,
 googleLinked: boolean,
 googleEnabled: boolean,
 sessions: App.Domain.Identity.Data.SessionData[],
+};
+export type ActiveOrderRefData = {
+id: string,
+number: string,
 };
 export type AuthUserData = {
 id: string,

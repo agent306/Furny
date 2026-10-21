@@ -34,6 +34,9 @@ final class RevokeSessions
 
     public const string REASON_PASSWORD_RESET = 'password_reset';
 
+    /** The customer asked to delete the account (13 §6.3, §9.1), or it was anonymised. */
+    public const string REASON_ACCOUNT_DELETION = 'account_deletion';
+
     /** Google was linked to an account whose address nobody had verified: whatever its earlier holder could use is cleared. */
     public const string REASON_GOOGLE_LINK_UNVERIFIED = 'google_link_unverified';
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Account\GoogleLinkController;
 use App\Http\Controllers\Account\PhoneController;
 use App\Http\Controllers\Account\SessionController;
+use App\Http\Controllers\Auth\AccountDeletedController;
 use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\Auth\PhoneOtpController;
 use App\Http\Controllers\Auth\ReauthenticateController;
@@ -33,6 +34,9 @@ Route::post('csp-report', CspReportController::class)
     ->name('csp.report')
     ->middleware('throttle:csp-report')
     ->withoutMiddleware(StatelessRoute::WITHOUT);
+
+// Where a customer lands after asking to delete the account (13 §9.1): public, they are signed out by then.
+Route::get('account-deleted', AccountDeletedController::class)->name('account.deletion-scheduled');
 
 // Google sign-in (13 §5.3). Open to everybody: a guest signs in, a signed-in user links Google or confirms their
 // identity, and the intent decides which. `active` signs out a deactivated user first. Hidden (404) unless
