@@ -391,7 +391,12 @@ export type {
 } from './catalog/specs';
 export { indexCatalog } from './furniture/catalogIndex';
 export type { CatalogIndex } from './furniture/catalogIndex';
-export { DEFAULT_DENSITY } from './furniture/rules/weight';
+export {
+    DEFAULT_DENSITY,
+    leafWeightKg,
+    partWeightKg,
+} from './furniture/rules/weight';
+export { hingeCount, hingeRoleKey } from './furniture/rules/hardware';
 export {
     CarcassSpecSchema,
     ContentSchema,

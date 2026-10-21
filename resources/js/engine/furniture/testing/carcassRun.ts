@@ -1,7 +1,8 @@
 /**
- * Test-only driver for the carcass generators of Tasks 32-33, in the order of
- * the pipeline (07 §3.1 step 3): envelope, panels, layout and dividers,
- * contents per leaf in pre-order, back, plinth, countertop.
+ * Test-only driver for the carcass and front generators of Tasks 32-34, in the
+ * order of the pipeline (07 §3.1 step 3): envelope, panels, layout and
+ * dividers, openings and front leaves (only with `fronts: true`), contents per
+ * leaf in pre-order, back, plinth, countertop.
  */
 import type { CatalogSnapshot } from '../../catalog/snapshot';
 import { seedCatalog } from '../../testing/seedCatalog';
@@ -17,6 +18,8 @@ import {
 import { carcassPanels } from '../carcass/panels';
 import { plinthParts } from '../carcass/plinth';
 import { createGenContext } from '../context';
+import { frontParts } from '../fronts/fronts';
+import type { OpeningRect } from '../fronts/openings';
 import type { Content, FurnitureDocument, Section } from '../schema';
 import type { GenContext, Part } from '../types';
 
@@ -24,12 +27,18 @@ export interface CarcassRun {
     ctx: GenContext;
     env: Envelope;
     layout: SectionLayout;
+    /** Openings by front / drawer-leaf id; empty unless the fronts ran. */
+    openings: Map<string, OpeningRect>;
 }
 
-/** Runs the carcass generators; throws when the envelope is too small. */
+/**
+ * Runs the carcass generators, and the front generators too with
+ * `fronts: true`; throws when the envelope is too small.
+ */
 export function runCarcass(
     doc: FurnitureDocument,
     catalog: CatalogSnapshot = seedCatalog(),
+    options: { fronts?: boolean } = {},
 ): CarcassRun {
     const ctx = createGenContext(doc, catalog);
     const env = computeEnvelope(ctx);
@@ -37,6 +46,9 @@ export function runCarcass(
     carcassPanels(ctx, env);
     const layout = layoutFromEnvelope(ctx, env);
     dividerParts(ctx, layout);
+    const openings = options.fronts
+        ? frontParts(ctx, env, layout)
+        : new Map<string, OpeningRect>();
     for (const id of layout.preorder) {
         const info = layout.byId.get(id);
         const content = findContent(doc, id);
@@ -50,8 +62,17 @@ export function runCarcass(
     backPanels(ctx, env, layout);
     plinthParts(ctx, env);
     countertopPart(ctx, env);
-    return { ctx, env, layout };
+    return { ctx, env, layout, openings };
 }
+
+/** `runCarcass` with the fronts. */
+export const runWithFronts = (
+    doc: FurnitureDocument,
+    catalog: CatalogSnapshot = seedCatalog(),
+): CarcassRun => runCarcass(doc, catalog, { fronts: true });
+
+export const hardwareOf = (ctx: GenContext, key: string) =>
+    ctx.hardware.find((h) => h.key === key);
 
 /** Content of section `id`; `undefined` when the section does not exist. */
 function findContent(

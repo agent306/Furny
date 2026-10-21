@@ -176,3 +176,114 @@ export function countertopBox(
         materials: { top: assign('PB25-WHITE') },
     });
 }
+
+/** A front with the defaults of the template helper `hingedFront` (07 §2.3); `over` patches it. */
+export const frontOn = (
+    id: string,
+    covers: string[],
+    over: Partial<Omit<Front, 'id' | 'covers'>> = {},
+): Front => ({
+    id,
+    kind: 'hinged',
+    covers,
+    leaves: 1,
+    hingeSide: 'auto',
+    overlay: 'full',
+    glass: false,
+    handleCode: 'inherit',
+    hingeCode: 'auto',
+    slidingTrackCode: null,
+    ...over,
+});
+
+/**
+ * 07 §12.4 inset: a 600 x 720 x 560 box whose root leaf (holding `content`)
+ * is closed by one single-leaf inset door.
+ */
+export function insetBox(
+    content: Content = { type: 'empty' },
+): FurnitureDocument {
+    return boxDocument({
+        width: 600,
+        height: 720,
+        depth: 560,
+        content,
+        fronts: [frontOn('fr_0000000001', [BOX_ROOT_ID], { overlay: 'inset' })],
+    });
+}
+
+/**
+ * 07 §12.4 half overlay: a 1200 x 720 x 560 box split into two equal columns
+ * (573 mm each), each closed by a single-leaf half-overlay door.
+ */
+export function halfOverlayBox(): FurnitureDocument {
+    return boxDocument({
+        width: 1200,
+        height: 720,
+        depth: 560,
+        interior: splitSection(BOX_ROOT_ID, 'columns', [
+            [flex(), leafSection('s_0000000002')],
+            [flex(), leafSection('s_0000000003')],
+        ]),
+        fronts: [
+            frontOn('fr_0000000001', ['s_0000000002'], { overlay: 'half' }),
+            frontOn('fr_0000000002', ['s_0000000003'], { overlay: 'half' }),
+        ],
+    });
+}
+
+/**
+ * 07 §12.4 sliding wardrobe defaults (07 §2.4.2): 2400 x 2100 x 650, plinth
+ * 100 with setback 0, three columns (shelves / rows[350 empty, rod] /
+ * shelves), one sliding front over the root with 3 leaves, flush handles.
+ */
+export function slidingWardrobe(
+    front: Partial<Omit<Front, 'id' | 'covers'>> = {},
+): FurnitureDocument {
+    const shelves: Content = {
+        type: 'shelves',
+        count: 4,
+        adjustable: true,
+        frontSetback: 20,
+    };
+    return boxDocument({
+        width: 2400,
+        height: 2100,
+        depth: 650,
+        interior: splitSection(BOX_ROOT_ID, 'columns', [
+            [flex(), leafSection('s_0000000002', shelves)],
+            [
+                flex(),
+                splitSection('s_0000000003', 'rows', [
+                    [fixed(350), leafSection('s_0000000004')],
+                    [
+                        flex(),
+                        leafSection('s_0000000005', {
+                            type: 'hanging_rod',
+                            topClearance: 60,
+                            rodCode: null,
+                        }),
+                    ],
+                ]),
+            ],
+            [flex(), leafSection('s_0000000006', shelves)],
+        ]),
+        fronts: [
+            frontOn('fr_0000000001', [BOX_ROOT_ID], {
+                kind: 'sliding',
+                leaves: 3,
+                hingeCode: null,
+                slidingTrackCode: 'auto',
+                ...front,
+            }),
+        ],
+        carcass: {
+            plinth: { type: 'plinth', height: 100, setback: 0, legCode: null },
+            handles: {
+                code: 'HDL-FLUSH',
+                orientation: 'auto',
+                placement: 'auto',
+            },
+        },
+    });
+}

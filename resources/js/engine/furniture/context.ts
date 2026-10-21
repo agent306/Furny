@@ -12,6 +12,25 @@ import type { GenContext } from './types';
 /** Furniture issues are `furniture.<name>`; the key drops the domain prefix, like the plan ones. */
 const ISSUE_KEY_PREFIX = 'engine.furniture.issue.';
 
+/**
+ * A furniture issue (03 §3.1) with its `messageKey` derived from `code`;
+ * for pure checks that run without a generation context.
+ */
+export function furnitureIssue(
+    code: string,
+    severity: Issue['severity'],
+    params: Issue['params'] = {},
+    entityIds: string[] = [],
+): Issue {
+    return {
+        code,
+        severity,
+        messageKey: ISSUE_KEY_PREFIX + code.replace(/^furniture\./, ''),
+        params,
+        entityIds,
+    };
+}
+
 const isIndex = (c: CatalogSnapshot | CatalogIndex): c is CatalogIndex =>
     'snapshot' in c && typeof (c as CatalogIndex).material === 'function';
 
@@ -54,13 +73,7 @@ export function createGenContext(
             ctx.mat(role).defaultEdgeBandCode ??
             null,
         issue(code, severity, params = {}, entityIds = []): Issue {
-            const issue: Issue = {
-                code,
-                severity,
-                messageKey: ISSUE_KEY_PREFIX + code.replace(/^furniture\./, ''),
-                params,
-                entityIds,
-            };
+            const issue = furnitureIssue(code, severity, params, entityIds);
             ctx.issues.push(issue);
             return issue;
         },
