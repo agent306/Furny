@@ -213,3 +213,7 @@ Ruling: keep the daemon-thread deadline backstop; usage loss is limited to calls
 Carry Task 31: never enable agentic_crops before Task 27 lands; write 07-labeling.json from LabelingOutcome.debug_summary() for every labeler (K17).
 Task 26: minor (deferred): sanitize leaves normalized_text/size_text and MissedRoom x/y unbounded; except BaseException in the worker thread; max_tokens path doesn't mark last call failed (totals unaffected); DimensionLabel kept for a text the model labelled non-dimension.
 Task 26: complete (commits 95a562d..783011b, review clean)
+Task 27: impl 0fcaa4c + 9d00b6b (DONE_WITH_CONCERNS; 1374 full). Extra run_agent(transcript=) kw; executor.max_crops lowered to passed max_crops; timeout after ≥1 answered turn → partial=True with both llm_failed_fallback_none and llm_partial; Task 23/26 carries done.
+Task 27: review 850e249..9d00b6b: spec ✅ (termination, one tool_result per tool_use, finalize tool_choice none + shared validate/sanitize, error mapping, text-free late logging; all carries), quality Approved. Both-warnings on partial timeout accepted (06 §9.6 step 3 llm_partial + 18 §7.5 llm_failed_fallback_none).
+Task 27: minor (deferred): leaked-thread cap check vs increment in separate critical sections (overshoot ≈ concurrent callers; llm.py:364/411); refusal transcript entry says succeeded while usage says failed (agent.py:206); transcript copies model tool arguments unbounded (agent.py:205); both-warnings case untested; repair-round timeout also flagged partial.
+Task 27: complete (commits 850e249..9d00b6b, review clean)
