@@ -322,6 +322,18 @@ export function detectRooms(
 }
 
 /**
+ * Whether a RoomMeta anchor lies strictly inside the centre-line face of a room.
+ * Holes count as outside and the boundary is not inside (04 §4.4 a). Shared by
+ * association, `validatePlan` and room reconciliation so they always agree.
+ */
+export function isAnchorInsideRoom(
+    anchor: Vec2,
+    room: Pick<DerivedRoom, 'facePolygon'>,
+): boolean {
+    return pointInPolygon(anchor, room.facePolygon) === 'inside';
+}
+
+/**
  * RoomMeta association (04 §4.4 a, §4.7): a meta belongs to the room whose
  * centre-line face (holes excluded) contains its anchor; with several metas in
  * one room the smallest id wins and the others get `room_meta_duplicate`.
@@ -338,9 +350,7 @@ export function associateRoomMetas(
     const inside = rooms.map(() => [] as string[]);
     for (const id of metaIds) {
         const anchor = doc.rooms[id]!.anchor;
-        const at = rooms.findIndex(
-            (r) => pointInPolygon(anchor, r.facePolygon) === 'inside',
-        );
+        const at = rooms.findIndex((r) => isAnchorInsideRoom(anchor, r));
         if (at >= 0) inside[at]!.push(id);
     }
 

@@ -204,3 +204,13 @@ export type {
     DeriverStats,
     PlanDeriver,
 } from './plan/derive';
+export { isAnchorInsideRoom } from './plan/rooms';
+export {
+    PLAN_ISSUE_CODES,
+    planErrorKeys,
+    removeOrphanNodes,
+    validatePlan,
+} from './plan/validate';
+export type { PlanIssueCode } from './plan/validate';
+export { planSummary } from './plan/summary';
+export type { PlanSummary } from './plan/summary';
