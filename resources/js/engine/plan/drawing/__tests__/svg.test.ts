@@ -404,13 +404,23 @@ describe('svgFromDrawing text', () => {
     });
 
     it('drops U+FFFE and U+FFFF from text and attribute values', () => {
+        // built from code units: formatters rewrite \u escapes of noncharacters
+        const nc1 = String.fromCharCode(0xfffe);
+        const nc2 = String.fromCharCode(0xffff);
         const xml = svg(
-            drawingWith('TEXT', group([textItem({ text: 'a￾b￿c' })], 'w_￾1￿2')),
+            drawingWith(
+                'TEXT',
+                group(
+                    [textItem({ text: `a${nc1}b${nc2}c` })],
+                    `w_${nc1}1${nc2}2`,
+                ),
+            ),
         );
         assertWellFormedXml(xml);
         expect(xml).toContain('>abc</text>');
         expect(xml).toContain('data-entity="w_12"');
-        expect(xml).not.toMatch(/[￾￿]/);
+        expect(xml).not.toContain(nc1);
+        expect(xml).not.toContain(nc2);
     });
 });
 
