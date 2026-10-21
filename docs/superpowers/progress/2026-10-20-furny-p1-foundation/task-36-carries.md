@@ -4,3 +4,4 @@
 2. Ledger (Task 28/29 correction): onboarding route is `customer.onboarding.show` (plus whatever 14 names for the steps).
 3. Task 34 built AccountPage/forms (ProfileForm with phone section #phone, PhoneVerifyDialog from Task 29, UpdateDisplayPreferences); reuse form components/actions for onboarding steps instead of duplicating them.
 4. Task 34 test: a not-onboarded customer hitting account pages — keep behaviour consistent with the CUS0 group.
+5. Ledger carry (Task 29 correction): VerifyContactBanner should show a toast on 429 (resend throttled) — owned by Task 34 or onboarding; if not already done (grep VerifyContactBanner), do it here with a test.
