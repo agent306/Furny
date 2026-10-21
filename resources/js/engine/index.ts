@@ -75,3 +75,22 @@ export {
     simplifyCollinear,
 } from './geometry/polygon';
 export type { PolygonWithHoles, Ring } from './geometry/polygon';
+export {
+    MM2_PER_FT2,
+    MM_PER_FOOT,
+    MM_PER_INCH,
+    PARSE_LENGTH_ERROR_CODES,
+    coerceUnitPrefs,
+} from './units/types';
+export type {
+    FormatLengthOptions,
+    LengthUnit,
+    ParseLengthContext,
+    ParseLengthError,
+    ParseLengthErrorCode,
+    ParseLengthResult,
+    UnitPrefs,
+    UnitSystem,
+} from './units/types';
+export { parseLength } from './units/parse';
+export { formatAngle, formatArea, formatLength } from './units/format';
