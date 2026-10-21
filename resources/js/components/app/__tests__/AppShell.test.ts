@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h, inject, nextTick } from 'vue';
@@ -87,6 +87,10 @@ afterEach(() => {
     document.body.innerHTML = '';
     vi.unstubAllGlobals();
 });
+
+// After the hook above, so it runs first (hooks run in stack order): the shells unmount before the body is emptied.
+// A shell left mounted keeps the announcement timer of its last navigation alive past the end of the file.
+enableAutoUnmount(afterEach);
 
 function announceFlash(flash: object): void {
     events.handlers.flash?.({ detail: { flash } });
