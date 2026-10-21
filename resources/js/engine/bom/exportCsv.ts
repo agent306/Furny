@@ -37,6 +37,14 @@ export function csvField(value: string | number): string {
     return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
+/** Text cells that start like a formula get a leading `'` so spreadsheets don't run them (OWASP CSV injection). */
+const textField = (value: string | number): string =>
+    csvField(
+        typeof value === 'string' && /^[=+\-@\t\r]/.test(value)
+            ? `'${value}`
+            : value,
+    );
+
 /** `qty × Σ banded finished edge lengths` in mm. */
 function edgeBandMm(row: CutListRow): number {
     const { L1, L2, W1, W2 } = row.edges;
@@ -96,7 +104,7 @@ export function cutListCsv(
             row.partKeys.join(' '),
             notesOf(row, doc),
         ];
-        out.push(fields.map(csvField).join(','));
+        out.push(fields.map(textField).join(','));
     });
     return BOM + out.join(EOL) + EOL;
 }

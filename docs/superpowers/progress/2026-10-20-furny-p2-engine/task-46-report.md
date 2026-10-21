@@ -22,3 +22,9 @@
 - Formula-injection escaping: spec 08 §8.1 does not require it, so none is applied (would change the byte-exact output). Concern: a user-supplied extra-part name or note starting with `=`, `+`, `-`, `@` is written raw; owner may want a spec amendment.
 - `edge_band_mm` uses row `length`/`width` per banded edge. Extruded (non-rectangular) parts are not special-cased (the row has no outline); their edges are not reported per edge anyway.
 - Material name falls back to empty if the code is missing from the catalog.
+
+## Fix report: CSV injection escaping (controller ruling)
+Deviation recorded: spec 19: CSV injection escaping added (08 §8.1 silent).
+- `cutListCsv` now maps every field through `textField`: string cells starting with `=`, `+`, `-`, `@`, TAB or CR get a leading `'`, then RFC 4180 quoting applies as before. Numeric cells (row_no, qty, mm columns, edge_band_mm, area) are numbers and untouched; `csvField` itself stays pure RFC 4180. Wardrobe rows 1 and 3 stay byte-exact (tests unchanged and green).
+- RED: 8 new injection tests failed (8 failed, 8 passed). GREEN: 16 of 16 pass (cases: `=SUM(A1)`, `+1`, `-x`, `@cmd`, leading TAB, leading CR, `=a,"b"` quoted after escaping, escaped note with numeric columns unchanged).
+- eslint, prettier --check, vue-tsc --noEmit on engine: clean. Concern 1 from the main report is resolved.

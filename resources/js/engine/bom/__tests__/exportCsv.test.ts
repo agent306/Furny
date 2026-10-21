@@ -106,3 +106,31 @@ describe('cutListCsv: quoting and notes', () => {
         );
     });
 });
+
+describe('cutListCsv: formula injection (spec 19, 08 §8.1 silent)', () => {
+    const nameRow = (name: string): string =>
+        lines(csvOf(withExtra(name, null))).find((r) => r.includes(EXTRA_ID))!;
+
+    it.each(['=SUM(A1)', '+1', '-x', '@cmd', '\tTab'])(
+        'prefixes %j with a single quote',
+        (name) => {
+            expect(nameRow(name)).toContain(`,'${name},1,PB18-WHITE,`);
+        },
+    );
+
+    it('prefixes a leading CR and quotes the result', () => {
+        expect(nameRow('\rx')).toContain(`,"'\rx",1,PB18-WHITE,`);
+    });
+
+    it('escapes before RFC 4180 quoting', () => {
+        expect(nameRow('=a,"b"')).toContain(`,"'=a,""b""",1,PB18-WHITE,`);
+    });
+
+    it('escapes notes but leaves numeric columns alone', () => {
+        const doc = wardrobeFixture();
+        doc.overrides.parts['carcass.back.2'] = { note: '=1+1' };
+        const row = lines(csvOf(doc))[1]!;
+        expect(row.endsWith(",carcass.back.2,'=1+1")).toBe(true);
+        expect(row.startsWith('1,Back panel 2,1,HDF3-WHITE,')).toBe(true);
+    });
+});
