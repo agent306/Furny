@@ -59,6 +59,43 @@ it('accepts a JSON string for a document and rejects invalid JSON', function ():
     $plan->working_document = '{"broken":';
 })->throws(JsonException::class);
 
+it('does not mark an identical document dirty but notices a real change', function (): void {
+    $plan = Plan::factory()->create()->fresh();
+    $document = $plan->working_document;
+
+    $plan->working_document = $document;
+    expect($plan->isDirty('working_document'))->toBeFalse();
+
+    $plan->working_document = JsonDocument::encode($document);
+    expect($plan->isDirty('working_document'))->toBeFalse();
+
+    $reordered = array_reverse($document, true);
+    $plan->working_document = $reordered;
+    expect($plan->isDirty('working_document'))->toBeFalse();
+
+    $document['meta']['northAngle'] = 10;
+    $plan->working_document = $document;
+    expect($plan->isDirty('working_document'))->toBeTrue();
+});
+
+it('treats an empty object and an empty list as different documents', function (): void {
+    $plan = Plan::factory()->create()->fresh();
+    $document = $plan->working_document;
+    $document['nodes'] = [];
+
+    $plan->working_document = $document;
+
+    expect($plan->isDirty('working_document'))->toBeTrue();
+});
+
+it('lets an unchanged revision be saved without tripping the immutability guard', function (): void {
+    $revision = PlanRevision::factory()->create()->fresh();
+
+    $revision->document = $revision->document;
+
+    expect($revision->save())->toBeTrue();
+});
+
 it('applies the column defaults', function (): void {
     $project = Project::factory()->create()->fresh();
     $plan = $project->plans()->create([
@@ -228,6 +265,13 @@ it('nulls plans.current_revision_id when that revision is deleted', function ():
 
     expect($plan->fresh()->current_revision_id)->toBeNull()
         ->and($plan->revisions()->count())->toBe(1);
+});
+
+it('gives a default withSiteAddress project an address of its own owner', function (): void {
+    $project = Project::factory()->withSiteAddress()->create()->fresh();
+
+    expect($project->siteAddress->user_id)->toBe($project->owner_id)
+        ->and(User::query()->count())->toBe(1);
 });
 
 it('resolves project relations and states', function (): void {

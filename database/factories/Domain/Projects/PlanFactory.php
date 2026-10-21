@@ -10,6 +10,7 @@ use App\Domain\Projects\Enums\PlanSource;
 use App\Domain\Projects\Models\Plan;
 use App\Domain\Projects\Models\PlanRevision;
 use App\Domain\Projects\Models\Project;
+use Carbon\CarbonImmutable;
 use Database\Factories\Support\Documents;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -66,7 +67,7 @@ final class PlanFactory extends Factory
     public function locked(?User $staff = null): static
     {
         return $this->state([
-            'locked_at' => now(),
+            'locked_at' => static fn (): CarbonImmutable => now()->toImmutable(),
             'locked_by' => $staff->id ?? User::factory()->staff(),
         ]);
     }

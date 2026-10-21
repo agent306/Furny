@@ -46,11 +46,11 @@ final class ProjectFactory extends Factory
         return $this->state(['status' => ProjectStatus::Archived]);
     }
 
-    /** A site address that belongs to the project's owner. */
+    /** A site address that belongs to the project's owner, whichever state sets the owner. */
     public function withSiteAddress(): static
     {
-        return $this->state(fn (array $attributes): array => [
-            'site_address_id' => Address::factory()->state(['user_id' => $attributes['owner_id']]),
+        return $this->state([
+            'site_address_id' => static fn (array $attributes): Factory => Address::factory()->state(['user_id' => $attributes['owner_id']]),
         ]);
     }
 
