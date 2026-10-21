@@ -1,0 +1,8 @@
+# Task 48 — carries (binding; preflight.md C2, C10, I15, E4)
+
+1. C2: P1 Task 1 already created `engine-cli/src/cli.ts`, `engine-cli/vite.config.ts`, the package.json scripts, `.gitignore` and tsconfig include. Treat all as Modify/verify (no-op if present). Keep `dispatch` and `CliResponse` exported from `cli.ts` (re-export from `commands.ts`). Guard `main()` with an entry check so importing `cli.ts` in tests never reads stdin. P1's `engine-cli/src/__tests__/cli.test.ts` must stay green.
+2. C10: snapshots live at the 16 §5.2 / §13.1 paths `tests/fixtures/engine-cli/…` as `{request, response}` JSON pairs, regenerated with `UPDATE_FIXTURES=1` — NOT `engine-cli/src/__tests__/__snapshots__`. Generate all files 16 §5.2/§13.1 list: `{validate-plan,plan-summary}.{hdb-3room,brochure-2bhk}.json`, `compute-bom.{fixture}.json`, `validate-furniture.wardrobe-3door.json`, `cutlist-csv.wardrobe-3door.csv`, `template-default.{key}.json`, `diff-furniture.wardrobe-width-2100.json`, `invalid-input.json`. P5 consumes them (PHP contract tests) — note that in your report.
+3. I15: the `compute-bom` test request carries `options: { nesting: true }` (the 7-sheet assertion depends on it).
+4. E4: the e2e test spawns `node engine-cli/dist/cli.mjs` — build once in `beforeAll`; `ssr.noExternal: true` bundles every dependency.
+5. Protocol (01 §5.4): stdin JSON request, stdout `{ok:true,result}` or `{ok:false,error:{code,message,details?}}`, exit 0 for both, non-zero only on crash. Results per 08 §9.2 (+ `bbox`).
+6. On Windows the spawned CLI must work with `node` from PATH (furny-env.sh puts Node 22 first); don't hard-code POSIX paths in the e2e test.

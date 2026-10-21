@@ -263,3 +263,8 @@ Spec 19 (deviation): 08 §8.1 CSV — OWASP formula-injection escaping on text c
 Task 46: minor (deferred): bcefc7f red mid-history (bisect); material-name '' fallback for unknown code (exportCsv.ts:299).
 Task 46: complete (commits 353c607..1d71366, review clean)
 Merged main 8a5518f (host baseline) → 993fab1; full vitest 5108/5108.
+Task 47: impl 972a6cc (DONE_WITH_CONCERNS; 9 tests, fixtures independently recomputed, C11 hidden-lines.json + README). vitest 5117 pass but exit 1 on AppShell.test.ts teardown timer (useRouteFocus.ts:89 'document is not defined') — pre-existing, P1 code → carried to P1 Task 34. Stray uncommitted index.ts edit seen mid-task (likely the finished T44 agent's leftover job) — reverted by implementer.
+Task 47: review 972a6cc: spec ✅ (08 §6.3 step-by-step, fixtures hand-recomputed, C11 met, fixtures PHP-safe), quality Approved.
+Carry P7 (QuoteCalculator PHP port): mirror unknown taxRateId → error (or document upstream validation in tests/fixtures/quotes/README.md); parseQuantityMilli regex needs \z / D modifier in PHP (no trailing-newline match); BigInt '/' truncates — only equal to floor because discount ≤0 / others ≥0 is validated upstream; the test pins the exact fixture file list (P7 additions must edit it).
+Task 47: minor (deferred): no parse tests for '+1', ' 1', '.5', '1\n'; unreachable `?? ''` (quoteTotals.ts:330).
+Task 47: complete (commits 4df6418..972a6cc, review clean)
