@@ -607,3 +607,27 @@ export type {
     FurnitureCommandType,
 } from './furniture/commands/registry';
 export { syncBehindDoor } from './furniture/commands/sections';
+export {
+    EDGE_ALLOWANCE_MM,
+    EDGE_WASTE_PERMILLE,
+    FINISH_AREA_STEP_MM2,
+} from './bom/constants';
+export { cutSize } from './bom/cutSizes';
+export { edgeBandLengths } from './bom/edgeBanding';
+export {
+    fnv1a32,
+    rowIdentity,
+    rowKeyFor,
+    rowKeyOfIdentity,
+} from './bom/rowKey';
+export { bomOptionsFor, computeBom, mergeIssues } from './bom/bom';
+export type {
+    Bom,
+    BomMaterial,
+    BomOperations,
+    ComputeBomOptions,
+    CutListRow,
+    NestedSheet,
+    NestingPlacement,
+    NestingResult,
+} from './bom/types';
