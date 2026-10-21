@@ -1100,3 +1100,225 @@ def test_ticks_beyond_the_ends_of_the_segment_are_dropped() -> None:
     assert ink_ticks(ink, y, 2, x0=300, x1=900) == []  # 20 px beyond: still outside
     stroke(ink, (296, y - 8), (296, y + 8), 2)
     assert ink_ticks(ink, y, 2, x0=300, x1=900) == pytest.approx([296, 900], abs=3)
+
+
+# --- raster candidates and filters (Task 14b) ------------------------------------------------------------
+
+
+def gray_of(ink: np.ndarray, faint: np.ndarray | None = None) -> np.ndarray:
+    """A page gray image: paper 250, `ink` 40, `faint` 215 (a light line the ink threshold misses)."""
+    gray = np.full(ink.shape, 250, np.uint8)
+    if faint is not None:
+        gray[faint > 0] = 215
+    gray[ink > 0] = 40
+    return gray
+
+
+def raster_ticks(
+    segments: list[Segment],
+    tokens: list[TextToken],
+    ink: np.ndarray,
+    gray: np.ndarray | None = None,
+) -> list[list[int]]:
+    """Absolute ticks (x for horizontal lines, y for vertical ones) of each raster dimension line."""
+    lines = find_dimension_lines(segments, tokens, REGION, ink=ink, gray=gray, t_thin=2.0)
+    out = []
+    for ln in lines:
+        vertical = abs(ln.p1[1] - ln.p0[1]) > abs(ln.p1[0] - ln.p0[0])
+        u = (np.array(ln.p1) - np.array(ln.p0)) / math.dist(ln.p0, ln.p1)
+        out.append([round(float((np.array(ln.p0) + u * t)[1 if vertical else 0])) for t in ln.tick_positions])
+    return out
+
+
+def slashed_line(ink: np.ndarray, x0: int, x1: int, ticks: list[int], y: int = LINE_Y) -> None:
+    stroke(ink, (x0, y), (x1, y), 2)
+    for x in ticks:
+        stroke(ink, *polar((x, y), 45, 17), 2)
+
+
+def test_line_cut_under_its_label_is_one_line() -> None:
+    """LSD loses the line under its label (the text mask): the two pieces are chained across the label's
+    box into one line with all its ticks."""
+    ink = plan()
+    slashed_line(ink, 299, 1201, TICKS)
+    label = tok("T1", "9000", 525, LINE_Y - 4)  # written across the line, which the text mask cut
+    x0, y0, x1, y1 = (round(v) for v in label.box)
+    ink[y0 - 2 : y1 + 3, x0 - 2 : x1 + 3] = 0
+    pieces = [seg("S1", (299, LINE_Y), (x0 - 3, LINE_Y)), seg("S2", (x1 + 3, LINE_Y), (1201, LINE_Y))]
+    assert raster_ticks(pieces, [label], ink) == [pytest.approx(TICKS, abs=3)]
+
+
+def test_faint_line_is_chained_through_its_gaps_by_the_gray_image() -> None:
+    """A light line the ink threshold broke up between its ticks: the gray image shows it running on, so its
+    pieces are one line; without the gray image they stay apart."""
+    ink, faint = plan(), plan()
+    stroke(faint, (299, LINE_Y), (1201, LINE_Y), 2)
+    kept = ((299, 450), (560, 820), (930, 1201))  # the parts the ink kept: gaps of 110 px < 0.06 L
+    for a, b in kept:
+        stroke(ink, (a, LINE_Y), (b, LINE_Y), 2)
+    for x in TICKS:
+        stroke(ink, *polar((x, LINE_Y), 45, 17), 2)
+    pieces = [seg(f"S{k}", (a, LINE_Y), (b, LINE_Y)) for k, (a, b) in enumerate(kept)]
+    labels = [tok("T1", "9000", 525, LINE_Y - 19), tok("T2", "9000", 975, LINE_Y - 19)]
+    assert raster_ticks(pieces, labels, ink, gray_of(ink, faint)) == [pytest.approx(TICKS, abs=3)]
+    assert raster_ticks(pieces, labels, ink) == []
+
+
+def test_pieces_drawn_with_another_pen_are_not_chained() -> None:
+    """A light face line running on from a dimension line's end is not part of it."""
+    ink, faint = plan(), plan()
+    slashed_line(ink, 640, 1201, [650, 1200])
+    stroke(faint, (380, LINE_Y), (636, LINE_Y), 2)
+    stroke(ink, (380, LINE_Y), (636, LINE_Y), 2)  # in the ink too: only the gray image tells them apart
+    gray = gray_of(ink)
+    gray[faint > 0] = 200
+    pieces = [seg("S1", (380, LINE_Y), (636, LINE_Y)), seg("S2", (640, LINE_Y), (1201, LINE_Y))]
+    lines = find_dimension_lines(pieces, [tok("T1", "9000", 925, LINE_Y - 19)], REGION, ink=ink, gray=gray)
+    assert len(lines) == 1
+    assert min(lines[0].p0[0], lines[0].p1[0]) == pytest.approx(640, abs=3)
+
+
+def test_line_runs_on_under_a_label_to_its_end_tick() -> None:
+    """The line's last piece is lost under a label written on it near the end; the chain runs on along the
+    gray image to the end tick."""
+    ink = plan()
+    slashed_line(ink, 299, 1201, TICKS)
+    label = tok("T1", "900", 1150, LINE_Y - 4)
+    x0, y0, x1, y1 = (round(v) for v in label.box)
+    gray = gray_of(ink)
+    ink[y0 - 2 : y1 + 3, x0 - 2 : x1 + 3] = 0
+    pieces = [seg("S1", (299, LINE_Y), (x0 - 3, LINE_Y))]
+    assert raster_ticks(pieces, [label, tok("T2", "9000", 525, LINE_Y - 19)], ink, gray) == [
+        pytest.approx(TICKS, abs=3)
+    ]
+
+
+def face_scene(partner_gap: int) -> tuple[np.ndarray, list[Segment]]:
+    """A face line at LINE_Y with partitions meeting it from below (perpendicular "ticks" at 300 / 1200)
+    and a parallel line `partner_gap` px below it (0: none)."""
+    ink = plan()
+    stroke(ink, (299, LINE_Y), (1201, LINE_Y), 2)
+    segments = [seg("S1", (299, LINE_Y), (1201, LINE_Y))]
+    for x in (300, 1200):
+        stroke(ink, (x, LINE_Y), (x, LINE_Y + 150), 2)
+        segments.append(seg(f"S{x}", (x, LINE_Y), (x, LINE_Y + 150)))
+    if partner_gap:
+        stroke(ink, (310, LINE_Y + partner_gap), (1190, LINE_Y + partner_gap), 2)
+        segments.append(seg("S9", (310, LINE_Y + partner_gap), (1190, LINE_Y + partner_gap)))
+    return ink, segments
+
+
+def test_line_paired_like_a_wall_face_is_no_dimension_line() -> None:
+    """A partition face (its partner face 12 px away, the strip between them empty) with partitions meeting
+    it and a label nearby is no dimension line; alone it would be one."""
+    label = [tok("T1", "9000", 750, LINE_Y - 19)]
+    ink, segments = face_scene(0)
+    assert len(raster_ticks(segments, label, ink)) == 1
+    ink, segments = face_scene(12)
+    assert raster_ticks(segments, label, ink) == []
+
+
+def test_label_between_two_lines_keeps_the_dimension_line() -> None:
+    """Text in the strip between two parallel lines: that strip is no wall, the line is a dimension line."""
+    ink, segments = face_scene(40)
+    label = [tok("T1", "9000", 750, LINE_Y + 20)]
+    found = find_dimension_lines(segments, label, REGION, ink=ink, t_thin=2.0)
+    assert any(abs(ln.p0[1] - LINE_Y) < 2 for ln in found)
+
+
+def test_dimension_line_beside_a_partition_stays_one() -> None:
+    """A dimension line drawn 18 px beside a double-line partition: the partition's near face pairs with its
+    own other face (6 px on), so the dimension line is no face."""
+    ink, segments = face_scene(18)
+    stroke(ink, (310, LINE_Y + 24), (1190, LINE_Y + 24), 2)
+    segments.append(seg("S10", (310, LINE_Y + 24), (1190, LINE_Y + 24)))
+    label = [tok("T1", "9000", 750, LINE_Y - 19)]
+    assert len(raster_ticks(segments, label, ink)) == 1
+
+
+def test_label_must_be_written_along_a_raster_line() -> None:
+    """Raster pages: a label written across the line (angle 90 beside an x line) does not make it a
+    dimension line (06 §8.4 step 3's orientation rule applied in step 1)."""
+    ink = plan()
+    slashed_line(ink, 299, 1201, TICKS)
+    line = [seg("S1", (299, LINE_Y), (1201, LINE_Y))]
+    assert len(raster_ticks(line, [tok("T1", "9000", 525, LINE_Y - 19)], ink)) == 1
+    assert raster_ticks(line, [tok("T1", "9000", 525, LINE_Y - 19, angle=90)], ink) == []
+
+
+def test_line_below_a_chain_does_not_borrow_its_label() -> None:
+    """A line 30 px below a dimension chain, crossed by the chain's extension lines, with the chain's label
+    in reach: the label stands on the chain, the line owns no label and is no dimension line."""
+    ink = plan()
+    slashed_line(ink, 299, 1201, TICKS)
+    stroke(ink, (299, LINE_Y + 30), (1201, LINE_Y + 30), 2)
+    for x in TICKS:
+        stroke(ink, (x, LINE_Y - 8), (x, LINE_Y + 150), 2)  # extension lines from the plan below
+    segments = [seg("S1", (299, LINE_Y), (1201, LINE_Y)), seg("S2", (299, LINE_Y + 30), (1201, LINE_Y + 30))]
+    found = find_dimension_lines(segments, [tok("T1", "9000", 525, LINE_Y - 19)], REGION, ink=ink, t_thin=2.0)
+    assert [round(ln.p0[1]) for ln in found] == [LINE_Y]
+
+
+def test_through_strokes_are_no_ticks_on_a_slash_ticked_line() -> None:
+    """A line drawn with slash ticks takes a door jamb running through it as no tick; the same jamb on a
+    line with bare extension-line ticks is one (fix2: a perpendicular stroke of any length is a tick)."""
+    ink = plan()
+    slashed_line(ink, 299, 1201, TICKS)
+    stroke(ink, (500, LINE_Y - 150), (500, LINE_Y + 150), 2)
+    line = [seg("S1", (299, LINE_Y), (1201, LINE_Y))]
+    label = [tok("T1", "9000", 650, LINE_Y - 19)]
+    assert raster_ticks(line, label, ink) == [pytest.approx(TICKS, abs=3)]
+    bare = plan()
+    stroke(bare, (299, LINE_Y), (1201, LINE_Y), 2)
+    for x in (*TICKS, 500):
+        stroke(bare, (x, LINE_Y - 150), (x, LINE_Y + 150), 2)
+    assert raster_ticks(line, label, bare) == [pytest.approx([300, 500, 750, 1200], abs=3)]
+
+
+def test_dimension_line_ending_across_another_is_no_tick_of_it() -> None:
+    """A vertical dimension line ends 6 px past a horizontal one: no tick of the horizontal line there."""
+    ink = plan()
+    slashed_line(ink, 299, 1201, [300, 1200])
+    stroke(ink, (750, 100), (750, LINE_Y + 6), 2)
+    for y in (110, 250):
+        stroke(ink, *polar((750, y), 45, 17), 2)
+    segments = [seg("S1", (299, LINE_Y), (1201, LINE_Y)), seg("S2", (750, 100), (750, LINE_Y + 6))]
+    labels = [tok("T1", "9000", 525, LINE_Y - 19), tok("T2", "9000", 731, 180, angle=90)]
+    found = sorted(raster_ticks(segments, labels, ink), key=len)
+    assert found == [pytest.approx([110, 250], abs=3), pytest.approx([300, 1200], abs=3)]
+
+
+def test_wall_at_the_line_end_is_a_tick_and_one_crossing_it_is_not() -> None:
+    """A line dimensioned to the face of a solid wall: the face is a tick. A wall the line runs through is
+    no tick."""
+    ink = plan()
+    slashed_line(ink, 300, 1201, [750, 1200])
+    ink[LINE_Y - 100 : LINE_Y + 100, 280:300] = 255  # the line starts at this wall's face
+    ink[LINE_Y - 100 : LINE_Y + 100, 900:920] = 255  # ... and runs through this one
+    line = [seg("S1", (300, LINE_Y), (1201, LINE_Y))]
+    assert raster_ticks(line, [tok("T1", "9000", 525, LINE_Y - 19)], ink) == [pytest.approx(TICKS, abs=3)]
+
+
+def test_chain_is_not_bridged_across_a_solid_wall() -> None:
+    """A chain interrupted by a solid wall is two dimension lines, each ending at the wall's face."""
+    ink = plan()
+    slashed_line(ink, 299, 600, [300])
+    slashed_line(ink, 640, 1201, [1200])
+    ink[LINE_Y - 100 : LINE_Y + 100, 600:640] = 255
+    pieces = [seg("S1", (299, LINE_Y), (600, LINE_Y)), seg("S2", (640, LINE_Y), (1201, LINE_Y))]
+    labels = [tok("T1", "3000", 450, LINE_Y - 19), tok("T2", "6000", 920, LINE_Y - 19)]
+    found = sorted(raster_ticks(pieces, labels, ink, gray_of(ink)))
+    assert found == [pytest.approx([300, 600], abs=3), pytest.approx([640, 1200], abs=3)]
+
+
+def test_slashes_on_extension_lines_running_through_mark_the_line() -> None:
+    """Slash ticks drawn on extension lines that run through the line (one stroke each) still mark it as a
+    slash-ticked line, so a bare door jamb running through it is no tick."""
+    ink = plan()
+    stroke(ink, (299, LINE_Y), (1201, LINE_Y), 2)
+    for x in TICKS:
+        stroke(ink, (x, LINE_Y - 150), (x, LINE_Y + 150), 2)
+        stroke(ink, *polar((x, LINE_Y), 45, 17), 2)
+    stroke(ink, (500, LINE_Y - 150), (500, LINE_Y + 150), 2)
+    line = [seg("S1", (299, LINE_Y), (1201, LINE_Y))]
+    assert raster_ticks(line, [tok("T1", "9000", 650, LINE_Y - 19)], ink) == [pytest.approx(TICKS, abs=3)]

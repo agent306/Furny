@@ -154,29 +154,21 @@ def _wall_candidates(
     return out
 
 
-def _text_height(tokens: Sequence[TextToken]) -> float:
-    """Median glyph height of the numeric tokens (all tokens when none is numeric); 0 without tokens."""
-    numeric = [t.height_px for t in tokens if t.parsed.kind in ("mm_number", "metric_length", "feet_inch")]
-    heights = numeric or [t.height_px for t in tokens]
-    return float(np.median(heights)) if heights else 0.0
-
-
 def _wall_face_dims(
     segments: Sequence[Segment],
     dimension_lines: Sequence[DimensionLine],
     ink: np.ndarray,
     t_thin: float,
     L: float,
-    text_height: float,
 ) -> set[str]:
-    """Ids of the "dimension lines" that are wall faces: their segment pairs with another thin segment as a
-    double-line wall (``_double_mask``'s pair rules, strip on the text-free ``ink``). The partner may be
-    another dimension line only when the two are closer than a text height: stacked dimension chains keep
-    their labels between them, two faces of a partition do not.
+    """Ids of the "dimension lines" that are wall faces: their segment pairs with another thin segment, not
+    a dimension line, as a double-line wall (``_double_mask``'s pair rules, strip on the text-free ``ink``).
 
-    A face line of a partition whose perpendicular partitions read as ticks, with a size label beside it,
-    passes ``find_dimension_lines``; dropping it and its "extension lines" would delete the partition and
-    the walls meeting it. A dimension line runs clear of other lines, so it has no such partner.
+    ``find_dimension_lines`` drops candidates that pair as wall faces itself (Task 14b), with the walls
+    stage's pair rules, one pair per stretch and the stacked-chain exception for two dimension lines. This
+    guard stays for the dimension lines drawn closer than 0.02 L beside a single face line (an interior
+    dimension along a partition): their segments stay wall candidates, so excluding them and their
+    extension lines does not cut the partition (on HDB the toilet-3 wall).
     """
     by_id = {s.id: s for s in segments}
     dim_ids = {d.segment_id for d in dimension_lines}
@@ -184,7 +176,7 @@ def _wall_face_dims(
     lines = [by_id[d.segment_id] for d in dimension_lines if d.segment_id in by_id]
     lines = [s for s in lines if s.length >= min_len]
     partners = [s for s in segments if s.is_thin and s.length >= min_len and s.id not in dim_ids]
-    if not lines:
+    if not lines or not partners:
         return set()
     segs = [*lines, *partners]
     p0 = np.array([s.p0 for s in segs], np.float64)
@@ -193,16 +185,13 @@ def _wall_face_dims(
     length = np.hypot(*(p1 - p0).T)
     unit = (p1 - p0) / length[:, None]
     n_lines = len(lines)
-    ii, jj = (a.ravel() for a in np.meshgrid(np.arange(n_lines), np.arange(len(segs)), indexing="ij"))
-    keep = jj > ii  # each dimension line with every later segment: the other lines and all partners
-    ii, jj = ii[keep], jj[keep]
+    ii, jj = (
+        a.ravel() for a in np.meshgrid(np.arange(n_lines), np.arange(n_lines, len(segs)), indexing="ij")
+    )
     cos_tol = math.cos(math.radians(DOUBLE_ANGLE_DEG))
     d_min, d_max = DOUBLE_D_MIN_THIN * t_thin, DOUBLE_D_MAX_FRAC * L
     faces: set[str] = set()
     for pr in _filter_pairs(ii, jj, p0, p1, length, unit, d_min, d_max, cos_tol):
-        both_dims = pr.i < n_lines and pr.j < n_lines
-        if both_dims and pr.d >= text_height:
-            continue
         geo = _pair_geometry(pr.i, pr.j, p0, p1, length, unit)
         if geo is None:
             continue
@@ -1335,7 +1324,10 @@ def extract_walls(
     """Wall masks and raw wall centre lines of the plan region (06 §8.1 steps 1-8); see the module doc.
 
     ``segments`` are the stage's line segments (06 §7.9) and ``dimension_lines`` the result of
-    ``find_dimension_lines``; neither takes part in walls. ``ctx.check_deadline`` is polled throughout.
+    ``find_dimension_lines``; neither takes part in walls. ``ink`` is the page's text-free ink
+    (``OcrResult.ink_notext``). ``tokens`` is kept for the stage interface; no rule reads it since Task 14b
+    moved the stacked-chain text-height rule into ``find_dimension_lines``. ``ctx.check_deadline`` is
+    polled throughout.
     """
     poll = _throttled(ctx.check_deadline)
     poll()
@@ -1345,10 +1337,9 @@ def extract_walls(
     source_full = np.zeros((h, w), np.uint8)
     ink_used = pre.ink if ink is None else ink
     L = float(crop.long_side)
+    del tokens  # see the docstring
     faces = (
-        _wall_face_dims(segments, dimension_lines, ink_used, pre.t_thin, L, _text_height(tokens))
-        if crop.w and crop.h
-        else set()
+        _wall_face_dims(segments, dimension_lines, ink_used, pre.t_thin, L) if crop.w and crop.h else set()
     )
     dims = [d for d in dimension_lines if d.segment_id not in faces]
     cands = _wall_candidates(segments, dims, pre.t_thin, ink_used)

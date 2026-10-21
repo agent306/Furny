@@ -1,0 +1,1084 @@
+{
+ "source": "Hand-traced from hdb-3room.webp (Task 14b dimension truth), source pixels. Each line was located on 6-8x gridded crops; its centre line is a robust least-squares fit of the darkness-weighted ink centroid across the stroke (gray < 235, one sample per px, crossings and labels rejected; the 600 line by column profiles, its fit is pulled by the faint face lines beside it). Its ends are the ends of the dimension stroke itself (interior lines: where they meet the wall or face line they dimension; a chain interrupted by a black wall, 3100 | 3600, and a chain whose middle is only a faint face line, 300 | 600, are two lines). Ticks (u = px along p0 -> p1 from p0) are the slash ticks / extension-line crossings, verified one by one on zoomed contact sheets; lines merely crossing a dimension line are not ticks. labels[i] is the text of the interval ticks[i] .. ticks[i+1] (null: an unlabelled wall-thickness interval). Lines bowed by the photograph (peak offset > 0.75 px: the long outer lines and 7600 | 3100) also carry 'points', the measured ink centre at 0/25/50/75/100 % of the length (median offset within +-8 %); matching uses that polyline. profile_check: a perpendicular ink profile (median of 5 profiles 1 px apart, +-3 px across) at 20/50/80 % of the length, moved by up to 3 % off a tick, crossing or label: offset of the ink centroid from the traced centre line (polyline where given) and the darkest gray. Every |offset| <= 0.5 px.",
+ "units": "source_px",
+ "lines": [
+  {
+   "id": "top",
+   "kind": "outer_chain",
+   "p0": [
+    148.0,
+    90.8
+   ],
+   "p1": [
+    1125.8,
+    72.1
+   ],
+   "points": [
+    [
+     148.0,
+     90.3
+    ],
+    [
+     392.5,
+     86.6
+    ],
+    [
+     636.9,
+     83.0
+    ],
+    [
+     881.4,
+     77.4
+    ],
+    [
+     1125.8,
+     72.5
+    ]
+   ],
+   "ticks": [
+    5.5,
+    141.5,
+    150.1,
+    261.6,
+    270.6,
+    487.9,
+    505.4,
+    610.9,
+    619.9,
+    673.8,
+    790.5,
+    973.0
+   ],
+   "labels": [
+    1600,
+    null,
+    1300,
+    null,
+    2500,
+    null,
+    1200,
+    null,
+    600,
+    1300,
+    2000
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": -0.18,
+     "min_gray": 221
+    },
+    {
+     "at": 0.51,
+     "offset_px": 0.14,
+     "min_gray": 185
+    },
+    {
+     "at": 0.8,
+     "offset_px": -0.03,
+     "min_gray": 189
+    }
+   ]
+  },
+  {
+   "id": "top-overall",
+   "kind": "outer_overall",
+   "p0": [
+    147.0,
+    52.0
+   ],
+   "p1": [
+    1125.8,
+    30.7
+   ],
+   "points": [
+    [
+     147.0,
+     50.7
+    ],
+    [
+     391.7,
+     46.2
+    ],
+    [
+     636.4,
+     41.8
+    ],
+    [
+     881.1,
+     35.9
+    ],
+    [
+     1125.8,
+     30.7
+    ]
+   ],
+   "ticks": [
+    6.8,
+    973.8
+   ],
+   "labels": [
+    11000
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": 0.14,
+     "min_gray": 205
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.07,
+     "min_gray": 208
+    },
+    {
+     "at": 0.8,
+     "offset_px": -0.34,
+     "min_gray": 208
+    }
+   ]
+  },
+  {
+   "id": "left",
+   "kind": "outer_chain",
+   "p0": [
+    76.1,
+    183.0
+   ],
+   "p1": [
+    69.9,
+    788.0
+   ],
+   "points": [
+    [
+     74.5,
+     183.0
+    ],
+    [
+     73.5,
+     334.2
+    ],
+    [
+     73.1,
+     485.5
+    ],
+    [
+     71.5,
+     636.8
+    ],
+    [
+     69.8,
+     788.0
+    ]
+   ],
+   "ticks": [
+    0.0,
+    291.0,
+    514.1,
+    604.0
+   ],
+   "labels": [
+    3300,
+    2500,
+    1000
+   ],
+   "profile_check": [
+    {
+     "at": 0.22,
+     "offset_px": 0.42,
+     "min_gray": 212
+    },
+    {
+     "at": 0.5,
+     "offset_px": 0.29,
+     "min_gray": 214
+    },
+    {
+     "at": 0.8,
+     "offset_px": -0.21,
+     "min_gray": 188
+    }
+   ]
+  },
+  {
+   "id": "left-overall",
+   "kind": "outer_overall",
+   "p0": [
+    37.5,
+    183.0
+   ],
+   "p1": [
+    30.2,
+    805.0
+   ],
+   "points": [
+    [
+     35.8,
+     183.0
+    ],
+    [
+     35.2,
+     338.5
+    ],
+    [
+     34.0,
+     494.0
+    ],
+    [
+     32.1,
+     649.5
+    ],
+    [
+     30.2,
+     805.0
+    ]
+   ],
+   "ticks": [
+    0.4,
+    621.9
+   ],
+   "labels": [
+    7000
+   ],
+   "profile_check": [
+    {
+     "at": 0.22,
+     "offset_px": 0.44,
+     "min_gray": 233
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.06,
+     "min_gray": 221
+    },
+    {
+     "at": 0.8,
+     "offset_px": 0.28,
+     "min_gray": 185
+    }
+   ]
+  },
+  {
+   "id": "right",
+   "kind": "outer_chain",
+   "p0": [
+    1162.7,
+    108.0
+   ],
+   "p1": [
+    1165.5,
+    939.0
+   ],
+   "ticks": [
+    6.2,
+    62.8,
+    219.2,
+    256.2,
+    550.9,
+    688.8,
+    706.2,
+    743.4,
+    824.9
+   ],
+   "labels": [
+    600,
+    1700,
+    400,
+    3200,
+    1500,
+    null,
+    400,
+    900
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": -0.25,
+     "min_gray": 97
+    },
+    {
+     "at": 0.5,
+     "offset_px": 0.31,
+     "min_gray": 47
+    },
+    {
+     "at": 0.8,
+     "offset_px": -0.27,
+     "min_gray": 28
+    }
+   ]
+  },
+  {
+   "id": "right-mid",
+   "kind": "outer_overall",
+   "p0": [
+    1204.5,
+    108.0
+   ],
+   "p1": [
+    1206.7,
+    940.0
+   ],
+   "ticks": [
+    6.0,
+    706.8,
+    824.2
+   ],
+   "labels": [
+    7600,
+    1300
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": -0.23,
+     "min_gray": 84
+    },
+    {
+     "at": 0.5,
+     "offset_px": 0.12,
+     "min_gray": 67
+    },
+    {
+     "at": 0.8,
+     "offset_px": -0.17,
+     "min_gray": 47
+    }
+   ]
+  },
+  {
+   "id": "right-overall",
+   "kind": "outer_overall",
+   "p0": [
+    1245.5,
+    108.0
+   ],
+   "p1": [
+    1247.3,
+    940.0
+   ],
+   "ticks": [
+    5.6,
+    824.1
+   ],
+   "labels": [
+    8900
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": -0.05,
+     "min_gray": 107
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.04,
+     "min_gray": 58
+    },
+    {
+     "at": 0.8,
+     "offset_px": 0.06,
+     "min_gray": 46
+    }
+   ]
+  },
+  {
+   "id": "bottom",
+   "kind": "outer_chain",
+   "p0": [
+    145.0,
+    960.2
+   ],
+   "p1": [
+    1126.0,
+    969.2
+   ],
+   "points": [
+    [
+     145.0,
+     962.4
+    ],
+    [
+     390.3,
+     962.5
+    ],
+    [
+     635.5,
+     962.7
+    ],
+    [
+     880.7,
+     967.0
+    ],
+    [
+     1126.0,
+     971.7
+    ]
+   ],
+   "ticks": [
+    0.6,
+    360.8,
+    369.6,
+    685.5,
+    694.2,
+    746.0,
+    907.4,
+    980.8
+   ],
+   "labels": [
+    4100,
+    null,
+    3600,
+    null,
+    600,
+    1800,
+    800
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": 0.07,
+     "min_gray": 77
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.12,
+     "min_gray": 42
+    },
+    {
+     "at": 0.8,
+     "offset_px": 0.38,
+     "min_gray": 42
+    }
+   ]
+  },
+  {
+   "id": "bottom-overall",
+   "kind": "outer_overall",
+   "p0": [
+    145.0,
+    1001.0
+   ],
+   "p1": [
+    1126.0,
+    1010.4
+   ],
+   "points": [
+    [
+     145.0,
+     1003.2
+    ],
+    [
+     390.2,
+     1003.4
+    ],
+    [
+     635.5,
+     1003.6
+    ],
+    [
+     880.8,
+     1007.6
+    ],
+    [
+     1126.0,
+     1012.8
+    ]
+   ],
+   "ticks": [
+    0.0,
+    981.0
+   ],
+   "labels": [
+    11100
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": 0.09,
+     "min_gray": 54
+    },
+    {
+     "at": 0.5,
+     "offset_px": 0.02,
+     "min_gray": 49
+    },
+    {
+     "at": 0.8,
+     "offset_px": 0.41,
+     "min_gray": 17
+    }
+   ]
+  },
+  {
+   "id": "i1000",
+   "kind": "interior",
+   "p0": [
+    418.0,
+    208.0
+   ],
+   "p1": [
+    512.0,
+    207.4
+   ],
+   "ticks": [
+    4.0,
+    89.2
+   ],
+   "labels": [
+    1000
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": -0.01,
+     "min_gray": 120
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.08,
+     "min_gray": 133
+    },
+    {
+     "at": 0.8,
+     "offset_px": 0.07,
+     "min_gray": 115
+    }
+   ]
+  },
+  {
+   "id": "i300",
+   "kind": "interior",
+   "p0": [
+    657.0,
+    208.8
+   ],
+   "p1": [
+    721.0,
+    208.1
+   ],
+   "ticks": [
+    2.0,
+    23.9
+   ],
+   "labels": [
+    300
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": -0.02,
+     "min_gray": 105
+    },
+    {
+     "at": 0.5,
+     "offset_px": 0.02,
+     "min_gray": 134
+    },
+    {
+     "at": 0.8,
+     "offset_px": 0.06,
+     "min_gray": 73
+    }
+   ]
+  },
+  {
+   "id": "i600",
+   "kind": "interior",
+   "p0": [
+    765.0,
+    208.1
+   ],
+   "p1": [
+    826.0,
+    207.4
+   ],
+   "ticks": [
+    3.9,
+    57.4
+   ],
+   "labels": [
+    600
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": 0.16,
+     "min_gray": 112
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.11,
+     "min_gray": 195
+    },
+    {
+     "at": 0.8,
+     "offset_px": -0.04,
+     "min_gray": 148
+    }
+   ]
+  },
+  {
+   "id": "i1900-1200",
+   "kind": "interior",
+   "p0": [
+    323.8,
+    183.0
+   ],
+   "p1": [
+    328.2,
+    484.0
+   ],
+   "ticks": [
+    7.0,
+    177.0,
+    186.0,
+    291.5
+   ],
+   "labels": [
+    1900,
+    null,
+    1200
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": 0.1,
+     "min_gray": 122
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.15,
+     "min_gray": 67
+    },
+    {
+     "at": 0.8,
+     "offset_px": -0.12,
+     "min_gray": 80
+    }
+   ]
+  },
+  {
+   "id": "i3200-bed1",
+   "kind": "interior",
+   "p0": [
+    589.8,
+    182.0
+   ],
+   "p1": [
+    593.9,
+    484.0
+   ],
+   "ticks": [
+    5.9,
+    293.0
+   ],
+   "labels": [
+    3200
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": 0.12,
+     "min_gray": 64
+    },
+    {
+     "at": 0.5,
+     "offset_px": 0.18,
+     "min_gray": 60
+    },
+    {
+     "at": 0.8,
+     "offset_px": -0.06,
+     "min_gray": 42
+    }
+   ]
+  },
+  {
+   "id": "i3100-bed1",
+   "kind": "interior",
+   "p0": [
+    369.0,
+    454.5
+   ],
+   "p1": [
+    644.0,
+    454.7
+   ],
+   "ticks": [
+    4.1,
+    275.0
+   ],
+   "labels": [
+    3100
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": 0.0,
+     "min_gray": 68
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.19,
+     "min_gray": 77
+    },
+    {
+     "at": 0.8,
+     "offset_px": 0.08,
+     "min_gray": 75
+    }
+   ]
+  },
+  {
+   "id": "i3600",
+   "kind": "interior",
+   "p0": [
+    661.0,
+    453.4
+   ],
+   "p1": [
+    985.0,
+    452.4
+   ],
+   "ticks": [
+    0.0,
+    315.5
+   ],
+   "labels": [
+    3600
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": 0.06,
+     "min_gray": 91
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.03,
+     "min_gray": 162
+    },
+    {
+     "at": 0.8,
+     "offset_px": 0.01,
+     "min_gray": 99
+    }
+   ]
+  },
+  {
+   "id": "i1900-toilet2",
+   "kind": "interior",
+   "p0": [
+    734.2,
+    179.0
+   ],
+   "p1": [
+    735.8,
+    361.0
+   ],
+   "ticks": [
+    7.7,
+    179.1
+   ],
+   "labels": [
+    1900
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": 0.02,
+     "min_gray": 66
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.06,
+     "min_gray": 40
+    },
+    {
+     "at": 0.8,
+     "offset_px": -0.01,
+     "min_gray": 68
+    }
+   ]
+  },
+  {
+   "id": "i1200-toilet2",
+   "kind": "interior",
+   "p0": [
+    660.0,
+    383.8
+   ],
+   "p1": [
+    766.0,
+    383.4
+   ],
+   "ticks": [
+    0.0,
+    102.6
+   ],
+   "labels": [
+    1200
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": 0.01,
+     "min_gray": 90
+    },
+    {
+     "at": 0.5,
+     "offset_px": 0.04,
+     "min_gray": 165
+    },
+    {
+     "at": 0.8,
+     "offset_px": 0.02,
+     "min_gray": 126
+    }
+   ]
+  },
+  {
+   "id": "i3200-bed2",
+   "kind": "interior",
+   "p0": [
+    957.2,
+    177.0
+   ],
+   "p1": [
+    957.7,
+    479.0
+   ],
+   "ticks": [
+    6.2,
+    299.2
+   ],
+   "labels": [
+    3200
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": -0.04,
+     "min_gray": 88
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.0,
+     "min_gray": 54
+    },
+    {
+     "at": 0.8,
+     "offset_px": 0.02,
+     "min_gray": 58
+    }
+   ]
+  },
+  {
+   "id": "i1800",
+   "kind": "interior",
+   "p0": [
+    1083.0,
+    189.0
+   ],
+   "p1": [
+    1083.3,
+    358.0
+   ],
+   "ticks": [
+    2.0,
+    165.8
+   ],
+   "labels": [
+    1800
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": 0.02,
+     "min_gray": 94
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.06,
+     "min_gray": 70
+    },
+    {
+     "at": 0.8,
+     "offset_px": -0.02,
+     "min_gray": 60
+    }
+   ]
+  },
+  {
+   "id": "i400",
+   "kind": "interior",
+   "p0": [
+    798.9,
+    134.0
+   ],
+   "p1": [
+    799.4,
+    179.0
+   ],
+   "ticks": [
+    5.0,
+    42.5
+   ],
+   "labels": [
+    400
+   ],
+   "profile_check": [
+    {
+     "at": 0.22,
+     "offset_px": -0.45,
+     "min_gray": 64
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.09,
+     "min_gray": 66
+    },
+    {
+     "at": 0.8,
+     "offset_px": -0.05,
+     "min_gray": 27
+    }
+   ]
+  },
+  {
+   "id": "i1300",
+   "kind": "interior",
+   "p0": [
+    980.0,
+    155.1
+   ],
+   "p1": [
+    1107.0,
+    152.9
+   ],
+   "ticks": [
+    4.6,
+    123.5
+   ],
+   "labels": [
+    1300
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": 0.0,
+     "min_gray": 176
+    },
+    {
+     "at": 0.5,
+     "offset_px": 0.12,
+     "min_gray": 210
+    },
+    {
+     "at": 0.8,
+     "offset_px": 0.12,
+     "min_gray": 182
+    }
+   ]
+  },
+  {
+   "id": "i3500",
+   "kind": "interior",
+   "p0": [
+    804.7,
+    481.0
+   ],
+   "p1": [
+    807.8,
+    801.0
+   ],
+   "ticks": [
+    3.6,
+    317.4
+   ],
+   "labels": [
+    3500
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": -0.1,
+     "min_gray": 56
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.11,
+     "min_gray": 25
+    },
+    {
+     "at": 0.8,
+     "offset_px": -0.16,
+     "min_gray": 32
+    }
+   ]
+  },
+  {
+   "id": "i7600-3100",
+   "kind": "interior",
+   "p0": [
+    148.0,
+    770.5
+   ],
+   "p1": [
+    1105.0,
+    778.5
+   ],
+   "points": [
+    [
+     148.0,
+     772.5
+    ],
+    [
+     387.2,
+     772.5
+    ],
+    [
+     626.5,
+     773.0
+    ],
+    [
+     865.7,
+     776.4
+    ],
+    [
+     1104.9,
+     780.6
+    ]
+   ],
+   "ticks": [
+    6.5,
+    671.4,
+    680.1,
+    956.0
+   ],
+   "labels": [
+    7600,
+    null,
+    3100
+   ],
+   "profile_check": [
+    {
+     "at": 0.2,
+     "offset_px": 0.05,
+     "min_gray": 38
+    },
+    {
+     "at": 0.5,
+     "offset_px": -0.06,
+     "min_gray": 20
+    },
+    {
+     "at": 0.8,
+     "offset_px": 0.15,
+     "min_gray": 39
+    }
+   ]
+  }
+ ]
+}
