@@ -9,3 +9,7 @@ engine-cli/dist/
 # Vendored shadcn-vue components and mail views (starter-kit convention)
 resources/js/components/ui/
 resources/views/mail/
+
+# Design tokens are kept verbatim from 15 §3.1 (Prettier would rewrite OKLCH numbers
+# and wrap values), so they stay diffable against the spec and the print copy stays identical.
+resources/css/app.css

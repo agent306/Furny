@@ -1,170 +1,483 @@
-@import 'tailwindcss';
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
 
-@import 'tw-animate-css';
+@source "../js/**/*.{vue,ts}";
 
-@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
-@source '../../storage/framework/views/*.php';
+@custom-variant dark (&:where(.dark, .dark *));
 
-@custom-variant dark (&:is(.dark *));
+/* ---------- LIGHT (default) ---------- */
+:root {
+  color-scheme: light;
+  --radius: 0.625rem;
+
+  /* surfaces & text */
+  --background: oklch(0.985 0.004 85);
+  --foreground: oklch(0.23 0.012 60);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.23 0.012 60);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.23 0.012 60);
+  --muted: oklch(0.96 0.006 80);
+  --muted-foreground: oklch(0.49 0.015 60);
+  --secondary: oklch(0.95 0.008 80);
+  --secondary-foreground: oklch(0.28 0.015 60);
+  --accent: oklch(0.94 0.014 75);
+  --accent-foreground: oklch(0.25 0.015 60);
+  --border: oklch(0.897 0.008 80);      /* 15 §14.6: L 0.90 → 0.897 so border/background reaches 1.3:1 */
+  --input: oklch(0.87 0.010 80);
+  --ring: oklch(0.55 0.080 55);
+
+  /* brand */
+  --primary: oklch(0.42 0.065 50);            /* Walnut */
+  --primary-hover: oklch(0.37 0.062 50);
+  --primary-foreground: oklch(0.985 0.004 85);
+  --brand-wood: oklch(0.72 0.080 70);         /* decorative only (illustrations, grain motif) */
+  --brand-wood-subtle: oklch(0.94 0.025 75);
+
+  /* semantic status */
+  --success: oklch(0.52 0.120 150);
+  --success-foreground: oklch(0.99 0 0);
+  --success-subtle: oklch(0.95 0.040 150);
+  --success-subtle-foreground: oklch(0.38 0.090 150);
+  --warning: oklch(0.75 0.150 75);
+  --warning-foreground: oklch(0.25 0.050 60);
+  --warning-subtle: oklch(0.96 0.050 85);
+  --warning-subtle-foreground: oklch(0.45 0.100 65);
+  --danger: oklch(0.55 0.200 27);
+  --danger-foreground: oklch(0.99 0 0);
+  --danger-subtle: oklch(0.96 0.030 25);
+  --danger-subtle-foreground: oklch(0.45 0.160 27);
+  --info: oklch(0.55 0.120 245);
+  --info-foreground: oklch(0.99 0 0);
+  --info-subtle: oklch(0.95 0.030 245);
+  --info-subtle-foreground: oklch(0.42 0.110 245);
+  --destructive: var(--danger);               /* shadcn compat */
+  --destructive-foreground: var(--danger-foreground);
+
+  /* sidebar (shadcn-vue sidebar) */
+  --sidebar: oklch(0.975 0.006 80);
+  --sidebar-foreground: oklch(0.28 0.015 60);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: oklch(0.935 0.014 75);
+  --sidebar-accent-foreground: oklch(0.23 0.012 60);
+  --sidebar-border: oklch(0.90 0.008 80);
+  --sidebar-ring: var(--ring);
+
+  /* charts (inline SVG, §9.30) */
+  --chart-1: oklch(0.42 0.065 50);
+  --chart-2: oklch(0.60 0.090 200);
+  --chart-3: oklch(0.70 0.120 85);
+  --chart-4: oklch(0.55 0.080 300);
+  --chart-5: oklch(0.62 0.100 150);
+  --chart-grid: oklch(0.90 0.008 80);
+
+  /* ---------- editor (consumed by 05/07 via CSS vars + lib/theme/editorColors.ts) ---------- */
+  --canvas-bg: oklch(0.99 0.003 85);
+  --canvas-grid-minor: oklch(0.94 0.005 80);
+  --canvas-grid-major: oklch(0.88 0.008 80);
+  --canvas-axis: oklch(0.80 0.010 80);
+  --wall: oklch(0.30 0.010 60);                /* wall fill (cut plane) */
+  --wall-stroke: oklch(0.20 0.010 60);
+  --wall-exterior-hatch: oklch(0.55 0.010 60); /* 45° hatch lines over exterior walls */
+  --wall-half: oklch(0.55 0.010 60);           /* half/low walls fill */
+  --opening-door: oklch(0.35 0.015 60);        /* leaf + swing arc stroke */
+  --opening-window: oklch(0.55 0.090 220);     /* glazing lines */
+  --opening-gap: var(--canvas-bg);
+  --placement-fill: oklch(0.88 0.045 65);      /* custom furniture footprint */
+  --placement-stroke: oklch(0.45 0.065 50);
+  --fixture-fill: oklch(0.95 0.004 80);
+  --fixture-stroke: oklch(0.60 0.010 60);
+  --selection: oklch(0.60 0.170 250);
+  --selection-fill: oklch(0.60 0.170 250 / 0.14);
+  --hover-outline: oklch(0.60 0.170 250 / 0.55);
+  --snap-guide: oklch(0.62 0.240 330);         /* magenta, conventional CAD guide colour */
+  --snap-point: oklch(0.62 0.240 330);
+  --dimension: oklch(0.42 0.030 250);          /* dimension lines, arrows */
+  --dimension-text: oklch(0.30 0.030 250);
+  --measure: oklch(0.55 0.180 40);             /* tape-measure tool */
+  --label-text: oklch(0.30 0.012 60);
+  --confidence-high: oklch(0.58 0.130 150);
+  --confidence-med: oklch(0.72 0.150 70);
+  --confidence-low: oklch(0.58 0.210 27);
+  --diff-added: oklch(0.62 0.160 150);
+  --diff-changed: oklch(0.75 0.150 75);        /* amber per 09 §4.6 */
+  --diff-removed: oklch(0.60 0.200 27);
+  --diff-removed-ghost: oklch(0.60 0.200 27 / 0.25);
+
+  /* room fills (2D plan, 3D floor tint) — mapping in §3.4 */
+  --room-living: oklch(0.955 0.030 85);
+  --room-bedroom: oklch(0.950 0.025 250);
+  --room-kitchen: oklch(0.955 0.035 55);
+  --room-bath: oklch(0.950 0.030 205);
+  --room-outdoor: oklch(0.950 0.040 140);
+  --room-utility: oklch(0.945 0.008 80);
+  --room-study: oklch(0.950 0.025 300);
+  --room-pooja: oklch(0.955 0.035 30);
+  --room-circulation: oklch(0.970 0.008 80);
+  --room-other: oklch(0.965 0.004 80);
+  --room-label: oklch(0.32 0.015 60);
+
+  /* motion */
+  --duration-instant: 80ms;
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.3, 0, 0, 1.15);
+  --ease-exit: cubic-bezier(0.3, 0, 1, 1);
+}
+
+/* ---------- DARK ---------- */
+.dark {
+  color-scheme: dark;
+  --background: oklch(0.18 0.008 60);
+  --foreground: oklch(0.94 0.006 80);
+  --card: oklch(0.215 0.009 60);
+  --card-foreground: oklch(0.94 0.006 80);
+  --popover: oklch(0.225 0.009 60);
+  --popover-foreground: oklch(0.94 0.006 80);
+  --muted: oklch(0.25 0.008 60);
+  --muted-foreground: oklch(0.70 0.012 75);
+  --secondary: oklch(0.27 0.010 60);
+  --secondary-foreground: oklch(0.92 0.006 80);
+  --accent: oklch(0.28 0.012 60);
+  --accent-foreground: oklch(0.94 0.006 80);
+  --border: oklch(0.31 0.010 60);
+  --input: oklch(0.34 0.012 60);
+  --ring: oklch(0.70 0.070 60);
+
+  --primary: oklch(0.76 0.075 65);            /* Oak */
+  --primary-hover: oklch(0.81 0.070 65);
+  --primary-foreground: oklch(0.20 0.020 55);
+  --brand-wood: oklch(0.62 0.070 65);
+  --brand-wood-subtle: oklch(0.26 0.020 65);
+
+  --success: oklch(0.68 0.130 150);
+  --success-foreground: oklch(0.18 0.030 150);
+  --success-subtle: oklch(0.27 0.050 150);
+  --success-subtle-foreground: oklch(0.82 0.100 150);
+  --warning: oklch(0.80 0.140 80);
+  --warning-foreground: oklch(0.20 0.040 60);
+  --warning-subtle: oklch(0.29 0.050 75);
+  --warning-subtle-foreground: oklch(0.86 0.110 85);
+  --danger: oklch(0.66 0.190 25);
+  --danger-foreground: oklch(0.18 0.030 25);
+  --danger-subtle: oklch(0.28 0.060 25);
+  --danger-subtle-foreground: oklch(0.82 0.100 25);
+  --info: oklch(0.70 0.120 245);
+  --info-foreground: oklch(0.18 0.030 245);
+  --info-subtle: oklch(0.27 0.050 245);
+  --info-subtle-foreground: oklch(0.83 0.080 245);
+
+  --sidebar: oklch(0.20 0.008 60);
+  --sidebar-foreground: oklch(0.90 0.006 80);
+  --sidebar-accent: oklch(0.27 0.012 60);
+  --sidebar-accent-foreground: oklch(0.94 0.006 80);
+  --sidebar-border: oklch(0.29 0.010 60);
+
+  --chart-1: oklch(0.76 0.075 65);
+  --chart-2: oklch(0.72 0.090 200);
+  --chart-3: oklch(0.80 0.120 85);
+  --chart-4: oklch(0.70 0.080 300);
+  --chart-5: oklch(0.72 0.110 150);
+  --chart-grid: oklch(0.31 0.010 60);
+
+  --canvas-bg: oklch(0.20 0.008 60);
+  --canvas-grid-minor: oklch(0.24 0.008 60);
+  --canvas-grid-major: oklch(0.29 0.010 60);
+  --canvas-axis: oklch(0.36 0.010 60);
+  --wall: oklch(0.82 0.010 80);
+  --wall-stroke: oklch(0.92 0.008 80);
+  --wall-exterior-hatch: oklch(0.55 0.010 80);
+  --wall-half: oklch(0.60 0.010 80);
+  --opening-door: oklch(0.85 0.010 80);
+  --opening-window: oklch(0.72 0.090 220);
+  --placement-fill: oklch(0.38 0.040 65);
+  --placement-stroke: oklch(0.78 0.070 65);
+  --fixture-fill: oklch(0.27 0.006 60);
+  --fixture-stroke: oklch(0.55 0.010 70);
+  --selection: oklch(0.72 0.150 250);
+  --selection-fill: oklch(0.72 0.150 250 / 0.18);
+  --hover-outline: oklch(0.72 0.150 250 / 0.6);
+  --snap-guide: oklch(0.72 0.220 330);
+  --snap-point: oklch(0.72 0.220 330);
+  --dimension: oklch(0.75 0.040 250);
+  --dimension-text: oklch(0.86 0.030 250);
+  --measure: oklch(0.72 0.160 45);
+  --label-text: oklch(0.88 0.008 80);
+  --confidence-high: oklch(0.70 0.130 150);
+  --confidence-med: oklch(0.80 0.140 80);
+  --confidence-low: oklch(0.68 0.190 25);
+  --diff-added: oklch(0.72 0.150 150);
+  --diff-changed: oklch(0.80 0.140 80);
+  --diff-removed: oklch(0.68 0.190 25);
+  --diff-removed-ghost: oklch(0.68 0.190 25 / 0.28);
+
+  --room-living: oklch(0.300 0.030 85);
+  --room-bedroom: oklch(0.290 0.030 250);
+  --room-kitchen: oklch(0.300 0.035 55);
+  --room-bath: oklch(0.290 0.030 205);
+  --room-outdoor: oklch(0.290 0.035 140);
+  --room-utility: oklch(0.270 0.008 80);
+  --room-study: oklch(0.290 0.030 300);
+  --room-pooja: oklch(0.300 0.035 30);
+  --room-circulation: oklch(0.245 0.008 80);
+  --room-other: oklch(0.255 0.004 80);
+  --room-label: oklch(0.90 0.008 80);
+}
 
 @theme inline {
-    --font-sans:
-        ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
-        'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, monospace;
 
-    --radius-lg: var(--radius);
-    --radius-md: calc(var(--radius) - 2px);
-    --radius-sm: calc(var(--radius) - 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-brand-wood: var(--brand-wood);
+  --color-brand-wood-subtle: var(--brand-wood-subtle);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  /* success / warning / danger / info: base, -foreground, -subtle, -subtle-foreground (16 entries, same pattern) */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-subtle: var(--success-subtle);
+  --color-success-subtle-foreground: var(--success-subtle-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-warning-subtle-foreground: var(--warning-subtle-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-danger-subtle-foreground: var(--danger-subtle-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-subtle: var(--info-subtle);
+  --color-info-subtle-foreground: var(--info-subtle-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-grid: var(--chart-grid);
+  /* editor tokens are exposed as utilities too (fill-wall, stroke-dimension, bg-room-kitchen …) */
+  --color-canvas-bg: var(--canvas-bg);
+  --color-canvas-grid-minor: var(--canvas-grid-minor);
+  --color-canvas-grid-major: var(--canvas-grid-major);
+  --color-wall: var(--wall);
+  --color-wall-stroke: var(--wall-stroke);
+  --color-wall-exterior-hatch: var(--wall-exterior-hatch);
+  --color-selection: var(--selection);
+  --color-snap-guide: var(--snap-guide);
+  --color-dimension: var(--dimension);
+  --color-confidence-high: var(--confidence-high);
+  --color-confidence-med: var(--confidence-med);
+  --color-confidence-low: var(--confidence-low);
+  --color-diff-added: var(--diff-added);
+  --color-diff-changed: var(--diff-changed);
+  --color-diff-removed: var(--diff-removed);
+  --color-room-living: var(--room-living);
+  --color-room-bedroom: var(--room-bedroom);
+  --color-room-kitchen: var(--room-kitchen);
+  --color-room-bath: var(--room-bath);
+  --color-room-outdoor: var(--room-outdoor);
+  --color-room-utility: var(--room-utility);
+  --color-room-study: var(--room-study);
+  --color-room-pooja: var(--room-pooja);
+  --color-room-circulation: var(--room-circulation);
+  --color-room-other: var(--room-other);
 
-    --color-background: var(--background);
-    --color-foreground: var(--foreground);
+  --radius-sm: calc(var(--radius) - 4px);   /* 6px  — badges, small inputs */
+  --radius-md: calc(var(--radius) - 2px);   /* 8px  — inputs, buttons */
+  --radius-lg: var(--radius);               /* 10px — cards, dialogs */
+  --radius-xl: calc(var(--radius) + 4px);   /* 14px — sheets, large media */
 
-    --color-card: var(--card);
-    --color-card-foreground: var(--card-foreground);
+  --shadow-xs: 0 1px 2px 0 oklch(0.2 0.01 60 / 0.06);
+  --shadow-sm: 0 1px 3px 0 oklch(0.2 0.01 60 / 0.08), 0 1px 2px -1px oklch(0.2 0.01 60 / 0.06);
+  --shadow-md: 0 4px 8px -2px oklch(0.2 0.01 60 / 0.10), 0 2px 4px -2px oklch(0.2 0.01 60 / 0.06);
+  --shadow-lg: 0 12px 24px -6px oklch(0.2 0.01 60 / 0.14), 0 4px 8px -4px oklch(0.2 0.01 60 / 0.08);
+  --shadow-overlay: 0 20px 40px -8px oklch(0.1 0.01 60 / 0.25);
 
-    --color-popover: var(--popover);
-    --color-popover-foreground: var(--popover-foreground);
-
-    --color-primary: var(--primary);
-    --color-primary-foreground: var(--primary-foreground);
-
-    --color-secondary: var(--secondary);
-    --color-secondary-foreground: var(--secondary-foreground);
-
-    --color-muted: var(--muted);
-    --color-muted-foreground: var(--muted-foreground);
-
-    --color-accent: var(--accent);
-    --color-accent-foreground: var(--accent-foreground);
-
-    --color-destructive: var(--destructive);
-    --color-destructive-foreground: var(--destructive-foreground);
-
-    --color-border: var(--border);
-    --color-input: var(--input);
-    --color-ring: var(--ring);
-
-    --color-chart-1: var(--chart-1);
-    --color-chart-2: var(--chart-2);
-    --color-chart-3: var(--chart-3);
-    --color-chart-4: var(--chart-4);
-    --color-chart-5: var(--chart-5);
-
-    --color-sidebar: var(--sidebar-background);
-    --color-sidebar-foreground: var(--sidebar-foreground);
-    --color-sidebar-primary: var(--sidebar-primary);
-    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-    --color-sidebar-accent: var(--sidebar-accent);
-    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-    --color-sidebar-border: var(--sidebar-border);
-    --color-sidebar-ring: var(--sidebar-ring);
+  --animate-skeleton: skeleton-pulse 1.6s var(--ease-standard) infinite;
 }
 
-/*
-  The default border color has changed to `currentColor` in Tailwind CSS v4,
-  so we've added these compatibility styles to make sure everything still
-  looks the same as it did with Tailwind CSS v3.
-
-  If we ever want to remove these styles, we need to add an explicit border
-  color utility to any element that depends on these defaults.
-*/
-@layer base {
-    *,
-    ::after,
-    ::before,
-    ::backdrop,
-    ::file-selector-button {
-        border-color: var(--color-gray-200, currentColor);
-    }
-}
-
-@layer utilities {
-    body,
-    html {
-        --font-sans:
-            ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
-            'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
-    }
-}
-
-:root {
-    --background: hsl(0 0% 100%);
-    --foreground: hsl(0 0% 3.9%);
-    --card: hsl(0 0% 100%);
-    --card-foreground: hsl(0 0% 3.9%);
-    --popover: hsl(0 0% 100%);
-    --popover-foreground: hsl(0 0% 3.9%);
-    --primary: hsl(0 0% 9%);
-    --primary-foreground: hsl(0 0% 98%);
-    --secondary: hsl(0 0% 92.1%);
-    --secondary-foreground: hsl(0 0% 9%);
-    --muted: hsl(0 0% 96.1%);
-    --muted-foreground: hsl(0 0% 45.1%);
-    --accent: hsl(0 0% 96.1%);
-    --accent-foreground: hsl(0 0% 9%);
-    --destructive: hsl(0 84.2% 60.2%);
-    --destructive-foreground: hsl(0 0% 98%);
-    --border: hsl(0 0% 92.8%);
-    --input: hsl(0 0% 89.8%);
-    --ring: hsl(0 0% 3.9%);
-    --chart-1: hsl(12 76% 61%);
-    --chart-2: hsl(173 58% 39%);
-    --chart-3: hsl(197 37% 24%);
-    --chart-4: hsl(43 74% 66%);
-    --chart-5: hsl(27 87% 67%);
-    --radius: 0.5rem;
-    --sidebar-background: hsl(0 0% 98%);
-    --sidebar-foreground: hsl(240 5.3% 26.1%);
-    --sidebar-primary: hsl(0 0% 10%);
-    --sidebar-primary-foreground: hsl(0 0% 98%);
-    --sidebar-accent: hsl(0 0% 94%);
-    --sidebar-accent-foreground: hsl(0 0% 30%);
-    --sidebar-border: hsl(0 0% 91%);
-    --sidebar-ring: hsl(217.2 91.2% 59.8%);
-    --sidebar: hsl(0 0% 98%);
-}
-
-.dark {
-    --background: hsl(0 0% 3.9%);
-    --foreground: hsl(0 0% 98%);
-    --card: hsl(0 0% 3.9%);
-    --card-foreground: hsl(0 0% 98%);
-    --popover: hsl(0 0% 3.9%);
-    --popover-foreground: hsl(0 0% 98%);
-    --primary: hsl(0 0% 98%);
-    --primary-foreground: hsl(0 0% 9%);
-    --secondary: hsl(0 0% 14.9%);
-    --secondary-foreground: hsl(0 0% 98%);
-    --muted: hsl(0 0% 16.08%);
-    --muted-foreground: hsl(0 0% 63.9%);
-    --accent: hsl(0 0% 14.9%);
-    --accent-foreground: hsl(0 0% 98%);
-    --destructive: hsl(0 84% 60%);
-    --destructive-foreground: hsl(0 0% 98%);
-    --border: hsl(0 0% 14.9%);
-    --input: hsl(0 0% 14.9%);
-    --ring: hsl(0 0% 83.1%);
-    --chart-1: hsl(220 70% 50%);
-    --chart-2: hsl(160 60% 45%);
-    --chart-3: hsl(30 80% 55%);
-    --chart-4: hsl(280 65% 60%);
-    --chart-5: hsl(340 75% 55%);
-    --sidebar-background: hsl(0 0% 7%);
-    --sidebar-foreground: hsl(0 0% 95.9%);
-    --sidebar-primary: hsl(360, 100%, 100%);
-    --sidebar-primary-foreground: hsl(0 0% 100%);
-    --sidebar-accent: hsl(0 0% 15.9%);
-    --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-    --sidebar-border: hsl(0 0% 15.9%);
-    --sidebar-ring: hsl(217.2 91.2% 59.8%);
-    --sidebar: hsl(240 5.9% 10%);
-}
+@keyframes skeleton-pulse { 0%,100% { opacity: 1 } 50% { opacity: .55 } }
 
 @layer base {
-    * {
-        @apply border-border outline-ring/50;
-    }
-    body {
-        @apply bg-background text-foreground;
-    }
+  * { @apply border-border outline-ring/60; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { @apply bg-background text-foreground font-sans antialiased; font-feature-settings: "cv11", "ss01"; }
+  .tabular { font-variant-numeric: tabular-nums; }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --duration-instant: 0ms; --duration-fast: 0ms; --duration-base: 0ms; --duration-slow: 0ms; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+/* ---------- PRINT (15 §16) ---------- */
+@media print {
+  @page { size: A4; margin: 14mm 12mm; }
+  html, body { background: #fff !important; color: #000 !important; font-size: 11pt; }
+  .dark { color-scheme: light; }                       /* print always light: tokens below */
+  header, nav, aside, footer, [data-print="hide"], [data-sonner-toaster], .mobile-tab-bar { display: none !important; }
+  [data-print="only"] { display: block !important; }
+  main { padding: 0 !important; max-width: none !important; }
+  a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 9pt; color: #555; }
+  .card, [data-slot="card"] { box-shadow: none !important; border: 1px solid #ccc !important; break-inside: avoid; }
+  table { border-collapse: collapse; width: 100%; } th, td { border-bottom: 1px solid #ddd; padding: 4pt 6pt; }
+  thead { display: table-header-group; } tr { break-inside: avoid; }
+  img { max-width: 100% !important; break-inside: avoid; }
+  h1, h2, h3 { break-after: avoid; }
+
+  /* Print forces the light token values: an exact copy of the :root block above
+     (tokens-contrast.test.ts asserts they stay identical). */
+  :root, .dark {
+    color-scheme: light;
+    --radius: 0.625rem;
+
+    /* surfaces & text */
+    --background: oklch(0.985 0.004 85);
+    --foreground: oklch(0.23 0.012 60);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.23 0.012 60);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.23 0.012 60);
+    --muted: oklch(0.96 0.006 80);
+    --muted-foreground: oklch(0.49 0.015 60);
+    --secondary: oklch(0.95 0.008 80);
+    --secondary-foreground: oklch(0.28 0.015 60);
+    --accent: oklch(0.94 0.014 75);
+    --accent-foreground: oklch(0.25 0.015 60);
+    --border: oklch(0.897 0.008 80);      /* 15 §14.6: L 0.90 → 0.897 so border/background reaches 1.3:1 */
+    --input: oklch(0.87 0.010 80);
+    --ring: oklch(0.55 0.080 55);
+
+    /* brand */
+    --primary: oklch(0.42 0.065 50);            /* Walnut */
+    --primary-hover: oklch(0.37 0.062 50);
+    --primary-foreground: oklch(0.985 0.004 85);
+    --brand-wood: oklch(0.72 0.080 70);         /* decorative only (illustrations, grain motif) */
+    --brand-wood-subtle: oklch(0.94 0.025 75);
+
+    /* semantic status */
+    --success: oklch(0.52 0.120 150);
+    --success-foreground: oklch(0.99 0 0);
+    --success-subtle: oklch(0.95 0.040 150);
+    --success-subtle-foreground: oklch(0.38 0.090 150);
+    --warning: oklch(0.75 0.150 75);
+    --warning-foreground: oklch(0.25 0.050 60);
+    --warning-subtle: oklch(0.96 0.050 85);
+    --warning-subtle-foreground: oklch(0.45 0.100 65);
+    --danger: oklch(0.55 0.200 27);
+    --danger-foreground: oklch(0.99 0 0);
+    --danger-subtle: oklch(0.96 0.030 25);
+    --danger-subtle-foreground: oklch(0.45 0.160 27);
+    --info: oklch(0.55 0.120 245);
+    --info-foreground: oklch(0.99 0 0);
+    --info-subtle: oklch(0.95 0.030 245);
+    --info-subtle-foreground: oklch(0.42 0.110 245);
+    --destructive: var(--danger);               /* shadcn compat */
+    --destructive-foreground: var(--danger-foreground);
+
+    /* sidebar (shadcn-vue sidebar) */
+    --sidebar: oklch(0.975 0.006 80);
+    --sidebar-foreground: oklch(0.28 0.015 60);
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--primary-foreground);
+    --sidebar-accent: oklch(0.935 0.014 75);
+    --sidebar-accent-foreground: oklch(0.23 0.012 60);
+    --sidebar-border: oklch(0.90 0.008 80);
+    --sidebar-ring: var(--ring);
+
+    /* charts (inline SVG, §9.30) */
+    --chart-1: oklch(0.42 0.065 50);
+    --chart-2: oklch(0.60 0.090 200);
+    --chart-3: oklch(0.70 0.120 85);
+    --chart-4: oklch(0.55 0.080 300);
+    --chart-5: oklch(0.62 0.100 150);
+    --chart-grid: oklch(0.90 0.008 80);
+
+    /* ---------- editor (consumed by 05/07 via CSS vars + lib/theme/editorColors.ts) ---------- */
+    --canvas-bg: oklch(0.99 0.003 85);
+    --canvas-grid-minor: oklch(0.94 0.005 80);
+    --canvas-grid-major: oklch(0.88 0.008 80);
+    --canvas-axis: oklch(0.80 0.010 80);
+    --wall: oklch(0.30 0.010 60);                /* wall fill (cut plane) */
+    --wall-stroke: oklch(0.20 0.010 60);
+    --wall-exterior-hatch: oklch(0.55 0.010 60); /* 45° hatch lines over exterior walls */
+    --wall-half: oklch(0.55 0.010 60);           /* half/low walls fill */
+    --opening-door: oklch(0.35 0.015 60);        /* leaf + swing arc stroke */
+    --opening-window: oklch(0.55 0.090 220);     /* glazing lines */
+    --opening-gap: var(--canvas-bg);
+    --placement-fill: oklch(0.88 0.045 65);      /* custom furniture footprint */
+    --placement-stroke: oklch(0.45 0.065 50);
+    --fixture-fill: oklch(0.95 0.004 80);
+    --fixture-stroke: oklch(0.60 0.010 60);
+    --selection: oklch(0.60 0.170 250);
+    --selection-fill: oklch(0.60 0.170 250 / 0.14);
+    --hover-outline: oklch(0.60 0.170 250 / 0.55);
+    --snap-guide: oklch(0.62 0.240 330);         /* magenta, conventional CAD guide colour */
+    --snap-point: oklch(0.62 0.240 330);
+    --dimension: oklch(0.42 0.030 250);          /* dimension lines, arrows */
+    --dimension-text: oklch(0.30 0.030 250);
+    --measure: oklch(0.55 0.180 40);             /* tape-measure tool */
+    --label-text: oklch(0.30 0.012 60);
+    --confidence-high: oklch(0.58 0.130 150);
+    --confidence-med: oklch(0.72 0.150 70);
+    --confidence-low: oklch(0.58 0.210 27);
+    --diff-added: oklch(0.62 0.160 150);
+    --diff-changed: oklch(0.75 0.150 75);        /* amber per 09 §4.6 */
+    --diff-removed: oklch(0.60 0.200 27);
+    --diff-removed-ghost: oklch(0.60 0.200 27 / 0.25);
+
+    /* room fills (2D plan, 3D floor tint) — mapping in §3.4 */
+    --room-living: oklch(0.955 0.030 85);
+    --room-bedroom: oklch(0.950 0.025 250);
+    --room-kitchen: oklch(0.955 0.035 55);
+    --room-bath: oklch(0.950 0.030 205);
+    --room-outdoor: oklch(0.950 0.040 140);
+    --room-utility: oklch(0.945 0.008 80);
+    --room-study: oklch(0.950 0.025 300);
+    --room-pooja: oklch(0.955 0.035 30);
+    --room-circulation: oklch(0.970 0.008 80);
+    --room-other: oklch(0.965 0.004 80);
+    --room-label: oklch(0.32 0.015 60);
+
+    /* motion */
+    --duration-instant: 80ms;
+    --duration-fast: 120ms;
+    --duration-base: 200ms;
+    --duration-slow: 320ms;
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --ease-emphasized: cubic-bezier(0.3, 0, 0, 1.15);
+    --ease-exit: cubic-bezier(0.3, 0, 1, 1);
+  }
 }
