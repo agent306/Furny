@@ -12,7 +12,9 @@ beforeAll(async () => {
     await eslint.lintText('export {};\n', {
         filePath: 'resources/js/engine/warmup.ts',
     });
-});
+    // The first lint builds the typed program for the whole app (P1 + P2), which
+    // takes longer than the default 10 s hook timeout.
+}, 120_000);
 
 async function ruleIds(code: string, filePath: string): Promise<string[]> {
     const [result] = await eslint.lintText(code, { filePath });

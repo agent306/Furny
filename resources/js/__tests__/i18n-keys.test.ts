@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest';
 const SOURCE_ROOT = 'resources/js';
 const EXCLUDED = [
     /(^|\/)lang\/generated\//,
+    // The engine renders no text: its local `t(...)` helpers build part and
+    // command shapes, not translations. Its issue keys are checked by P2 Task 51.
+    /^resources\/js\/engine\//,
     /(^|\/)__tests__\//,
     /\.test\.ts$/,
 ];
