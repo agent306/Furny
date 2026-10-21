@@ -12,6 +12,8 @@
     "common.verify_required": "Verify your email or phone number to continue.",
     "designs.errors.in_order": "This design is part of an order, so it cannot be deleted.",
     "designs.errors.locked": "This design is part of an order and cannot be changed.",
+    "messages.errors.edit_window": "Messages can only be edited for 10 minutes.",
+    "messages.errors.thread_closed": "This conversation is closed. Contact us if you need help.",
     "production.stages.assembly": "Assembly",
     "production.stages.cutting": "Cutting",
     "production.stages.drilling": "Drilling & machining",
@@ -21,5 +23,6 @@
     "production.stages.packing": "Packing",
     "production.stages.quality_check": "Quality check",
     "projects.errors.has_orders": "This project has orders, so it cannot be deleted.",
-    "quotes.default_terms": "This quote is valid until the date shown. Final dimensions are confirmed during our confirmation call. Delivery dates are estimates until production starts."
+    "quotes.default_terms": "This quote is valid until the date shown. Final dimensions are confirmed during our confirmation call. Delivery dates are estimates until production starts.",
+    "quotes.errors.not_draft": "Only a draft quote can be changed or deleted."
 }

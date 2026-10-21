@@ -16,7 +16,10 @@ use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
 
-/** 13 §8.1. */
+/**
+ * 13 §8.1. Policies do not check whether a project is archived or trashed: the controllers of P4/P5/P6 refuse
+ * writes to such projects, so an archived or trashed project still answers these abilities as an active one.
+ */
 final class ProjectPolicy
 {
     use AuthorizesStaff, ChecksProjectOwnership, RespondsWithCodes;

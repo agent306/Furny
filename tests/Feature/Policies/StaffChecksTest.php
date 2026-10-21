@@ -6,12 +6,19 @@ use App\Domain\Furniture\Models\FurnitureDesign;
 use App\Domain\Identity\Models\User;
 use App\Domain\Imports\Enums\ImportMode;
 use App\Domain\Imports\Models\BlueprintImport;
+use App\Domain\Messaging\Models\Message;
+use App\Domain\Orders\Models\ChangeProposal;
+use App\Domain\Orders\Models\Quote;
 use App\Domain\Projects\Models\Plan;
 use App\Domain\Projects\Models\Project;
 use App\Policies\BlueprintImportPolicy;
+use App\Policies\ChangeProposalPolicy;
 use App\Policies\FurnitureDesignPolicy;
+use App\Policies\MessagePolicy;
+use App\Policies\OrderPolicy;
 use App\Policies\PlanPolicy;
 use App\Policies\ProjectPolicy;
+use App\Policies\QuotePolicy;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Gate;
 
@@ -85,6 +92,34 @@ describe('inactive staff, with Gate::before out of the way (policies called dire
             (new FurnitureDesignPolicy)->view($inactive, $design),
             (new BlueprintImportPolicy)->refund($inactive, $import),
             (new BlueprintImportPolicy)->create($inactive, $project, ImportMode::Trace),
+        ];
+
+        foreach ($denials as $response) {
+            expect($response->allowed())->toBeFalse();
+        }
+    });
+});
+
+describe('inactive staff on orders, quotes, proposals and messages, with Gate::before out of the way', function (): void {
+    it('are denied by the policy itself', function (): void {
+        $inactive = User::factory()->owner()->inactive()->create();
+        $quote = Quote::factory()->sent()->create();
+        $order = $quote->order;
+        $proposal = ChangeProposal::factory()->sent()->for($order)->create();
+        $message = Message::factory()->by($inactive)->for($order)->create();
+
+        $denials = [
+            (new OrderPolicy)->view($inactive, $order),
+            (new OrderPolicy)->review($inactive, $order),
+            (new OrderPolicy)->close($inactive, $order),
+            (new QuotePolicy)->view($inactive, $quote),
+            (new QuotePolicy)->viewCosts($inactive, $quote),
+            (new ChangeProposalPolicy)->view($inactive, $proposal),
+            (new ChangeProposalPolicy)->send($inactive, $proposal),
+            (new MessagePolicy)->viewThread($inactive, $order),
+            (new MessagePolicy)->create($inactive, $order),
+            (new MessagePolicy)->createInternalNote($inactive, $order),
+            (new MessagePolicy)->update($inactive, $message),
         ];
 
         foreach ($denials as $response) {

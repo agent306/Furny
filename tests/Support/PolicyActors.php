@@ -18,6 +18,9 @@ final class PolicyActors
     /** The roles holding `plans.edit_any` (13 §7.2). */
     public const array PLAN_EDITORS = ['staff-owner', 'admin', 'estimator'];
 
+    /** The roles holding the estimating permissions (`orders.review`, `quotes.create`, `orders.cancel`, ...), 13 §7.2. */
+    public const array ESTIMATORS = ['staff-owner', 'admin', 'estimator'];
+
     /** The roles holding `customers.manage`, `ai.manage` and the other owner/admin-only permissions. */
     public const array MANAGERS = ['staff-owner', 'admin'];
 
@@ -87,5 +90,18 @@ final class PolicyActors
         }
 
         return $expectations;
+    }
+
+    /**
+     * Expectations of an ability for staff holding one permission only (the customer who owns the record
+     * is told 403 and a stranger 404, because the record exists for the former). The owner-customer-only
+     * ability is `ownerOrStaff([])`.
+     *
+     * @param  list<string>  $staffAllowed  staff actors holding the permission
+     * @return array<string, bool|int|null>
+     */
+    public static function staffOnly(array $staffAllowed): array
+    {
+        return ['customer' => 403] + self::ownerOrStaff($staffAllowed);
     }
 }
