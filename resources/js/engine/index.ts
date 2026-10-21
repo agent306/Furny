@@ -214,3 +214,15 @@ export {
 export type { PlanIssueCode } from './plan/validate';
 export { planSummary } from './plan/summary';
 export type { PlanSummary } from './plan/summary';
+export { fixtureFootprint, placementFootprint } from './plan/footprint';
+export type {
+    Footprint,
+    FootprintProvider,
+    FootprintSize,
+} from './plan/footprint';
+export {
+    CONFLICT_KINDS,
+    computePlacementConflicts,
+    doorSwingSectors,
+} from './plan/conflicts';
+export type { ConflictKind, PlacementConflict } from './plan/conflicts';
