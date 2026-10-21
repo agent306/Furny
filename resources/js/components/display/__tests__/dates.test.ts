@@ -137,6 +137,29 @@ describe('DateText', () => {
         expect(time.text()).toBe('10:00 am');
     });
 
+    it('a :style binding reaches the <time> element (the spec names the date style prop "style" too)', () => {
+        const wrapper = mount(DateText, {
+            props: {
+                value: '2026-10-20',
+                kind: 'date',
+                style: { color: 'red' },
+            },
+        });
+        const time = wrapper.get('time');
+
+        expect(time.attributes('style')).toContain('color: red');
+        expect(time.text()).toBe('20 Oct 2026');
+    });
+
+    it('class still falls through', () => {
+        const wrapper = mount(DateText, {
+            props: { value: '2026-10-20', kind: 'date' },
+            attrs: { class: 'text-sm' },
+        });
+
+        expect(wrapper.get('time').classes()).toContain('text-sm');
+    });
+
     it('kind="time" with style long names the zone', () => {
         expect(
             mount(DateText, {

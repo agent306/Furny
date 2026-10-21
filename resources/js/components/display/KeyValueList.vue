@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { PLACEHOLDER } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 // 15 §9.28. `label`/`value` are already translated. An item with `slot` renders
@@ -21,11 +22,11 @@ withDefaults(
             )
         "
     >
-        <div v-for="item in items" :key="item.label" class="min-w-0">
+        <div v-for="(item, index) in items" :key="index" class="min-w-0">
             <dt class="text-muted-foreground">{{ item.label }}</dt>
             <dd class="mt-0.5 font-medium break-words">
                 <slot v-if="item.slot" :name="item.slot" />
-                <template v-else>{{ item.value || '—' }}</template>
+                <template v-else>{{ item.value || PLACEHOLDER }}</template>
             </dd>
         </div>
     </dl>

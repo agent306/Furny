@@ -69,6 +69,23 @@ describe('MoneyDisplay', () => {
         ).toBe('—');
     });
 
+    it('renders a dash and logs, instead of throwing, for a non-integer amount', () => {
+        const error = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => undefined);
+
+        for (const minor of [12.5, Number.NaN, 2 ** 53]) {
+            const wrapper = mount(MoneyDisplay, { props: { minor } });
+
+            expect(wrapper.text(), String(minor)).toBe('—');
+            // Unmounted so a later `resetPage()` cannot re-render it into the next test.
+            wrapper.unmount();
+        }
+
+        expect(error).toHaveBeenCalledTimes(3);
+        error.mockRestore();
+    });
+
     it('takes another currency', () => {
         expect(
             mount(MoneyDisplay, {

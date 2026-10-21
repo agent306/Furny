@@ -115,6 +115,51 @@ describe('ReasonDialog', () => {
         expect(view.emitted('submit')).toBeUndefined();
     });
 
+    it('moves focus to the first radio when the reason is missing (even if the note is too)', async () => {
+        show({ reasons, noteRequired: true });
+        await flushPromises();
+
+        await submit();
+
+        const first = document.body.querySelectorAll('[role="radio"]')[0];
+        expect(document.activeElement).toBe(first);
+        expect(note().getAttribute('aria-invalid')).toBe('true');
+    });
+
+    it('moves focus to the invalid textarea when only the note is missing', async () => {
+        show({ reasons, noteRequired: true });
+        await flushPromises();
+
+        document.body
+            .querySelectorAll<HTMLElement>('[role="radio"]')[0]
+            ?.click();
+        await flushPromises();
+        await submit();
+
+        expect(document.activeElement).toBe(note());
+        expect(note().getAttribute('aria-invalid')).toBe('true');
+    });
+
+    it('moves focus to the textarea when there are no reasons and the note is missing', async () => {
+        show({ noteRequired: true });
+        await flushPromises();
+
+        await submit();
+
+        expect(document.activeElement).toBe(note());
+    });
+
+    it('does not steal focus on a valid submit', async () => {
+        show({ noteRequired: false });
+        await flushPromises();
+        (document.body.querySelector('button') as HTMLElement).focus();
+        const before = document.activeElement;
+
+        await submit();
+
+        expect(document.activeElement).toBe(before);
+    });
+
     it('emits { reason, note } when valid', async () => {
         const view = show({ reasons, noteRequired: true });
         await flushPromises();

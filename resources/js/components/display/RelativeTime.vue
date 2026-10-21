@@ -2,6 +2,7 @@
 import { useIntervalFn } from '@vueuse/core';
 import { computed, ref } from 'vue';
 import { useFormat } from '@/composables/useFormat';
+import { PLACEHOLDER } from '@/lib/format';
 
 // 15 §9.28: relative text, absolute time (user zone) as the tooltip, refreshed
 // every minute.
@@ -19,7 +20,7 @@ useIntervalFn(() => {
 }, 60_000);
 
 const relative = computed(() => formatRelative(props.at, now.value));
-const readable = computed(() => relative.value !== '—');
+const readable = computed(() => relative.value !== PLACEHOLDER);
 </script>
 
 <template>

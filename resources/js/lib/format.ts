@@ -45,8 +45,7 @@ const caches = {
     relative: new Map<string, Intl.RelativeTimeFormat>(),
 };
 
-function cached<T>(cache: Map<string, T>, key: unknown[], create: () => T): T {
-    const id = JSON.stringify(key);
+function cached<T>(cache: Map<string, T>, id: string, create: () => T): T {
     let value = cache.get(id);
 
     if (value === undefined) {
@@ -57,13 +56,26 @@ function cached<T>(cache: Map<string, T>, key: unknown[], create: () => T): T {
     return value;
 }
 
+// Option objects are flat records of primitives; `key=value` pairs keep two
+// shapes with equal values (`{ dateStyle: 's' }` vs `{ timeStyle: 's' }`) apart
+// without the cost of `JSON.stringify` on every call.
+function optionsKey(locale: string, options: object): string {
+    let id = locale;
+
+    for (const [key, value] of Object.entries(options)) {
+        id += `|${key}=${String(value)}`;
+    }
+
+    return id;
+}
+
 function numberFormat(
     locale: string,
     options: Intl.NumberFormatOptions,
 ): Intl.NumberFormat {
     return cached(
         caches.number,
-        [locale, options],
+        optionsKey(locale, options),
         () => new Intl.NumberFormat(locale, options),
     );
 }
@@ -74,26 +86,66 @@ function dateFormat(
 ): Intl.DateTimeFormat {
     return cached(
         caches.date,
-        [locale, options],
+        optionsKey(locale, options),
         () => new Intl.DateTimeFormat(locale, options),
     );
 }
 
-function validTimeZone(candidate: string, fallback: string): string {
-    try {
-        new Intl.DateTimeFormat('en', { timeZone: candidate });
-
-        return candidate;
-    } catch {
-        return fallback;
-    }
+function currencyFormat(
+    locale: string,
+    currency: string,
+    signDisplay: FormatMoneyOptions['signDisplay'],
+    compact: boolean,
+): Intl.NumberFormat {
+    return cached(
+        caches.number,
+        `${locale}|money|${currency}|${signDisplay ?? ''}|${compact ? 'c' : 's'}`,
+        () =>
+            new Intl.NumberFormat(locale, {
+                style: 'currency',
+                currency,
+                signDisplay,
+                notation: compact ? 'compact' : 'standard',
+            }),
+    );
 }
 
+const validZones = new Map<string, string>();
+
+/** `candidate` if it is a time zone `Intl` knows, else `fallback`; memoised. */
+function validTimeZone(candidate: string, fallback: string): string {
+    const id = `${candidate}\u0000${fallback}`;
+    let zone = validZones.get(id);
+
+    if (zone === undefined) {
+        try {
+            new Intl.DateTimeFormat('en', { timeZone: candidate });
+            zone = candidate;
+        } catch {
+            zone = fallback;
+        }
+
+        validZones.set(id, zone);
+    }
+
+    return zone;
+}
+
+const currencyDigits = new Map<string, number>();
+
 function fractionDigitsFor(currency: string): number {
-    return (
-        numberFormat('en', { style: 'currency', currency }).resolvedOptions()
-            .maximumFractionDigits ?? 2
-    );
+    let digits = currencyDigits.get(currency);
+
+    if (digits === undefined) {
+        digits =
+            numberFormat('en', {
+                style: 'currency',
+                currency,
+            }).resolvedOptions().maximumFractionDigits ?? 2;
+        currencyDigits.set(currency, digits);
+    }
+
+    return digits;
 }
 
 function assertMinorUnits(minor: number): void {
@@ -228,7 +280,9 @@ function parseTemporal(value: string): Temporal | null {
         return null;
     }
 
-    const date = new Date(HAS_OFFSET.test(value) ? value : `${value}Z`);
+    // `2026-10-20 04:30:00` (a space) is not ISO-8601; Safari rejects it.
+    const iso = value.replace(' ', 'T');
+    const date = new Date(HAS_OFFSET.test(iso) ? iso : `${iso}Z`);
 
     return Number.isNaN(date.getTime()) ? null : { kind: 'instant', date };
 }
@@ -240,8 +294,13 @@ export type Formatters = ReturnType<typeof createFormat>;
  * context on every call (`useFormat` does, so prop changes apply at once).
  */
 export function createFormat(source: FormatContext | (() => FormatContext)) {
+    const read = (): FormatContext =>
+        typeof source === 'function' ? source() : source;
+
+    // Number formatting only needs `read()`; the time-zone checks run only for
+    // the date functions.
     const context = (): FormatContext => {
-        const raw = typeof source === 'function' ? source() : source;
+        const raw = read();
         const businessTimeZone = validTimeZone(
             raw.businessTimeZone,
             DEFAULT_FORMAT_CONTEXT.businessTimeZone,
@@ -259,27 +318,27 @@ export function createFormat(source: FormatContext | (() => FormatContext)) {
         currency?: string,
         options: FormatMoneyOptions = {},
     ): string {
-        const { locale, currency: businessCurrency } = context();
+        const { locale, currency: businessCurrency } = read();
         const code = currency ?? businessCurrency;
 
         // The exact decimal string, not `minor / 100`: no float in between.
-        return numberFormat(locale, {
-            style: 'currency',
-            currency: code,
-            signDisplay: options.signDisplay,
-            notation: options.compact ? 'compact' : 'standard',
-        }).format(minorToMajorString(minor, code) as `${number}`);
+        return currencyFormat(
+            locale,
+            code,
+            options.signDisplay,
+            options.compact === true,
+        ).format(minorToMajorString(minor, code) as `${number}`);
     }
 
     function formatNumber(
         n: number,
         options?: Intl.NumberFormatOptions,
     ): string {
-        return numberFormat(context().locale, options ?? {}).format(n);
+        return numberFormat(read().locale, options ?? {}).format(n);
     }
 
     function formatPercent(fraction: number, digits = 0): string {
-        return numberFormat(context().locale, {
+        return numberFormat(read().locale, {
             style: 'percent',
             minimumFractionDigits: 0,
             maximumFractionDigits: digits,
@@ -288,7 +347,7 @@ export function createFormat(source: FormatContext | (() => FormatContext)) {
 
     /** `3500 → "35%"`, `1250 → "12.5%"`: a basis point is 0.01%. */
     function formatBps(bps: number): string {
-        return numberFormat(context().locale, {
+        return numberFormat(read().locale, {
             style: 'percent',
             minimumFractionDigits: 0,
             maximumFractionDigits: 2,
@@ -386,16 +445,20 @@ export function createFormat(source: FormatContext | (() => FormatContext)) {
 
         return cached(
             caches.relative,
-            [context().locale],
+            read().locale,
             () =>
-                new Intl.RelativeTimeFormat(context().locale, {
+                new Intl.RelativeTimeFormat(read().locale, {
                     numeric: 'auto',
                     style: 'short',
                 }),
         ).format(value, unit);
     }
 
-    /** Binary units (1 KB = 1024 B), one decimal at most: `1536 → "1.5 KB"`. */
+    /**
+     * Binary units (1 KB = 1024 B), one decimal at most: `1536 → "1.5 KB"`.
+     * Rolls up after rounding (1048575 B is "1 MB", not "1,024 KB"). TB is the
+     * largest unit, so 2^50 B prints as "1,024 TB".
+     */
     function formatFileSize(bytes: number): string {
         if (!Number.isFinite(bytes) || bytes < 0) {
             return PLACEHOLDER;
@@ -405,12 +468,17 @@ export function createFormat(source: FormatContext | (() => FormatContext)) {
         let size = bytes;
         let index = 0;
 
-        while (size >= 1024 && index < units.length - 1) {
+        const last = units.length - 1;
+        // What the reader sees: whole bytes, otherwise one decimal.
+        const shown = (): number =>
+            index === 0 ? Math.round(size) : Math.round(size * 10) / 10;
+
+        while (index < last && (size >= 1024 || shown() >= 1024)) {
             size /= 1024;
             index += 1;
         }
 
-        return `${numberFormat(context().locale, {
+        return `${numberFormat(read().locale, {
             maximumFractionDigits: index === 0 ? 0 : 1,
         }).format(size)} ${units[index]}`;
     }

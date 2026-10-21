@@ -105,11 +105,16 @@ describe('enum label keys', () => {
             'utf8',
         );
         const missing: string[] = [];
+        const missingUnions: string[] = [];
 
         for (const [pattern, typeName] of Object.entries(ENUM_KEY_PATTERNS)) {
             const members = unionMembers(declarations, typeName);
 
             if (members === null) {
+                // A pattern whose enum vanished (renamed, or regenerated
+                // without it) would otherwise pass without checking anything.
+                missingUnions.push(`${pattern} -> ${typeName}`);
+
                 continue;
             }
 
@@ -122,6 +127,7 @@ describe('enum label keys', () => {
             }
         }
 
+        expect(missingUnions).toEqual([]);
         expect(missing).toEqual([]);
     });
 });

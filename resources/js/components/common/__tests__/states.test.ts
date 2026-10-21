@@ -35,6 +35,7 @@ describe('ErrorState', () => {
         const button = wrapper.get('button');
 
         expect(button.text()).toBe('Retry');
+        expect(button.attributes('type')).toBe('button');
 
         await button.trigger('click');
 

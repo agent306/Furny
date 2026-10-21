@@ -35,7 +35,7 @@ describe('UserAvatar', () => {
         expect(new Set(classes).size).toBe(4);
     });
 
-    it('declares the avatar image when a URL is given', () => {
+    it('keeps the accessible name when an image URL is given', () => {
         const wrapper = mount(UserAvatar, {
             props: {
                 user: {
@@ -45,8 +45,9 @@ describe('UserAvatar', () => {
             },
         });
 
-        // happy-dom never loads images, so the fallback stays; the image
-        // element is rendered by reka only after load. The label stays either way.
+        // happy-dom never loads images, so Reka keeps the fallback; the name
+        // lives on the root either way.
+        expect(wrapper.attributes('role')).toBe('img');
         expect(wrapper.attributes('aria-label')).toBe('Anita Rao');
     });
 });
@@ -70,6 +71,22 @@ describe('KeyValueList', () => {
         expect(wrapper.findAll('dd').map((n) => n.text())).toEqual([
             'ORD-1',
             'Pune',
+        ]);
+    });
+
+    it('keeps rows that share a label (no keyed-by-label collapse)', () => {
+        const wrapper = mount(KeyValueList, {
+            props: {
+                items: [
+                    { label: 'Phone', value: '111' },
+                    { label: 'Phone', value: '222' },
+                ],
+            },
+        });
+
+        expect(wrapper.findAll('dd').map((n) => n.text())).toEqual([
+            '111',
+            '222',
         ]);
     });
 

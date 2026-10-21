@@ -61,6 +61,31 @@ describe('formatMoney', () => {
         expect(formatMoney(1234567, 'KWD')).toContain('1,234.567');
     });
 
+    it('formats USD, EUR and BHD exactly (0.05 / 1,234.50 / three digits)', () => {
+        const plain = (text: string): string => text.replaceAll('\u00a0', ' ');
+
+        for (const locale of ['en-US', 'en-IN']) {
+            const format = createFormat({
+                locale,
+                currency: 'INR',
+                timeZone: 'UTC',
+                businessTimeZone: 'UTC',
+            });
+
+            expect(format.formatMoney(1234567, 'USD'), locale).toBe(
+                '$12,345.67',
+            );
+            expect(format.formatMoney(5, 'USD')).toBe('$0.05');
+            expect(format.formatMoney(-5, 'USD')).toBe('-$0.05');
+            expect(format.formatMoney(123450, 'EUR')).toBe('€1,234.50');
+            expect(plain(format.formatMoney(1234567, 'BHD'))).toBe(
+                'BHD 1,234.567',
+            );
+            expect(plain(format.formatMoney(5, 'BHD'))).toBe('BHD 0.005');
+            expect(plain(format.formatMoney(-5, 'BHD'))).toBe('-BHD 0.005');
+        }
+    });
+
     it('can use the compact notation for charts', () => {
         expect(formatMoney(1234567890, undefined, { compact: true })).toBe(
             '₹1.2Cr',
@@ -240,6 +265,11 @@ describe('formatFileSize', () => {
         [5 * 1024 * 1024, '5 MB'],
         [1.5 * 1024 * 1024, '1.5 MB'],
         [3 * 1024 ** 3, '3 GB'],
+        [1048575, '1 MB'],
+        [1048575 - 1024 * 3, '1,021 KB'],
+        [1023.6, '1 KB'],
+        [1024 ** 3 - 1, '1 GB'],
+        [2 ** 50, '1,024 TB'],
     ])('%i bytes is %s', (bytes, expected) => {
         expect(formatFileSize(bytes)).toBe(expected);
     });
@@ -368,6 +398,45 @@ describe('dates', () => {
         expect(todayInBusinessTz()).toBe('2026-10-20');
     });
 
+    it('reads a space-separated datetime like the ISO form (Safari rejects the raw string)', () => {
+        setFormatContext({ timeZone: 'Asia/Kolkata' });
+
+        expect(formatDateTime('2026-10-20 04:30:00')).toBe(
+            '20 Oct 2026, 10:00 am',
+        );
+        expect(formatDateTime('2026-10-20 04:30:00+00:00')).toBe(
+            '20 Oct 2026, 10:00 am',
+        );
+        expect(formatTime('2026-10-20 04:30')).toBe('10:00 am');
+    });
+
+    it.each([
+        // US spring forward: 2026-03-08 02:00 EST -> 03:00 EDT (07:00Z).
+        ['2026-03-08T04:59:59Z', '2026-03-07'],
+        ['2026-03-08T05:00:00Z', '2026-03-08'],
+        ['2026-03-08T06:59:59Z', '2026-03-08'],
+        ['2026-03-08T07:00:00Z', '2026-03-08'],
+        ['2026-03-09T03:59:59Z', '2026-03-08'],
+        ['2026-03-09T04:00:00Z', '2026-03-09'],
+        // US fall back: 2026-11-01 02:00 EDT -> 01:00 EST (06:00Z).
+        ['2026-11-01T03:59:59Z', '2026-10-31'],
+        ['2026-11-01T04:00:00Z', '2026-11-01'],
+        ['2026-11-01T05:30:00Z', '2026-11-01'], // 01:30 EDT
+        ['2026-11-01T06:30:00Z', '2026-11-01'], // 01:30 EST, the repeated hour
+        ['2026-11-02T04:59:59Z', '2026-11-01'],
+        ['2026-11-02T05:00:00Z', '2026-11-02'],
+    ])(
+        'todayInBusinessTz in New York at %s is %s (DST boundaries)',
+        (instant, expected) => {
+            setFormatContext({
+                businessTimeZone: 'America/New_York',
+                timeZone: 'Asia/Kolkata',
+            });
+
+            expect(todayInBusinessTz(new Date(instant))).toBe(expected);
+        },
+    );
+
     it('todayInBusinessTz can be asked about another instant', () => {
         setFormatContext({ businessTimeZone: 'Pacific/Kiritimati' });
 
@@ -433,5 +502,54 @@ describe('createFormat', () => {
         expect(format.formatDateTime('2026-10-20T04:30:00Z')).toBe(
             '20 Oct 2026, 10:00 am',
         );
+    });
+});
+
+describe('performance', () => {
+    it('formatMoney costs microseconds per call: 20,000 calls in under 300 ms', () => {
+        const format = createFormat(() => ({
+            locale: 'en-IN',
+            currency: 'INR',
+            timeZone: 'Asia/Kolkata',
+            businessTimeZone: 'Asia/Kolkata',
+        }));
+        format.formatMoney(1); // build the Intl instance once, as a page would
+
+        const started = performance.now();
+
+        for (let i = 0; i < 20_000; i += 1) {
+            format.formatMoney(1234567 + i);
+        }
+
+        expect(performance.now() - started).toBeLessThan(300);
+    });
+
+    it('formatMoney with the module-level functions too, and never touches time zones', () => {
+        const zone = vi.spyOn(Intl, 'DateTimeFormat');
+
+        for (let i = 0; i < 2_000; i += 1) {
+            formatMoney(i);
+        }
+
+        expect(zone).not.toHaveBeenCalled();
+        zone.mockRestore();
+    });
+
+    it('validates a time zone once, not on every date call', () => {
+        const format = createFormat({
+            locale: 'en-IN',
+            currency: 'INR',
+            timeZone: 'Pacific/Auckland',
+            businessTimeZone: 'Pacific/Auckland',
+        });
+        format.formatDate('2026-10-20T00:00:00Z');
+        const zone = vi.spyOn(Intl, 'DateTimeFormat');
+
+        for (let i = 0; i < 500; i += 1) {
+            format.formatDate('2026-10-20T00:00:00Z');
+        }
+
+        expect(zone).not.toHaveBeenCalled();
+        zone.mockRestore();
     });
 });

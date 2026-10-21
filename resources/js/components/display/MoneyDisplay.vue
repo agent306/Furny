@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { useFormat } from '@/composables/useFormat';
 import { useI18n } from '@/composables/useI18n';
+import { PLACEHOLDER } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 // 15 §9.6. Minor units in; the only division is Intl's own, on an exact
@@ -32,13 +33,25 @@ const SIZE_CLASS = {
     xl: 'text-2xl font-semibold',
 } as const;
 
-const text = computed(() =>
-    props.minor === null
-        ? null
-        : formatMoney(props.minor, props.currency, {
-              signDisplay: props.signDisplay,
-          }),
-);
+// A value that is not an integer count of minor units is a data bug; show the
+// placeholder rather than crash the page (formatMoney itself throws).
+const text = computed(() => {
+    if (props.minor === null) {
+        return null;
+    }
+
+    try {
+        return formatMoney(props.minor, props.currency, {
+            signDisplay: props.signDisplay,
+        });
+    } catch (error) {
+        if (import.meta.env.DEV) {
+            console.error('[MoneyDisplay]', error);
+        }
+
+        return null;
+    }
+});
 </script>
 
 <template>
@@ -52,7 +65,7 @@ const text = computed(() =>
             )
         "
     >
-        <template v-if="text === null">—</template>
+        <template v-if="text === null">{{ PLACEHOLDER }}</template>
         <template v-else>
             <span
                 v-if="approx"

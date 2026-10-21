@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useId, watch } from 'vue';
+import { computed, nextTick, ref, useId, watch } from 'vue';
 import InputError from '@/components/common/InputError.vue';
 import { Button } from '@/components/ui/button';
 import {
@@ -98,10 +98,22 @@ const confirmVariant = computed(
 function onSubmit(): void {
     attempted.value = true;
 
-    if (
-        (hasReasons.value && !reason.value) ||
-        (props.noteRequired && note.value.trim() === '')
-    ) {
+    const reasonMissing = hasReasons.value && !reason.value;
+    const noteMissing = props.noteRequired && note.value.trim() === '';
+
+    if (reasonMissing || noteMissing) {
+        // 15 §10.1 / §14.8: focus moves to the first invalid field. The error
+        // text renders on the next tick, with `aria-invalid` on the field.
+        void nextTick(() => {
+            const firstReason = props.reasons?.[0]?.value;
+            const target =
+                reasonMissing && firstReason !== undefined
+                    ? document.getElementById(`${uid}-reason-${firstReason}`)
+                    : document.getElementById(noteId);
+
+            target?.focus();
+        });
+
         return;
     }
 

@@ -1,33 +1,57 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import type { StyleValue } from 'vue';
 import { useFormat } from '@/composables/useFormat';
+import { PLACEHOLDER } from '@/lib/format';
 import type { DateStyle } from '@/lib/format';
 
 // 15 §9.28. A date-only value (`2026-10-20`) is a calendar date and is printed
 // as is, in no time zone; an instant is shown in the user's zone.
+//
+// `style` is the spec-mandated name of the date style prop, but Vue also
+// routes a `:style` binding to a declared prop of that name, so the root
+// element would never receive it. The prop therefore also accepts a Vue
+// `StyleValue` (an object or an array): anything that is not 'short' |
+// 'medium' | 'long' is applied to the <time> element as inline style.
+// Caveat: a static `style="short"` attribute is parsed by the template
+// compiler as CSS text; pass `:style="'short'"` (or use `class`, which falls
+// through normally).
 const props = withDefaults(
     defineProps<{
         value: string;
         kind: 'date' | 'datetime' | 'time';
-        style?: DateStyle;
+        style?: DateStyle | StyleValue;
     }>(),
     { style: 'medium' },
 );
 
 const { formatDate, formatDateTime, formatTime } = useFormat();
 
+const DATE_STYLES: readonly unknown[] = ['short', 'medium', 'long'];
+
+const dateStyle = computed<DateStyle>(() =>
+    DATE_STYLES.includes(props.style) ? (props.style as DateStyle) : 'medium',
+);
+const inlineStyle = computed(() =>
+    DATE_STYLES.includes(props.style) ? undefined : (props.style as StyleValue),
+);
+
 const text = computed(() => {
     switch (props.kind) {
         case 'date':
-            return formatDate(props.value, props.style);
+            return formatDate(props.value, dateStyle.value);
         case 'datetime':
-            return formatDateTime(props.value, props.style);
+            return formatDateTime(props.value, dateStyle.value);
         default:
-            return formatTime(props.value, props.style);
+            return formatTime(props.value, dateStyle.value);
     }
 });
 </script>
 
 <template>
-    <time :datetime="text === '—' ? undefined : value">{{ text }}</time>
+    <time
+        :datetime="text === PLACEHOLDER ? undefined : value"
+        :style="inlineStyle"
+        >{{ text }}</time
+    >
 </template>

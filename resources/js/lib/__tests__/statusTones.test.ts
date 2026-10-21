@@ -70,3 +70,68 @@ describe('status tone tables (15 §9.3)', () => {
         expect(new Set(icons).size).toBe(icons.length);
     });
 });
+
+// Pinned verbatim from the 15 §9.3 "(complete)" block, so editing a map and its
+// test to match each other still has to agree with the spec.
+describe('literal tones of 15 §9.3', () => {
+    it('IMPORT_STATUS_TONE', () => {
+        expect(IMPORT_STATUS_TONE).toEqual({
+            uploaded: 'info',
+            queued: 'info',
+            preprocessing: 'info',
+            recognizing: 'info',
+            ready_for_review: 'warning',
+            accepted: 'success',
+            discarded: 'neutral',
+            failed: 'danger',
+            cancelled: 'neutral',
+        });
+    });
+
+    it('QUOTE_STATUS_TONE', () => {
+        expect(QUOTE_STATUS_TONE).toEqual({
+            draft: 'neutral',
+            sent: 'warning',
+            accepted: 'success',
+            declined: 'danger',
+            superseded: 'neutral',
+            expired: 'neutral',
+            withdrawn: 'neutral',
+        });
+    });
+
+    it('PROPOSAL_STATUS_TONE', () => {
+        expect(PROPOSAL_STATUS_TONE).toEqual({
+            draft: 'neutral',
+            sent: 'warning',
+            resolved: 'success',
+            withdrawn: 'neutral',
+        });
+    });
+
+    it('PROPOSAL_DECISION_TONE', () => {
+        expect(PROPOSAL_DECISION_TONE).toEqual({
+            pending: 'warning',
+            approved: 'success',
+            rejected: 'danger',
+        });
+    });
+
+    it('ISSUE_STATUS_TONE', () => {
+        expect(ISSUE_STATUS_TONE).toEqual({
+            open: 'danger',
+            in_progress: 'warning',
+            resolved: 'success',
+            rejected: 'neutral',
+        });
+    });
+
+    it('NEGOTIATION_STATUS_TONE', () => {
+        expect(NEGOTIATION_STATUS_TONE).toEqual({
+            open: 'warning',
+            answered_with_revision: 'info',
+            answered_keep_price: 'info',
+            closed: 'neutral',
+        });
+    });
+});

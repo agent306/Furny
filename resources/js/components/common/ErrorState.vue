@@ -41,7 +41,13 @@ const size = useControlSize();
         <p v-if="status" class="text-xs text-muted-foreground">
             {{ t('errors.status_code', { status }) }}
         </p>
-        <Button v-if="retry" variant="outline" :size="size" @click="retry()">
+        <Button
+            v-if="retry"
+            type="button"
+            variant="outline"
+            :size="size"
+            @click="retry()"
+        >
             {{ t('common.actions.retry') }}
         </Button>
     </div>
