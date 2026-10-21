@@ -133,3 +133,23 @@ it('takes the Pulse ingest driver from the environment', function (): void {
 it('lets the media library accept the largest collection file (40 MB, 02 §10)', function (): void {
     expect(config('media-library.max_file_size'))->toBeGreaterThanOrEqual(40 * 1024 * 1024);
 });
+
+it('defaults the session to the settings of 13 section 6.1', function (): void {
+    $session = evaluateConfigFile('session', array_fill_keys([
+        'SESSION_DRIVER', 'SESSION_CONNECTION', 'SESSION_LIFETIME', 'SESSION_EXPIRE_ON_CLOSE', 'SESSION_ENCRYPT', 'SESSION_COOKIE',
+        'SESSION_DOMAIN', 'SESSION_SECURE_COOKIE', 'SESSION_HTTP_ONLY', 'SESSION_SAME_SITE',
+    ], false));
+
+    expect($session)->toMatchArray([
+        'driver' => 'redis',
+        'connection' => 'sessions',
+        'lifetime' => 120,
+        'expire_on_close' => false,
+        'encrypt' => true,
+        'cookie' => '__Host-session',
+        'domain' => null,
+        'secure' => true,
+        'http_only' => true,
+        'same_site' => 'lax',
+    ]);
+});

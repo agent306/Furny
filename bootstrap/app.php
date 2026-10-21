@@ -13,6 +13,7 @@ use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\RequireRecentAuthentication;
 use App\Http\Middleware\SecurityHeaders;
+use App\Http\Middleware\TrackSession;
 use App\Support\Http\ErrorPage;
 use App\Support\Http\RateLimitedResponse;
 use Illuminate\Foundation\Application;
@@ -21,6 +22,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Session\Middleware\AuthenticateSession;
 use Illuminate\Support\Facades\Route;
 
 $app = Application::configure(basePath: dirname(__DIR__))
@@ -90,6 +92,7 @@ $app = Application::configure(basePath: dirname(__DIR__))
             '2fa.enrolled' => EnsureTwoFactorEnrolled::class,
             'session.absolute' => EnforceAbsoluteSessionLifetime::class,
             'recent.auth' => RequireRecentAuthentication::class,
+            'track.session' => TrackSession::class,
         ]);
 
         // Route model binding must come after every check on who the user is and whether they may be here:
@@ -110,6 +113,10 @@ $app = Application::configure(basePath: dirname(__DIR__))
             HandleAppearance::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
+            // A password change signs out the other sessions of a password user (13 §6.1); then the registry
+            // records the session (13 §6.3).
+            AuthenticateSession::class,
+            TrackSession::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

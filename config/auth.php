@@ -43,6 +43,9 @@ return [
         'web' => [
             'driver' => 'session',
             'provider' => 'users',
+            // The remember cookie lasts 14 days (13 §6.1). Read when the guard is built, so it is not set in a
+            // service provider: that would build the session store while the app boots.
+            'remember' => 20160,
         ],
     ],
 

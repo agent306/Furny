@@ -127,7 +127,7 @@ return [
     |
     */
 
-    'cookie' => env('SESSION_COOKIE', 'furny_session'),
+    'cookie' => env('SESSION_COOKIE', '__Host-session'),
 
     /*
     |--------------------------------------------------------------------------
@@ -163,10 +163,12 @@ return [
     | By setting this option to true, session cookies will only be sent back
     | to the server if the browser has a HTTPS connection. This will keep
     | the cookie from being sent to you when it can't be done securely.
+    | The default is on: the `__Host-` cookie name of the default (13 §6.1)
+    | needs it, and local development turns it off in `.env`.
     |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    'secure' => env('SESSION_SECURE_COOKIE', true),
 
     /*
     |--------------------------------------------------------------------------

@@ -67,6 +67,10 @@ return [
     'two-factor.recovery-codes' => $entry('any'),
     'two-factor.regenerate-recovery-codes' => $entry('any'),
 
+    // Account security, both audiences (14 §3.3).
+    'account.sessions.destroy' => $entry('any'),
+    'account.sessions.destroy-others' => $entry('any'),
+
     // Customer app (10 §2).
     'customer.dashboard' => $entry('customer'),
 

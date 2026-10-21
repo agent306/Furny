@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Auth\SessionController;
 use App\Http\Controllers\CspReportController;
 use App\Http\Controllers\LegalController;
 use App\Http\Controllers\ManifestController;
@@ -25,6 +26,15 @@ Route::post('csp-report', CspReportController::class)
     ->name('csp.report')
     ->middleware('throttle:csp-report')
     ->withoutMiddleware(StatelessRoute::WITHOUT);
+
+// Account security, for both audiences (14 §3.3). Signing out one's own devices is not a sensitive action; signing
+// out all the others is (`recent.auth`).
+Route::middleware(['auth', 'active'])->prefix('account')->name('account.')->group(function (): void {
+    Route::delete('sessions/{sessionKey}', [SessionController::class, 'destroy'])->name('sessions.destroy');
+    Route::delete('sessions', [SessionController::class, 'destroyOthers'])
+        ->middleware('recent.auth')
+        ->name('sessions.destroy-others');
+});
 
 // A URL that matches nothing is a 404 raised inside the `web` group, so the Error page renders in the
 // layout of the signed-in user, with their session and the shared props (10 §4.10).

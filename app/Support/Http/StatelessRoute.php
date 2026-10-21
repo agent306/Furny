@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support\Http;
 
+use App\Http\Middleware\TrackSession;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -22,5 +23,6 @@ final class StatelessRoute
         StartSession::class,
         ShareErrorsFromSession::class,
         PreventRequestForgery::class,
+        TrackSession::class,
     ];
 }
