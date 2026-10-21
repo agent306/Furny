@@ -431,9 +431,43 @@ describe('makePart: defaults', () => {
         const part = makePart(spec({ geometry }), ctxFor());
         expect(part.geometry).toEqual(geometry);
         expect(part.geometry).not.toBe(geometry);
-        if (part.geometry.kind === 'box') {
-            expect(part.geometry.box.min).not.toBe(geometry.box.min);
+        if (part.geometry.kind !== 'box') throw new Error('expected a box');
+        expect(part.geometry.box).not.toBe(geometry.box);
+        expect(part.geometry.box.min).not.toBe(geometry.box.min);
+        expect(part.geometry.box.size).not.toBe(geometry.box.size);
+    });
+
+    it('copies the default box geometry without aliasing the spec box', () => {
+        const box = {
+            min: [0, 0, 0] as [number, number, number],
+            size: [18, 2000, 582] as [number, number, number],
+        };
+        const part = makePart(spec({ box }), ctxFor());
+        if (part.geometry.kind !== 'box') throw new Error('expected a box');
+        expect(part.geometry.box.min).not.toBe(box.min);
+        expect(part.geometry.box.size).not.toBe(box.size);
+    });
+
+    it('copies the outline of an explicit extruded geometry', () => {
+        const geometry = {
+            kind: 'extruded' as const,
+            outline: [
+                [0, 0],
+                [10, 0],
+                [10, 10],
+            ] as Array<[number, number]>,
+            plane: 'xz' as const,
+            y: 5,
+            thickness: 18,
+        };
+        const part = makePart(spec({ geometry }), ctxFor());
+        expect(part.geometry).toEqual(geometry);
+        expect(part.geometry).not.toBe(geometry);
+        if (part.geometry.kind !== 'extruded') {
+            throw new Error('expected an extruded geometry');
         }
+        expect(part.geometry.outline).not.toBe(geometry.outline);
+        expect(part.geometry.outline[0]).not.toBe(geometry.outline[0]);
     });
 
     it('uses spec.materialCode when it differs from the role material', () => {

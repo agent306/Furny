@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { EngineInputError } from '../../../errors';
-import { newId } from '../../../ids';
 import { testIds } from '../../../testing/ids';
 import { seedCatalog } from '../../../testing/seedCatalog';
 import { indexCatalog } from '../../catalogIndex';
@@ -9,6 +8,7 @@ import {
     FurnitureDocumentSchema,
     TEMPLATE_KEYS,
     type Content,
+    type TemplateKey,
     type Section,
 } from '../../schema';
 import { shelfCount } from '../common';
@@ -88,6 +88,7 @@ describe('wardrobe_hinged generation', () => {
         expect(doorsOf(3600)).toBe(6);
         expect(doorsOf(900)).toBe(2); // round(1.5)
         expect(doorsOf(1500)).toBe(3); // round(2.5)
+        expect(doorsOf(1400)).toBe(2); // round(2.33); ceil would give 3
     });
 
     it('explicit doors win over the width', () => {
@@ -259,6 +260,20 @@ describe('wardrobe_hinged generation', () => {
         });
     });
 
+    it('subtracts the two board thicknesses from the shelf heights', () => {
+        // ih = 2340 - 100 - 36 = 2204 -> round(5.51) - 1 = 5 (4 with an extra 18)
+        const single = interiorOf({ doors: 1, height: 2340 }).children[0]
+            ?.section.content;
+        expect(single).toMatchObject({ type: 'shelves', count: 5 });
+        // ih = 2164; 2164 - 18 - 360 = 1786 -> round(4.47) - 1 = 3 (4 without the 18)
+        const column = interiorOf({ height: 2300, internalDrawers: 2 })
+            .children[0]?.section as Section;
+        expect(column.children[0]?.section.content).toMatchObject({
+            type: 'shelves',
+            count: 3,
+        });
+    });
+
     it('takes dims and the back type from the parameters', () => {
         const doc = gen({
             width: 2400,
@@ -359,7 +374,10 @@ describe('wardrobe_hinged definition', () => {
             advanced: true,
         });
         expect(field('backType')?.advanced).toBe(true);
-        expect(field('singleColumnSide')?.visibleIf?.key).toBe('doors');
+        expect(field('singleColumnSide')?.visibleIf).toEqual({
+            key: 'doors',
+            equals: ['auto', 1, 3, 5, 7, 9, 11],
+        });
     });
 
     it('has the code defaults of 07 §2.4.1', () => {
@@ -463,7 +481,6 @@ describe('wardrobe_hinged definition', () => {
         );
         expect(document.carcass?.interior.id).toMatch(/^s_[0-9a-z]{10}$/);
         expect(document.carcass?.interior.id).not.toBe('s_0000000001');
-        expect(typeof newId('s')).toBe('string');
     });
 });
 
@@ -471,6 +488,14 @@ describe('template registry', () => {
     it('registers wardrobe_hinged', () => {
         expect(TEMPLATES.wardrobe_hinged).toBe(wardrobeHinged);
         expect(getTemplate('wardrobe_hinged')).toBe(wardrobeHinged);
+    });
+
+    it('getTemplate does not resolve inherited object properties', () => {
+        for (const key of ['toString', 'constructor', '__proto__']) {
+            expect(() => getTemplate(key as TemplateKey)).toThrow(
+                EngineInputError,
+            );
+        }
     });
 
     it('getTemplate throws invalid_input for a template that is not built yet', () => {

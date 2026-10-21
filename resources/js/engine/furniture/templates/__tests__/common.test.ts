@@ -44,6 +44,8 @@ describe('clamp, interiorHeight, shelfCount', () => {
         expect(shelfCount(100, 400)).toBe(1);
         expect(shelfCount(100000, 400)).toBe(20);
         expect(shelfCount(600, 400)).toBe(1); // round(1.5) - 1
+        expect(shelfCount(1000, 400)).toBe(2); // round(2.5) - 1, half rounds up
+        expect(shelfCount(920, 400)).toBe(1); // round(2.3) - 1; ceil would give 2
     });
 });
 
@@ -252,13 +254,15 @@ describe('effectiveParams', () => {
     });
 
     it('ignores keys that are not template fields', () => {
-        const params = effectiveParams(wardrobeHinged, {
-            nope: 1,
-            width: 2000,
-            __proto__: { polluted: true },
-        });
+        const overrides = JSON.parse(
+            '{"nope":1,"width":2000,"__proto__":{"polluted":true}}',
+        ) as Record<string, unknown>;
+        expect(Object.hasOwn(overrides, '__proto__')).toBe(true);
+        const params = effectiveParams(wardrobeHinged, overrides);
         expect(params).toEqual({ ...wardrobeHinged.defaults, width: 2000 });
         expect('nope' in params).toBe(false);
+        expect(Object.hasOwn(params, '__proto__')).toBe(false);
+        expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
     });
 
     it('falls back to the code defaults when the merge fails the schema', () => {
@@ -272,6 +276,10 @@ describe('effectiveParams', () => {
 
     it('does not return the defaults object itself', () => {
         expect(effectiveParams(wardrobeHinged, {})).not.toBe(
+            wardrobeHinged.defaults,
+        );
+        // the fallback branch copies too
+        expect(effectiveParams(wardrobeHinged, { width: 5000 })).not.toBe(
             wardrobeHinged.defaults,
         );
     });
@@ -342,11 +350,58 @@ describe('reidentify', () => {
         expect(out.materials).not.toBe(doc.materials);
     });
 
-    it('does not remap when new ids overlap old ones (single pass)', () => {
+    it('maps in a single pass when new ids overlap old ones', () => {
         const doc = docWithOverrides();
-        // new ids s_1, s_2 ... are the same as the old ones: nothing may shift twice
-        const out = reidentify(doc, testIds());
-        expect(out).toEqual(doc);
+        // shifted by one: old s_1 -> s_2, old s_2 -> s_3 ..., old fr_1 -> fr_2, old fr_2 -> fr_3
+        const ids = testIds();
+        ids('s');
+        ids('fr');
+        doc.overrides.parts['section.s_0000000001.partition.1'] = { note: 'p' };
+        doc.overrides.hardware['x.s_0000000002.fr_0000000001'] = {
+            removed: true,
+        };
+        const out = reidentify(doc, ids);
+        expect(out.carcass?.interior.id).toBe('s_0000000002');
+        expect(out.carcass?.fronts.map((f) => f.id)).toEqual([
+            'fr_0000000002',
+            'fr_0000000003',
+        ]);
+        expect(out.carcass?.fronts.map((f) => f.covers)).toEqual([
+            ['s_0000000003'],
+            ['s_0000000004'],
+        ]);
+        expect(out.overrides.parts).toEqual({
+            'front.fr_0000000002.leaf.1': { note: 'a' },
+            'section.s_0000000003.shelf.2': { removed: true },
+            'carcass.top': { note: 'b' },
+            'section.s_0000000002.partition.1': { note: 'p' },
+        });
+        expect(out.overrides.hardware).toEqual({
+            'hinge.fr_0000000003.leaf.1': { removed: true },
+            'x.s_0000000003.fr_0000000002': { removed: true },
+        });
+    });
+
+    it('only rewrites whole ids, not tokens that merely contain one', () => {
+        const doc = docWithOverrides();
+        const lookalikes = [
+            'xs_0000000002.shelf.1', // letter before
+            '_s_0000000002.shelf.1', // underscore before
+            '9s_0000000002.shelf.1', // digit before
+            'section.s_00000000021.shelf.1', // longer id (old id is its prefix)
+            'section.s_0000000002a.shelf.1', // letter after
+            'section.s_000000002.shelf.1', // shorter id
+            'xfr_0000000001.leaf.1',
+        ];
+        for (const key of lookalikes) doc.overrides.parts[key] = { note: key };
+        const out = reidentify(doc, offsetIds());
+        for (const key of lookalikes) {
+            expect(out.overrides.parts[key]).toEqual({ note: key });
+        }
+        // the embedded, whole ids are still rewritten
+        expect(out.overrides.parts).toHaveProperty(
+            'section.s_0000000102.shelf.2',
+        );
     });
 
     it('leaves unknown ids in covers and keys alone', () => {

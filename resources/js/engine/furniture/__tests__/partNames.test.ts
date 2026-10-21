@@ -78,6 +78,13 @@ describe('partNameEn', () => {
         expect(partNameEn('__proto__')).toBe('__proto__');
     });
 
+    it('keeps $ replacement patterns of a user-supplied name literal', () => {
+        expect(partNameEn('parts.extra', { name: 'Kick $& plate $$' })).toBe(
+            'Kick $& plate $$',
+        );
+        expect(partNameEn('parts.shelf', { n: "$'" })).toBe("Shelf $'");
+    });
+
     it('keeps inner whitespace of a user-supplied extra part name', () => {
         expect(partNameEn('parts.extra', { name: '  Kick  plate ' })).toBe(
             'Kick  plate',

@@ -59,9 +59,12 @@ export function partNameEn(
     // themselves (a user-supplied extra part name) are never rewritten.
     return template
         .replace(/\s*\{(\w+)\}/g, (match, name: string) => {
-            const value = nameParams[name];
+            const value = Object.hasOwn(nameParams, name)
+                ? nameParams[name]
+                : undefined;
             if (value === undefined) return '';
-            return match.replace(/\{\w+\}/, String(value));
+            // function replacers: `$&`, `$$` etc. in a user-supplied name stay literal
+            return match.replace(/\{\w+\}/, () => String(value));
         })
         .trim();
 }
