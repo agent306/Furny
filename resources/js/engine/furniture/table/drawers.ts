@@ -101,15 +101,26 @@ function turnParts(
 /** Where the under-top drawers go, in their own frame (facing +z). */
 interface DrawerRow {
     side: DrawerSide;
-    /** Along the face. */
-    span: [number, number];
+    /**
+     * The drawer bay along the face: the clear span between the inner faces
+     * of what bounds the drawers at their height and depth (legs, side
+     * aprons, end panels, the cabinet side). The outer runners stand
+     * against these faces, inside the bay.
+     */
+    bay: [number, number];
     /** z of the face plane (the fronts' outer face). */
     plane: number;
     /** Depth available behind the face plane. */
     depthAvail: number;
 }
 
-/** The drawer row of the base, or null when the base has no room for under-top drawers. */
+/**
+ * The drawer row of the base, or null when the base has no room for
+ * under-top drawers. On four legs the bay is bounded by the legs (section
+ * `s`, solid or hardware) and by the aprons across the drawer side (their
+ * inner face at `inset + t_c`), whichever reaches further in; on panel ends
+ * by the end panels; on cabinet ends by the left end and the cabinet.
+ */
 function drawerRow(
     f: Frame,
     side: DrawerSide,
@@ -117,12 +128,14 @@ function drawerRow(
 ): DrawerRow | null {
     const { T, Wb, Db, bx0, bz0, s, tc } = f;
     const inset = T.base.apron.inset;
+    // From the base's outer face to the inner face bounding the bay.
+    const reach = Math.max(s, T.base.apron.enabled ? inset + tc : 0);
     switch (T.base.type) {
         case 'four_legs':
             if (side === 'front') {
                 return {
                     side,
-                    span: [bx0 + s, bx0 + Wb - s],
+                    bay: [bx0 + reach, bx0 + Wb - reach],
                     plane: bz0 + Db - inset,
                     depthAvail: Db - 2 * inset - tc,
                 };
@@ -130,13 +143,13 @@ function drawerRow(
             return side === 'left'
                 ? {
                       side,
-                      span: [bz0 + s, bz0 + Db - s],
+                      bay: [bz0 + reach, bz0 + Db - reach],
                       plane: -(bx0 + inset),
                       depthAvail: Wb / 2 - s,
                   }
                 : {
                       side,
-                      span: [-(bz0 + Db - s), -(bz0 + s)],
+                      bay: [-(bz0 + Db - reach), -(bz0 + reach)],
                       plane: bx0 + Wb - inset,
                       depthAvail: Wb / 2 - s,
                   };
@@ -145,7 +158,7 @@ function drawerRow(
             if (side !== 'front') return null;
             return {
                 side,
-                span: [
+                bay: [
                     bx0 + tc,
                     T.base.type === 'panel_ends' ? bx0 + Wb - tc : cabinetX0,
                 ],
@@ -160,8 +173,9 @@ function drawerRow(
 /**
  * Under-top drawer `j` in the slot `[x0, x0 + ws]` of `row`: the front
  * (flush with the face plane), the runners hung under the top beside the
- * slot, the box per 07 §3.12 (`Wo = ws`, slot `fh + 20`, `A = depthAvail`),
- * its slides and handle.
+ * slot, the box per 07 §3.12 (`Wo = ws`, slot `fh + 20`), its slides and
+ * handle. The box stands behind the front, so its available depth is
+ * `depthAvail − t_f` (the runners still span `depthAvail`).
  */
 function underTopDrawer(
     ctx: GenContext,
@@ -200,10 +214,11 @@ function underTopDrawer(
         });
     const runners = [runner('left', x0 - tc), runner('right', x1)];
 
+    const available = A - tf;
     const selection = selectSlide(ctx, {
         slideCode: drawers.slideCode,
-        maxLen: A - DRAWER_REAR_CLEARANCE,
-        availableDepth: A,
+        maxLen: available - DRAWER_REAR_CLEARANCE,
+        availableDepth: available,
         drawerKey: prefix,
     });
     ctx.issues.push(...selection.issues);
@@ -228,6 +243,16 @@ function underTopDrawer(
         canBuild: Ls > 0 && sizes.Win > 0 && sizes.Lb > 0,
         verticals: runners,
     };
+    if (Ls > 0 && sizes.Lb <= 0) {
+        // A slide too short for the box: the closest code is the slide one.
+        const ref = drawerIssueRef(undefined, prefix);
+        ctx.issue(
+            'furniture.drawer_no_slide',
+            'error',
+            { ...ref.params, availableDepth: available },
+            ref.entityIds,
+        );
+    }
     drawerBox(ctx, boxes, prefix, j, slot);
 
     const fw = fl(ws);
@@ -267,9 +292,10 @@ function underTopDrawer(
 }
 
 /**
- * Under-top drawers (07 §3.13): `count` drawers centred in the row's span
- * with `TABLE_DRAWER_SPACING` between them, each at most
- * `TABLE_DRAWER_MAX_WIDTH` wide. A side the base does not support is error
+ * Under-top drawers (07 §3.13): `count` drawers centred in the bay less one
+ * runner on each side, with `TABLE_DRAWER_SPACING` between them (at least
+ * the two runners between neighbours), each at most `TABLE_DRAWER_MAX_WIDTH`
+ * wide. A side the base does not support is error
  * `furniture.table_drawer_side_unsupported` and builds nothing.
  */
 export function underTopDrawers(
@@ -282,22 +308,23 @@ export function underTopDrawers(
     if (!drawers || side === null) return;
     const row = drawerRow(f, side, cabinetX0);
     if (!row) {
-        ctx.issue('furniture.table_drawer_side_unsupported', 'error', {}, [
-            'table.drawer',
-        ]);
+        ctx.issue('furniture.table_drawer_side_unsupported', 'error');
         return;
     }
     const k = drawers.count;
-    const span = row.span[1] - row.span[0];
+    const spacing = Math.max(TABLE_DRAWER_SPACING, 2 * f.tc);
+    const from = row.bay[0] + f.tc;
+    const span = row.bay[1] - f.tc - from;
     const ws = Math.min(
         TABLE_DRAWER_MAX_WIDTH,
-        fl((span - (k - 1) * TABLE_DRAWER_SPACING) / k),
+        fl((span - (k - 1) * spacing) / k),
     );
+    // Too narrow for any drawer: 07 §7.3 has no code for it (reported, not invented).
     if (ws <= 0) return;
-    const total = k * ws + (k - 1) * TABLE_DRAWER_SPACING;
-    const start = row.span[0] + (span - total) / 2;
+    const total = k * ws + (k - 1) * spacing;
+    const start = from + (span - total) / 2;
     for (let j = 1; j <= k; j++) {
-        const x0 = start + (j - 1) * (ws + TABLE_DRAWER_SPACING);
+        const x0 = start + (j - 1) * (ws + spacing);
         underTopDrawer(ctx, f, row, drawers, j, x0, ws);
     }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Issue } from '../../../plan/types';
-import { seedCatalog } from '../../../testing/seedCatalog';
+import { mutateCatalog, seedCatalog } from '../../../testing/seedCatalog';
 import { withThickness, withoutDefault } from '../../testing/catalogs';
 import { createGenContext } from '../../context';
 import { generateFurniture } from '../../generate';
@@ -13,6 +13,7 @@ import {
 } from '../../testing/docs';
 import type { Box3, FurnitureModel, Part } from '../../types';
 import { validateFurniture } from '../../validate';
+import { partOverlaps } from '../../testing/overlaps';
 import { tableParts } from '../generateTable';
 import { circleOutline, ellipseOutline, roundedRectOutline } from '../outlines';
 
@@ -61,6 +62,43 @@ const cabinetDrawers = (over: Partial<Drawers> = {}): Content => ({
     ...over,
 });
 
+const withCount = (
+    count: number,
+    side: 'front' | 'left' | 'right',
+): NonNullable<FurnitureDocument['table']>['storage']['drawers'] => ({
+    count,
+    side,
+    slideCode: null,
+});
+
+/** 07 §2.4.17 console table generation: overhang 20, solid legs 50, apron 100 inset 10. */
+const consoleTable = (W: number, D: number, drawers: number) =>
+    tableDocument(
+        { width: W, height: 800, depth: D },
+        {
+            top: {
+                shape: 'rectangle',
+                thickness: 'material',
+                cornerRadius: 0,
+                overhang: 20,
+            },
+            base: {
+                type: 'four_legs',
+                legSource: 'solid',
+                legCode: null,
+                legSection: 50,
+                apron: { enabled: true, height: 100, inset: 10 },
+                stretcher: false,
+            },
+            storage: {
+                drawers: drawers > 0 ? withCount(drawers, 'front') : null,
+                lowerShelf: false,
+                endCabinets: null,
+            },
+        },
+        'console_table',
+    );
+
 describe('outlines (CW [x, z] pairs)', () => {
     it('roundedRectOutline: 4 corners of 8 segments, 36 points inside W x D, clockwise', () => {
         const ring = roundedRectOutline(1800, 900, 100);
@@ -85,6 +123,23 @@ describe('outlines (CW [x, z] pairs)', () => {
         // each corner square loses r^2 minus the fan of 8 triangles under the arc
         const corner = 100 * 100 * (1 - 4 * Math.sin(Math.PI / 16));
         expect(shoelace(ring) / 2).toBeCloseTo(1800 * 900 - 4 * corner, 1);
+    });
+
+    it('roundedRectOutline repeats no point where the corners meet (r = min(W, D)/2)', () => {
+        const repeats = (ring: Array<[number, number]>) =>
+            ring.filter((p, i) => {
+                const next = ring[(i + 1) % ring.length];
+                return next?.[0] === p[0] && next[1] === p[1];
+            });
+        const square = roundedRectOutline(900, 900, 450);
+        expect(square).toHaveLength(32);
+        expect(repeats(square)).toEqual([]);
+        expect(square[0]).toEqual([900, 450]);
+        const long = roundedRectOutline(1800, 900, 450);
+        expect(long).toHaveLength(34);
+        expect(repeats(long)).toEqual([]);
+        expect(shoelace(long)).toBeGreaterThan(0);
+        expect(roundedRectOutline(1800, 900, 449)).toHaveLength(36);
     });
 
     it('roundedRectOutline takes the segments per corner and degrades to a rectangle at r = 0', () => {
@@ -456,6 +511,28 @@ describe('top shapes and thickness (07 §3.13 top)', () => {
         expect(issuesOf(model, 'furniture.round_top_not_square')).toMatchObject(
             [{ severity: 'error', entityIds: ['table.top'] }],
         );
+        // drawn as the W x D ellipse, so the top stays inside the bbox
+        expect(partOf(model, 'table.top').geometry).toMatchObject({
+            kind: 'extruded',
+            outline: ellipseOutline(1800, 900),
+        });
+    });
+
+    it('clamps the outline radius to min(W, D)/2 when the radius is too large', () => {
+        const model = shaped((d) => {
+            d.table.top.shape = 'rounded_rectangle';
+            d.table.top.cornerRadius = 5000;
+        });
+        const g = partOf(model, 'table.top').geometry;
+        expect(g).toMatchObject({
+            outline: roundedRectOutline(1800, 900, 450),
+        });
+        for (const [x, z] of g.kind === 'extruded' ? g.outline : []) {
+            expect(x).toBeGreaterThanOrEqual(0);
+            expect(x).toBeLessThanOrEqual(1800);
+            expect(z).toBeGreaterThanOrEqual(0);
+            expect(z).toBeLessThanOrEqual(900);
+        }
     });
 
     it('rounded rectangle r 100: extruded outline of 4 x 8 corner segments', () => {
@@ -670,7 +747,7 @@ describe('under-top drawers on four legs', () => {
         });
     });
 
-    it('box per 07 §3.12: Wo 600, slot 110 -> box 70, slide by A - 10 = 742 -> 600', () => {
+    it('box per 07 §3.12: Wo 600, slot 110 -> box 70, slide by A - t_f - 10 = 724 -> 600', () => {
         const model = withDrawers(1);
         expect(lineOf(model, 'table.drawer.1.slides')).toMatchObject({
             code: 'SLD-BB-600',
@@ -685,7 +762,7 @@ describe('under-top drawers on four legs', () => {
         });
         expect(partOf(model, 'table.drawer.1.back').length).toBe(550);
         expect(issuesOf(model, 'furniture.drawer_depth_unused')).toMatchObject([
-            { params: { unused: 142 }, entityIds: ['table.drawer.1'] },
+            { params: { unused: 124 }, entityIds: ['table.drawer.1'] },
         ]);
     });
 
@@ -701,17 +778,61 @@ describe('under-top drawers on four legs', () => {
         ).toBe(2);
     });
 
-    it('three drawers share the span with 50 mm between: ws = fl((1600 - 100) / 3) = 500', () => {
+    it('three drawers fill the bay less the outer runners: ws = fl((1600 - 36 - 100) / 3) = 488', () => {
         const model = withDrawers(3);
         expect(
             [1, 2, 3].map(
                 (j) => boxOf(model, `table.drawer.${j}.front`).min[0],
             ),
-        ).toEqual([100, 650, 1200]);
-        expect(partOf(model, 'table.drawer.2.front').length).toBe(500);
+        ).toEqual([118, 656, 1194]);
+        expect(partOf(model, 'table.drawer.2.front').length).toBe(488);
+        // the outer runners stand against the inner faces of the legs (x 100, 1700)
+        expect(boxOf(model, 'table.drawer.1.runner.left').min[0]).toBe(100);
+        expect(boxOf(model, 'table.drawer.3.runner.right')).toMatchObject({
+            min: [1682, 615, 83],
+        });
+        expect(partOverlaps(model.parts)).toEqual([]);
         // dowels: 3 aprons x 4
         expect(lineOf(model, 'table.connectors.dowel')?.qty).toBe(12);
         expect(lineOf(model, 'table.connectors.corner')?.qty).toBe(4);
+    });
+
+    it('side aprons reaching past thin legs bound the bay (inset + t_c > s)', () => {
+        // LEG-CAB-ADJ has a 40 mm section; aprons inset 30 end at 50 + 30 + 18 = 98
+        const model = run(
+            diningTable((d) => {
+                d.table.base.legSource = 'hardware';
+                d.table.base.legCode = 'LEG-CAB-ADJ';
+                d.table.base.apron.inset = 30;
+                d.table.storage.drawers = withCount(3, 'front');
+            }),
+        );
+        // ws = fl((1568 - 100) / 3) = 489 leaves 1 mm, split on both sides
+        expect(boxOf(model, 'table.drawer.1.runner.left').min[0]).toBe(98.5);
+        expect(boxOf(model, 'table.apron.left')).toMatchObject({
+            min: [80, 635, 90],
+        });
+        // The drawers touch nothing. The 07 §3.13 apron formulas themselves
+        // cross at the back corners when inset + t_c > s (reported for a ruling).
+        expect(partOverlaps(model.parts)).toEqual([
+            'table.apron.back x table.apron.left: 8 x 90 x 8',
+            'table.apron.back x table.apron.right: 8 x 90 x 8',
+        ]);
+    });
+
+    it('keeps neighbouring runners apart when 2 t_c exceeds the 50 mm spacing', () => {
+        // 30 mm carcass board: drawers 60 apart
+        const model = run(
+            diningTable((d) => {
+                d.table.storage.drawers = withCount(3, 'front');
+            }),
+            withThickness('PB18-WHITE', 30),
+        );
+        const x0 = (j: number) =>
+            boxOf(model, `table.drawer.${j}.front`).min[0];
+        const ws = partOf(model, 'table.drawer.1.front').length;
+        expect(x0(2) - x0(1) - ws).toBe(60);
+        expect(partOverlaps(model.parts)).toEqual([]);
     });
 
     it('two drawers cap at 600 and stay centred', () => {
@@ -766,6 +887,104 @@ describe('under-top drawers on four legs', () => {
             min: [1117, 635, 725],
             size: [600, 70, 12],
         });
+    });
+
+    it('side drawers keep the physical meaning of their edges (edgeMap turned with them)', () => {
+        const edgesFor = (side: 'left' | 'right') => {
+            const ctx = createGenContext(
+                diningTable((d) => {
+                    d.table.storage.drawers = withCount(1, side);
+                }),
+                catalog,
+            );
+            tableParts(ctx);
+            return {
+                front: ctx.edgeMap.get('table.drawer.1.front'),
+                sideLeft: ctx.edgeMap.get('table.drawer.1.side.left'),
+            };
+        };
+        // built facing +z: the front's W1/W2 are its left/right ends, the box
+        // side's W1/W2 its front/back ends
+        expect(edgesFor('left')).toEqual({
+            front: { L1: 'top', L2: 'bottom', W1: 'back', W2: 'front' },
+            sideLeft: { L1: 'top', L2: 'bottom', W1: 'left', W2: 'right' },
+        });
+        expect(edgesFor('right')).toEqual({
+            front: { L1: 'top', L2: 'bottom', W1: 'front', W2: 'back' },
+            sideLeft: { L1: 'top', L2: 'bottom', W1: 'right', W2: 'left' },
+        });
+    });
+
+    it('an override resizes a turned drawer part along its real axes', () => {
+        const resized = (side: 'left' | 'right') =>
+            run(
+                diningTable((d) => {
+                    d.table.storage.drawers = withCount(1, side);
+                    d.overrides.parts['table.drawer.1.side.left'] = {
+                        lengthDelta: -50,
+                        widthDelta: -10,
+                    };
+                    d.overrides.parts['table.drawer.1.front'] = {
+                        lengthDelta: -100,
+                    };
+                }),
+            );
+        const left = resized('left');
+        // the box side runs along x (600 -> 550) and is 70 high (-> 60)
+        expect(boxOf(left, 'table.drawer.1.side.left')).toEqual({
+            min: [83, 635, 163],
+            size: [550, 60, 12],
+        });
+        expect(partOf(left, 'table.drawer.1.side.left')).toMatchObject({
+            length: 550,
+            width: 60,
+        });
+        // the front runs along z (600 -> 500)
+        expect(boxOf(left, 'table.drawer.1.front').size).toEqual([18, 90, 500]);
+        expect(
+            boxOf(resized('right'), 'table.drawer.1.side.left').size,
+        ).toEqual([550, 60, 12]);
+    });
+
+    it('a slide too short for its box: error drawer_no_slide, no box (m5)', () => {
+        const shortBox = mutateCatalog(catalog, (draft) => {
+            for (const h of draft.hardware) {
+                if (h.code === 'SLD-UM-350') h.specs.lengthDeductionMm = 400;
+            }
+        });
+        const model = run(
+            diningTable((d) => {
+                d.table.storage.drawers = {
+                    count: 1,
+                    side: 'front',
+                    slideCode: 'SLD-UM-350',
+                };
+            }),
+            shortBox,
+        );
+        expect(issuesOf(model, 'furniture.drawer_no_slide')).toMatchObject([
+            {
+                severity: 'error',
+                params: { availableDepth: 734 },
+                entityIds: ['table.drawer.1'],
+            },
+        ]);
+        expect(
+            keys(model).filter((k) =>
+                /^table\.drawer\.1\.(side|back|bottom)/.test(k),
+            ),
+        ).toEqual([]);
+    });
+
+    it('drawers that cannot fit the bay at all build nothing (no 07 §7.3 code for it)', () => {
+        // W 200: Wb 100 = the two legs; no room for runners
+        const model = run(
+            diningTable((d) => {
+                d.dims.width = 200;
+                d.table.storage.drawers = withCount(1, 'front');
+            }),
+        );
+        expect(keys(model).filter((k) => k.includes('drawer'))).toEqual([]);
     });
 
     it('count 0 is no drawers', () => {
@@ -917,7 +1136,10 @@ describe('panel ends', () => {
             min: [282, 585, 40],
             size: [18, 140, 560],
         });
-        expect(lineOf(model, 'table.drawer.1.slides')?.code).toBe('SLD-BB-550');
+        // A = 600 - 40 = 560, less the front: 542 -> maxLen 532 -> 500
+        expect(lineOf(model, 'table.drawer.1.slides')?.code).toBe('SLD-BB-500');
+        expect(boxOf(model, 'table.drawer.1.side.left').min[2]).toBe(82);
+        expect(partOverlaps(model.parts)).toEqual([]);
     });
 
     it('a side drawer is an error and builds nothing', () => {
@@ -930,7 +1152,7 @@ describe('panel ends', () => {
         });
         expect(
             issuesOf(model, 'furniture.table_drawer_side_unsupported'),
-        ).toMatchObject([{ severity: 'error' }]);
+        ).toMatchObject([{ severity: 'error', params: {}, entityIds: [] }]);
         expect(keys(model).filter((k) => k.includes('drawer'))).toEqual([]);
     });
 });
@@ -1088,7 +1310,14 @@ describe('pedestal', () => {
         });
         expect(partOf(model, 'table.pedestal.base')).toMatchObject({
             nameKey: 'parts.pedestal_plate',
+            visibleFaces: 0,
             edges: { L1: EB, L2: EB, W1: EB, W2: EB },
+        });
+        // 07 §5.2 bands only the base plate
+        expect(partOf(model, 'table.pedestal.top')).toMatchObject({
+            nameKey: 'parts.pedestal_plate',
+            visibleFaces: 0,
+            edges: { L1: null, L2: null, W1: null, W2: null },
         });
     });
 
@@ -1124,6 +1353,17 @@ describe('pedestal', () => {
 
 describe('cabinet ends: study desk defaults (07 §2.4.14)', () => {
     const model = run(studyDesk());
+
+    it('cabinet sides show one face like carcass sides; bottom and back none', () => {
+        expect(
+            [
+                'table.cabinet.side.left',
+                'table.cabinet.side.right',
+                'table.cabinet.bottom',
+                'table.cabinet.back',
+            ].map((k) => partOf(model, k).visibleFaces),
+        ).toEqual([1, 1, 0, 0]);
+    });
 
     it('a panel end on the left and a 400 mm cabinet on the right', () => {
         expect(boxOf(model, 'table.end.left')).toEqual({
@@ -1476,7 +1716,125 @@ describe('table family in generateFurniture', () => {
                 };
             }),
         ],
+        ['console 1200 x 800 x 400, 2 drawers', consoleTable(1200, 400, 2)],
+        [
+            // A = 658 - 30 - 18 = 610: a slide of A - 10 would reach the back apron
+            'dining 1800 x 758, 1 front drawer',
+            diningTable((d) => {
+                d.dims.depth = 758;
+                d.table.storage.drawers = withCount(1, 'front');
+            }),
+        ],
+        ['console 600 x 350, 3 drawers', consoleTable(600, 350, 3)],
+        ['console 1800 x 450, 3 drawers', consoleTable(1800, 450, 3)],
+        [
+            'dining, 3 front drawers',
+            diningTable((d) => {
+                d.table.storage.drawers = withCount(3, 'front');
+            }),
+        ],
+        [
+            'dining, 2 left drawers, stretcher',
+            diningTable((d) => {
+                d.table.base.stretcher = true;
+                d.table.storage.drawers = withCount(2, 'left');
+            }),
+        ],
+        [
+            'dining, 3 right drawers, hardware legs',
+            diningTable((d) => {
+                d.table.base.legSource = 'hardware';
+                d.table.storage.drawers = withCount(3, 'right');
+            }),
+        ],
+        [
+            'coffee table round 500, shelf',
+            tableDocument(
+                { width: 500, height: 420, depth: 500 },
+                {
+                    ...diningTableSpec(),
+                    top: {
+                        ...diningTableSpec().top,
+                        shape: 'round',
+                        overhang: 30,
+                    },
+                    base: {
+                        ...diningTableSpec().base,
+                        apron: { enabled: true, height: 70, inset: 10 },
+                    },
+                    storage: {
+                        drawers: null,
+                        lowerShelf: true,
+                        endCabinets: null,
+                    },
+                },
+                'coffee_table',
+            ),
+        ],
+        [
+            'pedestal round 1300',
+            diningTable((d) => {
+                d.dims.width = 1300;
+                d.dims.depth = 1300;
+                d.table.top.shape = 'round';
+                d.table.base.type = 'pedestal';
+            }),
+        ],
+        [
+            'desk 800 x 450, panel ends, 1 drawer',
+            studyDesk((d) => {
+                d.dims.width = 800;
+                d.dims.depth = 450;
+                d.table.base.type = 'panel_ends';
+                d.table.storage.endCabinets = null;
+                d.table.storage.drawers = withCount(1, 'front');
+            }),
+        ],
+        [
+            'desk 800, cabinet 600, top drawer',
+            studyDesk((d) => {
+                d.dims.width = 800;
+                if (d.table.storage.endCabinets) {
+                    d.table.storage.endCabinets.width = 600;
+                }
+                d.table.storage.drawers = withCount(1, 'front');
+            }),
+        ],
+        [
+            'desk 800 x 450, cabinet 600 shelves, top drawer',
+            studyDesk((d) => {
+                d.dims.width = 800;
+                d.dims.depth = 450;
+                d.table.storage.endCabinets = {
+                    width: 600,
+                    content: {
+                        type: 'shelves',
+                        count: 2,
+                        adjustable: true,
+                        frontSetback: 20,
+                    },
+                };
+                d.table.storage.drawers = withCount(1, 'front');
+            }),
+        ],
+        [
+            'desk 2400 x 780 x 800, cabinet 300, top drawers',
+            studyDesk((d) => {
+                d.dims = { width: 2400, height: 780, depth: 800 };
+                if (d.table.storage.endCabinets) {
+                    d.table.storage.endCabinets.width = 300;
+                }
+                d.table.storage.drawers = withCount(3, 'front');
+            }),
+        ],
     ];
+
+    it.each(variants)(
+        '%s: no two parts intersect (they may touch)',
+        (_name, doc) => {
+            expect(partOverlaps(run(doc).parts)).toEqual([]);
+        },
+    );
 
     it.each(variants)(
         '%s: every part and hardware key appears once (carry 1)',

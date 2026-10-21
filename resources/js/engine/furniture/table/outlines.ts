@@ -11,6 +11,9 @@
 const PRECISION = 1e6;
 const round = (v: number): number => Math.round(v * PRECISION) / PRECISION;
 
+const samePoint = (a: [number, number], b: [number, number]): boolean =>
+    a[0] === b[0] && a[1] === b[1];
+
 /** `segments` points of the ellipse centred at (cx, cz) with radii rx, rz. */
 function ellipseRing(
     cx: number,
@@ -31,8 +34,10 @@ function ellipseRing(
 /**
  * A `W x D` rectangle with corners rounded to radius `r`, each corner arc
  * made of `segmentsPerCorner` segments (`segmentsPerCorner + 1` points per
- * corner, so `4 x (segmentsPerCorner + 1)` points). Starts at the front
- * right corner (`[W, D − r]`). `r <= 0` gives the 4 corners of the rectangle.
+ * corner, so `4 x (segmentsPerCorner + 1)` points; fewer at
+ * `r = min(W, D) / 2`, where the corners meet and shared points appear
+ * once). Starts at the front right corner (`[W, D − r]`). `r <= 0` gives
+ * the 4 corners of the rectangle.
  */
 export function roundedRectOutline(
     W: number,
@@ -54,7 +59,7 @@ export function roundedRectOutline(
         [r, r],
         [W - r, r],
     ];
-    return centres.flatMap(([cx, cz], corner) =>
+    const ring = centres.flatMap(([cx, cz], corner) =>
         Array.from(
             { length: segmentsPerCorner + 1 },
             (_, i): [number, number] => {
@@ -66,6 +71,11 @@ export function roundedRectOutline(
             },
         ),
     );
+    // At r = W/2 or D/2 neighbouring corners meet: drop the repeated points.
+    return ring.filter((point, i) => {
+        const next = ring[(i + 1) % ring.length];
+        return !(next && samePoint(point, next));
+    });
 }
 
 /** A circle of diameter `d` in the `d x d` square, `segments` points. */
