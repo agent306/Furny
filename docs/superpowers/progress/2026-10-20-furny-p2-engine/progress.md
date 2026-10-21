@@ -257,3 +257,8 @@ Task 45: review a4e290e: spec ✅ (07 §10.1–§10.4; implementer's English nam
 Task 45: minor (deferred): notes null vs '' counts as a change (diff.ts:1619); highlightMap extruded-geometry comparison beyond §10.4 is untested (diffHighlight.ts:1662; spec-19 note); no test for ≤2% price change = minor, table-family document, table.top.thickness 'material' union.
 Carry Task 51: CHANGE_FIELD_LABELS_EN + front-kind/role English names are diff params (spec-fixed English exception) — keep out of the translation-coverage gate.
 Task 45: complete (commits 12dd076..a4e290e, review clean)
+Task 46: impl 7adb70c (DONE_WITH_CONCERNS; 8 tests; wardrobe rows byte-exact). Ruling: add OWASP CSV formula-injection escaping (leading = + - @ TAB CR → prefix ') on text cells before RFC 4180 quoting — part names/notes can be customer input opened by staff in spreadsheets; 08 §8.1 silent; spec-19 deviation — cost if wrong: a stray leading quote in a legit text cell. Implementer resumed with the ruling before review.
+Task 46: fix bcefc7f + 1d71366 (injection guard; 16 tests). Review 353c607..1d71366: spec ✅ (08 §8.1 byte-level), ruling implemented exactly, quality Approved.
+Spec 19 (deviation): 08 §8.1 CSV — OWASP formula-injection escaping on text cells (leading = + - @ TAB CR → ').
+Task 46: minor (deferred): bcefc7f red mid-history (bisect); material-name '' fallback for unknown code (exportCsv.ts:299).
+Task 46: complete (commits 353c607..1d71366, review clean)
