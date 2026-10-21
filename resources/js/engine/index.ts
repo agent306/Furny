@@ -285,5 +285,6 @@ export type {
     SvgExportOptions,
     SvgStyle,
 } from './plan/drawing';
-export { buildHitIndex, hitTest, hitTestRect } from './plan/hitIndex';
+export { buildHitIndex } from './plan/hitIndex';
 export type { Hit, HitIndex, HitKind, HitLayerMask } from './plan/hitIndex';
+export { hitTest, hitTestRect } from './plan/hitTest';

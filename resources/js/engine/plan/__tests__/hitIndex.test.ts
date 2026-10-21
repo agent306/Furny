@@ -1,14 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { pointInRing } from '../../geometry/polygon';
 import type { Vec2 } from '../../geometry/vec2';
 import { buildPlanDrawing } from '../drawing';
 import { derivePlanGeometry } from '../derive';
-import {
-    buildHitIndex,
-    hitTest,
-    hitTestRect,
-    type Hit,
-    type HitLayerMask,
-} from '../hitIndex';
+import { buildHitIndex, type Hit, type HitLayerMask } from '../hitIndex';
+import { hitTest, hitTestRect } from '../hitTest';
 import type { PlanDocument } from '../schema';
 import {
     addFixture,
@@ -719,5 +715,346 @@ describe.each([
                 'crossing',
             ),
         );
+    });
+});
+
+describe('hit priority mutants and recency (fix round 1)', () => {
+    it('ranks an opening above a node within tolerance', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        const o = addOpening(doc, W_TOP, { offset: 320, width: 400 });
+        const geom = derivePlanGeometry(doc);
+        const p = { x: 130, y: 0 };
+        // the point is inside the cut and within a (zoom 0.05) mouse tolerance of n1
+        expect(pointInRing(p, geom.openings[o]!.cut)).toBe('inside');
+        const w = world(doc);
+        const hits = at(w, p, 'mouse', {}, 0.05);
+        expect(kinds(hits).slice(0, 3)).toEqual(['opening', 'node', 'wall']);
+        expect(hits[0]!.id).toBe(o);
+        expect(hits[1]!.id).toBe(N1);
+    });
+
+    it('ranks a dimension above a text label', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        doc.annotations.dimensions['d_0000000001'] = {
+            id: 'd_0000000001',
+            a: { x: 1000, y: 1000 },
+            b: { x: 3000, y: 1000 },
+            offset: 300,
+            attachedTo: null,
+        };
+        const probe = world(doc);
+        const line = probe.drawing.layers.DIMS.find(
+            (g) => g.entityKind === 'dimension',
+        )!.items.find((i) => i.t === 'line' && i.style === 'dim_line');
+        if (line?.t !== 'line') throw new Error('no dimension line');
+        const mid = { x: (line.a.x + line.b.x) / 2, y: line.a.y };
+        doc.annotations.labels['t_0000000001'] = {
+            id: 't_0000000001',
+            position: { x: mid.x - 100, y: mid.y },
+            text: 'Hello',
+            fontSize: 300,
+            rotation: 0,
+        };
+        const w = world(doc);
+        const hits = at(w, mid, 'mouse', { room: false });
+        expect(hits.map((h) => [h.kind, h.id])).toEqual([
+            ['dimension', 'd_0000000001'],
+            ['label', 't_0000000001'],
+        ]);
+    });
+
+    describe('wall ties on the mitre line', () => {
+        // Thicknesses differ, so the mitre line is not the 45 degree diagonal
+        // and the distances to the two centre lines differ along it. Both
+        // outlines contain the point (outline distance 0 for both), so only
+        // the centre-line tie-break decides.
+        const plan = (top: number, left: number): World => {
+            const doc = makeRectPlan(5000, 4000, 230);
+            doc.walls[W_TOP]!.thickness = top;
+            doc.walls[W_LEFT]!.thickness = left;
+            return world(doc);
+        };
+        const wallHits = (w: World, p: Vec2): Hit[] =>
+            at(w, p, 'mouse', { node: false }).filter((h) => h.kind === 'wall');
+
+        it('picks the wall whose centre line is nearer (left, the later id)', () => {
+            // outer corner (-57.5, -115), inner corner (57.5, 115), 75 % along
+            const hits = wallHits(plan(230, 115), { x: 28.75, y: 57.5 });
+            expect(hits.map((h) => h.distancePx)).toEqual([0, 0]);
+            expect(hits.map((h) => h.id)).toEqual([W_LEFT, W_TOP]);
+        });
+
+        it('picks the wall whose centre line is nearer (top, the earlier id)', () => {
+            const hits = wallHits(plan(115, 230), { x: 57.5, y: 28.75 });
+            expect(hits.map((h) => h.distancePx)).toEqual([0, 0]);
+            expect(hits.map((h) => h.id)).toEqual([W_TOP, W_LEFT]);
+        });
+    });
+
+    describe('stacked placements of equal height', () => {
+        // Ids are not in insertion order: recency is the record order, not the id.
+        const stacked = (order: string[]): string[] => {
+            const doc = makeRectPlan(5000, 4000, 230);
+            for (const id of order) addPlacement(doc, id, 'sofa', 2000, 1000);
+            return at(world(doc), { x: 2000, y: 1200 })
+                .filter((h) => h.kind === 'placement')
+                .map((h) => h.id);
+        };
+
+        it('puts the later record entry first, whatever its id', () => {
+            expect(
+                stacked(['f_zzzzzzzzzz', 'f_aaaaaaaaaa', 'f_mmmmmmmmmm']),
+            ).toEqual(['f_mmmmmmmmmm', 'f_aaaaaaaaaa', 'f_zzzzzzzzzz']);
+            expect(stacked(['f_aaaaaaaaaa', 'f_zzzzzzzzzz'])).toEqual([
+                'f_zzzzzzzzzz',
+                'f_aaaaaaaaaa',
+            ]);
+        });
+
+        it('ranks a fixture added after a placement of equal top above it', () => {
+            const doc = makeRectPlan(5000, 4000, 230);
+            addPlacement(doc, 'f_0000000001', 'wardrobe', 2000, 1000); // top 2100
+            const x = addFixture(doc, { x: 2000, y: 1300, height: 2100 });
+            const hits = at(world(doc), { x: 2000, y: 1200 }).filter(
+                (h) => h.kind === 'placement' || h.kind === 'fixture',
+            );
+            expect(hits.map((h) => h.id)).toEqual([x, 'f_0000000001']);
+        });
+    });
+
+    it('picks the smaller of two overlapping rooms, whatever the order or id', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        const geom = derivePlanGeometry(doc);
+        const base = geom.rooms[0]!;
+        const sq = (x0: number, y0: number, x1: number, y1: number): Vec2[] => [
+            { x: x0, y: y0 },
+            { x: x1, y: y0 },
+            { x: x1, y: y1 },
+            { x: x0, y: y1 },
+        ];
+        const big = {
+            ...base,
+            faceKey: 'aaa',
+            metaId: null,
+            areaMm2: 9e9,
+            holes: [],
+            polygon: sq(0, 0, 5000, 4000),
+        };
+        const small = {
+            ...base,
+            faceKey: 'zzz',
+            metaId: null,
+            areaMm2: 1e6,
+            holes: [],
+            polygon: sq(2000, 1500, 3000, 2500),
+        };
+        const drawing = buildPlanDrawing(doc, geom, opts);
+        for (const rooms of [
+            [big, small],
+            [small, big],
+        ]) {
+            const index = buildHitIndex(
+                doc,
+                { ...geom, rooms },
+                drawing,
+                opts.footprints,
+            );
+            const hits = hitTest(
+                index,
+                { x: 2500, y: 2000 },
+                ZOOM,
+                'mouse',
+                {},
+            );
+            expect(hits.map((h) => h.id)).toEqual(['face:zzz', 'face:aaa']);
+        }
+    });
+});
+
+describe('hit shapes (fix round 1)', () => {
+    /** The rect-plan world with extra label groups on the TEXT layer. */
+    function labelWorld(
+        labels: Array<{
+            id: string;
+            at: Vec2;
+            anchor: 'start' | 'middle' | 'end';
+            baseline: 'middle' | 'top' | 'bottom';
+            text?: string;
+            sizeMm?: number;
+            dyEm?: number;
+            rotationDeg?: number;
+        }>,
+    ): World {
+        const doc = makeRectPlan(5000, 4000, 230);
+        const geom = derivePlanGeometry(doc);
+        const drawing = buildPlanDrawing(doc, geom, opts);
+        for (const l of labels) {
+            drawing.layers.TEXT.push({
+                entityId: l.id,
+                entityKind: 'label',
+                items: [
+                    {
+                        t: 'text',
+                        at: l.at,
+                        text: l.text ?? 'abcde',
+                        sizeMm: l.sizeMm ?? 100,
+                        dyEm: l.dyEm ?? 0,
+                        rotationDeg: l.rotationDeg ?? 0,
+                        anchor: l.anchor,
+                        baseline: l.baseline,
+                        style: 'label',
+                    },
+                ],
+            });
+        }
+        return {
+            doc,
+            drawing,
+            index: buildHitIndex(doc, geom, drawing, opts.footprints),
+        };
+    }
+    const labelIds = (w: World, p: Vec2): string[] =>
+        at(w, p, 'mouse', {}, 1)
+            .filter((h) => h.kind === 'label')
+            .map((h) => h.id);
+
+    it('places the text box by anchor and baseline (5 chars x 0.56 x 100 = 280 wide)', () => {
+        const w = labelWorld([
+            {
+                id: 't_end',
+                at: { x: 3000, y: 3000 },
+                anchor: 'end',
+                baseline: 'bottom',
+            },
+            {
+                id: 't_mid',
+                at: { x: 1000, y: 1000 },
+                anchor: 'middle',
+                baseline: 'top',
+            },
+            {
+                id: 't_start',
+                at: { x: 2000, y: 2000 },
+                anchor: 'start',
+                baseline: 'middle',
+            },
+        ]);
+        // end + bottom: x 2720..3000, y 2900..3000
+        expect(labelIds(w, { x: 2730, y: 2910 })).toEqual(['t_end']);
+        expect(labelIds(w, { x: 2990, y: 2990 })).toEqual(['t_end']);
+        expect(labelIds(w, { x: 3030, y: 2950 })).toEqual([]);
+        expect(labelIds(w, { x: 2700, y: 2950 })).toEqual([]);
+        expect(labelIds(w, { x: 2850, y: 3030 })).toEqual([]);
+        // middle + top: x 860..1140, y 1000..1100
+        expect(labelIds(w, { x: 870, y: 1010 })).toEqual(['t_mid']);
+        expect(labelIds(w, { x: 1130, y: 1090 })).toEqual(['t_mid']);
+        expect(labelIds(w, { x: 1000, y: 990 })).toEqual([]);
+        expect(labelIds(w, { x: 850, y: 1050 })).toEqual([]);
+        // start + middle: x 2000..2280, y 1950..2050
+        expect(labelIds(w, { x: 2010, y: 1960 })).toEqual(['t_start']);
+        expect(labelIds(w, { x: 1990, y: 2000 })).toEqual([]);
+        expect(labelIds(w, { x: 2300, y: 2000 })).toEqual([]);
+    });
+
+    it('offsets the box by dyEm and counts code points, not UTF-16 units', () => {
+        const w = labelWorld([
+            {
+                id: 't_dy',
+                at: { x: 2000, y: 2000 },
+                anchor: 'start',
+                baseline: 'middle',
+                dyEm: 2,
+            },
+            {
+                id: 't_emoji',
+                at: { x: 500, y: 500 },
+                anchor: 'start',
+                baseline: 'middle',
+                text: '😀😀',
+            },
+        ]);
+        // dy = 200: y 2150..2250
+        expect(labelIds(w, { x: 2100, y: 2200 })).toEqual(['t_dy']);
+        expect(labelIds(w, { x: 2100, y: 2000 })).toEqual([]);
+        // two code points: 112 wide, not 224
+        expect(labelIds(w, { x: 600, y: 500 })).toEqual(['t_emoji']);
+        expect(labelIds(w, { x: 650, y: 500 })).toEqual([]);
+    });
+
+    it('skips empty text', () => {
+        const w = labelWorld([
+            {
+                id: 't_empty',
+                at: { x: 2000, y: 2000 },
+                anchor: 'start',
+                baseline: 'middle',
+                text: '',
+            },
+        ]);
+        expect(labelIds(w, { x: 2000, y: 2000 })).toEqual([]);
+    });
+
+    it('hits a dimension through its text box, away from its line', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        doc.annotations.dimensions['d_0000000001'] = {
+            id: 'd_0000000001',
+            a: { x: 1000, y: 1000 },
+            b: { x: 3000, y: 1000 },
+            offset: 300,
+            attachedTo: null,
+        };
+        const w = world(doc);
+        const group = w.drawing.layers.DIMS.find(
+            (g) => g.entityKind === 'dimension',
+        )!;
+        const txt = group.items.find((i) => i.t === 'text');
+        const line = group.items.find(
+            (i) => i.t === 'line' && i.style === 'dim_line',
+        );
+        if (txt?.t !== 'text' || line?.t !== 'line') throw new Error('missing');
+        // zoom 1: 8 mm tolerance. The text sits 37.5..187.5 mm above the line.
+        const p = { x: txt.at.x, y: txt.at.y - 100 };
+        expect(Math.abs(p.y - line.a.y)).toBeGreaterThan(8);
+        expect(
+            at(w, p, 'mouse', { room: false }, 1).map((h) => [h.kind, h.id]),
+        ).toEqual([['dimension', 'd_0000000001']]);
+        expect(
+            at(
+                w,
+                { x: txt.at.x, y: txt.at.y - 300 },
+                'mouse',
+                { room: false },
+                1,
+            ),
+        ).toEqual([]);
+    });
+
+    it('clips the segment against the rectangle on y as well as x', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        doc.annotations.dimensions['d_0000000001'] = {
+            id: 'd_0000000001',
+            a: { x: 1000, y: 1000 },
+            b: { x: 3000, y: 2000 },
+            offset: 300,
+            attachedTo: null,
+        };
+        const w = world(doc);
+        const line = w.drawing.layers.DIMS.find(
+            (g) => g.entityKind === 'dimension',
+        )!.items.find((i) => i.t === 'line' && i.style === 'dim_line');
+        if (line?.t !== 'line') throw new Error('no dimension line');
+        const t = (2000 - line.a.x) / (line.b.x - line.a.x);
+        const ym = line.a.y + t * (line.b.y - line.a.y);
+        const rect = (y0: number, y1: number): string[] =>
+            hitTestRect(
+                w.index,
+                { x: 1950, y: y0 },
+                { x: 2050, y: y1 },
+                'crossing',
+            );
+        // inside the line's x range but 300..400 mm clear of it in y
+        expect(rect(ym + 300, ym + 400)).toEqual([]);
+        expect(rect(ym - 400, ym - 300)).toEqual([]);
+        expect(rect(ym - 20, ym + 20)).toEqual(['d_0000000001']);
     });
 });
