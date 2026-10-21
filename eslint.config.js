@@ -52,6 +52,70 @@ export const LEGACY_KIT_FILES = [
 const APP_URL_PREFIX =
     '^\\/(api\\/|admin|orders|projects|plans|furniture|imports|account)';
 
+// Engine purity (01 §5.1, 04 §10): framework-free, DOM-free, network-free.
+// clipper2-ts and earcut each have exactly one permitted importer.
+const ENGINE_FILES = ['resources/js/engine/**/*.ts'];
+
+const ENGINE_RESTRICTED_PACKAGES = [
+    {
+        name: 'vue',
+        message: 'The engine is framework-free (01 §5.1).',
+    },
+    {
+        name: 'three',
+        message: 'The engine is renderer-free (01 §5.1).',
+    },
+    {
+        name: 'clipper2-ts',
+        message:
+            'Only engine/geometry/clip.ts may import clipper2-ts (04 §10).',
+    },
+    {
+        name: 'earcut',
+        message:
+            'Only engine/geometry/triangulate.ts may import earcut (04 §10).',
+    },
+];
+
+const ENGINE_RESTRICTED_PATTERNS = [
+    {
+        group: ['@tresjs/*', 'three/*'],
+        message: 'The engine is renderer-free (01 §5.1).',
+    },
+    {
+        group: ['@/*', '**/editor/**', '**/components/**'],
+        message:
+            'Engine imports are relative and never reach into the app (01 §5.2).',
+    },
+];
+
+const ENGINE_RESTRICTED_GLOBALS = [
+    'window',
+    'document',
+    'localStorage',
+    'fetch',
+    'HTMLCanvasElement',
+    'Image',
+].map((name) => ({
+    name,
+    message: 'The engine must not touch DOM or network globals (01 §5.1).',
+}));
+
+function enginePurityRules(allowedPackage) {
+    return {
+        'no-restricted-imports': [
+            'error',
+            {
+                paths: ENGINE_RESTRICTED_PACKAGES.filter(
+                    (p) => p.name !== allowedPackage,
+                ),
+                patterns: ENGINE_RESTRICTED_PATTERNS,
+            },
+        ],
+        'no-restricted-globals': ['error', ...ENGINE_RESTRICTED_GLOBALS],
+    };
+}
+
 export default defineConfigWithVueTs(
     {
         name: 'furny/ignores',
@@ -112,6 +176,21 @@ export default defineConfigWithVueTs(
                 },
             ],
         },
+    },
+    {
+        name: 'furny/engine-purity',
+        files: ENGINE_FILES,
+        rules: enginePurityRules(null),
+    },
+    {
+        name: 'furny/engine-purity/clip',
+        files: ['resources/js/engine/geometry/clip.ts'],
+        rules: enginePurityRules('clipper2-ts'),
+    },
+    {
+        name: 'furny/engine-purity/triangulate',
+        files: ['resources/js/engine/geometry/triangulate.ts'],
+        rules: enginePurityRules('earcut'),
     },
     {
         name: 'furny/message-body-v-html',
