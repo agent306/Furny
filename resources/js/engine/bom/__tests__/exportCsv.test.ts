@@ -111,15 +111,23 @@ describe('cutListCsv: formula injection (spec 19, 08 §8.1 silent)', () => {
     const nameRow = (name: string): string =>
         lines(csvOf(withExtra(name, null))).find((r) => r.includes(EXTRA_ID))!;
 
-    it.each(['=SUM(A1)', '+1', '-x', '@cmd', '\tTab'])(
+    it.each(['=SUM(A1)', '+1', '-x', '@cmd'])(
         'prefixes %j with a single quote',
         (name) => {
             expect(nameRow(name)).toContain(`,'${name},1,PB18-WHITE,`);
         },
     );
 
-    it('prefixes a leading CR and quotes the result', () => {
-        expect(nameRow('\rx')).toContain(`,"'\rx",1,PB18-WHITE,`);
+    // part names are trimmed upstream, so TAB / CR only reach the file through notes
+    it.each([
+        ['\tTab', "'\tTab"],
+        ['\rx', '"\'\rx"'],
+    ])('prefixes a note starting with %j', (note, cell) => {
+        const doc = wardrobeFixture();
+        doc.overrides.parts['carcass.back.2'] = { note };
+        expect(lines(csvOf(doc))[1]!.endsWith(`,carcass.back.2,${cell}`)).toBe(
+            true,
+        );
     });
 
     it('escapes before RFC 4180 quoting', () => {
