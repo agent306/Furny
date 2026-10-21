@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Domain\Identity\Actions\LinkGoogleAccount;
 use App\Domain\Identity\Enums\LengthUnit;
 use App\Domain\Identity\Enums\UnitSystem;
 use App\Domain\Identity\Enums\UserType;
@@ -9,6 +10,7 @@ use App\Domain\Identity\Events\ContactVerified;
 use App\Domain\Identity\Events\CustomerRegistered;
 use App\Domain\Identity\Models\StaffInvitation;
 use App\Domain\Identity\Models\User;
+use App\Domain\Identity\Support\GoogleAccountException;
 use App\Http\Requests\Account\UnlinkGoogleRequest;
 use App\Listeners\ApplyPendingGoogleLink;
 use App\Listeners\RecordSuccessfulLogin;
@@ -1459,6 +1461,18 @@ describe('staff with a second factor and an address nobody verified (13 section 
         ($this->challenge)()->assertRedirect(route('admin.dashboard'));
 
         $this->assertAuthenticatedAs($this->owner);
+        expect($this->owner->refresh()->google_id)->toBeNull()->and($this->owner->password)->toBe($this->hash);
+    });
+
+    it('leaves the model clean when the link fails, so that a later save of it does not repeat the failed write', function (): void {
+        // Which listener of `Login` runs first depends on the file system, so the save of the next one must be harmless.
+        User::factory()->create(['google_id' => '321']);
+        $owner = User::query()->findOrFail($this->owner->getKey());
+
+        expect(fn () => app(LinkGoogleAccount::class)->byEmail($owner, '321'))->toThrow(GoogleAccountException::class);
+
+        expect($owner->isDirty())->toBeFalse()->and($owner->google_id)->toBeNull();
+        $owner->forceFill(['last_login_at' => now()])->save();
         expect($this->owner->refresh()->google_id)->toBeNull()->and($this->owner->password)->toBe($this->hash);
     });
 });

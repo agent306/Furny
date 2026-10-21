@@ -633,9 +633,15 @@ describe('numberSeparators', () => {
         ['de-DE', ',', '.'],
         ['fr-FR', ',', '\u202f'],
         ['ru-RU', ',', '\u00a0'],
-        ['de-CH', '.', '\u2019'],
     ])('%s: decimal %j, group %j', (locale, decimal, group) => {
         expect(numberSeparators(locale)).toEqual({ decimal, group });
+    });
+
+    it('de-CH: decimal ".", group an apostrophe (CLDR 48 spells it U+0027, older data U+2019)', () => {
+        const { decimal, group } = numberSeparators('de-CH');
+
+        expect(decimal).toBe('.');
+        expect(["'", '\u2019']).toContain(group);
     });
 
     it('falls back to . and , for a locale Intl rejects', () => {
@@ -690,6 +696,18 @@ describe('parseMajorToMinor with locale separators', () => {
 
         expect(parseMajorToMinor('1\u2019234.50', 2, ch)).toBe(123450);
         expect(parseMajorToMinor("1'234.50", 2, ch)).toBe(123450);
+    });
+
+    it('de-CH: either apostrophe groups, whichever one Intl uses', () => {
+        for (const group of ["'", '’']) {
+            const separators = { decimal: '.', group };
+
+            expect(parseMajorToMinor('1’234.50', 2, separators)).toBe(123450);
+            expect(parseMajorToMinor("1'234.50", 2, separators)).toBe(123450);
+            expect(parseMajorToMinor("1'234'567", 2, separators)).toBe(
+                123456700,
+            );
+        }
     });
 
     it('the default stays . and ,', () => {

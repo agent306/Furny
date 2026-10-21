@@ -194,6 +194,7 @@ it('has no closure route actions in the application routes, so route:cache works
         ->filter(fn ($route) => $route->getAction('uses') instanceof Closure)
         ->filter(function ($route): bool {
             $file = (new ReflectionFunction($route->getAction('uses')))->getFileName();
+            $file = is_string($file) ? str_replace('\\', '/', $file) : $file;
 
             return is_string($file) && ! str_contains($file, '/vendor/') && ! str_contains($file, '/tests/');
         })
