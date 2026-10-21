@@ -20,7 +20,8 @@ from app.utils.geometry import Rect
 __all__ = ["OcrLike", "OcrResult", "run_ocr", "split_combined_label", "tokens_from_vector_words"]
 
 MIN_VECTOR_WORDS = 10  # at least this many pdfplumber words: no OCR (06 §7.7)
-VERTICAL_ASPECT = 1.5  # a box this much taller than wide (and 2+ characters) holds vertical text
+VERTICAL_ASPECT = 1.5  # a 2-character box this much taller than wide holds vertical text
+VERTICAL_ASPECT_LONG = 1.25  # ... for 3+ characters (narrow digits such as "111" stay below 1.5)
 MASK_DILATE_PX = 2
 _WORD = re.compile(r"\S+")
 
@@ -59,17 +60,20 @@ def orient(reading: Reading) -> Reading:
     """Settle the text angle from the box shape; the pass only decides when the shape is ambiguous.
 
     RapidOCR reads tall boxes as rotated text in both passes (and reads horizontal text in the rotated
-    pass), so the pass alone does not say how the text runs: a box at least 1.5x taller than wide with 2+
-    characters is vertical (90), at least 1.5x wider than tall is horizontal (0), anything else keeps the
-    pass's angle. Quads that do not start along the reading direction are replaced by the box corners.
+    pass), so the pass alone does not say how the text runs: a box at least 1.5x taller than wide (1.25x
+    with 3+ characters) is vertical (90), as wide as that is horizontal (0), anything else (and a single
+    character) keeps the pass's angle. Quads that do not start along the reading direction are replaced
+    by the box corners.
     """
     x0, y0, x1, y1 = quad_bbox(reading.quad)
     w, h = x1 - x0, y1 - y0
     angle = reading.angle
-    if len(reading.text.strip()) >= 2:
-        if h >= VERTICAL_ASPECT * w:
+    n_chars = len(reading.text.strip())
+    if n_chars >= 2:
+        aspect = VERTICAL_ASPECT_LONG if n_chars >= 3 else VERTICAL_ASPECT
+        if h >= aspect * w:
             angle = 90
-        elif w >= VERTICAL_ASPECT * h:
+        elif w >= aspect * h:
             angle = 0
     quad = reading.quad
     if not _runs_along(quad, angle):

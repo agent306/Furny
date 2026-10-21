@@ -208,6 +208,42 @@ def test_angle_follows_box_shape_and_falls_back_to_the_pass() -> None:
     assert tall.quad == ((300, 250), (300, 100), (340, 100), (340, 250))  # reads bottom-to-top
 
 
+def test_aspect_threshold_depends_on_length() -> None:
+    narrow = raw(300, 100, 357, 185, "111", 0.9)  # 57 x 85: aspect 1.49 is still vertical for 3+ characters
+    two = raw(500, 100, 557, 185, "11", 0.9)  # the same shape with 2 characters stays ambiguous
+    got = {t.text: t.angle for t in read_page(pass_split([narrow, two], [])).tokens}
+    assert got == {"111": 90, "11": 0}
+
+
+def test_seam_fragment_loses_to_the_full_box() -> None:
+    w, h = 2000, 600
+    origins = tile_origins(w)
+    assert origins == [0, 720]
+
+    def fn(img: np.ndarray, n: int) -> list[RawOcrBox]:
+        if img.shape[:2] != (600, 1280):  # pass B: nothing
+            return []
+        if n == 0:  # tile 0 ends at x=1280: "1250" is cut at the seam into a confident "125"
+            return [raw(1200, 100, 1280, 140, "125", 0.99)]
+        return [raw(480, 100, 570, 140, "1250", 0.80)]  # full box (1200..1290)
+
+    result = read_page(FakeOcr(fn), w, h)
+    assert [(t.text, t.score) for t in result.tokens] == [("1250", 0.80)]
+
+
+def test_seams_are_interior_tile_edges_only() -> None:
+    from app.ocr.tiling import _touches_seam
+
+    box = (1200.0, 100.0, 1280.0, 140.0)
+    assert _touches_seam(box, 1280, 600, (0, 0), (2000, 600))  # right edge of the first tile
+    assert not _touches_seam(
+        box, 1280, 600, (720, 0), (2000, 600)
+    )  # right edge of the last tile: image border
+    assert _touches_seam((0.0, 100.0, 80.0, 140.0), 1280, 600, (720, 0), (2000, 600))  # left edge of tile 2
+    assert not _touches_seam((0.0, 100.0, 80.0, 140.0), 1280, 600, (0, 0), (2000, 600))  # image border
+    assert not _touches_seam((500.0, 100.0, 580.0, 140.0), 1280, 600, (0, 0), (2000, 600))
+
+
 def test_sorted_ids() -> None:
     boxes = [
         raw(500, 300, 560, 330, "ONE", 0.9),
@@ -359,6 +395,22 @@ def test_real_rapidocr_reads_plan_text() -> None:
     assert texts["3300"].angle == 90
     assert texts["3300"].parsed.kind == "mm_number"
     assert result.ink_notext.sum() < pre.ink.sum()
+
+
+@pytest.mark.slow
+def test_real_rapidocr_vertical_narrow_digits_are_angle_90() -> None:
+    img = render_plan(
+        (1600, 900),
+        texts=[
+            SText("111", (300, 700), scale=1.2, thickness=2, vertical=True),
+            SText("1100", (700, 700), scale=1.2, thickness=2, vertical=True),
+        ],
+    )
+    page = page_of(1600, 900, img=img)
+    result = run_ocr(page, preprocess(page, make_ctx()), OcrEngine(), make_ctx())
+    got = {t.text: t.angle for t in result.tokens}
+    assert got.get("111") == 90, got
+    assert got.get("1100") == 90, got
 
 
 @pytest.mark.slow
