@@ -51,6 +51,11 @@ export interface RoomNet {
 export interface WallRoomSides {
     left: string | null;
     right: string | null;
+    /**
+     * The side that faces no bounded face at all while the other side does.
+     * A side facing a dropped sub-minimum face is not exterior.
+     */
+    exteriorSide: 'left' | 'right' | null;
 }
 
 export interface RoomAnalysis {
@@ -110,7 +115,11 @@ export function computeRoomNet(
         areaMm2: Math.round(bestArea),
         perimeterMm: Math.round(perimeterMm),
         centroid: clean(polygonCentroid(best)),
-        netRect: rect ? { width: rect.width, depth: rect.depth } : null,
+        // a w x d label would mislead for a room with holes (islands, columns)
+        netRect:
+            rect && netHoles.length === 0
+                ? { width: rect.width, depth: rect.depth }
+                : null,
     };
 }
 
@@ -212,14 +221,18 @@ export function analyzeRooms(
     faces.forEach((face, faceIndex) => {
         for (const h of face.halfEdges) faceOfHalfEdge.set(h, faceIndex);
     });
-    const keyOfHalfEdge = (h: number): string | null => {
+    const sideOfHalfEdge = (h: number): Side => {
         const f = faceOfHalfEdge.get(h);
-        return f === undefined ? null : (keyOfFace.get(f) ?? null);
+        return f === undefined
+            ? { key: null, outside: true, length: 0 }
+            : { key: keyOfFace.get(f) ?? null, outside: false, length: 0 };
     };
 
     // Per wall and side, the face of the longest sub-edge (04 §3.5).
     interface Side {
         key: string | null;
+        /** Faces the unbounded outside (no face at all, not even a dropped one). */
+        outside: boolean;
         length: number;
     }
     const best = new Map<string, { left: Side; right: Side }>();
@@ -231,28 +244,35 @@ export function analyzeRooms(
             const info = graph.valid.get(wallId);
             if (!info) continue;
             const forward = dot(sub(v1, v0), info.d) > 0;
-            const rightKey = keyOfHalfEdge(forward ? 2 * e : 2 * e + 1);
-            const leftKey = keyOfHalfEdge(forward ? 2 * e + 1 : 2 * e);
-            let entry = best.get(wallId);
+            const right = {
+                ...sideOfHalfEdge(forward ? 2 * e : 2 * e + 1),
+                length,
+            };
+            const left = {
+                ...sideOfHalfEdge(forward ? 2 * e + 1 : 2 * e),
+                length,
+            };
+            const entry = best.get(wallId);
             if (!entry) {
-                entry = {
-                    left: { key: leftKey, length },
-                    right: { key: rightKey, length },
-                };
-                best.set(wallId, entry);
+                best.set(wallId, { left, right });
                 continue;
             }
-            if (length > entry.left.length) {
-                entry.left = { key: leftKey, length };
-            }
-            if (length > entry.right.length) {
-                entry.right = { key: rightKey, length };
-            }
+            if (length > entry.left.length) entry.left = left;
+            if (length > entry.right.length) entry.right = right;
         }
     });
     const wallSides = new Map<string, WallRoomSides>();
     for (const [wallId, s] of best) {
-        wallSides.set(wallId, { left: s.left.key, right: s.right.key });
+        wallSides.set(wallId, {
+            left: s.left.key,
+            right: s.right.key,
+            exteriorSide:
+                s.left.outside && !s.right.outside
+                    ? 'left'
+                    : s.right.outside && !s.left.outside
+                      ? 'right'
+                      : null,
+        });
     }
     return { rooms, wallSides };
 }

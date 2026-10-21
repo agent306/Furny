@@ -422,12 +422,7 @@ export function derivePlanGeometry(doc: PlanDocument): DerivedPlan {
         if (!w) continue;
         w.leftRoomKey = sides.left;
         w.rightRoomKey = sides.right;
-        w.exteriorSide =
-            sides.left === null && sides.right !== null
-                ? 'left'
-                : sides.right === null && sides.left !== null
-                  ? 'right'
-                  : null;
+        w.exteriorSide = sides.exteriorSide;
     }
 
     return {

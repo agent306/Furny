@@ -185,6 +185,36 @@ describe('detectRooms', () => {
         expect(inner.faceKey).toBe(faceKeyFor(['w4', 'w5', 'w6', 'w7']));
     });
 
+    it('has no netRect for a room with a hole', () => {
+        const doc = build(
+            [
+                [0, 0],
+                [10000, 0],
+                [10000, 8000],
+                [0, 8000],
+                [4000, 3000],
+                [6000, 3000],
+                [6000, 5000],
+                [4000, 5000],
+            ] as NodeSpec[],
+            [
+                [0, 1, 230],
+                [1, 2, 230],
+                [2, 3, 230],
+                [3, 0, 230],
+                [4, 5],
+                [5, 6],
+                [6, 7],
+                [7, 4],
+            ],
+        );
+        const plan = derivePlanGeometry(doc);
+        const outer = plan.rooms.find((r) => r.holes.length === 1)!;
+        const inner = plan.rooms.find((r) => r.holes.length === 0)!;
+        expect(outer.netRect).toBeNull();
+        expect(inner.netRect).not.toBeNull();
+    });
+
     it('keeps one room for a dangling wall and notches its net polygon', () => {
         const doc = build([...RECT, [0, 2000], [1500, 2000]] as NodeSpec[], [
             ...RECT_WALLS,
@@ -326,6 +356,32 @@ describe('wall sides', () => {
         }
         expect(interior).toBe(12);
         expect(exterior).toBe(12);
+    });
+
+    it('is not exterior on a side that faces a dropped sub-minimum face', () => {
+        const doc = build(
+            [
+                ...RECT,
+                [1000, 0],
+                [1000, 4000],
+                [1120, 0],
+                [1120, 4000],
+            ] as NodeSpec[],
+            [...RECT_WALLS, [4, 5], [6, 7]],
+        );
+        const plan = derivePlanGeometry(doc);
+        // the 5 mm gap between the two thin walls is below MIN_ROOM_NET_AREA
+        expect(plan.rooms).toHaveLength(2);
+        for (const id of ['w4', 'w5']) {
+            const w = plan.walls[id]!;
+            expect(w.exteriorSide).toBeNull();
+            expect([w.leftRoomKey, w.rightRoomKey]).toContain(null);
+        }
+        // the plan boundary stays exterior
+        const top = Object.values(plan.walls).find(
+            (w) => w.centerline[0].y === 0 && w.centerline[1].y === 0,
+        )!;
+        expect(top.exteriorSide).toBe('left');
     });
 
     it('uses the face of the longest sub-edge for a wall crossed without a node', () => {
