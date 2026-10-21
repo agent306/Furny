@@ -6,7 +6,10 @@ use App\Domain\Identity\Models\User;
 use App\Support\Auth\RecentAuthentication;
 use App\Support\Auth\SessionKey;
 use App\Support\Auth\SessionRegistry;
+use App\Support\Http\RateLimitedResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
@@ -483,5 +486,129 @@ describe('the login page', function (): void {
 
     it('keeps a signed-in user away from the page', function (): void {
         $this->actingAs($this->customer)->get(route('login'))->assertRedirect();
+    });
+});
+
+describe('no enumeration', function (): void {
+    it('does exactly one hash check on every way to sign in or to fail, and makes no hash', function (string $email, string $password): void {
+        User::factory()->passwordless()->create(['email' => 'nopass@example.com']);
+        User::factory()->inactive()->create(['email' => 'gone@example.com']);
+        User::factory()->pendingDeletion()->create(['email' => 'deleted@example.com']);
+
+        // The placeholder hash is made once, ever; this request makes it.
+        ($this->login)('nobody@example.com');
+
+        $hasher = Hash::partialMock();
+        $hasher->shouldReceive('check')->once()->passthru();
+        $hasher->shouldReceive('make')->never();
+
+        ($this->login)($email, $password);
+    })->with([
+        'an unknown email' => ['nobody@example.com', 'password'],
+        'a wrong password' => ['asha@example.com', 'wrong'],
+        'a user without a password' => ['nopass@example.com', 'password'],
+        'an inactive user, wrong password' => ['gone@example.com', 'wrong'],
+        'an inactive user, right password' => ['gone@example.com', 'password'],
+        'a soft-deleted user' => ['deleted@example.com', 'password'],
+        'the right password' => ['asha@example.com', 'password'],
+    ]);
+
+    it('keeps the placeholder hash out of the request: it is made once and cached', function (): void {
+        ($this->login)('nobody@example.com');
+        $first = Cache::get('auth:placeholder-hash:'.md5((string) json_encode(config('hashing'))));
+
+        ($this->login)('other@example.com');
+
+        expect($first)->toBeString()->not->toBeEmpty()
+            ->and(Cache::get('auth:placeholder-hash:'.md5((string) json_encode(config('hashing')))))->toBe($first);
+    });
+
+    it('takes at least the time box on every way out', function (string $email, string $password): void {
+        config(['auth.login_timebox_microseconds' => 150_000]);
+        User::factory()->inactive()->create(['email' => 'gone@example.com']);
+
+        $start = hrtime(true);
+        ($this->login)($email, $password);
+        $elapsed = (hrtime(true) - $start) / 1_000_000;
+
+        expect($elapsed)->toBeGreaterThanOrEqual(145.0);
+    })->with([
+        'an unknown email' => ['nobody@example.com', 'password'],
+        'a wrong password' => ['asha@example.com', 'wrong'],
+        'an inactive user' => ['gone@example.com', 'password'],
+        'the right password' => ['asha@example.com', 'password'],
+    ]);
+
+    it('has a time box of 200 ms by default', function (): void {
+        expect(evaluateConfigFile('auth')['login_timebox_microseconds'])->toBe(200_000);
+    });
+});
+
+describe('logging out leaves the other devices alone', function (): void {
+    it('keeps the remember token, forgets this device\'s cookie, and lets another device\'s cookie sign in', function (): void {
+        $this->customer->forceFill(['remember_token' => Str::random(60)])->save();
+        $user = $this->customer->fresh();
+        $recaller = recallerValue($user);
+        $name = Auth::guard('web')->getRecallerName();
+
+        // Device A: signed in with the session and the remember cookie.
+        ($this->from)()->post(route('login.store'), ['email' => 'asha@example.com', 'password' => 'password', 'remember' => 'on']);
+        $sessionA = session()->getId();
+
+        $response = $this->withCookie((string) config('session.cookie'), $sessionA)
+            ->withCookie($name, $recaller)
+            ->post(route('logout'))
+            ->assertRedirect('/');
+
+        $forgotten = recallerOf($response);
+
+        expect($forgotten)->not->toBeNull()
+            ->and($forgotten->getExpiresTime())->toBeLessThan(now()->getTimestamp())
+            ->and($user->fresh()->remember_token)->toBe($user->remember_token)
+            ->and(session('inertia.clear_history'))->toBeTrue()
+            ->and(Activity::query()->where('event', 'auth.logout')->count())->toBe(1);
+        $this->assertGuest();
+
+        // Device B: nothing but its remember cookie.
+        Auth::forgetGuards();
+
+        $this->withCookie($name, $recaller)->get(route('customer.dashboard'))->assertOk();
+
+        $this->assertAuthenticatedAs($user);
+    });
+
+    it('does the same for a JSON client', function (): void {
+        $this->customer->forceFill(['remember_token' => 'token-of-the-customer'])->save();
+
+        $this->actingAs($this->customer)->postJson(route('logout'))->assertNoContent();
+
+        expect($this->customer->fresh()->remember_token)->toBe('token-of-the-customer');
+    });
+
+    it('leaves a guest to the auth middleware', function (): void {
+        $this->post(route('logout'))->assertRedirectToRoute('login');
+    });
+});
+
+describe('a throttled sign-in on the page itself (10 section 4)', function (): void {
+    it('comes back with the wait as an inline error and without a toast', function (): void {
+        foreach (range(1, 5) as $_) {
+            ($this->from)()->post(route('login.store'), ['email' => 'asha@example.com', 'password' => 'wrong']);
+        }
+
+        $headers = [...InertiaRequest::headers(), 'Referer' => route('login')];
+
+        ($this->from)()->withHeaders($headers)
+            ->post(route('login.store'), ['email' => 'asha@example.com', 'password' => 'wrong'])
+            ->assertRedirect(route('login'));
+
+        $page = $this->withHeaders(InertiaRequest::headers())->get(route('login'))->assertOk();
+
+        expect((int) $page->json('props.errors.rate_limited'))->toBeGreaterThan(0)->toBeLessThanOrEqual(60)
+            ->and($page->json())->not->toHaveKey('flash');
+    });
+
+    it('lists the forms whose wait is shown on the page', function (): void {
+        expect(RateLimitedResponse::INLINE_ROUTES)->toBe(['login.store', 'register.store']);
     });
 });

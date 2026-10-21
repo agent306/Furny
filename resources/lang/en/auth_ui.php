@@ -16,7 +16,9 @@ return [
         'log_in' => 'Log in',
     ],
 
-    // Shared by the auth forms.
+    // Shared by the auth forms. `throttled` is the wait after too many attempts (10 §4), counted down on the page.
+    'throttled' => 'Too many attempts. Try again in {seconds, plural, one {# second} other {# seconds}}.',
+    'captcha' => 'Check that you are human',
     'password' => [
         'show' => 'Show password',
         'hide' => 'Hide password',

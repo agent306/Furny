@@ -84,3 +84,27 @@ it('still cycles the remember token when a deactivated user is signed out', func
 
     expect($this->user->fresh()->remember_token)->not->toBe($this->token);
 });
+
+it('keeps the remember cookies of other devices when a user signs out the device in use from the device list', function (): void {
+    $current = Str::random(40);
+    Session::getHandler()->write($current, '[]');
+    app(SessionRegistry::class)->register($this->user, $current, Request::create('/'), 'password', true);
+
+    $this->actingAs($this->user)
+        ->withCookie((string) config('session.cookie'), $current)
+        ->withCookie(Auth::guard('web')->getRecallerName(), $this->recaller)
+        ->withSession(SessionStamp::loginHoursAgo(0))
+        ->delete(route('account.sessions.destroy', SessionKey::for($current)))
+        ->assertRedirectToRoute('login');
+
+    $this->assertGuest();
+    expect($this->user->fresh()->remember_token)->toBe($this->token);
+
+    Auth::forgetGuards();
+
+    $this->withCookie(Auth::guard('web')->getRecallerName(), $this->recaller)->get(route('customer.dashboard'))->assertOk();
+
+    $this->assertAuthenticatedAs($this->user);
+
+    Redis::connection('sessions')->del('sess:revoked:'.$current, 'sess:meta:'.$current);
+});

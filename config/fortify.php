@@ -149,8 +149,8 @@ return [
         Features::registration(),
         Features::resetPasswords(),
         Features::emailVerification(),
-        Features::updateProfileInformation(),
-        Features::updatePasswords(),
+        // Features::updateProfileInformation() and Features::updatePasswords() (13 section 2) are enabled by the
+        // password and profile task, together with the Actions their routes need.
         Features::twoFactorAuthentication([
             'confirm' => true,
             'confirmPassword' => true,

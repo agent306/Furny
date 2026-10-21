@@ -117,6 +117,19 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Login time box
+    |--------------------------------------------------------------------------
+    |
+    | Every login attempt takes at least this long, whether the email exists, the password is right or the
+    | account is inactive, so the time it takes says nothing about the account (13 §2). Microseconds, as the
+    | framework's own guard uses it. Tests set it to 0.
+    |
+    */
+
+    'login_timebox_microseconds' => 200_000,
+
     'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
 
 ];

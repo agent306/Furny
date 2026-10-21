@@ -137,7 +137,7 @@ describe('Register (10 §4.3)', () => {
 
         expect(terms.attributes('aria-checked')).toBe('false');
         expect(label.text()).toBe(
-            'I accept the Terms of service and the Privacy policy',
+            'I accept the Terms of service and the Privacy policy*',
         );
 
         for (const [href, text] of [

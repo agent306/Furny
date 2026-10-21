@@ -14,7 +14,11 @@ use Tests\TestCase;
 */
 
 // Feature tests assert on props and markup, never on built assets: `public/build` may be absent or stale.
-pest()->extend(TestCase::class)->use(LazilyRefreshDatabase::class)->beforeEach(fn () => $this->withoutVite())->in('Feature');
+pest()->extend(TestCase::class)->use(LazilyRefreshDatabase::class)->beforeEach(function (): void {
+    $this->withoutVite();
+    // The login time box (13 §2) would slow every sign-in down by its minimum; its own tests switch it on.
+    config(['auth.login_timebox_microseconds' => 0]);
+})->in('Feature');
 pest()->extend(TestCase::class)->use(RefreshDatabase::class)->in('Browser');
 pest()->extend(TestCase::class)->in('Unit');
 

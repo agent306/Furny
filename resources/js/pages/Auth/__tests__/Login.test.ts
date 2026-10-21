@@ -73,8 +73,10 @@ describe('Login (10 §4.2)', () => {
         expect(email.attributes('autocomplete')).toBe('username');
         expect(password.attributes('type')).toBe('password');
         expect(password.attributes('autocomplete')).toBe('current-password');
-        expect(wrapper.get('label[for="email"]').text()).toBe('Email address');
-        expect(wrapper.get('label[for="password"]').text()).toBe('Password');
+        expect(wrapper.get('label[for="email"]').text()).toBe(
+            'Email address *',
+        );
+        expect(wrapper.get('label[for="password"]').text()).toBe('Password *');
     });
 
     it('shows "Keep me signed in" checked by default', () => {

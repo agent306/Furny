@@ -322,6 +322,22 @@ describe('throttling', function (): void {
             ->assertHeader('Retry-After');
     });
 
+    it('comes back to the form with the wait as an inline error and without a toast', function (): void {
+        foreach (range(1, 5) as $_) {
+            ($this->register)(['terms' => null]);
+        }
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.45'])
+            ->withHeaders([...InertiaRequest::headers(), 'Referer' => route('register')])
+            ->post(route('register.store'), registration())
+            ->assertRedirect(route('register'));
+
+        $page = $this->withHeaders(InertiaRequest::headers())->get(route('register'))->assertOk();
+
+        expect((int) $page->json('props.errors.rate_limited'))->toBeGreaterThan(0)->toBeLessThanOrEqual(3600)
+            ->and($page->json())->not->toHaveKey('flash');
+    });
+
     it('counts per IP', function (): void {
         foreach (range(1, 5) as $_) {
             ($this->register)(['terms' => null])->assertSessionHasErrors('terms');

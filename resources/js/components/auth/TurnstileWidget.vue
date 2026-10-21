@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { usePage } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue';
+import { useI18n } from '@/composables/useI18n';
 import { loadTurnstile } from '@/lib/turnstile';
 
 // 13 §3: Cloudflare Turnstile in managed mode. Nothing is rendered, and nothing is loaded from Cloudflare,
@@ -15,6 +16,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ token: [value: string] }>();
 
+const { t } = useI18n();
 const page = usePage();
 const active = computed(
     () =>
@@ -79,7 +81,12 @@ defineExpose({ reset });
 </script>
 
 <template>
-    <div v-if="active" data-test="turnstile">
+    <div
+        v-if="active"
+        role="group"
+        :aria-label="t('auth_ui.captcha')"
+        data-test="turnstile"
+    >
         <div ref="container" />
         <input type="hidden" name="cf_turnstile_response" :value="token" />
     </div>

@@ -11,6 +11,7 @@ use App\Http\Responses\LoginResponse;
 use App\Http\Responses\LogoutResponse;
 use App\Http\Responses\RegisterResponse;
 use App\Http\Responses\TwoFactorLoginResponse;
+use Illuminate\Auth\Events\CurrentDeviceLogout;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Auth\Events\Login;
@@ -47,10 +48,15 @@ it('configures Fortify as 13 section 2 says', function (): void {
             Features::registration(),
             Features::resetPasswords(),
             Features::emailVerification(),
-            Features::updateProfileInformation(),
-            Features::updatePasswords(),
             Features::twoFactorAuthentication(['confirm' => true, 'confirmPassword' => true, 'window' => 1]),
         ]);
+});
+
+it('leaves the profile and password updates off until their Actions exist', function (): void {
+    expect(Features::enabled(Features::updateProfileInformation()))->toBeFalse()
+        ->and(Features::enabled(Features::updatePasswords()))->toBeFalse()
+        ->and(Route::has('user-profile-information.update'))->toBeFalse()
+        ->and(Route::has('user-password.update'))->toBeFalse();
 });
 
 it('runs the login pipeline of 13 section 2: the remember policy first, no throttle step of Fortify', function (): void {
@@ -85,7 +91,7 @@ it('answers with the responses of the app', function (): void {
 
 it('listens once for each event: no listener is registered twice', function (string $event): void {
     expect(Event::getListeners($event))->toHaveCount(1);
-})->with([Login::class, Logout::class, Failed::class, Lockout::class, CustomerRegistered::class]);
+})->with([Login::class, Logout::class, CurrentDeviceLogout::class, Failed::class, Lockout::class, CustomerRegistered::class]);
 
 it('hands every auth page the flags, the Turnstile key and canRegister', function (string $route, string $component, bool $signedIn): void {
     if ($signedIn) {

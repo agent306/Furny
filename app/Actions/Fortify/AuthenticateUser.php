@@ -6,8 +6,10 @@ namespace App\Actions\Fortify;
 
 use App\Domain\Identity\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Illuminate\Support\Timebox;
 use Illuminate\Validation\ValidationException;
 use Laravel\Fortify\Fortify;
 
@@ -18,29 +20,14 @@ use Laravel\Fortify\Fortify;
  */
 final class AuthenticateUser
 {
-    private static ?string $placeholderHash = null;
-
     /** @throws ValidationException when the password is right but the account is not active */
     public static function handle(Request $request): ?User
     {
-        $email = self::email($request);
-        $password = $request->input('password');
-        $user = $email === null ? null : User::query()->where('email', $email)->first();
-
-        // Soft-deleted users are left out by the model's scope. A check against a placeholder hash when there is no
-        // password to compare keeps a wrong email from answering faster than a wrong password.
-        $matches = is_string($password) && $password !== ''
-            && Hash::check($password, $user->password ?? self::placeholderHash());
-
-        if ($user === null || $user->password === null || ! $matches) {
-            return null;
-        }
-
-        if (! $user->is_active) {
-            throw ValidationException::withMessages([Fortify::username() => [__('auth.inactive')]]);
-        }
-
-        return $user;
+        // Every way out takes the same minimum time, the exceptions of the inactive path included.
+        return (new Timebox)->call(
+            static fn (): ?User => self::authenticate($request),
+            (int) config('auth.login_timebox_microseconds'),
+        );
     }
 
     /** The login email, trimmed and lower-cased; null when it is missing or not text. */
@@ -57,8 +44,38 @@ final class AuthenticateUser
         return $email === '' ? null : $email;
     }
 
+    private static function authenticate(Request $request): ?User
+    {
+        $email = self::email($request);
+        $password = $request->input('password');
+        $password = is_string($password) ? $password : '';
+        $user = $email === null ? null : User::query()->where('email', $email)->first();
+
+        // Soft-deleted users are left out by the model's scope. Exactly one hash check happens on every path: when
+        // there is nobody (or no password) to compare with, it is made against a placeholder, so a wrong email
+        // costs what a wrong password costs.
+        $matches = Hash::check($password, $user->password ?? self::placeholderHash()) && $password !== '';
+
+        if ($user === null || $user->password === null || ! $matches) {
+            return null;
+        }
+
+        if (! $user->is_active) {
+            throw ValidationException::withMessages([Fortify::username() => [__('auth.inactive')]]);
+        }
+
+        return $user;
+    }
+
+    /**
+     * A hash of a random value made with the configured hasher. It is made once, ever, and kept in the cache: php-fpm
+     * forgets statics after each request, and making a hash per request would itself tell the two cases apart.
+     */
     private static function placeholderHash(): string
     {
-        return self::$placeholderHash ??= Hash::make(Str::random(32));
+        return Cache::rememberForever(
+            'auth:placeholder-hash:'.md5((string) json_encode(config('hashing'))),
+            static fn (): string => Hash::make(Str::random(32)),
+        );
     }
 }

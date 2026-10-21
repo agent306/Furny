@@ -7,18 +7,20 @@ namespace App\Listeners;
 use App\Domain\Identity\Models\User;
 use App\Support\Auth\SessionKey;
 use App\Support\Auth\SessionRegistry;
+use Illuminate\Auth\Events\CurrentDeviceLogout;
 use Illuminate\Auth\Events\Logout;
 use Throwable;
 
 /**
  * `auth.logout` (13 §5.4 step 5, §17): takes the session out of the registry and writes the audit entry. The
- * browser history is cleared by `LogoutResponse`, after the session has been invalidated.
+ * browser history is cleared by `LogoutResponse`, after the session has been invalidated. `CurrentDeviceLogout` is
+ * what signing out one device fires; `Logout` is fired by the other ends of a session.
  */
 final class RecordLogout
 {
     public function __construct(private readonly SessionRegistry $registry) {}
 
-    public function handle(Logout $event): void
+    public function handle(Logout|CurrentDeviceLogout $event): void
     {
         $user = $event->user;
 

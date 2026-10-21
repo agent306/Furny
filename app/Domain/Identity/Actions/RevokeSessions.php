@@ -41,7 +41,8 @@ final class RevokeSessions
         $this->audit($user, $open, self::REASON_DEVICE);
 
         if ($isCurrent) {
-            Auth::guard()->logout();
+            // This device only: `logout()` would cycle the remember token and end every other device's cookie.
+            Auth::guard('web')->logoutCurrentDevice();
             session()->invalidate();
             session()->regenerateToken();
 

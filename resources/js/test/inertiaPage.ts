@@ -40,6 +40,8 @@ export type TestPageProps = {
         workingHours?: string;
     };
     features?: Partial<FeatureFlags>;
+    /** The validation errors of the last visit, by field. */
+    errors?: Record<string, string>;
     unreadNotifications?: number;
     staffCounters?: { submitted: number; toCall: number } | null;
     healthBanners?: HealthBanner[];

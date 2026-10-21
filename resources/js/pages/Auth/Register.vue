@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { Form, Head, Link } from '@inertiajs/vue3';
+import { Form, Head, Link, usePage } from '@inertiajs/vue3';
 import { computed, useTemplateRef } from 'vue';
 import PasswordField from '@/components/auth/PasswordField.vue';
+import ThrottleNotice from '@/components/auth/ThrottleNotice.vue';
 import TurnstileWidget from '@/components/auth/TurnstileWidget.vue';
 import InputError from '@/components/common/InputError.vue';
+import RequiredMark from '@/components/common/RequiredMark.vue';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { useFocusFirstError } from '@/composables/useFocusFirstError';
 import { useI18n } from '@/composables/useI18n';
+import { useThrottleCountdown } from '@/composables/useThrottleCountdown';
 import { login } from '@/routes';
 import { privacy, terms } from '@/routes/legal';
 import { store } from '@/routes/register';
@@ -25,14 +29,34 @@ const props = defineProps<{
 }>();
 
 const { t } = useI18n();
+const { focusFirstError } = useFocusFirstError();
+// Too many attempts: the wait is counted down here, not shown as a toast (10 §4).
+const page = usePage();
+const { remaining } = useThrottleCountdown(() => page.props.errors);
 const turnstile =
     useTemplateRef<InstanceType<typeof TurnstileWidget>>('turnstile');
+
+/** A new token is needed after a failed submit, and the first invalid field gets the focus (15 §10.1). */
+function onError(): void {
+    turnstile.value?.reset();
+    void focusFirstError();
+}
 
 const minLength = computed(() => {
     const match = /minlength:\s*(\d+)/.exec(props.passwordRules);
 
     return match?.[1] === undefined ? null : Number(match[1]);
 });
+
+/** The ids that describe the password field: its error, and the hint when there is one. */
+function describedBy(error: string | undefined): string | undefined {
+    const ids = [
+        error ? 'password-error' : null,
+        minLength.value === null ? null : 'password-hint',
+    ].filter((id) => id !== null);
+
+    return ids.length === 0 ? undefined : ids.join(' ');
+}
 </script>
 
 <template>
@@ -59,15 +83,19 @@ const minLength = computed(() => {
             </p>
         </div>
 
+        <ThrottleNotice v-if="remaining > 0" :seconds="remaining" />
+
         <Form
             v-slot="{ errors, processing }"
             v-bind="store.form()"
             :reset-on-error="['password', 'password_confirmation']"
             class="flex flex-col gap-5"
-            @error="turnstile?.reset()"
+            @error="onError"
         >
             <div class="grid gap-2">
-                <Label for="name">{{ t('auth_ui.register.name') }}</Label>
+                <Label for="name"
+                    >{{ t('auth_ui.register.name') }} <RequiredMark
+                /></Label>
                 <Input
                     id="name"
                     name="name"
@@ -85,7 +113,9 @@ const minLength = computed(() => {
             </div>
 
             <div class="grid gap-2">
-                <Label for="email">{{ t('auth_ui.register.email') }}</Label>
+                <Label for="email"
+                    >{{ t('auth_ui.register.email') }} <RequiredMark
+                /></Label>
                 <Input
                     id="email"
                     name="email"
@@ -101,9 +131,9 @@ const minLength = computed(() => {
             </div>
 
             <div class="grid gap-2">
-                <Label for="password">{{
-                    t('auth_ui.register.password')
-                }}</Label>
+                <Label for="password"
+                    >{{ t('auth_ui.register.password') }} <RequiredMark
+                /></Label>
                 <PasswordField
                     id="password"
                     name="password"
@@ -113,11 +143,7 @@ const minLength = computed(() => {
                     autocomplete="new-password"
                     :passwordrules="passwordRules"
                     :aria-invalid="errors.password ? 'true' : undefined"
-                    :aria-describedby="
-                        errors.password
-                            ? 'password-error password-hint'
-                            : 'password-hint'
-                    "
+                    :aria-describedby="describedBy(errors.password)"
                 />
                 <p
                     v-if="minLength !== null"
@@ -130,9 +156,10 @@ const minLength = computed(() => {
             </div>
 
             <div class="grid gap-2">
-                <Label for="password_confirmation">{{
-                    t('auth_ui.register.password_confirmation')
-                }}</Label>
+                <Label for="password_confirmation"
+                    >{{ t('auth_ui.register.password_confirmation') }}
+                    <RequiredMark
+                /></Label>
                 <PasswordField
                     id="password_confirmation"
                     name="password_confirmation"
@@ -175,6 +202,7 @@ const minLength = computed(() => {
                             class="underline underline-offset-4"
                             >{{ t('legal.privacy.title') }}</a
                         >
+                        <RequiredMark />
                     </Label>
                 </div>
                 <InputError id="terms-error" :message="errors.terms" />
@@ -199,6 +227,11 @@ const minLength = computed(() => {
                     ref="turnstile"
                     :site-key="turnstileSiteKey"
                     action="register"
+                    :aria-describedby="
+                        errors.cf_turnstile_response
+                            ? 'captcha-error'
+                            : undefined
+                    "
                 />
                 <InputError
                     id="captcha-error"
@@ -210,7 +243,7 @@ const minLength = computed(() => {
                 type="submit"
                 size="lg"
                 class="w-full"
-                :disabled="processing"
+                :disabled="processing || remaining > 0"
                 data-test="register-button"
             >
                 <Spinner v-if="processing" />

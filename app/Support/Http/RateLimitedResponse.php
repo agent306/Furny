@@ -14,9 +14,18 @@ use Inertia\Inertia;
  * Renders `ThrottleRequestsException` (13 §10): JSON and XHR clients get `429 {code, retryAfter}`; an
  * Inertia visit is sent back with the wait as a native Inertia flash (the toast); anything else falls
  * through to the Error page.
+ *
+ * The forms of the auth pages are the exception (10 §4): their page shows the wait inline, as a countdown, so
+ * the visit comes back with the seconds as the validation error `rate_limited` and no toast.
  */
 final class RateLimitedResponse
 {
+    /** Route names of forms that show the wait on the page itself. The password reset form joins with its task. */
+    public const array INLINE_ROUTES = ['login.store', 'register.store'];
+
+    /** The validation error that carries the wait, in seconds, to the page. */
+    public const string INLINE_ERROR = 'rate_limited';
+
     public static function render(ThrottleRequestsException $exception, Request $request): JsonResponse|RedirectResponse|null
     {
         $seconds = max(1, (int) ($exception->getHeaders()['Retry-After'] ?? 60));
@@ -36,9 +45,18 @@ final class RateLimitedResponse
     {
         $previous = url()->previous();
 
-        // Without a session there is nowhere to keep the message; going back to the page that was
-        // throttled would only be throttled again.
-        if (! $request->hasSession() || $previous === $request->fullUrl()) {
+        // Without a session there is nowhere to keep the message.
+        if (! $request->hasSession()) {
+            return null;
+        }
+
+        // A form posts to the URL of its own page, so for it going back is not a loop.
+        if ($request->routeIs(...self::INLINE_ROUTES)) {
+            return redirect()->to($previous)->withErrors([self::INLINE_ERROR => (string) $seconds]);
+        }
+
+        // Going back to the page that was throttled would only be throttled again.
+        if ($previous === $request->fullUrl()) {
             return null;
         }
 
