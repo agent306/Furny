@@ -419,7 +419,7 @@ function pasteFragment(
 
     // walls, resolving their nodes on first use
     const refOf = (id: string): EndpointRef =>
-        has(idMap, id)
+        has(idMap, id) && has(d.nodes, idMap[id]!)
             ? { nodeId: idMap[id]! }
             : { point: shift(f.nodes[id]!) };
     const lines = new Map<string, Line>();

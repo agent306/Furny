@@ -629,6 +629,7 @@ function splitCrossedWalls(
     )) {
         // folded into another wall by an earlier split: that split went
         // through the node this one wanted
+        // (defensive: 40 000 fuzzed crossings never reached it, so no test)
         if (!Object.hasOwn(d.walls, wallId)) continue;
         const wall = d.walls[wallId]!;
         if (wall.a === into.nodeId || wall.b === into.nodeId) continue;

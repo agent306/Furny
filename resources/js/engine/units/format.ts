@@ -117,6 +117,9 @@ export function formatArea(mm2: number, prefs: UnitPrefs): string {
 
 /** Degrees with up to one decimal, trailing zeros stripped (04 §1.4). */
 export function formatAngle(deg: number, locale: string): string {
-    const tenths = Math.round(Math.abs(deg) * 10);
+    const scaled = Math.abs(deg) * 10;
+    // 359.96 rounds to 3600 tenths: a full turn reads as 0, never 360
+    const tenths =
+        scaled < 3600 && Math.round(scaled) === 3600 ? 0 : Math.round(scaled);
     return `${signPrefix(deg < 0, tenths, false)}${formatNumber(tenths / 10, locale, 0, 1, false)}°`;
 }

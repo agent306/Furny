@@ -407,6 +407,13 @@ describe('engine public API', () => {
         expect(PUBLIC_NAMES.filter((name) => !exported.has(name))).toEqual([]);
     });
 
+    it('exports nothing that is not listed', () => {
+        const listed = new Set<string>(PUBLIC_NAMES);
+        expect(Object.keys(engine).filter((name) => !listed.has(name))).toEqual(
+            [],
+        );
+    });
+
     it('lists no name twice', () => {
         expect(new Set(PUBLIC_NAMES).size).toBe(PUBLIC_NAMES.length);
     });

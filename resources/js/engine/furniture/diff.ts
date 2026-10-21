@@ -889,7 +889,7 @@ export function diffFurniture(
         ...frontChanges(a, b, labelOf),
         ...partChanges(sa.model.parts, sb.model.parts),
         ...hardwareChanges(sa.bom.hardware, sb.bom.hardware, idx),
-        ...(a.notes !== b.notes
+        ...((a.notes ?? '') !== (b.notes ?? '')
             ? [
                   item(
                       'notes_changed',

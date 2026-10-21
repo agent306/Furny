@@ -37,7 +37,7 @@ const ENGINE_RESTRICTED_PACKAGES = [
 
 const ENGINE_RESTRICTED_PATTERNS = [
     {
-        group: ['@tresjs/*', 'three/*'],
+        group: ['@tresjs/*', 'three/*', 'vue/*', '@vue/*'],
         message: 'The engine is renderer-free (01 §5.1).',
     },
     {

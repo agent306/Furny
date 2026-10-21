@@ -1074,6 +1074,45 @@ describe('insertFragment dry-run skip (mayAddNoWall)', () => {
         expect(bus.getDoc().nodes).toEqual(start.nodes);
     });
 
+    it('skips only wall_duplicate: a wall cutting through an opening refuses the paste', () => {
+        // x = 1000 lies inside the door of the top wall (offset 1000, width 900)
+        const r = room();
+        const fragment = emptyFragment();
+        fragment.nodes['n_00000f0001'] = {
+            id: 'n_00000f0001',
+            x: 1000,
+            y: -1000,
+        };
+        fragment.nodes['n_00000f0002'] = {
+            id: 'n_00000f0002',
+            x: 1000,
+            y: 1000,
+        };
+        fragment.walls['w_00000f0001'] = {
+            ...PROPS,
+            id: 'w_00000f0001',
+            a: 'n_00000f0001',
+            b: 'n_00000f0002',
+        };
+        const bus = busOf(r.g);
+        const before = bus.getDoc();
+        const error = refused(
+            bus.execute('insertFragment', { fragment, dx: 0, dy: 0 }),
+        );
+        expect(error.code).toBe('split_through_opening');
+        expect(bus.getDoc()).toBe(before);
+        create(before, (d) => {
+            expect(
+                addsWall(
+                    d,
+                    { point: { x: 1000, y: -1000 } },
+                    { point: { x: 1000, y: 1000 } },
+                    PROPS,
+                ),
+            ).toBe(true);
+        });
+    });
+
     it('never skips a dry run that would find a duplicate (seeded property)', () => {
         const random = mulberry32(50);
         const near = (v: number, spread: number) =>

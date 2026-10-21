@@ -194,6 +194,21 @@ describe('diffFurniture (07 §12.6)', () => {
     });
 });
 
+describe('notes', () => {
+    it('treats null and the empty string as the same notes', () => {
+        const items = diffFurniture(
+            patched(base, (d) => {
+                d.notes = null;
+            }),
+            patched(base, (d) => {
+                d.notes = '';
+            }),
+            catalog,
+        );
+        expect(ofKind(items, 'notes_changed')).toEqual([]);
+    });
+});
+
 describe('material, edge band, finish', () => {
     it('carcass material is major', () => {
         const items = diff((d) => {

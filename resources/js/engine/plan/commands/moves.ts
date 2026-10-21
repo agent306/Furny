@@ -290,7 +290,9 @@ function moveNodeTo(
     }
     if (into === null) {
         if (finalize) {
-            for (const w of incident) splitIntersections(d, w.id, ctx, out);
+            for (const w of incident) {
+                if (has(d.walls, w.id)) splitIntersections(d, w.id, ctx, out);
+            }
         }
         return null;
     }
