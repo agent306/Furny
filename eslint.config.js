@@ -17,8 +17,6 @@ export const LEGACY_KIT_FILES = [
     'resources/js/components/TextLink.vue',
     'resources/js/pages/Auth/ConfirmPassword.vue',
     'resources/js/pages/Auth/ForgotPassword.vue',
-    'resources/js/pages/Auth/Login.vue',
-    'resources/js/pages/Auth/Register.vue',
     'resources/js/pages/Auth/ResetPassword.vue',
     'resources/js/pages/Auth/TwoFactorChallenge.vue',
     'resources/js/pages/Auth/VerifyEmail.vue',

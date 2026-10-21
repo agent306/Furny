@@ -1,107 +1,128 @@
 <script setup lang="ts">
-import { Form, Head } from '@inertiajs/vue3';
-import InputError from '@/components/InputError.vue';
-import PasswordInput from '@/components/PasswordInput.vue';
-import TextLink from '@/components/TextLink.vue';
+import { Form, Head, Link } from '@inertiajs/vue3';
+import PasswordField from '@/components/auth/PasswordField.vue';
+import InputError from '@/components/common/InputError.vue';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { useI18n } from '@/composables/useI18n';
 import { register } from '@/routes';
 import { store } from '@/routes/login';
 import { request } from '@/routes/password';
+import type { FeatureFlags } from '@/types/inertia';
 
-defineOptions({
-    layout: {
-        title: 'Log in to your account',
-        description: 'Enter your email and password below to log in',
-    },
-});
-
+// 10 §4.2. The phone and Google sign-in buttons are added with those sign-in methods.
 defineProps<{
-    status?: string;
+    status?: string | null;
     canResetPassword: boolean;
+    canRegister: boolean;
+    features: FeatureFlags;
+    turnstileSiteKey: string | null;
 }>();
+
+const { t } = useI18n();
 </script>
 
 <template>
-    <Head title="Log in" />
+    <Head :title="t('auth_ui.login.title')" />
 
-    <div
-        v-if="status"
-        class="mb-4 text-center text-sm font-medium text-success"
-    >
-        {{ status }}
-    </div>
+    <div class="space-y-6">
+        <div class="space-y-2 text-center">
+            <h1
+                tabindex="-1"
+                class="text-2xl font-semibold tracking-tight outline-none"
+            >
+                {{ t('auth_ui.login.title') }}
+            </h1>
+            <p class="text-sm text-muted-foreground">
+                {{ t('auth_ui.login.description') }}
+            </p>
+        </div>
 
-    <Form
-        v-bind="store.form()"
-        :reset-on-success="['password']"
-        v-slot="{ errors, processing }"
-        class="flex flex-col gap-6"
-    >
-        <div class="grid gap-6">
+        <Alert v-if="status" role="status" data-test="login-status">
+            <AlertDescription>{{ status }}</AlertDescription>
+        </Alert>
+
+        <Form
+            v-slot="{ errors, processing }"
+            v-bind="store.form()"
+            :reset-on-error="['password']"
+            class="flex flex-col gap-5"
+        >
             <div class="grid gap-2">
-                <Label for="email">Email address</Label>
+                <Label for="email">{{ t('auth_ui.login.email') }}</Label>
                 <Input
                     id="email"
-                    type="email"
                     name="email"
+                    type="email"
+                    size="lg"
                     required
-                    v-focus
-                    :tabindex="1"
-                    autocomplete="email"
-                    placeholder="email@example.com"
+                    aria-required="true"
+                    autocomplete="username"
+                    :aria-invalid="errors.email ? 'true' : undefined"
+                    :aria-describedby="errors.email ? 'email-error' : undefined"
                 />
-                <InputError :message="errors.email" />
+                <InputError id="email-error" :message="errors.email" />
             </div>
 
             <div class="grid gap-2">
-                <div class="flex items-center justify-between">
-                    <Label for="password">Password</Label>
-                    <TextLink
+                <div class="flex items-center justify-between gap-2">
+                    <Label for="password">{{
+                        t('auth_ui.login.password')
+                    }}</Label>
+                    <Link
                         v-if="canResetPassword"
                         :href="request()"
-                        class="text-sm"
-                        :tabindex="5"
+                        class="inline-flex min-h-11 items-center text-sm underline underline-offset-4"
                     >
-                        Forgot your password?
-                    </TextLink>
+                        {{ t('auth_ui.login.forgot_password') }}
+                    </Link>
                 </div>
-                <PasswordInput
+                <PasswordField
                     id="password"
                     name="password"
+                    size="lg"
                     required
-                    :tabindex="2"
+                    aria-required="true"
                     autocomplete="current-password"
-                    placeholder="Password"
+                    :aria-invalid="errors.password ? 'true' : undefined"
+                    :aria-describedby="
+                        errors.password ? 'password-error' : undefined
+                    "
                 />
-                <InputError :message="errors.password" />
+                <InputError id="password-error" :message="errors.password" />
             </div>
 
-            <div class="flex items-center justify-between">
-                <Label for="remember" class="flex items-center space-x-3">
-                    <Checkbox id="remember" name="remember" :tabindex="3" />
-                    <span>Remember me</span>
-                </Label>
+            <div class="flex min-h-11 items-center gap-3">
+                <Checkbox id="remember" name="remember" :default-value="true" />
+                <Label for="remember" class="font-normal">{{
+                    t('auth_ui.login.remember')
+                }}</Label>
             </div>
 
             <Button
                 type="submit"
-                class="mt-4 w-full"
-                :tabindex="4"
+                size="lg"
+                class="w-full"
                 :disabled="processing"
                 data-test="login-button"
             >
                 <Spinner v-if="processing" />
-                Log in
+                {{ t('auth_ui.login.submit') }}
             </Button>
-        </div>
+        </Form>
 
-        <div class="text-center text-sm text-muted-foreground">
-            Don't have an account?
-            <TextLink :href="register()" :tabindex="5">Sign up</TextLink>
-        </div>
-    </Form>
+        <p v-if="canRegister" class="text-center text-sm text-muted-foreground">
+            {{ t('auth_ui.login.new_here') }}
+            <Link
+                :href="register()"
+                class="inline-flex min-h-11 items-center text-foreground underline underline-offset-4"
+            >
+                {{ t('auth_ui.login.create_account') }}
+            </Link>
+        </p>
+    </div>
 </template>

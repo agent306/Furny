@@ -4,13 +4,31 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Actions\Fortify\ApplyRememberPolicy;
+use App\Actions\Fortify\AuthenticateUser;
 use App\Actions\Fortify\CreateNewUser;
 use App\Actions\Fortify\ResetUserPassword;
+use App\Domain\Identity\Events\CustomerRegistered;
+use App\Domain\Identity\Listeners\SendWelcomeNotification;
+use App\Http\Responses\LoginResponse;
+use App\Http\Responses\LogoutResponse;
+use App\Http\Responses\RegisterResponse;
+use App\Http\Responses\TwoFactorLoginResponse;
+use App\Support\Features;
+use App\Support\Settings\Settings;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use Inertia\Inertia;
-use Laravel\Fortify\Features;
+use Laravel\Fortify\Actions\AttemptToAuthenticate;
+use Laravel\Fortify\Actions\PrepareAuthenticatedSession;
+use Laravel\Fortify\Actions\RedirectIfTwoFactorAuthenticatable;
+use Laravel\Fortify\Contracts\LoginResponse as LoginResponseContract;
+use Laravel\Fortify\Contracts\LogoutResponse as LogoutResponseContract;
+use Laravel\Fortify\Contracts\RegisterResponse as RegisterResponseContract;
+use Laravel\Fortify\Contracts\TwoFactorLoginResponse as TwoFactorLoginResponseContract;
+use Laravel\Fortify\Features as FortifyFeatures;
 use Laravel\Fortify\Fortify;
 
 final class FortifyServiceProvider extends ServiceProvider
@@ -20,7 +38,10 @@ final class FortifyServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(LoginResponseContract::class, LoginResponse::class);
+        $this->app->singleton(TwoFactorLoginResponseContract::class, TwoFactorLoginResponse::class);
+        $this->app->singleton(RegisterResponseContract::class, RegisterResponse::class);
+        $this->app->singleton(LogoutResponseContract::class, LogoutResponse::class);
     }
 
     /**
@@ -29,7 +50,11 @@ final class FortifyServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureActions();
+        $this->configureAuthentication();
         $this->configureViews();
+
+        // The listeners of `app/Listeners` are found by event discovery; this one lives with its domain.
+        Event::listen(CustomerRegistered::class, SendWelcomeNotification::class);
     }
 
     /**
@@ -42,35 +67,75 @@ final class FortifyServiceProvider extends ServiceProvider
     }
 
     /**
-     * Configure Fortify views.
+     * The login pipeline of 13 §2. The throttle is the route middleware of the `login` limiter
+     * (`fortify.limiters.login`), so Fortify's own throttle step is not part of it; staff never get a remember
+     * cookie.
+     */
+    private function configureAuthentication(): void
+    {
+        Fortify::authenticateUsing(AuthenticateUser::handle(...));
+
+        Fortify::authenticateThrough(static fn (): array => [
+            ApplyRememberPolicy::class,
+            RedirectIfTwoFactorAuthenticatable::class,
+            AttemptToAuthenticate::class,
+            PrepareAuthenticatedSession::class,
+        ]);
+    }
+
+    /**
+     * Configure Fortify views. Every page gets the props of `AuthPageProps` (13 §2, 14 §3.1).
      */
     private function configureViews(): void
     {
         Fortify::loginView(fn (Request $request) => Inertia::render('Auth/Login', [
-            'canResetPassword' => Features::enabled(Features::resetPasswords()),
+            ...$this->pageProps(),
+            'canResetPassword' => FortifyFeatures::enabled(FortifyFeatures::resetPasswords()),
             'status' => $request->session()->get('status'),
         ]));
 
         Fortify::resetPasswordView(fn (Request $request) => Inertia::render('Auth/ResetPassword', [
+            ...$this->pageProps(),
             'email' => $request->email,
             'token' => $request->route('token'),
             'passwordRules' => Password::defaults()->toPasswordRulesString(),
         ]));
 
         Fortify::requestPasswordResetLinkView(fn (Request $request) => Inertia::render('Auth/ForgotPassword', [
+            ...$this->pageProps(),
             'status' => $request->session()->get('status'),
         ]));
 
         Fortify::verifyEmailView(fn (Request $request) => Inertia::render('Auth/VerifyEmail', [
+            ...$this->pageProps(),
             'status' => $request->session()->get('status'),
         ]));
 
         Fortify::registerView(fn () => Inertia::render('Auth/Register', [
+            ...$this->pageProps(),
             'passwordRules' => Password::defaults()->toPasswordRulesString(),
         ]));
 
-        Fortify::twoFactorChallengeView(fn () => Inertia::render('Auth/TwoFactorChallenge'));
+        Fortify::twoFactorChallengeView(fn () => Inertia::render('Auth/TwoFactorChallenge', $this->pageProps()));
 
-        Fortify::confirmPasswordView(fn () => Inertia::render('Auth/ConfirmPassword'));
+        Fortify::confirmPasswordView(fn () => Inertia::render('Auth/ConfirmPassword', $this->pageProps()));
+    }
+
+    /**
+     * `AuthPageProps`: the feature flags, the public Turnstile key (only while the captcha is on) and whether new
+     * customers may register.
+     *
+     * @return array{features: array<string, bool>, turnstileSiteKey: string|null, canRegister: bool}
+     */
+    private function pageProps(): array
+    {
+        $siteKey = config('services.turnstile.site_key');
+
+        return [
+            'features' => Features::all(),
+            'turnstileSiteKey' => Features::enabled('captcha') && is_string($siteKey) ? $siteKey : null,
+            'canRegister' => FortifyFeatures::enabled(FortifyFeatures::registration())
+                && $this->app->make(Settings::class)->auth()->allowCustomerRegistration,
+        ];
     }
 }

@@ -57,11 +57,11 @@ it('sends the CSP of 13 §12.1', function (): void {
 
     expect($nonce)->not->toBe('')
         ->and(cspDirective($response, 'default-src'))->toBe("default-src 'self'")
-        ->and(cspDirective($response, 'script-src'))->toBe("script-src 'self' 'nonce-{$nonce}' 'strict-dynamic' https://challenges.cloudflare.com")
+        ->and(cspDirective($response, 'script-src'))->toBe("script-src 'self' 'nonce-{$nonce}' 'strict-dynamic'")
         ->and(cspDirective($response, 'style-src'))->toBe("style-src 'self' 'unsafe-inline'")
         ->and(cspDirective($response, 'font-src'))->toBe("font-src 'self' data:")
         ->and(cspDirective($response, 'worker-src'))->toBe("worker-src 'self' blob:")
-        ->and(cspDirective($response, 'frame-src'))->toBe('frame-src https://challenges.cloudflare.com')
+        ->and(cspDirective($response, 'frame-src'))->toBe("frame-src 'none'")
         ->and(cspDirective($response, 'frame-ancestors'))->toBe("frame-ancestors 'none'")
         ->and(cspDirective($response, 'form-action'))->toBe("form-action 'self' https://accounts.google.com")
         ->and(cspDirective($response, 'base-uri'))->toBe("base-uri 'self'")
@@ -70,6 +70,41 @@ it('sends the CSP of 13 §12.1', function (): void {
         ->and(cspDirective($response, 'upgrade-insecure-requests'))->toBe('upgrade-insecure-requests')
         ->and(cspDirective($response, 'report-uri'))->toBe('report-uri /csp-report')
         ->and(cspHeader($response))->not->toContain('unsafe-eval');
+});
+
+const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com';
+
+describe('Cloudflare Turnstile (13 §3, §12.1)', function (): void {
+    it('is not a source of anything while features.captcha is off', function (): void {
+        $response = $this->get('/');
+
+        expect(cspHeader($response))->not->toContain('cloudflare')
+            ->and(cspDirective($response, 'frame-src'))->toBe("frame-src 'none'");
+    });
+
+    it('is a script, connect and frame source, and only those, while features.captcha is on', function (): void {
+        config(['services.turnstile.site_key' => 'site-key', 'services.turnstile.secret_key' => 'secret-key']);
+
+        $response = $this->get('/');
+        $nonce = cspNonce($response);
+
+        expect(cspDirective($response, 'script-src'))->toBe("script-src 'self' 'nonce-{$nonce}' 'strict-dynamic' ".TURNSTILE_ORIGIN)
+            ->and(cspDirective($response, 'frame-src'))->toBe('frame-src '.TURNSTILE_ORIGIN)
+            ->and(cspDirective($response, 'connect-src'))->toContain(TURNSTILE_ORIGIN)
+            ->and(substr_count(cspHeader($response), TURNSTILE_ORIGIN))->toBe(3);
+    });
+
+    it('needs both keys', function (string $missing): void {
+        config(['services.turnstile.site_key' => 'site-key', 'services.turnstile.secret_key' => 'secret-key', $missing => null]);
+
+        expect(cspHeader($this->get('/')))->not->toContain('cloudflare');
+    })->with(['services.turnstile.site_key', 'services.turnstile.secret_key']);
+
+    it('is left out of the relaxed policy of the dashboards', function (): void {
+        config(['services.turnstile.site_key' => 'site-key', 'services.turnstile.secret_key' => 'secret-key']);
+
+        expect(cspDirective($this->get('/horizon'), 'script-src'))->not->toContain('cloudflare');
+    });
 });
 
 it('uses a fresh 128-bit nonce per request', function (): void {
@@ -156,7 +191,7 @@ it('adds the object-storage and Reverb origins from config', function (): void {
 
     expect(cspDirective($response, 'img-src'))->toBe("img-src 'self' data: blob: https://files.example.com https://pub.example.com")
         ->and(cspDirective($response, 'media-src'))->toBe("media-src 'self' blob: https://files.example.com")
-        ->and(cspDirective($response, 'connect-src'))->toBe("connect-src 'self' wss://ws.example.com https://ws.example.com https://files.example.com https://pub.example.com https://challenges.cloudflare.com blob:");
+        ->and(cspDirective($response, 'connect-src'))->toBe("connect-src 'self' wss://ws.example.com https://ws.example.com https://files.example.com https://pub.example.com blob:");
 });
 
 it('includes a non-default Reverb port and leaves out unset origins', function (): void {
@@ -171,7 +206,7 @@ it('includes a non-default Reverb port and leaves out unset origins', function (
 
     expect(cspDirective($response, 'img-src'))->toBe("img-src 'self' data: blob:")
         ->and(cspDirective($response, 'media-src'))->toBe("media-src 'self' blob:")
-        ->and(cspDirective($response, 'connect-src'))->toBe("connect-src 'self' wss://localhost:8080 https://localhost:8080 https://challenges.cloudflare.com blob:")
+        ->and(cspDirective($response, 'connect-src'))->toBe("connect-src 'self' wss://localhost:8080 https://localhost:8080 blob:")
         ->and(cspHeader($response))->not->toContain('null')->not->toContain('  ');
 });
 
@@ -418,7 +453,7 @@ describe('dashboards get a relaxed script policy', function (): void {
         $nonce = cspNonce($response);
 
         expect($nonce)->not->toBe('')
-            ->and(cspDirective($response, 'script-src'))->toBe("script-src 'self' 'nonce-{$nonce}' 'strict-dynamic' https://challenges.cloudflare.com");
+            ->and(cspDirective($response, 'script-src'))->toBe("script-src 'self' 'nonce-{$nonce}' 'strict-dynamic'");
     })->with(['/', '/terms', '/horizons', '/horizon-x', '/pulsed', '/admin', '/telescoped', '/definitely-missing', '/x/horizon']);
 
     it('also relaxes the report-only header', function (): void {

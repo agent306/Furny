@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Support\Features;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\View;
@@ -100,20 +101,22 @@ final class SecurityHeaders
         $private = $this->origins('s3_private_origin');
         $reverb = $this->reverbOrigins();
         $vite = $this->viteDevOrigins();
+        // Cloudflare is a script, connect and frame source only while the captcha is on (13 §3, §12.1).
+        $turnstile = Features::enabled('captcha') ? [self::TURNSTILE] : [];
 
         $directives = [
             'default-src' => ["'self'"],
             // A nonce or strict-dynamic would make browsers ignore 'unsafe-inline', so the dashboards get neither.
             'script-src' => $relaxed
                 ? ["'self'", "'unsafe-inline'", ...$vite['http']]
-                : ["'self'", "'nonce-{$nonce}'", "'strict-dynamic'", self::TURNSTILE, ...$vite['http']],
+                : ["'self'", "'nonce-{$nonce}'", "'strict-dynamic'", ...$turnstile, ...$vite['http']],
             'style-src' => ["'self'", "'unsafe-inline'", ...$vite['http']],
             'img-src' => ["'self'", 'data:', 'blob:', ...$storage],
             'media-src' => ["'self'", 'blob:', ...$private],
             'font-src' => ["'self'", 'data:'],
-            'connect-src' => ["'self'", ...$reverb['secure'], ...$storage, self::TURNSTILE, 'blob:', ...$reverb['local'], ...$vite['http'], ...$vite['ws']],
+            'connect-src' => ["'self'", ...$reverb['secure'], ...$storage, ...$turnstile, 'blob:', ...$reverb['local'], ...$vite['http'], ...$vite['ws']],
             'worker-src' => ["'self'", 'blob:'],
-            'frame-src' => [self::TURNSTILE],
+            'frame-src' => $turnstile === [] ? ["'none'"] : $turnstile,
             'frame-ancestors' => ["'none'"],
             'form-action' => ["'self'", 'https://accounts.google.com'],
             'base-uri' => ["'self'"],

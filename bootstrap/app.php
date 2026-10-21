@@ -9,6 +9,7 @@ use App\Http\Middleware\EnsureCustomerOnboarded;
 use App\Http\Middleware\EnsureTwoFactorEnrolled;
 use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\EnsureUserType;
+use App\Http\Middleware\FortifyRouteGuards;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\RequireRecentAuthentication;
@@ -117,6 +118,8 @@ $app = Application::configure(basePath: dirname(__DIR__))
             // records the session (13 §6.3).
             AuthenticateSession::class,
             TrackSession::class,
+            // The limiters and the closed-registration check that Fortify's own routes cannot carry (14 §3.1).
+            FortifyRouteGuards::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -1,5 +1,9 @@
 import { reactive } from 'vue';
-import type { FlashMessages, HealthBanner } from '@/types/inertia';
+import type {
+    FeatureFlags,
+    FlashMessages,
+    HealthBanner,
+} from '@/types/inertia';
 
 /**
  * Reactive stand-in for `usePage()` in component tests. Mock it like so (the
@@ -35,6 +39,7 @@ export type TestPageProps = {
         email?: string;
         workingHours?: string;
     };
+    features?: Partial<FeatureFlags>;
     unreadNotifications?: number;
     staffCounters?: { submitted: number; toCall: number } | null;
     healthBanners?: HealthBanner[];

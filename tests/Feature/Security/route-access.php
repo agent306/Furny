@@ -56,6 +56,8 @@ return [
     'verification.notice' => $entry('any'),
     'verification.verify' => $entry('any'),
     'verification.send' => $entry('any'),
+    'user-profile-information.update' => $entry('any'),
+    'user-password.update' => $entry('any'),
     'password.confirm' => $entry('any'),
     'password.confirm.store' => $entry('any'),
     'password.confirmation' => $entry('any'),

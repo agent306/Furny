@@ -1,114 +1,231 @@
 <script setup lang="ts">
-import { Form, Head } from '@inertiajs/vue3';
-import InputError from '@/components/InputError.vue';
-import PasswordInput from '@/components/PasswordInput.vue';
-import TextLink from '@/components/TextLink.vue';
+import { Form, Head, Link } from '@inertiajs/vue3';
+import { computed, useTemplateRef } from 'vue';
+import PasswordField from '@/components/auth/PasswordField.vue';
+import TurnstileWidget from '@/components/auth/TurnstileWidget.vue';
+import InputError from '@/components/common/InputError.vue';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { useI18n } from '@/composables/useI18n';
 import { login } from '@/routes';
+import { privacy, terms } from '@/routes/legal';
 import { store } from '@/routes/register';
+import type { FeatureFlags } from '@/types/inertia';
 
-defineProps<{
+// 10 §4.3. The phone and Google sign-up buttons are added with those sign-in methods.
+const props = defineProps<{
+    canRegister: boolean;
+    features: FeatureFlags;
+    turnstileSiteKey: string | null;
+    /** Laravel's `Password::defaults()` as password-manager rules, e.g. `minlength: 8; maxlength: 128;`. */
     passwordRules: string;
 }>();
 
-defineOptions({
-    layout: {
-        title: 'Create an account',
-        description: 'Enter your details below to create your account',
-    },
+const { t } = useI18n();
+const turnstile =
+    useTemplateRef<InstanceType<typeof TurnstileWidget>>('turnstile');
+
+const minLength = computed(() => {
+    const match = /minlength:\s*(\d+)/.exec(props.passwordRules);
+
+    return match?.[1] === undefined ? null : Number(match[1]);
 });
 </script>
 
 <template>
-    <Head title="Register" />
+    <Head :title="t('auth_ui.register.title')" />
 
-    <Form
-        v-bind="store.form()"
-        :reset-on-success="['password', 'password_confirmation']"
-        v-slot="{ errors, processing }"
-        class="flex flex-col gap-6"
+    <p
+        v-if="!canRegister"
+        class="text-center text-sm text-muted-foreground"
+        data-test="registration-closed"
     >
-        <div class="grid gap-6">
+        {{ t('auth_ui.registration_closed') }}
+    </p>
+
+    <div v-else class="space-y-6">
+        <div class="space-y-2 text-center">
+            <h1
+                tabindex="-1"
+                class="text-2xl font-semibold tracking-tight outline-none"
+            >
+                {{ t('auth_ui.register.title') }}
+            </h1>
+            <p class="text-sm text-muted-foreground">
+                {{ t('auth_ui.register.description') }}
+            </p>
+        </div>
+
+        <Form
+            v-slot="{ errors, processing }"
+            v-bind="store.form()"
+            :reset-on-error="['password', 'password_confirmation']"
+            class="flex flex-col gap-5"
+            @error="turnstile?.reset()"
+        >
             <div class="grid gap-2">
-                <Label for="name">Name</Label>
+                <Label for="name">{{ t('auth_ui.register.name') }}</Label>
                 <Input
                     id="name"
-                    type="text"
-                    required
-                    v-focus
-                    :tabindex="1"
-                    autocomplete="name"
                     name="name"
-                    placeholder="Full name"
+                    type="text"
+                    size="lg"
+                    required
+                    aria-required="true"
+                    minlength="2"
+                    maxlength="120"
+                    autocomplete="name"
+                    :aria-invalid="errors.name ? 'true' : undefined"
+                    :aria-describedby="errors.name ? 'name-error' : undefined"
                 />
-                <InputError :message="errors.name" />
+                <InputError id="name-error" :message="errors.name" />
             </div>
 
             <div class="grid gap-2">
-                <Label for="email">Email address</Label>
+                <Label for="email">{{ t('auth_ui.register.email') }}</Label>
                 <Input
                     id="email"
-                    type="email"
-                    required
-                    :tabindex="2"
-                    autocomplete="email"
                     name="email"
-                    placeholder="email@example.com"
+                    type="email"
+                    size="lg"
+                    required
+                    aria-required="true"
+                    autocomplete="email"
+                    :aria-invalid="errors.email ? 'true' : undefined"
+                    :aria-describedby="errors.email ? 'email-error' : undefined"
                 />
-                <InputError :message="errors.email" />
+                <InputError id="email-error" :message="errors.email" />
             </div>
 
             <div class="grid gap-2">
-                <Label for="password">Password</Label>
-                <PasswordInput
+                <Label for="password">{{
+                    t('auth_ui.register.password')
+                }}</Label>
+                <PasswordField
                     id="password"
-                    required
-                    :tabindex="3"
-                    autocomplete="new-password"
                     name="password"
-                    placeholder="Password"
+                    size="lg"
+                    required
+                    aria-required="true"
+                    autocomplete="new-password"
                     :passwordrules="passwordRules"
+                    :aria-invalid="errors.password ? 'true' : undefined"
+                    :aria-describedby="
+                        errors.password
+                            ? 'password-error password-hint'
+                            : 'password-hint'
+                    "
                 />
-                <InputError :message="errors.password" />
+                <p
+                    v-if="minLength !== null"
+                    id="password-hint"
+                    class="text-sm text-muted-foreground"
+                >
+                    {{ t('auth_ui.password_rules', { min: minLength }) }}
+                </p>
+                <InputError id="password-error" :message="errors.password" />
             </div>
 
             <div class="grid gap-2">
-                <Label for="password_confirmation">Confirm password</Label>
-                <PasswordInput
+                <Label for="password_confirmation">{{
+                    t('auth_ui.register.password_confirmation')
+                }}</Label>
+                <PasswordField
                     id="password_confirmation"
-                    required
-                    :tabindex="4"
-                    autocomplete="new-password"
                     name="password_confirmation"
-                    placeholder="Confirm password"
+                    size="lg"
+                    required
+                    aria-required="true"
+                    autocomplete="new-password"
                     :passwordrules="passwordRules"
                 />
-                <InputError :message="errors.password_confirmation" />
+            </div>
+
+            <div class="grid gap-2">
+                <div class="flex items-start gap-3">
+                    <Checkbox
+                        id="terms"
+                        name="terms"
+                        class="mt-0.5"
+                        :aria-invalid="errors.terms ? 'true' : undefined"
+                        :aria-describedby="
+                            errors.terms ? 'terms-error' : undefined
+                        "
+                    />
+                    <Label
+                        for="terms"
+                        class="block text-sm leading-relaxed font-normal"
+                    >
+                        {{ t('auth_ui.register.terms_before') }}
+                        <a
+                            :href="terms().url"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="underline underline-offset-4"
+                            >{{ t('legal.terms.title') }}</a
+                        >
+                        {{ t('auth_ui.register.terms_and') }}
+                        <a
+                            :href="privacy().url"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="underline underline-offset-4"
+                            >{{ t('legal.privacy.title') }}</a
+                        >
+                    </Label>
+                </div>
+                <InputError id="terms-error" :message="errors.terms" />
+            </div>
+
+            <div class="flex items-start gap-3">
+                <Checkbox
+                    id="marketing_opt_in"
+                    name="marketing_opt_in"
+                    class="mt-0.5"
+                />
+                <Label
+                    for="marketing_opt_in"
+                    class="block text-sm leading-relaxed font-normal"
+                >
+                    {{ t('auth_ui.register.marketing_opt_in') }}
+                </Label>
+            </div>
+
+            <div class="grid gap-2">
+                <TurnstileWidget
+                    ref="turnstile"
+                    :site-key="turnstileSiteKey"
+                    action="register"
+                />
+                <InputError
+                    id="captcha-error"
+                    :message="errors.cf_turnstile_response"
+                />
             </div>
 
             <Button
                 type="submit"
-                class="mt-2 w-full"
-                tabindex="5"
+                size="lg"
+                class="w-full"
                 :disabled="processing"
-                data-test="register-user-button"
+                data-test="register-button"
             >
                 <Spinner v-if="processing" />
-                Create account
+                {{ t('auth_ui.register.submit') }}
             </Button>
-        </div>
+        </Form>
 
-        <div class="text-center text-sm text-muted-foreground">
-            Already have an account?
-            <TextLink
+        <p class="text-center text-sm text-muted-foreground">
+            {{ t('auth_ui.register.have_account') }}
+            <Link
                 :href="login()"
-                class="underline underline-offset-4"
-                :tabindex="6"
-                >Log in</TextLink
+                class="inline-flex min-h-11 items-center text-foreground underline underline-offset-4"
             >
-        </div>
-    </Form>
+                {{ t('auth_ui.register.log_in') }}
+            </Link>
+        </p>
+    </div>
 </template>

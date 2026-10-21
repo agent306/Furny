@@ -116,14 +116,11 @@ final class AppServiceProvider extends ServiceProvider
             app()->isProduction(),
         );
 
-        Password::defaults(fn (): ?Password => app()->isProduction()
-            ? Password::min(12)
-                ->mixedCase()
-                ->letters()
-                ->numbers()
-                ->symbols()
-                ->uncompromised()
-            : null,
+        // NIST 800-63B: length and a breached-password check, no composition rules (13 §2). `uncompromised()` asks
+        // the HIBP range API; when that cannot be reached Laravel treats the password as not compromised.
+        Password::defaults(fn (): Password => app()->isProduction()
+            ? Password::min(10)->max(128)->uncompromised()
+            : Password::min(8)->max(128),
         );
     }
 }

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Support\Http\RateLimitKey;
+use Illuminate\Auth\Events\Lockout;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
@@ -37,10 +39,25 @@ final class RateLimitServiceProvider extends ServiceProvider
 
             // Every limit gets its own counter: two limits of one limiter may count the same thing
             // (per minute and per day by user) and must not share a hit count.
-            $limits[] = $this->limit($spec['per'], $spec['max'])->by($spec['per'].'|'.RateLimitKey::resolve($request, $spec['key']));
+            $limit = $this->limit($spec['per'], $spec['max'])->by($spec['per'].'|'.RateLimitKey::resolve($request, $spec['key']));
+
+            $limits[] = $name === 'login' ? $limit->response($this->lockout(...)) : $limit;
         }
 
         return $limits;
+    }
+
+    /**
+     * Fortify fires `Lockout` only from its own throttle step, which a named `login` limiter replaces (13 §2), so
+     * the limiter fires it when it refuses a sign-in. The response is the same 429 the `throttle` middleware gives.
+     *
+     * @param  array<string, mixed>  $headers
+     */
+    private function lockout(Request $request, array $headers): never
+    {
+        event(new Lockout($request));
+
+        throw new ThrottleRequestsException('Too Many Attempts.', headers: $headers);
     }
 
     private function limit(string $per, int $max): Limit

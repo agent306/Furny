@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Exceptions;
 
 use App\Domain\Identity\Models\User;
+use App\Support\Auth\IntendedRedirect;
 use App\Support\Http\ErrorPage;
 use Exception;
 use Illuminate\Contracts\Debug\ShouldntReport;
@@ -25,10 +26,10 @@ final class RecentAuthenticationRequired extends Exception implements ShouldntRe
             return response()->json(['code' => 'recent_auth_required'], 403);
         }
 
-        $intended = $request->isMethod('GET') ? $request->fullUrl() : self::sameSitePath($request, $request->headers->get('Referer'));
+        $intended = $request->isMethod('GET') ? $request->fullUrl() : $this->refererPath($request);
 
         if ($intended !== null && $request->hasSession()) {
-            $request->session()->put('url.intended', $intended);
+            $request->session()->put(IntendedRedirect::SESSION_KEY, $intended);
         }
 
         $user = $request->user();
@@ -36,43 +37,11 @@ final class RecentAuthenticationRequired extends Exception implements ShouldntRe
         return redirect()->to(route($user instanceof User && $user->hasPassword() ? 'password.confirm' : 'auth.reauthenticate'));
     }
 
-    /** The path and query of `$url` when it points at this site (the request or `app.url`), else null. */
-    private static function sameSitePath(Request $request, ?string $url): ?string
+    /** The Referer as a path of this site. A browser sends an absolute URL; anything else is not a Referer. */
+    private function refererPath(Request $request): ?string
     {
-        $parts = $url === null ? false : parse_url($url);
+        $referer = $request->headers->get('Referer');
 
-        if ($parts === false || ! isset($parts['scheme'], $parts['host'])) {
-            return null;
-        }
-
-        $origin = self::origin($parts['scheme'], $parts['host'], $parts['port'] ?? null);
-        $own = array_filter([
-            self::origin($request->getScheme(), $request->getHost(), $request->getPort()),
-            self::originOf((string) config('app.url')),
-        ]);
-
-        if (! in_array($origin, $own, true)) {
-            return null;
-        }
-
-        // A single leading slash: `//host/path` would be read as another site.
-        return '/'.ltrim(($parts['path'] ?? '/').(isset($parts['query']) ? '?'.$parts['query'] : ''), '/\\');
-    }
-
-    private static function originOf(string $url): ?string
-    {
-        $parts = parse_url($url);
-
-        return $parts === false || ! isset($parts['scheme'], $parts['host'])
-            ? null
-            : self::origin($parts['scheme'], $parts['host'], $parts['port'] ?? null);
-    }
-
-    private static function origin(string $scheme, string $host, int|string|null $port): string
-    {
-        $scheme = strtolower($scheme);
-        $port = $port === null || $port === '' ? ($scheme === 'https' ? 443 : 80) : (int) $port;
-
-        return $scheme.'://'.strtolower($host).':'.$port;
+        return $referer === null || str_starts_with($referer, '/') ? null : IntendedRedirect::sameSitePath($request, $referer);
     }
 }

@@ -9,6 +9,7 @@ use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Validation\Rule;
 use Stringable;
 
+/** The rules for the name and the email of a user (14 §3.1), shared by registration and the profile update. */
 trait ProfileValidationRules
 {
     /**
@@ -31,11 +32,12 @@ trait ProfileValidationRules
      */
     protected function nameRules(): array
     {
-        return ['required', 'string', 'max:255'];
+        return ['required', 'string', 'min:2', 'max:120'];
     }
 
     /**
-     * Get the validation rules used to validate user emails.
+     * Get the validation rules used to validate user emails. The address must be unused, soft-deleted users
+     * included: their email stays taken until they are anonymised (13 §9).
      *
      * @return array<int, ValidationRule|Stringable|array<mixed>|string>
      */
@@ -44,8 +46,8 @@ trait ProfileValidationRules
         return [
             'required',
             'string',
-            'email',
-            'max:255',
+            'email:rfc',
+            'max:254',
             $userId === null
                 ? Rule::unique(User::class)
                 : Rule::unique(User::class)->ignore($userId),
