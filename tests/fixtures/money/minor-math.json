@@ -1,0 +1,28 @@
+[
+    { "fn": "roundHalfUpDiv", "args": [5, 2], "expected": 3 },
+    { "fn": "roundHalfUpDiv", "args": [-5, 2], "expected": -3 },
+    { "fn": "roundHalfUpDiv", "args": [4, 2], "expected": 2 },
+    { "fn": "roundHalfUpDiv", "args": [1, 3], "expected": 0 },
+    { "fn": "roundHalfUpDiv", "args": [2, 3], "expected": 1 },
+    { "fn": "roundHalfUpDiv", "args": [-1, 2], "expected": -1 },
+    { "fn": "roundHalfUpDiv", "args": [-4, 3], "expected": -1 },
+    { "fn": "applyBps", "args": [1637186, 1000], "expected": 163719 },
+    { "fn": "applyBps", "args": [1800905, 3500], "expected": 630317 },
+    {
+        "fn": "applyBps",
+        "args": [9007199254741, 3333],
+        "expected": 3002099511605
+    },
+    { "fn": "roundUpToStep", "args": [2431222, 100], "expected": 2431300 },
+    { "fn": "roundUpToStep", "args": [2431200, 100], "expected": 2431200 },
+    { "fn": "roundUpToStep", "args": [123, 1], "expected": 123 },
+    { "fn": "roundUpToStep", "args": [0, 100], "expected": 0 },
+    { "fn": "roundUpToStep", "args": [123, 0], "expected": 123 },
+    { "fn": "grossUp", "args": [2431300, 1800], "expected": 2868934 },
+    { "fn": "netFromGross", "args": [2541895, 1800], "expected": 2154148 },
+    { "fn": "ceilDiv", "args": [32767, 10], "expected": 3277 },
+    { "fn": "ceilDiv", "args": [0, 7], "expected": 0 },
+    { "fn": "ceilDiv", "args": [7, 7], "expected": 1 },
+    { "fn": "costFromHundredths", "args": [427, 215000], "expected": 918050 },
+    { "fn": "costFromMilli", "args": [1500, 999], "expected": 1499 }
+]
