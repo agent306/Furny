@@ -280,3 +280,10 @@ Task 49: fix round 1/5 (2 addressed, 1 open — useEngineWorker JSDoc missing de
 Task 49: minor (deferred): engine.worker.ts posts handler results unguarded — a DataCloneError would fire `error` and (fatal policy) disable the engine for the session; postMessage-throw cleanup has no regression test (unobservable).
 Task 49: fix round 2/5 commits 224689e + 8fd9145 (JSDoc + corrected comments; cause of round-1 miss: edit script read files with the Windows default codec, '§' never matched). Re-review 2 by controller (comment-only diff 7220545..8fd9145): finding 3 ADDRESSED, comments now accurate.
 Task 49: complete (commits 0d48cfe..8fd9145, 2 fix rounds)
+Task 50: impl 166d64e..e42f081 (DONE_WITH_CONCERNS; bench:check 12/12 budgets; 5215 vitest; buildHitIndex O(rooms²)→1.7 ms; insertFragment dry-run skip 117→64 ms; p95 checked against vitest p99; validatePlan benched with precomputed geometry).
+Task 50: review e440b75..e42f081: mechanism/thresholds/bench:check/gitignore/buildHitIndex ✅; quality Needs fixes — Important: insertFragment dry-run skip unsafe under resolveEndpoint wall-end snap (≤11.2 mm) → a paste can abort with wall_too_short where it used to skip the wall; tests don't cover it. Fix round 1 dispatched (resume a5a7538182ca69842) with equivalence property test + check-bench/hitIndex minors.
+Spec 19 (note): 04 §7.3 validatePlan budget measured with precomputed geometry + shallow-copied doc (cold derive gated separately) — spec owner to accept. p95 budget checked against vitest p99 (no p95 in bench JSON).
+Note: AppShell/AddressFields vitest files flaked once under load (passed alone) — P1 final review.
+Task 50: fix round 1/5 commit cc6aa3b (3 addressed, 0 open). Re-review: mayAddNoWall bound SNAP=hypot(10,5)+1 proven against every resolveEndpoint path + 120k-segment fuzz (no skip/duplicate case); property test non-vacuous. Grid-paste speedup gone (117–148 ms; correctness first).
+Final review: fragment refOf resolves an idMap end as nodeId — if settleRoundedCuts merge deleted that node the next lookup could throw (pre-existing).
+Task 50: complete (commits e440b75..cc6aa3b, 1 fix round)
