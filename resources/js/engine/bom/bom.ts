@@ -9,11 +9,11 @@ import { indexCatalog } from '../furniture/catalogIndex';
 import { partNameEn } from '../furniture/partNames';
 import type { FurnitureDocument } from '../furniture/schema';
 import type { FurnitureModel, Part } from '../furniture/types';
-import { ceilDiv } from '../money';
 import type { Issue } from '../plan/types';
 import { ENGINE_VERSION } from '../version';
 import { cutSize } from './cutSizes';
 import { edgeBandLengths } from './edgeBanding';
+import { ceilDivBig, product, toSafeNumber } from './intMath';
 import { rowIdentity, rowKeyOfIdentity } from './rowKey';
 import type {
     Bom,
@@ -132,22 +132,23 @@ function materialTotals(
     const groups = groupBy(parts, (p) => p.materialCode);
     return [...groups.keys()].sort(cmpId).map((code) => {
         const group = groups.get(code)!;
-        const netAreaMm2 = group.reduce(
-            (sum, p) => sum + p.length * p.width * p.qty,
-            0,
+        const netArea = group.reduce(
+            (sum, p) => sum + product(p.length, p.width, p.qty),
+            0n,
         );
         // An unknown material (already `furniture.unknown_code`) has no sheet.
         const material = idx.material(code);
         const sheetsEstimated = material
-            ? ceilDiv(
-                  netAreaMm2 * (1000 + Math.round(material.wasteFactor * 1000)),
-                  material.sheetLengthMm * material.sheetWidthMm * 1000,
+            ? ceilDivBig(
+                  netArea *
+                      product(1000 + Math.round(material.wasteFactor * 1000)),
+                  product(material.sheetLengthMm, material.sheetWidthMm, 1000),
               )
             : 0;
         return {
             materialCode: code,
             partCount: group.reduce((sum, p) => sum + p.qty, 0),
-            netAreaMm2,
+            netAreaMm2: toSafeNumber(netArea),
             sheetsEstimated,
             sheetsNested: null,
             sheetsBilled: sheetsEstimated,
@@ -161,16 +162,24 @@ function finishingTotals(
     parts: readonly Part[],
     finishByRole: ComputeBomOptions['finishByRole'],
 ): Bom['finishing'] {
-    const areas = new Map<string, number>();
+    const areas = new Map<string, bigint>();
     for (const part of parts) {
         const code = finishByRole[part.role];
         if (!code || part.visibleFaces <= 0) continue;
-        const area = part.length * part.width * part.visibleFaces * part.qty;
-        areas.set(code, (areas.get(code) ?? 0) + area);
+        const area = product(
+            part.length,
+            part.width,
+            part.visibleFaces,
+            part.qty,
+        );
+        areas.set(code, (areas.get(code) ?? 0n) + area);
     }
     return [...areas.keys()]
         .sort(cmpId)
-        .map((code) => ({ finishCode: code, areaMm2: areas.get(code)! }))
+        .map((code) => ({
+            finishCode: code,
+            areaMm2: toSafeNumber(areas.get(code)!),
+        }))
         .filter((row) => row.areaMm2 > 0);
 }
 

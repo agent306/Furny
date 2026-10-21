@@ -4,7 +4,10 @@ import { generateFurniture } from '../../furniture/generate';
 import { FurnitureDocumentSchema } from '../../furniture/schema';
 import type { FurnitureModel, HardwareLine, Part } from '../../furniture/types';
 import type { Issue } from '../../plan/types';
-import { seedCatalog } from '../../testing/seedCatalog';
+import { mulberry32 } from '../../testing/random';
+import { mutateCatalog, seedCatalog } from '../../testing/seedCatalog';
+import { cmpId } from '../../compare';
+import { rowKeyFor } from '../rowKey';
 import { wardrobeFixture } from '../../furniture/testing/docs';
 import { bomOptionsFor, computeBom, mergeIssues } from '../bom';
 import type { ComputeBomOptions } from '../types';
@@ -163,6 +166,28 @@ describe('computeBom: cut list rows (08 §3.4)', () => {
         ]);
     });
 
+    it('breaks a tie on material, thickness and size by rowKey, not by part key', () => {
+        const plain = panel({ grain: 'none' });
+        const grained = panel({ grain: 'length' });
+        const [low, high] = [plain, grained].sort((a, b) =>
+            cmpId(rowKeyFor(a), rowKeyFor(b)),
+        );
+        // the part with the larger rowKey gets the smaller part key
+        const bom = computeBom(
+            model([
+                { ...high!, key: 'a' },
+                { ...low!, key: 'b' },
+            ]),
+            catalog,
+            OFF,
+        );
+        expect(bom.cutList.map((r) => r.partKeys[0])).toEqual(['b', 'a']);
+        expect(bom.cutList.map((r) => r.rowKey)).toEqual([
+            rowKeyFor(low!),
+            rowKeyFor(high!),
+        ]);
+    });
+
     it('suffixes the later identity of a hash collision with -2', () => {
         // FNV-1a collision: both identities hash to 0xe389dbf9
         const bom = computeBom(
@@ -210,12 +235,14 @@ describe('computeBom: cut list rows (08 §3.4)', () => {
 
 describe('computeBom: materials, finishing, hardware, issues (08 §3.5–§3.9)', () => {
     it('estimates sheets with the material waste factor', () => {
-        // PB18-OAK: 2440 × 1220, waste 0.12; 2 × 1000 × 500 = 1 000 000 mm²
+        // PB18-OAK: 2440 × 1220 = 2 976 800 mm², waste 0.12; 2700 × 1000 = 2 700 000 mm²
+        // 12 %: 3 024 000 000 / 2 976 800 000 → 2 sheets (10 % would give 0.998 → 1)
         const bom = computeBom(
             model([
                 named('a', 'a', {
                     materialCode: 'PB18-OAK',
-                    qty: 2,
+                    length: 2700,
+                    width: 1000,
                 }),
             ]),
             catalog,
@@ -224,13 +251,49 @@ describe('computeBom: materials, finishing, hardware, issues (08 §3.5–§3.9)'
         expect(bom.materials).toEqual([
             {
                 materialCode: 'PB18-OAK',
-                partCount: 2,
-                netAreaMm2: 1000000,
-                sheetsEstimated: 1,
+                partCount: 1,
+                netAreaMm2: 2700000,
+                sheetsEstimated: 2,
                 sheetsNested: null,
-                sheetsBilled: 1,
+                sheetsBilled: 2,
                 utilization: null,
             },
+        ]);
+    });
+
+    it('rounds the waste factor to whole per mille, half up', () => {
+        // 0.0355 × 1000 = 35.5 → 36; one sheet holds 2 976 800 000 / 1036 = 2 873 359.07 mm²
+        const odd = mutateCatalog(catalog, (draft) => {
+            draft.materials.find((m) => m.code === 'PB18-WHITE')!.wasteFactor =
+                0.0355;
+        });
+        const sheets = (area: number) =>
+            computeBom(
+                model([named('a', 'a', { length: area, width: 1 })]),
+                odd,
+                OFF,
+            ).materials[0]!.sheetsEstimated;
+        expect(sheets(2873359)).toBe(1);
+        expect(sheets(2873360)).toBe(2);
+    });
+
+    it('lists materials by code, whatever the part order', () => {
+        const bom = computeBom(
+            model([
+                named('a', 'a', { materialCode: 'PB18-WHITE' }),
+                named('b', 'b', {
+                    materialCode: 'HDF3-WHITE',
+                    thickness: 3,
+                }),
+                named('c', 'c', { materialCode: 'MDF18-RAW' }),
+            ]),
+            catalog,
+            OFF,
+        );
+        expect(bom.materials.map((m) => m.materialCode)).toEqual([
+            'HDF3-WHITE',
+            'MDF18-RAW',
+            'PB18-WHITE',
         ]);
     });
 
@@ -422,4 +485,46 @@ describe('computeBom: every furniture fixture', () => {
         }
         expect(bom.issues).toEqual(m.issues);
     });
+});
+
+describe('computeBom: order invariance', () => {
+    const dir = new URL(
+        '../../../../../database/fixtures/furniture/',
+        import.meta.url,
+    );
+    const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
+
+    function shuffled<T>(items: readonly T[], random: () => number): T[] {
+        const out = [...items];
+        for (let i = out.length - 1; i > 0; i--) {
+            const j = Math.floor(random() * (i + 1));
+            [out[i], out[j]] = [out[j]!, out[i]!];
+        }
+        return out;
+    }
+
+    it.each(files)(
+        '%s: shuffled parts and hardware give the same BOM',
+        (file) => {
+            const doc = FurnitureDocumentSchema.parse(
+                JSON.parse(readFileSync(new URL(file, dir), 'utf8')),
+            );
+            doc.materials.front.finishCode = 'FIN-LAM-MATT';
+            doc.materials.carcass.finishCode = 'FIN-PU-MATT';
+            const m = generateFurniture(doc, catalog);
+            const options = bomOptionsFor(doc, false);
+            const expected = computeBom(m, catalog, options);
+            const random = mulberry32(42);
+            for (let run = 0; run < 5; run++) {
+                const shuffledModel: FurnitureModel = {
+                    ...m,
+                    parts: shuffled(m.parts, random),
+                    hardware: shuffled(m.hardware, random),
+                };
+                expect(computeBom(shuffledModel, catalog, options)).toEqual(
+                    expected,
+                );
+            }
+        },
+    );
 });

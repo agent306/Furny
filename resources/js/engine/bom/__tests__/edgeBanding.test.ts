@@ -98,6 +98,19 @@ describe('edgeBandLengths (08 §3.3, §10.3)', () => {
         ]);
     });
 
+    it('prefers a long edge over a short one for an extruded part (L2 before W1)', () => {
+        const top = roundTop();
+        top.edges = {
+            L1: null,
+            L2: 'EB20-WHITE',
+            W1: 'EB08-WHITE',
+            W2: null,
+        };
+        expect(edgeBandLengths([top], catalog)).toEqual([
+            { edgeBandCode: 'EB20-WHITE', lengthMm: 3350 },
+        ]);
+    });
+
     it('does not band an extruded part without a band code', () => {
         const top = roundTop();
         top.edges = { ...NO_EDGES };
