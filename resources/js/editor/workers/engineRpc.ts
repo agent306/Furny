@@ -34,6 +34,10 @@ export type RpcResponse =
 export interface RpcPort {
     postMessage(msg: RpcRequest): void;
     onmessage: ((e: { data: RpcResponse }) => void) | null;
+    /** The worker failed to load or threw uncaught: fatal for the client. */
+    onerror?: (() => void) | null;
+    /** A reply could not be deserialised: its caller is unknown, so all pending calls fail. */
+    onmessageerror?: (() => void) | null;
     terminate?(): void;
 }
 
@@ -42,6 +46,14 @@ export class EngineWorkerStaleError extends Error {
     constructor(message = 'Engine request superseded or disposed') {
         super(message);
         this.name = 'EngineWorkerStaleError';
+    }
+}
+
+/** The worker failed (load error, uncaught exception or undeliverable reply). */
+export class EngineWorkerError extends Error {
+    constructor(message = 'Engine worker failed') {
+        super(message);
+        this.name = 'EngineWorkerError';
     }
 }
 
@@ -101,6 +113,7 @@ export function createRpcClient(
 ): EngineRpcClient & { dispose(): void } {
     let nextId = 1;
     let disposed = false;
+    let failed = false;
     const pending = new Map<number, Pending>();
     const latestIdByMethod = new Map<RpcMethod, number>();
 
@@ -118,9 +131,24 @@ export function createRpcClient(
         }
     };
 
+    const rejectAll = (reason: Error) => {
+        pending.forEach((p) => p.reject(reason));
+        pending.clear();
+        latestIdByMethod.clear();
+    };
+    // Fatal: the worker is gone or broken, so later calls reject until a new client is made.
+    port.onerror = () => {
+        failed = true;
+        rejectAll(new EngineWorkerError());
+    };
+    // Not fatal: one reply was lost, the worker itself is still alive.
+    port.onmessageerror = () =>
+        rejectAll(new EngineWorkerError('Engine worker reply was unreadable'));
+
     const call = (method: RpcMethod, params: unknown[]) =>
         new Promise<unknown>((resolve, reject) => {
             if (disposed) return reject(new EngineWorkerStaleError());
+            if (failed) return reject(new EngineWorkerError());
             const previous = latestIdByMethod.get(method);
             if (previous !== undefined) {
                 pending.get(previous)?.reject(new EngineWorkerStaleError());
@@ -129,7 +157,13 @@ export function createRpcClient(
             const id = nextId++;
             latestIdByMethod.set(method, id);
             pending.set(id, { method, resolve, reject });
-            port.postMessage({ id, method, params });
+            try {
+                port.postMessage({ id, method, params });
+            } catch (e) {
+                pending.delete(id);
+                latestIdByMethod.delete(method);
+                reject(e);
+            }
         });
 
     const client = {
@@ -139,6 +173,8 @@ export function createRpcClient(
             pending.forEach((p) => p.reject(new EngineWorkerStaleError()));
             pending.clear();
             port.onmessage = null;
+            port.onerror = null;
+            port.onmessageerror = null;
             port.terminate?.();
         },
     } as EngineRpcClient & { dispose(): void };

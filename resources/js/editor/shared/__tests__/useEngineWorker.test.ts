@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { effectScope } from 'vue';
 import { makeRectPlan } from '@/engine/plan/testing/fixtures';
-import { EngineWorkerStaleError } from '../../workers/engineRpc';
+import {
+    EngineWorkerError,
+    EngineWorkerStaleError,
+} from '../../workers/engineRpc';
 import { useEngineWorker } from '../useEngineWorker';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -49,5 +52,31 @@ describe('useEngineWorker', () => {
         });
         scope.stop();
         expect(instances[0]!.terminate).toHaveBeenCalledOnce();
+    });
+
+    it('wires the Worker error event: pending calls reject EngineWorkerError', async () => {
+        type Fake = { onerror: (() => void) | null };
+        const instances: Fake[] = [];
+        vi.stubGlobal(
+            'Worker',
+            vi.fn(function () {
+                const w = {
+                    postMessage: vi.fn(),
+                    terminate: vi.fn(),
+                    onmessage: null,
+                    onerror: null,
+                };
+                instances.push(w);
+                return w;
+            }),
+        );
+        const scope = effectScope();
+        const engine = scope.run(() => useEngineWorker())!;
+        const pending = engine.derivePlanGeometry(
+            makeRectPlan(5000, 4000, 230),
+        );
+        instances[0]!.onerror!();
+        await expect(pending).rejects.toBeInstanceOf(EngineWorkerError);
+        scope.stop();
     });
 });

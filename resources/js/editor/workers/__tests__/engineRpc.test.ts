@@ -7,6 +7,7 @@ import { seedCatalog } from '@/engine/testing/seedCatalog';
 import {
     createInlinePort,
     createRpcClient,
+    EngineWorkerError,
     EngineWorkerStaleError,
     handleRpcRequest,
     type RpcPort,
@@ -20,11 +21,15 @@ function fakePort() {
     const port: RpcPort & { terminate: ReturnType<typeof vi.fn> } = {
         postMessage: (msg) => void sent.push(msg),
         onmessage: null,
+        onerror: null,
+        onmessageerror: null,
         terminate: vi.fn(),
     };
     const deliver = (res: RpcResponse) => port.onmessage?.({ data: res });
+    const fail = () => port.onerror?.();
+    const failMessage = () => port.onmessageerror?.();
     const answer = (req: RpcRequest) => deliver(handleRpcRequest(req));
-    return { port, sent, deliver, answer };
+    return { port, sent, deliver, answer, fail, failMessage };
 }
 
 const catalog = seedCatalog();
@@ -106,6 +111,75 @@ describe('createRpcClient stale-request cancellation (01 §5.5)', () => {
         await expect(
             client.derivePlanGeometry(makeRectPlan(5000, 4000, 230)),
         ).rejects.toBeInstanceOf(EngineWorkerStaleError);
+    });
+});
+
+describe('worker failure events', () => {
+    const plan = makeRectPlan(5000, 4000, 230);
+
+    it('error rejects every pending call with EngineWorkerError', async () => {
+        const { port, fail } = fakePort();
+        const client = createRpcClient(port);
+        const a = client.estimateFurniture(doc, catalog);
+        const b = client.derivePlanGeometry(plan);
+        fail();
+        for (const p of [a, b]) {
+            const err = await p.then(
+                () => null,
+                (e: unknown) => e,
+            );
+            expect(err).toBeInstanceOf(EngineWorkerError);
+            expect((err as Error).name).toBe('EngineWorkerError');
+        }
+    });
+
+    it('error is fatal: later calls reject immediately and nothing is posted', async () => {
+        const { port, sent, fail } = fakePort();
+        const client = createRpcClient(port);
+        fail();
+        await expect(client.derivePlanGeometry(plan)).rejects.toBeInstanceOf(
+            EngineWorkerError,
+        );
+        expect(sent).toHaveLength(0);
+    });
+
+    it('messageerror rejects pending calls but the client stays usable', async () => {
+        const { port, sent, answer, failMessage } = fakePort();
+        const client = createRpcClient(port);
+        const a = client.derivePlanGeometry(plan);
+        failMessage();
+        await expect(a).rejects.toBeInstanceOf(EngineWorkerError);
+        const b = client.derivePlanGeometry(plan);
+        answer(sent[1]!);
+        expect((await b).rooms).toHaveLength(1);
+    });
+
+    it('a reply arriving after a failure is ignored', async () => {
+        const { port, sent, answer, failMessage } = fakePort();
+        const client = createRpcClient(port);
+        const a = client.derivePlanGeometry(plan);
+        failMessage();
+        await expect(a).rejects.toBeInstanceOf(EngineWorkerError);
+        expect(() => answer(sent[0]!)).not.toThrow();
+    });
+
+    it('a synchronous postMessage throw rejects and leaves no pending entry', async () => {
+        const { port, sent, answer } = fakePort();
+        let fails = true;
+        const post = port.postMessage;
+        port.postMessage = (msg) => {
+            if (fails)
+                throw new DOMException('not cloneable', 'DataCloneError');
+            post(msg);
+        };
+        const client = createRpcClient(port);
+        await expect(client.derivePlanGeometry(plan)).rejects.toThrow(
+            'not cloneable',
+        );
+        fails = false;
+        const next = client.derivePlanGeometry(plan);
+        answer(sent[0]!);
+        expect((await next).rooms).toHaveLength(1);
     });
 });
 
