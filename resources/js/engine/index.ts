@@ -260,7 +260,6 @@ export type {
 } from './plan/snapping';
 export {
     LAYER_ORDER,
-    ROOM_FILL,
     STYLE_KEYS,
     autoDimensions,
     buildPlanDrawing,
@@ -272,6 +271,7 @@ export {
     drawRoom,
     drawWall,
     drawWallOutline,
+    roomTypeToColorKey,
 } from './plan/drawing';
 export type {
     DrawGroup,
@@ -279,5 +279,6 @@ export type {
     DrawingOptions,
     LayerName,
     PlanDrawing,
+    RoomColorKey,
     StyleKey,
 } from './plan/drawing';

@@ -14,7 +14,7 @@ import {
 import { formatLength } from '../../units/format';
 import type { DerivedWall } from '../derive';
 import type { DimensionAnnotation, Wall } from '../schema';
-import { degOf, line, text } from './shared';
+import { degOf, line, r2, text } from './shared';
 import type { DrawGroup, DrawItem, DrawingOptions } from './types';
 
 /** Walls shorter than this get no automatic dimensions (mm). */
@@ -63,6 +63,8 @@ function drawRow(
     const items: DrawItem[] = [];
 
     stops.forEach((u, i) => {
+        // A dimension line closer than the gap has no room for an extension line.
+        if (offset < EXT_GAP) return;
         const base = add(origin, scale(dir, u));
         items.push(
             line(
@@ -81,7 +83,8 @@ function drawRow(
     }
 
     if (withText) {
-        const rotationDeg = uprightDeg(degOf(dir));
+        // Round first: 90.004 degrees must land on 90, not on -89.996 (-90).
+        const rotationDeg = uprightDeg(r2(degOf(dir)));
         for (let i = 0; i + 1 < stops.length; i += 1) {
             const a = stops[i]!;
             const b = stops[i + 1]!;

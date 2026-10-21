@@ -35,7 +35,7 @@ export function drawPlacement(
             height: 0,
         });
         group.items.push(
-            poly(fp.corners, 'furniture_missing'),
+            poly(fp.corners, 'furniture_missing', { dashed: true }),
             text(
                 fp.center,
                 opts.strings.missingDesign,

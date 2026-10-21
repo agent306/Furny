@@ -4,33 +4,40 @@ import type { DerivedRoom } from '../derive';
 import type { RoomType } from '../roomTypes';
 import type { RoomMeta } from '../schema';
 import { poly, text } from './shared';
-import type { DrawGroup, DrawItem, DrawingOptions, StyleKey } from './types';
+import type {
+    DrawGroup,
+    DrawItem,
+    DrawingOptions,
+    RoomColorKey,
+    StyleKey,
+} from './types';
 
-/**
- * Light-theme fill of each room type: sRGB hex of the room tokens of 15 §3.1,
- * grouped as in 15 §3.4.
- */
-export const ROOM_FILL: Readonly<Record<RoomType, string>> = {
-    living: '#f9efda',
-    dining: '#f9efda',
-    bedroom: '#e2f0ff',
-    master_bedroom: '#e2f0ff',
-    dress: '#e2f0ff',
-    kitchen: '#ffebda',
-    bathroom: '#d8f5f8',
-    toilet: '#d8f5f8',
-    balcony: '#e1f6dc',
-    deck: '#e1f6dc',
-    utility: '#f0ece7',
-    store: '#f0ece7',
-    garage: '#f0ece7',
-    ots: '#f0ece7',
-    study: '#f1ebfd',
-    pooja: '#ffe8e2',
-    foyer: '#f8f5ef',
-    corridor: '#f8f5ef',
-    other: '#f5f3f0',
+/** Room type to fill token (15 §3.4); all 19 `RoomType`s. */
+const ROOM_COLOR_KEY: Readonly<Record<RoomType, RoomColorKey>> = {
+    living: 'room-living',
+    dining: 'room-living',
+    bedroom: 'room-bedroom',
+    master_bedroom: 'room-bedroom',
+    dress: 'room-bedroom',
+    kitchen: 'room-kitchen',
+    bathroom: 'room-bath',
+    toilet: 'room-bath',
+    balcony: 'room-outdoor',
+    deck: 'room-outdoor',
+    utility: 'room-utility',
+    store: 'room-utility',
+    garage: 'room-utility',
+    ots: 'room-utility',
+    study: 'room-study',
+    pooja: 'room-pooja',
+    foyer: 'room-circulation',
+    corridor: 'room-circulation',
+    other: 'room-other',
 };
+
+export function roomTypeToColorKey(type: RoomType): RoomColorKey {
+    return ROOM_COLOR_KEY[type];
+}
 
 /** `dyEm` of each line of a stack of two or three; one line sits at 0. */
 const STACK_DY = [-0.6, 0.6, 1.8] as const;
@@ -44,14 +51,17 @@ export function drawRoom(
     const items: DrawItem[] = [
         poly(r.polygon, 'room_fill', {
             holes: r.holes,
-            fill: ROOM_FILL[meta?.type ?? 'other'],
+            fillKey: roomTypeToColorKey(meta?.type ?? 'other'),
         }),
     ];
 
     const lines: Array<{ style: StyleKey; value: string }> = [
         {
             style: 'room_name',
-            value: meta && meta.name !== '' ? meta.name : strings.unnamedRoom,
+            value:
+                meta && meta.name.trim() !== ''
+                    ? meta.name.trim()
+                    : strings.unnamedRoom,
         },
     ];
     // LOD 1 hides the size line, LOD 2 also the area (05 §4.7).

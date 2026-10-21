@@ -169,7 +169,8 @@ export function buildPlanDrawing(
         if (derived)
             add(layers, 'WALLS', drawWall(derived, doc.walls[id]!, opts));
     }
-    add(layers, 'WALLS', drawWallOutline(geom.wallsUnion));
+    const cuts = sortedIds(geom.openings).map((id) => geom.openings[id]!.cut);
+    add(layers, 'WALLS', drawWallOutline(geom.wallsUnion, cuts));
 
     for (const id of sortedIds(doc.openings)) {
         const opening = doc.openings[id]!;

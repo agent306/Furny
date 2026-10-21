@@ -51,6 +51,22 @@ export const STYLE_KEYS = [
 ] as const;
 export type StyleKey = (typeof STYLE_KEYS)[number];
 
+/**
+ * Theme token key of a room fill (15 §3.4, `EditorColorKey`). The renderer
+ * resolves it: CSS variable on screen, `EXPORT_PALETTE` in exports.
+ */
+export type RoomColorKey =
+    | 'room-living'
+    | 'room-bedroom'
+    | 'room-kitchen'
+    | 'room-bath'
+    | 'room-outdoor'
+    | 'room-utility'
+    | 'room-study'
+    | 'room-pooja'
+    | 'room-circulation'
+    | 'room-other';
+
 export type DrawItem =
     | {
           t: 'poly';
@@ -58,8 +74,14 @@ export type DrawItem =
           holes?: Vec2[][];
           closed: boolean;
           style: StyleKey;
-          /** Overrides the style fill (room colours, fixture fills). */
+          /** Literal colour that overrides the style fill (fixture fills). */
           fill?: string;
+          /**
+           * Theme token overriding the style fill (room fills). Set on
+           * `room_fill` items instead of a literal `fill`, so the fill follows
+           * the UI theme on screen and the light palette in exports.
+           */
+          fillKey?: RoomColorKey;
           /** Dashed stroke; present (true) only when set. */
           dashed?: boolean;
       }
@@ -95,6 +117,12 @@ export type DrawItem =
           style: StyleKey;
       }
     | {
+          /**
+           * `at` is the plan coordinate of the unrotated image's top-left
+           * pixel; `rotationDeg` turns the image about its centre
+           * (`at + (width, height) / 2`), as 05 §4.12 and 06 §12.2 require.
+           * `width` and `height` are the unrotated size in mm.
+           */
           t: 'image';
           href: string;
           at: Vec2;

@@ -131,7 +131,7 @@ describe('drawWall', () => {
         );
     });
 
-    it('draws one closed polygon per poché part, with holes kept', () => {
+    it('draws one closed polygon per poché part', () => {
         const doc = makeRectPlan(5000, 4000, 230);
         addOpening(doc, TOP, { kind: 'window', type: 'fixed' });
         const geom = derivePlanGeometry(doc);
@@ -145,7 +145,35 @@ describe('drawWall', () => {
             expect(p.closed).toBe(true);
             expect(p.pts).toHaveLength(w.pocheParts[i]!.outer.length);
             expect(signedArea(p.pts)).toBeGreaterThan(0);
+            expect(p.holes).toBeUndefined();
         });
+    });
+
+    it('keeps the holes of a poché part', () => {
+        // Opening cuts overshoot both faces, so derive never yields a holed
+        // part; a hand-made one proves the holes are carried through.
+        const doc = makeRectPlan(5000, 4000, 230);
+        const w = derivePlanGeometry(doc).walls[TOP]!;
+        const hole = [
+            { x: 1000, y: 40 },
+            { x: 1000, y: -40 },
+            { x: 1500.004, y: -40 },
+            { x: 1500, y: 40 },
+        ];
+        const holed = {
+            ...w,
+            pocheParts: [{ outer: w.outline, holes: [hole] }],
+        };
+        const polys = polysOf(drawWall(holed, doc.walls[TOP]!, opts));
+        expect(polys).toHaveLength(1);
+        expect(polys[0]!.holes).toEqual([
+            [
+                { x: 1000, y: 40 },
+                { x: 1000, y: -40 },
+                { x: 1500, y: -40 },
+                { x: 1500, y: 40 },
+            ],
+        ]);
     });
 });
 
@@ -470,16 +498,17 @@ describe('drawRoom', () => {
         };
     }
 
-    it('fills the net polygon with the room type colour', () => {
+    it('fills the net polygon with the room type colour token', () => {
         const { room, group, metaId } = roomGroup();
         expect(group).toMatchObject({ entityId: metaId, entityKind: 'room' });
         const fill = polysOf(group, 'room_fill');
         expect(fill).toHaveLength(1);
         expect(fill[0]!.closed).toBe(true);
         expect(fill[0]!.pts).toHaveLength(room.polygon.length);
-        expect(fill[0]!.fill).toMatch(/^#[0-9a-f]{6}$/);
+        expect(fill[0]!.fillKey).toBe('room-living');
+        expect(fill[0]!.fill).toBeUndefined();
         const other = roomGroup({ type: 'bedroom' }).group;
-        expect(polysOf(other)[0]!.fill).not.toBe(fill[0]!.fill);
+        expect(polysOf(other)[0]!.fillKey).toBe('room-bedroom');
     });
 
     it('stacks name, area and size at -0.6 / +0.6 / +1.8 em', () => {
@@ -530,6 +559,12 @@ describe('drawRoom', () => {
         expect(hidden.map((t) => t.style)).toEqual(['room_name', 'room_dims']);
         const unnamed = textsOf(roomGroup({ name: '' }).group);
         expect(unnamed[0]!.text).toBe('Room');
+        for (const name of ['   ', '\t\n ']) {
+            expect(textsOf(roomGroup({ name }).group)[0]!.text).toBe('Room');
+        }
+        expect(textsOf(roomGroup({ name: '  Den ' }).group)[0]!.text).toBe(
+            'Den',
+        );
         const custom = testDrawingOptions({
             strings: { unnamedRoom: 'Raum', missingDesign: 'x' },
         });
@@ -639,6 +674,7 @@ describe('drawPlacement', () => {
             { x: 1300, y: 1600 },
             { x: 700, y: 1600 },
         ]);
+        expect(sq[0]!.dashed).toBe(true);
         expect(polysOf(g, 'furniture')).toHaveLength(0);
         expect(textsOf(g).map((t) => t.text)).toEqual(['Missing design']);
         expect(textsOf(g)[0]!.at).toEqual({ x: 1000, y: 1300 });

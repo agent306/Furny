@@ -2,7 +2,7 @@ export { buildPlanDrawing } from './buildPlanDrawing';
 export { autoDimensions, drawDimension } from './dimensions';
 export { drawFixture, drawLabel, drawPlacement } from './items';
 export { drawOpening } from './openings';
-export { ROOM_FILL, drawRoom } from './rooms';
+export { drawRoom, roomTypeToColorKey } from './rooms';
 export { LAYER_ORDER, STYLE_KEYS } from './types';
 export type {
     DrawGroup,
@@ -10,6 +10,7 @@ export type {
     DrawingOptions,
     LayerName,
     PlanDrawing,
+    RoomColorKey,
     StyleKey,
 } from './types';
 export { drawWall, drawWallOutline } from './walls';

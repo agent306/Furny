@@ -6,7 +6,7 @@
  */
 import { ensureCW } from '../../geometry/polygon';
 import { normDeg, type Vec2 } from '../../geometry/vec2';
-import type { DrawItem, StyleKey } from './types';
+import type { DrawItem, RoomColorKey, StyleKey } from './types';
 
 /** Rounds to 0.01 and normalises `-0`. */
 export const r2 = (n: number): number => {
@@ -47,6 +47,7 @@ export function poly(
         closed?: boolean;
         holes?: Vec2[][];
         fill?: string;
+        fillKey?: RoomColorKey;
         dashed?: boolean;
         cw?: boolean;
     } = {},
@@ -61,6 +62,7 @@ export function poly(
         closed: opts.closed ?? true,
         style,
         ...(opts.fill !== undefined ? { fill: opts.fill } : {}),
+        ...(opts.fillKey !== undefined ? { fillKey: opts.fillKey } : {}),
         ...(opts.dashed ? { dashed: true } : {}),
     };
 }

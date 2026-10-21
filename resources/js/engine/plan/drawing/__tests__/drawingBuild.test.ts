@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { pointInRing, polygonCentroid } from '../../../geometry/polygon';
 import { mulberry32 } from '../../../testing/random';
 import { derivePlanGeometry } from '../../derive';
 import { doorSwingSectors } from '../../conflicts';
@@ -176,25 +177,92 @@ describe('buildPlanDrawing layers', () => {
         }
     });
 
-    it('draws the wall outline once from wallsUnion, after the wall fills', () => {
-        const geom = derivePlanGeometry(doc);
+    it('draws the wall outline once, after the wall fills', () => {
         const walls = drawing.layers.WALLS;
         const last = walls[walls.length - 1]!;
         expect(last).toMatchObject({ entityId: null, entityKind: 'wall' });
         expect(walls.filter((g) => g.entityId === null)).toHaveLength(1);
-        expect(last.items).toHaveLength(geom.wallsUnion.length);
-        last.items.forEach((item, i) => {
-            const part = geom.wallsUnion[i]!;
+        expect(last.items.length).toBeGreaterThan(0);
+        for (const item of last.items) {
             expect(item).toMatchObject({
                 t: 'poly',
                 style: 'wall_outline',
                 closed: true,
             });
-            if (item.t !== 'poly') return;
+        }
+        expect(walls.slice(0, -1).every((g) => g.entityId !== null)).toBe(true);
+    });
+
+    it('draws the outline of a plan without openings from wallsUnion as is', () => {
+        const plain = makeRectPlan(5000, 4000, 230);
+        const geom = derivePlanGeometry(plain);
+        const outline = build(plain).layers.WALLS.at(-1)!;
+        expect(outline.items).toHaveLength(geom.wallsUnion.length);
+        outline.items.forEach((item, i) => {
+            const part = geom.wallsUnion[i]!;
+            if (item.t !== 'poly') throw new Error('expected a poly');
             expect(item.pts).toHaveLength(part.outer.length);
             expect(item.holes?.length ?? 0).toBe(part.holes.length);
         });
-        expect(walls.slice(0, -1).every((g) => g.entityId !== null)).toBe(true);
+    });
+
+    it('leaves a clean gap in the outline at every opening of the HDB plan', () => {
+        const hdb = buildHdb3Room();
+        const geom = derivePlanGeometry(hdb);
+        // Each cut shortened by 2% along its wall, so a stroke along a jamb
+        // (the edge of the gap) does not count, only one running through it.
+        const shrunk = Object.values(geom.openings)
+            .filter((o) => o.u1 - o.u0 > 1)
+            .map((o) => {
+                const c = polygonCentroid({ outer: o.cut, holes: [] });
+                const dir = geom.walls[o.wallId]!.dir;
+                return o.cut.map((p) => {
+                    const along = (p.x - c.x) * dir.x + (p.y - c.y) * dir.y;
+                    const shift = along * -0.02;
+                    return { x: p.x + dir.x * shift, y: p.y + dir.y * shift };
+                });
+            });
+        expect(shrunk.length).toBeGreaterThan(10);
+
+        const crossings = (rings: Array<Array<{ x: number; y: number }>>) => {
+            let count = 0;
+            for (const ring of rings) {
+                ring.forEach((a, i) => {
+                    const b = ring[(i + 1) % ring.length]!;
+                    const steps = Math.max(
+                        1,
+                        Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 5),
+                    );
+                    for (let k = 0; k <= steps; k += 1) {
+                        const p = {
+                            x: a.x + ((b.x - a.x) * k) / steps,
+                            y: a.y + ((b.y - a.y) * k) / steps,
+                        };
+                        if (
+                            shrunk.some(
+                                (cut) => pointInRing(p, cut, 0) === 'inside',
+                            )
+                        ) {
+                            count += 1;
+                        }
+                    }
+                });
+            }
+            return count;
+        };
+
+        // Precondition: the plain union does run through the gaps.
+        const unionRings = geom.wallsUnion.flatMap((p) => [
+            p.outer,
+            ...p.holes,
+        ]);
+        expect(crossings(unionRings)).toBeGreaterThan(0);
+
+        const outline = build(hdb).layers.WALLS.at(-1)!;
+        const rings = outline.items.flatMap((i) =>
+            i.t === 'poly' ? [i.pts, ...(i.holes ?? [])] : [],
+        );
+        expect(crossings(rings)).toBe(0);
     });
 
     it('draws one group per wall, opening, fixture and placement', () => {
