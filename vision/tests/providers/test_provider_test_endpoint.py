@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from app.api.providers import _scrub
 from app.config import Settings
 from app.main import create_app
 from app.providers import registry
@@ -241,7 +242,13 @@ def test_requires_bearer_and_valid_body(client: TestClient) -> None:
 
 @pytest.mark.parametrize(
     "echoed",
-    ["sk-ant-api03-********wXyZ", "sk-proj-********abcd", "sk-ant-api03-AbCd…wXyZ", "sk-********1234"],
+    [
+        "sk-ant-api03-********wXyZ",
+        "sk-proj-********abcd",
+        "sk-ant-api03-AbCd…wXyZ",
+        "sk-ant-api03-AbCd...wXyZ",
+        "sk-********1234",
+    ],
 )
 def test_masked_keys_echoed_by_the_provider_are_scrubbed(client: TestClient, echoed: str) -> None:
     use(client, FakeProvider([ProviderAuthError(f"401 Incorrect API key provided: {echoed}.")]))
@@ -274,3 +281,11 @@ def test_hung_provider_is_cut_off_after_the_timeout(
     assert body["ok"] is False
     assert body["error"]["code"] == "llm_timeout"
     assert body["usage"] is None
+
+
+def test_scrub_masks_the_whole_three_dot_key_and_spares_words_ending_in_sk() -> None:
+    settings = Settings(vision_service_token="t" * 32)
+
+    out = _scrub("key sk-ant-api03-AbCd...wXyZ rejected; ask task-manager or desk-lamp-9", settings)
+
+    assert out == "key [REDACTED] rejected; ask task-manager or desk-lamp-9"

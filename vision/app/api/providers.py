@@ -56,7 +56,7 @@ TEST_TIMEOUT_S = 60
 TEST_MAX_OUTPUT_TOKENS = 2048
 MIN_SECRET_LENGTH = 8
 # Providers echo masked keys in 401 text (`sk-proj-****abcd`, `sk-ant-api03-AbCd…wXyZ`).
-_MASKED_KEY = re.compile(r"sk-[\w*…-]{6,}")
+_MASKED_KEY = re.compile(r"\bsk-[\w*….-]{6,}")
 
 router = APIRouter(dependencies=[Depends(require_token)])
 
