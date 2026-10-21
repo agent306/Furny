@@ -33,10 +33,12 @@ BOLD_FACTOR = 1.8  # bold strokes are at least this many t_thin wide (= segments
 BOLD_MIN_LEN_FRAC = 0.04  # ... and at least this long (fraction of the page's long edge here, of L in walls)
 DOUBLE_MIN_LEN_FRAC = 0.03  # double-line walls for the plan region: two thin lines at least this long ...
 DOUBLE_MAX_GAP_FRAC = 0.02  # ... at most this far apart (fractions of the long edge; walls' pair limits, R6)
-DOUBLE_MIN_SPAN_FRAC = 0.1  # ... in joined strips spanning at least this much both across and down
 GRID_LINE_SHARE = 0.5  # periodic grids: lines running across half of a structure ...
 GRID_MIN_CELLS = 3  # ... at least this many consecutive cells ...
 GRID_PITCH_TOL = 0.15  # ... of equal pitch within 15 %, in both directions
+SOLID_MIN_SPAN_FRAC = 0.1  # solid wall drawings span this much of the long edge (a lone column does not)
+TABLE_FILL = 0.5  # a table: strips filling half of their structure's box ...
+TABLE_TEXT = 0.5  # ... or half of its cell area holding text
 
 
 @dataclass(frozen=True, eq=False)
@@ -131,13 +133,14 @@ def double_line_strips(
     the long edge long and at most ``0.02`` of it apart: the extent of double-line walls, before segments
     exist (Task 16c; the walls stage pairs the segments themselves). Thin line work is the ink minus its
     opening with a ``1.8 t_thin`` square; text, hatching (not axis-aligned or shorter than the length) and
-    single lines leave no strip.
+    single lines leave no strip. No periodic grid counts (``_is_grid``: tables, tiled floors, terraces).
 
-    A connected structure of strips counts when it is no periodic grid (``_is_grid``: schedule and
-    title-block tables, tiled floors and terraces) and either touches a solid wall drawing (``walls``:
-    thick or bold strokes) inside that drawing's bounding box (it adds no extent), or spans at
-    least ``0.1`` of the long edge both ways (walls meet at corners and junctions; a lone straight pair
-    reaching out of a drawing is a pair of extension lines or a stacked chain as often as a wall)."""
+    - With a solid wall drawing on the page (``walls``: thick or bold, a component at least ``0.1`` of
+      the long edge long), a connected structure of strips counts only when it touches them, inside that
+      drawing's bounding box (it adds no extent).
+    - Without one (a plan drawn in double lines, perhaps with a few solid columns), the largest
+      structure of strips (wider than one strip both ways) that is no table or schedule (``_is_table``)
+      counts, with the structures and straight strips meeting its box (Task 16c fix round 2)."""
     k = odd(round(BOLD_FACTOR * t_thin))
     thin = cv2.subtract(ink, cv2.morphologyEx(ink, cv2.MORPH_OPEN, np.ones((k, k), np.uint8)))
     length = max(3, round(DOUBLE_MIN_LEN_FRAC * long_edge))
@@ -153,31 +156,92 @@ def double_line_strips(
     n, labels, stats, _ = cv2.connectedComponentsWithStats(out, connectivity=8)
     if n <= 1:
         return out
-    within = np.zeros(n, bool)  # touching a solid wall, inside that wall's drawing's extent
-    if walls is not None and walls.any():
-        _, wall_labels, wall_stats, _ = cv2.connectedComponentsWithStats(walls, connectivity=8)
-        near = cv2.dilate(walls, np.ones((3, 3), np.uint8)) > 0
-        hits = labels[near] > 0
-        wall_of = cv2.dilate(wall_labels.astype(np.float32), np.ones((3, 3), np.uint8))[near][hits].astype(
-            np.intp
-        )
-        for c, wl in set(zip(labels[near][hits].tolist(), wall_of.tolist(), strict=True)):
-            if wl <= 0:
-                continue
-            wx, wy, ww, wh = (int(v) for v in wall_stats[wl, :4])
-            x, y, w, h = (int(v) for v in stats[c, :4])
-            if x >= wx and y >= wy and x + w <= wx + ww and y + h <= wy + wh:
-                within[c] = True
-    span = DOUBLE_MIN_SPAN_FRAC * long_edge
-    keep = np.zeros(n, bool)
-    for c in range(1, n):
+
+    def box(c: int) -> tuple[slice, slice]:
         x, y, w, h = (int(v) for v in stats[c, :4])
-        if not (within[c] or min(w, h) >= span):
-            continue
-        box = (slice(y, y + h), slice(x, x + w))
-        keep[c] = not _is_grid(line_masks[0][box], line_masks[1][box])
+        return slice(y, y + h), slice(x, x + w)
+
+    def grid(c: int) -> bool:
+        return _is_grid(line_masks[0][box(c)], line_masks[1][box(c)])
+
+    keep = np.zeros(n, bool)
+    if walls is not None and _has_solid_drawing(walls, SOLID_MIN_SPAN_FRAC * long_edge):
+        for c in _touching_walls(labels, stats, walls):
+            keep[c] = not grid(c)
+    else:
+        lines_any = cv2.bitwise_or(line_masks[0], line_masks[1])
+        walls_like = [
+            c
+            for c in range(1, n)
+            if not grid(c) and not _is_table(labels[box(c)] == c, ink[box(c)], lines_any[box(c)], gap)
+        ]
+        # A straight strip (one wall's) fills its own box: it joins the largest structure it meets.
+        straight = [c for c in range(1, n) if min(stats[c, 2], stats[c, 3]) <= gap and c not in walls_like]
+        structures = [c for c in walls_like if min(stats[c, 2], stats[c, 3]) > gap]
+        if structures:
+            big = max(structures, key=lambda c: int(stats[c, cv2.CC_STAT_AREA]))
+            bx, by, bw, bh = (int(v) for v in stats[big, :4])
+            for c in walls_like + straight:
+                x, y, w, h = (int(v) for v in stats[c, :4])
+                keep[c] = (
+                    x <= bx + bw + gap and bx <= x + w + gap and y <= by + bh + gap and by <= y + h + gap
+                )
     kept: np.ndarray = keep[labels].astype(np.uint8) * 255
     return kept
+
+
+def _has_solid_drawing(walls: np.ndarray, span: float) -> bool:
+    """A solid wall drawing on the page: a thick or bold component at least ``span`` long."""
+    n, _, stats, _ = cv2.connectedComponentsWithStats(walls, connectivity=8)
+    return n > 1 and bool(
+        np.maximum(stats[1:, cv2.CC_STAT_WIDTH], stats[1:, cv2.CC_STAT_HEIGHT]).max() >= span
+    )
+
+
+def _touching_walls(labels: np.ndarray, stats: np.ndarray, walls: np.ndarray) -> set[int]:
+    """The strip structures (labels) touching a solid wall component, inside that component's box."""
+    _, wall_labels, wall_stats, _ = cv2.connectedComponentsWithStats(walls, connectivity=8)
+    near = cv2.dilate(walls, np.ones((3, 3), np.uint8)) > 0
+    hits = labels[near] > 0
+    wall_of = cv2.dilate(wall_labels.astype(np.float32), np.ones((3, 3), np.uint8))[near][hits].astype(
+        np.intp
+    )
+    out: set[int] = set()
+    for c, wl in set(zip(labels[near][hits].tolist(), wall_of.tolist(), strict=True)):
+        if wl <= 0:
+            continue
+        wx, wy, ww, wh = (int(v) for v in wall_stats[wl, :4])
+        x, y, w, h = (int(v) for v in stats[c, :4])
+        if x >= wx and y >= wy and x + w <= wx + ww and y + h <= wy + wh:
+            out.add(c)
+    return out
+
+
+def _is_table(strip: np.ndarray, ink: np.ndarray, lines: np.ndarray, gap: int) -> bool:
+    """A table or schedule rather than double-line walls (both in one structure's box): its strips fill
+    most of the box (every row is a strip; walls enclose rooms far wider than themselves), or most of its
+    cell area holds text: glyph-sized ink (at most ``gap`` across) clear of the lines. OCR runs on the plan
+    region, after this, so text is read from the ink's shapes here."""
+    if strip.mean() >= TABLE_FILL:
+        return True
+    cells = strip & ~(cv2.dilate(lines, np.ones((3, 3), np.uint8)) > 0)
+    n, cell_labels, cell_stats, _ = cv2.connectedComponentsWithStats(cells.astype(np.uint8), connectivity=4)
+    if n <= 1:
+        return False
+    m, glyph_labels, glyph_stats, centroids = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    on_line = np.zeros(m, bool)
+    on_line[np.unique(glyph_labels[lines > 0])] = True
+    small = np.maximum(glyph_stats[:, cv2.CC_STAT_WIDTH], glyph_stats[:, cv2.CC_STAT_HEIGHT]) <= gap
+    glyphs = np.flatnonzero(small & ~on_line)
+    glyphs = glyphs[glyphs > 0]
+    if glyphs.size == 0:
+        return False
+    cx = np.clip(np.rint(centroids[glyphs, 0]).astype(np.intp), 0, ink.shape[1] - 1)
+    cy = np.clip(np.rint(centroids[glyphs, 1]).astype(np.intp), 0, ink.shape[0] - 1)
+    text_cells = np.unique(cell_labels[cy, cx])
+    text_cells = text_cells[text_cells > 0]
+    area = cell_stats[1:, cv2.CC_STAT_AREA].sum()
+    return bool(cell_stats[text_cells, cv2.CC_STAT_AREA].sum() >= TABLE_TEXT * area)
 
 
 def _line_positions(lines: np.ndarray, axis: int) -> np.ndarray:

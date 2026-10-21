@@ -509,3 +509,72 @@ def test_grids_and_hatching_do_not_become_the_plan_region(style: str, case: str)
     with_it = preprocess(page_of(img), make_ctx()).region
     assert with_it == alone
     assert alone.x < 200 and alone.x + alone.w > 1100 and alone.x + alone.w < 1250
+
+
+def _table(img: np.ndarray, x0: int, y0: int, rows: list[int], cols: list[int], text: bool = False) -> None:
+    """A table of 2 px lines with the given row heights and column widths, optionally with a short text
+    in each cell at least 28 px high."""
+    ys, xs = np.cumsum([y0, *rows]), np.cumsum([x0, *cols])
+    for y in ys:
+        img[y : y + 2, xs[0] : xs[-1]] = 0
+    for x in xs:
+        img[ys[0] : ys[-1], x : x + 2] = 0
+    if text:
+        for i, h in enumerate(rows):
+            for j in range(len(cols)):
+                if h >= 28:
+                    org = (int(xs[j]) + 8, int(ys[i]) + h - 8)
+                    cv2.putText(img, f"AB-{i * 7 + j}", org, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+
+
+IRREGULAR_ROWS = [26, 44, 30, 38, 22, 46, 34, 28, 41, 25, 36, 47, 29, 33, 43, 24, 39, 31, 45, 27, 35, 42, 23]
+
+
+@pytest.mark.parametrize("style", ["filled", "double"])
+@pytest.mark.parametrize("case", ["title-block", "schedule"])
+def test_tables_with_uneven_rows_do_not_become_the_plan_region(style: str, case: str) -> None:
+    """Fix round 2 (re-review, Important 2): a title-block table and a 2-column schedule with uneven rows
+    (22-47 px, so no periodic grid) at the sheet's right. Beside a solid plan, strips count only when they
+    touch its walls; beside a double-line plan (no solid drawing) the largest structure that is no table
+    counts, and these tables' strips fill their boxes."""
+    base = _small_plan(style)
+    img = base.copy()
+    if case == "title-block":
+        _table(img, 1500, 200, IRREGULAR_ROWS + IRREGULAR_ROWS[:10], [130, 260, 90, 210, 110])
+    else:
+        _table(img, 1500, 200, IRREGULAR_ROWS[:20], [400, 400])
+    alone = preprocess(page_of(base), make_ctx()).region
+    assert preprocess(page_of(img), make_ctx()).region == alone
+    assert alone.x + alone.w < 1250
+
+
+def test_a_double_line_plan_wins_over_a_table_with_text() -> None:
+    """Fix round 2: a double-line plan and a larger table whose narrow rows (strips) alternate with tall
+    ones, so its strips fill under half of its box; its cells hold text, so it is no plan. Without the
+    text the table's strips, larger than the plan's, would take the region: the text rule decides."""
+    rows = [34, 90, 30, 85, 36, 95, 32, 88, 34, 92, 30, 86, 33]
+    base = _small_plan("double")
+    alone = preprocess(page_of(base), make_ctx()).region
+    img = base.copy()
+    _table(img, 1350, 150, rows, [260, 300, 380], text=True)
+    assert preprocess(page_of(img), make_ctx()).region == alone
+    empty = base.copy()
+    _table(empty, 1350, 150, rows, [260, 300, 380])
+    assert preprocess(page_of(empty), make_ctx()).region.x > 1100  # discriminating
+
+
+@pytest.mark.parametrize("rooms", [2, 4, 6])
+@pytest.mark.parametrize("column", [False, True])
+def test_regular_double_line_plans_hold_the_region(rooms: int, column: bool) -> None:
+    """The re-review's regular plans: n x n equal rooms in double lines (equal pitch, but no table: the
+    strips are thin walls around wide rooms), with or without a solid 40 px column (too small to be a
+    solid wall drawing). The region is the whole plan."""
+    x0, y0, w, h = 300, 300, 1500, 1200
+    walls = []
+    for i in range(rooms + 1):
+        y, x = y0 + h * i // rooms, x0 + w * i // rooms
+        walls += [SWall((x0, y), (x0 + w, y), 14, "double"), SWall((x, y0), (x, y0 + h), 14, "double")]
+    if column:
+        walls.append(SWall((x0 + 40, y0 + 40), (x0 + 40, y0 + 120), 40))
+    r = preprocess(page_of(render_plan((2400, 1800), walls)), make_ctx()).region
+    assert r.x < x0 and r.y < y0 and r.x + r.w > x0 + w and r.y + r.h > y0 + h

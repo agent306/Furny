@@ -151,9 +151,9 @@ def test_bold_stroke_gaps_are_measured_against_t_wall(monkeypatch: pytest.Monkey
     assert free_ends(run(img, use_dimensions=False).graph) == 2
 
 
-def block_door_bold(door: bool) -> np.ndarray:
+def block_door_bold(door: bool, side: int = -1) -> np.ndarray:
     """An 8 px bold outline whose bottom wall starts as a 30 px black block (x 300-700) and continues as
-    the bold stroke 8 px lower after a 150 px door (or the same gap without a door)."""
+    the bold stroke 8 px lower after a 150 px door swinging to ``side`` (or the same gap without a door)."""
     walls = [
         SWall((300, 300), (2100, 300), 8),
         SWall((2100, 300), (2100, 1500), 8),
@@ -162,15 +162,17 @@ def block_door_bold(door: bool) -> np.ndarray:
         SWall((300, 1500), (685, 1500), 30),
         SWall((700, 1508), (2100, 1508), 8) if door else SWall((850, 1508), (2100, 1508), 8),
     ]
-    doors = [SDoor(5, 0, 150, hinge="start", side=1)] if door else []
+    doors = [SDoor(5, 0, 150, hinge="start", side=side)] if door else []
     return render_plan(SIZE, walls, doors=doors, dims=BOLD_DIMS, line_px=3)
 
 
-def test_block_and_bold_stroke_are_bridged_across_a_door() -> None:
+@pytest.mark.parametrize("side", [-1, 1])
+def test_block_and_bold_stroke_are_bridged_across_a_door(side: int) -> None:
     """Ruling B2: a black block and a bold stroke 8 px apart across, 150 px apart along, with a door swing
-    at the jamb: one opening of the block's line, a connector where the stroke's line jogs, no free end.
-    Without the door's arc there is no opening evidence and nothing is bridged."""
-    r = run(block_door_bold(door=True), use_dimensions=False)
+    at the jamb (outward, its arc cut by the region's margin, or inward): one opening of the block's line,
+    a connector where the stroke's line jogs, no free end. Without the door's arc there is no opening
+    evidence and nothing is bridged."""
+    r = run(block_door_bold(door=True, side=side), use_dimensions=False)
     assert free_ends(r.graph) == 0
     spans = [o1 - o0 for w in r.graph.walls for o0, o1 in w.openings_px if min(w.a[1], w.b[1]) > 1450]
     assert spans == [pytest.approx(150, abs=6)]
@@ -381,7 +383,7 @@ def test_door_arc_evidence_is_one_thin_curve(texture: str, bridged: bool) -> Non
 
 def test_rejoining_many_thin_lines_is_fast_and_polls_the_deadline() -> None:
     """Task 16c review, Important 3: 11.5k thin segments with 100 dimension lines, each with 15 extension
-    lines ending on it (a dense A1 plan): rejoining stays well under a second (0.3 s measured; it was 141 s
+    lines ending on it (a dense A1 plan): rejoining stays within 0.5 s (0.3 s measured; it was 141 s
     as a pairwise loop) and polls the deadline throughout."""
     import time
 
@@ -405,5 +407,109 @@ def test_rejoining_many_thin_lines_is_fast_and_polls_the_deadline() -> None:
     polls: list[int] = []
     start = time.perf_counter()
     candmod._rejoined(segs, np.array(dims), 2.0, lambda: polls.append(1))
-    assert time.perf_counter() - start < 1.0
+    assert time.perf_counter() - start <= 0.5
     assert len(polls) >= 20
+
+
+def _door_case(style: str, gap: int, hinge: str, side: int) -> tuple[int, list[float]]:
+    """A 30 px black block (x 300-685) and, 15 px on, a double-line wall (4 px lower) or a 14 px filled
+    wall (8 px lower) with a ``gap`` px door cut from its start (the reviewer's 24 doors, fix round 2):
+    the free ends and the bottom wall's openings."""
+    second = (
+        SWall((700, 1504), (2100, 1504), 14, "double")
+        if style == "double"
+        else SWall((700, 1508), (2100, 1508), 8)
+    )
+    walls = [
+        SWall((300, 300), (2100, 300), 8),
+        SWall((2100, 300), (2100, 1500), 8),
+        SWall((300, 1500), (300, 300), 8),
+        SWall((1200, 300), (1200, 1500), 14, "double"),
+        SWall((300, 1500), (685, 1500), 30),
+        second,
+    ]
+    img = render_plan(
+        SIZE, walls, doors=[SDoor(5, 0, gap, hinge=hinge, side=side)], dims=BOLD_DIMS, line_px=3
+    )
+    graph = run(img, use_dimensions=False).graph
+    spans = [o1 - o0 for w in graph.walls for o0, o1 in w.openings_px if min(w.a[1], w.b[1]) > 1450]
+    return free_ends(graph), spans
+
+
+def test_real_doors_between_a_block_and_another_style_are_bridged() -> None:
+    """Fix round 2, New Important 1: doors of 90, 150 and 220 px, hinged at either jamb and swinging to
+    either side, between a black block and a double-line or filled wall. The arc is read on the page's
+    thin ink (the jamb block removed; an outward swing past the region's margin stays whole): all 24
+    bridge (the ruling's floor is 21, the 36b0753 detector's score), each with one opening of the door's
+    width."""
+    cases = [
+        (style, gap, hinge, side)
+        for style in ("double", "filled")
+        for gap in (90, 150, 220)
+        for hinge in ("start", "end")
+        for side in (1, -1)
+    ]
+    bridged = []
+    for case in cases:
+        free, spans = _door_case(*case)
+        if free == 0:
+            assert spans == [pytest.approx(case[1], abs=6)], case
+            bridged.append(case)
+    assert len(bridged) == len(cases), sorted(set(cases) - set(bridged))
+
+
+@pytest.mark.parametrize("texture", ["grid24", "sofa", "ground"])
+def test_furniture_and_ground_lines_are_no_door_evidence(texture: str) -> None:
+    """The reviewer's other non-doors beside a plain 150 px gap between a block and a double-line wall: a
+    24 px tile grid inside, a sofa outline beside the gap, two ground lines outside. Nothing bridges."""
+    img = _block_gap_double("plain")
+    if texture == "grid24":
+        for y in range(1250, 1482, 24):
+            img[y : y + 2, 560:1000] = 0
+        for x in range(560, 1000, 24):
+            img[1250:1482, x : x + 2] = 0
+    elif texture == "sofa":
+        cv2.rectangle(img, (700, 1380), (840, 1470), (0, 0, 0), 2)
+        cv2.rectangle(img, (712, 1392), (828, 1458), (0, 0, 0), 2)
+    else:
+        img[1520:1522, 250:2150] = 0
+        img[1528:1530, 250:2150] = 0
+    graph = run(img, use_dimensions=False).graph
+    assert not [w for w in graph.walls if w.openings_px and min(w.a[1], w.b[1]) > 1450]
+
+
+def test_door_arc_check_costs_little_per_candidate_at_a_1000_px_gap() -> None:
+    """Fix round 2, New Important 2: one bridge candidate reads up to 8 arcs (4 jambs x 2 sides). On a
+    6000 px page with 2 % ink noise (ink everywhere, no arc) a 1000 px gap costs at most 0.15 s for all 8
+    (2.9 s when the whole square around each jamb was read; 0.03 s measured)."""
+    import time
+
+    ink = np.zeros((6000, 6000), np.uint8)
+    ink[np.random.default_rng(0).random(ink.shape) < 0.02] = 255
+    hinge, toward, out = np.array((3000.0, 3000.0)), np.array((1.0, 0.0)), np.array((0.0, 1.0))
+    best = float("inf")
+    for _ in range(3):
+        start = time.perf_counter()
+        found = [
+            wallmod._door_arc(ink, hinge, toward, out * side, 1000.0, 30.0)
+            for side in (1, -1)
+            for _ in range(4)
+        ]
+        best = min(best, time.perf_counter() - start)
+    assert not any(found)
+    assert best <= 0.15
+
+
+def test_bridge_candidates_poll_the_deadline_each() -> None:
+    """Fix round 2, New Important 2: `_link_runs` polls the deadline before each bridge candidate's
+    evidence, so many large candidates cannot outrun it."""
+    runs = []
+    for k in range(6):  # six collinear pieces alternating block / double: five bridge candidates
+        block = k % 2 == 0
+        runs.append(
+            _run(400.0 * k, 400.0 * k + 200.0, 0.0, 30.0 if block else 14.0, "block" if block else "double")
+        )
+    polls: list[int] = []
+    ink = np.zeros((600, 2600), np.uint8)
+    wallmod._link_runs(runs, np.zeros((0, 4)), ink, 20.0, lambda: polls.append(1))
+    assert len(polls) >= 1 + 5
