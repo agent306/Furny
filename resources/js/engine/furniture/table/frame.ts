@@ -44,8 +44,14 @@ export interface Frame {
     /** Leg section `s` and the leg, carcass, shelf, front, back board thicknesses. */
     s: number;
     /**
+     * Depth (z-size) of a leg: `t_leg` for solid legs (they are `s x t_leg`),
+     * `s` for hardware legs (spec 19, R40-3).
+     */
+    legDepth: number;
+    /**
      * Apron inset from the base faces: `apron.inset`, clamped to
-     * `max(0, s − t_c)` on four legs so the aprons never cross (spec 19).
+     * `max(0, min(s, legDepth) − t_c)` on four legs so each apron stays
+     * against its legs and the aprons never cross (spec 19).
      */
     apronInset: number;
     tLeg: number;
@@ -178,10 +184,17 @@ export function tableFrame(ctx: GenContext, T: TableSpec): Frame | null {
     }
 
     const tc = ctx.t('carcass');
+    const tLeg = ctx.t('leg');
+    const legDepth = T.base.legSource === 'solid' ? tLeg : s;
+    const legMin = Math.min(s, legDepth);
     const apron = T.base.apron;
     let apronInset = apron.inset;
-    if (T.base.type === 'four_legs' && apron.enabled && apron.inset + tc > s) {
-        apronInset = Math.max(0, s - tc);
+    if (
+        T.base.type === 'four_legs' &&
+        apron.enabled &&
+        apron.inset + tc > legMin
+    ) {
+        apronInset = Math.max(0, legMin - tc);
         ctx.issue('furniture.apron_inset_clamped', 'info', {
             requested: apron.inset,
             applied: apronInset,
@@ -217,8 +230,9 @@ export function tableFrame(ctx: GenContext, T: TableSpec): Frame | null {
         bx0: (W - Wb) / 2,
         bz0: (D - Db) / 2,
         s,
+        legDepth,
         apronInset,
-        tLeg: ctx.t('leg'),
+        tLeg,
         tc,
         ts: ctx.t('shelf'),
         tf: ctx.t('front'),

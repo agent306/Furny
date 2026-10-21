@@ -22,6 +22,7 @@ import { codeIssues } from './codes';
 import { createGenContext } from './context';
 import { frontParts } from './fronts/fronts';
 import { applyOverrides } from './overrides';
+import { splitLongPanels } from './panelSplit';
 import {
     cabinetLegs,
     mountingHardware,
@@ -98,6 +99,7 @@ function generateCarcass(ctx: GenContext, root: Section): boolean {
     countertopPart(ctx, env);
     cabinetLegs(ctx, env);
     mountingHardware(ctx, env);
+    splitLongPanels(ctx);
     connectorsForJoints(ctx, 'carcass');
     screwPacks(ctx, 'carcass');
     return true;

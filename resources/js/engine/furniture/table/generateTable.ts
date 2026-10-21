@@ -11,6 +11,7 @@
  * `hardware.ts`; `frame.ts` holds the shared symbols and helpers.
  */
 import { screwPacks } from '../rules/carcassHardware';
+import { splitLongPanels } from '../panelSplit';
 import { connectorsForJoints } from '../rules/connectors';
 import type { GenContext } from '../types';
 import { fourLegs, panelEnds, pedestal, trestle } from './bases';
@@ -52,6 +53,7 @@ export function tableParts(ctx: GenContext): boolean {
             break;
     }
     underTopDrawers(ctx, f, cabinetX0);
+    splitLongPanels(ctx);
     connectorsForJoints(ctx, 'table');
     screwPacks(ctx, 'table');
     return true;

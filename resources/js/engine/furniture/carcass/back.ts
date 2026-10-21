@@ -8,54 +8,21 @@ import {
     BACK_GROOVE_CLEARANCE,
     BACK_GROOVE_OFFSET,
 } from '../constants';
+import { greedySeams, type Seam } from '../panelSplit';
 import { makePart } from '../parts';
 import { fitsSheet } from '../sheetFit';
 import type { GenContext, Part, PartGrain } from '../types';
 import type { Envelope } from './envelope';
 import type { Divider, SectionLayout } from './layout';
 
-/** A seam is only supported by a divider at least this far from the previous seam. */
-const MIN_PIECE = 100;
 /** Dividers "cover" a span within this distance. */
 const COVER_TOLERANCE = 0.5;
-
-interface Seam {
-    at: number;
-    supported: boolean;
-}
 
 /** A vertical strip of the back, cut into pieces bottom to top at `seams`. */
 interface Strip {
     x0: number;
     x1: number;
     seams: Seam[];
-}
-
-/**
- * Seams over `[from, to]` so that no piece exceeds `maxSpan` (greedy, 07
- * §3.4.1 step 3): the largest support in `[s + 100, s + maxSpan]` when there
- * is one, else an even split of the rest. Nothing for a span that cannot fit.
- */
-function greedySeams(
-    from: number,
-    to: number,
-    maxSpan: number,
-    supports: readonly number[],
-): Seam[] {
-    const out: Seam[] = [];
-    if (maxSpan <= 0) return out;
-    let s = from;
-    while (to - s > maxSpan) {
-        const support = supports.filter(
-            (c) => c >= s + MIN_PIECE && c <= s + maxSpan,
-        );
-        const best = support.length > 0 ? Math.max(...support) : undefined;
-        const at =
-            best ?? s + Math.ceil((to - s) / Math.ceil((to - s) / maxSpan));
-        out.push({ at, supported: best !== undefined });
-        s = at;
-    }
-    return out;
 }
 
 const centre = (d: Divider, axis: 0 | 1): number =>

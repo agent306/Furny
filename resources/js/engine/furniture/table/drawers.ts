@@ -117,10 +117,11 @@ interface DrawerRow {
 
 /**
  * The drawer row of the base, or null when the base has no room for
- * under-top drawers. On four legs the bay is bounded by the legs (section
- * `s`, solid or hardware) and by the aprons across the drawer side (their
- * inner face at the clamped `inset + t_c`; past `s` only when `s < t_c`),
- * whichever reaches further in; on panel ends
+ * under-top drawers. On four legs the bay is bounded by the legs (`s` wide
+ * along x, `legDepth` deep along z; solid or hardware) and by the aprons
+ * across the drawer side (their inner face at the clamped `inset + t_c`;
+ * past the leg only when the leg is thinner than `t_c`), whichever reaches
+ * further in; on panel ends
  * by the end panels; on cabinet ends by the left end and the cabinet.
  */
 function drawerRow(
@@ -130,8 +131,11 @@ function drawerRow(
 ): DrawerRow | null {
     const { T, Wb, Db, bx0, bz0, s, tc } = f;
     const inset = f.apronInset;
-    // From the base's outer face to the inner face bounding the bay.
-    const reach = Math.max(s, T.base.apron.enabled ? inset + tc : 0);
+    // From the base's outer face to the inner face bounding the bay: along
+    // x the legs are s wide, along z legDepth deep (spec 19, R40-3).
+    const apronReach = T.base.apron.enabled ? inset + tc : 0;
+    const reach = Math.max(s, apronReach);
+    const reachZ = Math.max(f.legDepth, apronReach);
     switch (T.base.type) {
         case 'four_legs':
             if (side === 'front') {
@@ -145,13 +149,13 @@ function drawerRow(
             return side === 'left'
                 ? {
                       side,
-                      bay: [bz0 + reach, bz0 + Db - reach],
+                      bay: [bz0 + reachZ, bz0 + Db - reachZ],
                       plane: -(bx0 + inset),
                       depthAvail: Wb / 2 - s,
                   }
                 : {
                       side,
-                      bay: [-(bz0 + Db - reach), -(bz0 + reach)],
+                      bay: [-(bz0 + Db - reachZ), -(bz0 + reachZ)],
                       plane: bx0 + Wb - inset,
                       depthAvail: Wb / 2 - s,
                   };

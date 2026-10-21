@@ -92,6 +92,11 @@ export const FURNITURE_ISSUE_CODES = [
     'furniture.table_drawers_dont_fit',
     // info { requested, applied }: apron inset clamped to s - t_c.
     'furniture.apron_inset_clamped',
+    // Task 40, ruling R40-1 (long horizontal runs split at seams, like the
+    // back of 07 §3.4.1): info { partKey, count } and, per seam with no
+    // support, warning { partKey, position }.
+    'furniture.panel_split',
+    'furniture.panel_seam_unsupported',
 ] as const;
 
 export type FurnitureIssueCode = (typeof FURNITURE_ISSUE_CODES)[number];

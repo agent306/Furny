@@ -797,6 +797,63 @@ describe('under-top drawers on four legs', () => {
         expect(lineOf(model, 'table.connectors.corner')?.qty).toBe(4);
     });
 
+    it('thin solid legs (s 40 < t_leg 50): aprons and stretchers stop at the legs (R40-3)', () => {
+        // legs x [50, 90] / [1710, 1750], z [50, 100] / [800, 850]
+        const model = run(
+            diningTable((d) => {
+                d.table.base.legSection = 40;
+                d.table.base.stretcher = true;
+            }),
+        );
+        expect(boxOf(model, 'table.leg.fl')).toEqual({
+            min: [50, 0, 800],
+            size: [40, 725, 50],
+        });
+        // side aprons run between the legs' z faces (t_leg), not s
+        expect(boxOf(model, 'table.apron.left')).toEqual({
+            min: [65, 635, 100],
+            size: [18, 90, 700],
+        });
+        expect(boxOf(model, 'table.apron.front')).toEqual({
+            min: [90, 635, 817],
+            size: [1620, 90, 18],
+        });
+        expect(boxOf(model, 'table.stretcher.left')).toEqual({
+            min: [45, 150, 100],
+            size: [50, 60, 700],
+        });
+        // the centre stretcher runs between the side stretchers' inner faces
+        expect(boxOf(model, 'table.stretcher.center')).toEqual({
+            min: [95, 150, 425],
+            size: [1610, 60, 50],
+        });
+        expect(partOverlaps(model.parts)).toEqual([]);
+        // the inset clamp takes the thinner leg side: 25 + 18 > 40
+        const clamped = run(
+            diningTable((d) => {
+                d.table.base.legSection = 40;
+                d.table.base.apron.inset = 25;
+            }),
+        );
+        expect(
+            issuesOf(clamped, 'furniture.apron_inset_clamped')[0]?.params,
+        ).toEqual({ requested: 25, applied: 22 });
+        expect(partOverlaps(clamped.parts)).toEqual([]);
+    });
+
+    it('thin solid legs: side drawers keep clear of the legs along z (R40-3)', () => {
+        for (const side of ['left', 'right'] as const) {
+            const model = run(
+                diningTable((d) => {
+                    d.table.base.legSection = 40;
+                    d.table.storage.drawers = withCount(1, side);
+                }),
+            );
+            expect(keys(model)).toContain('table.drawer.1.front');
+            expect(partOverlaps(model.parts)).toEqual([]);
+        }
+    });
+
     it('clamps the apron inset to s - t_c when inset + t_c > s, so the aprons never cross', () => {
         // LEG-CAB-ADJ has a 40 mm section: inset 30 + 18 > 40 -> inset 22
         const model = run(

@@ -49,6 +49,11 @@ const TABLE_LEGS = 4;
 /** Base `four_legs` (07 §3.13): legs, aprons, stretchers, lower shelf and their hardware. */
 export function fourLegs(ctx: GenContext, f: Frame): void {
     const { T, Hb, Wb, Db, bx0, bz0, s, tLeg, tc, ts } = f;
+    // Members along z stop at the legs' z faces (legDepth); along x at s.
+    const betweenLegsZ: [number, number] = [
+        bz0 + f.legDepth,
+        bz0 + Db - f.legDepth,
+    ];
     const base = T.base;
     const xL: [number, number] = [bx0, bx0 + s];
     const xR: [number, number] = [bx0 + Wb - s, bx0 + Wb];
@@ -102,7 +107,7 @@ export function fourLegs(ctx: GenContext, f: Frame): void {
         const inset = f.apronInset;
         const y: [number, number] = [Hb - ah, Hb];
         const alongX: [number, number] = [bx0 + s, bx0 + Wb - s];
-        const alongZ: [number, number] = [bz0 + s, bz0 + Db - s];
+        const alongZ = betweenLegsZ;
         const aprons = [
             ['front', alongX, y, [bz0 + Db - inset - tc, bz0 + Db - inset]],
             ['back', alongX, y, [bz0 + inset, bz0 + inset + tc]],
@@ -136,11 +141,18 @@ export function fourLegs(ctx: GenContext, f: Frame): void {
             c - tLeg / 2,
             c + tLeg / 2,
         ];
-        const alongZ: [number, number] = [bz0 + s, bz0 + Db - s];
+        const alongZ = betweenLegsZ;
+        // The centre stretcher runs between the side stretchers' inner
+        // faces (= [bx0 + s, bx0 + Wb - s] when t_leg = s; spec 19, R40-3).
         const stretchers = [
             ['left', centred(bx0 + s / 2), alongZ, 'x'],
             ['right', centred(bx0 + Wb - s / 2), alongZ, 'x'],
-            ['center', [bx0 + s, bx0 + Wb - s], centred(bz0 + Db / 2), 'z'],
+            [
+                'center',
+                [bx0 + s / 2 + tLeg / 2, bx0 + Wb - s / 2 - tLeg / 2],
+                centred(bz0 + Db / 2),
+                'z',
+            ],
         ] as const;
         for (const [side, x, z, thin] of stretchers) {
             const part = panel(ctx, {
