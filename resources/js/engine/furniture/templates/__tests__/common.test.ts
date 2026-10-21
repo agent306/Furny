@@ -4,6 +4,7 @@ import { indexCatalog } from '../../catalogIndex';
 import { mutateCatalog, seedCatalog } from '../../../testing/seedCatalog';
 import { testIds } from '../../../testing/ids';
 import type { FurnitureDocument, Section } from '../../schema';
+import { archived, withoutDefault } from '../../testing/catalogs';
 import {
     clamp,
     columnsFromDoors,
@@ -164,13 +165,7 @@ describe('commonCarcass and emptyOverrides', () => {
     });
 
     it('has no handle code when the catalog has no default handle', () => {
-        const catalog = mutateCatalog(seedCatalog(), (d) => {
-            for (const h of d.hardware) {
-                h.isDefaultFor = h.isDefaultFor.filter(
-                    (k) => k !== 'handle.default',
-                );
-            }
-        });
+        const catalog = withoutDefault('handle.default');
         expect(commonCarcass(ctxFor(catalog)).handles.code).toBeNull();
     });
 
@@ -209,10 +204,7 @@ describe('resolveDefaultMaterials', () => {
     });
 
     it('takes the first preferred code that exists and is active', () => {
-        const catalog = mutateCatalog(seedCatalog(), (d) => {
-            const m = d.materials.find((x) => x.code === 'PB18-ANTH');
-            if (m) m.isActive = false;
-        });
+        const catalog = archived('PB18-ANTH');
         const m = resolveDefaultMaterials(
             {
                 preferredMaterials: {

@@ -516,6 +516,9 @@ export type {
     PhysEdge,
 } from './furniture/types';
 export { createGenContext } from './furniture/context';
+export { generateFurniture } from './furniture/generate';
+export { codeIssues, referencedCodes } from './furniture/codes';
+export type { CodeKind, CodeRef } from './furniture/codes';
 export { layoutSections } from './furniture/carcass/layout';
 export type {
     Divider,

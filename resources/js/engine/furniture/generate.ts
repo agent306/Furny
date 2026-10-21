@@ -1,0 +1,150 @@
+/**
+ * `generateFurniture` (07 §3.1): the pipeline that turns a furniture document
+ * into its model (parts, fronts, hardware, sections, issues). Pure,
+ * synchronous and deterministic.
+ */
+import type { CatalogSnapshot } from '../catalog/snapshot';
+import { cmpId } from '../compare';
+import { backPanels } from './carcass/back';
+import { basketsFor, rodFor, shelvesFor } from './carcass/contents';
+import { countertopPart } from './carcass/countertop';
+import { drawersFor } from './carcass/drawers';
+import { computeEnvelope, type Envelope } from './carcass/envelope';
+import {
+    dividerParts,
+    layoutFromEnvelope,
+    type SectionLayout,
+} from './carcass/layout';
+import { carcassPanels } from './carcass/panels';
+import { plinthParts } from './carcass/plinth';
+import { indexCatalog } from './catalogIndex';
+import { codeIssues } from './codes';
+import { createGenContext } from './context';
+import { frontParts } from './fronts/fronts';
+import { applyOverrides } from './overrides';
+import {
+    cabinetLegs,
+    mountingHardware,
+    screwPacks,
+} from './rules/carcassHardware';
+import { connectorsForJoints } from './rules/connectors';
+import { leafWeightKg, roundKg } from './rules/weight';
+import type { Content, FurnitureDocument, Section } from './schema';
+import type { FurnitureModel, GenContext, ModelFront } from './types';
+
+/** The content of every section of `root`, by id. */
+function contentsById(root: Section): Map<string, Content | null> {
+    const out = new Map<string, Content | null>();
+    const visit = (section: Section): void => {
+        out.set(section.id, section.content);
+        for (const child of section.children) visit(child.section);
+    };
+    visit(root);
+    return out;
+}
+
+/** Step 3.5: the contents of every leaf, leaves in pre-order. */
+function leafContents(
+    ctx: GenContext,
+    env: Envelope,
+    layout: SectionLayout,
+    root: Section,
+): void {
+    const contents = contentsById(root);
+    for (const id of layout.preorder) {
+        const info = layout.byId.get(id);
+        const content = contents.get(id);
+        if (!info?.leaf || !content) continue;
+        switch (content.type) {
+            case 'shelves':
+                shelvesFor(ctx, info, content);
+                break;
+            case 'hanging_rod':
+                rodFor(ctx, info, content);
+                break;
+            case 'pull_out_basket':
+                basketsFor(ctx, info, content);
+                break;
+            case 'drawers':
+                drawersFor(ctx, env, layout, info, content);
+                break;
+            case 'empty':
+                break;
+        }
+    }
+}
+
+/**
+ * Step 3, carcass family. Stops after the envelope when it is too small
+ * (`furniture.envelope_too_small`, no parts).
+ */
+function generateCarcass(ctx: GenContext, root: Section): void {
+    const env = computeEnvelope(ctx);
+    if (!env) return;
+    carcassPanels(ctx, env);
+    const layout = layoutFromEnvelope(ctx, env);
+    dividerParts(ctx, layout);
+    frontParts(ctx, env, layout);
+    leafContents(ctx, env, layout, root);
+    backPanels(ctx, env, layout);
+    plinthParts(ctx, env);
+    countertopPart(ctx, env);
+    cabinetLegs(ctx, env);
+    mountingHardware(ctx, env);
+    connectorsForJoints(ctx, 'carcass');
+    screwPacks(ctx, 'carcass');
+}
+
+/** Info `furniture.weight_estimate`: all parts x qty, 1 decimal (07 §6.1). */
+function weightEstimate(ctx: GenContext): void {
+    ctx.issue('furniture.weight_estimate', 'info', {
+        kg: roundKg(leafWeightKg(ctx.parts, ctx.idx)),
+    });
+}
+
+/**
+ * Step 6: model-level validation rules (07 §7.3: sag, sheet fit, …).
+ * A no-op hook until `validate.ts` (Task 37) fills it.
+ */
+function modelRules(ctx: GenContext): void {
+    void ctx;
+}
+
+const byFrontPosition = (a: ModelFront, b: ModelFront): number =>
+    a.rect.x - b.rect.x || b.rect.y - a.rect.y || cmpId(a.id, b.id);
+
+/**
+ * The model of `doc` against `catalog` (07 §3.1). Never throws on document
+ * content: problems become issues. The document must be schema-valid
+ * (callers parse it with zod first).
+ */
+export function generateFurniture(
+    doc: FurnitureDocument,
+    catalog: CatalogSnapshot,
+): FurnitureModel {
+    // 1. Context.
+    const idx = indexCatalog(catalog);
+    const ctx = createGenContext(doc, idx);
+    // 2. Code check; unknown materials fall back to the role default in `ctx.mat`.
+    ctx.issues.push(...codeIssues(doc, idx));
+    // 3. Carcass family (a family without its spec is reported by validateFurniture).
+    if (doc.family === 'carcass' && doc.carcass) {
+        generateCarcass(ctx, doc.carcass.interior);
+    }
+    // 4. Table family: `tableParts` (Task 38).
+    // 5. Overrides.
+    applyOverrides(ctx);
+    // 6. Model-level rules.
+    weightEstimate(ctx);
+    modelRules(ctx);
+    // 7. Order and bounding box.
+    const { width, height, depth } = doc.dims;
+    return {
+        parts: [...ctx.parts].sort((a, b) => cmpId(a.key, b.key)),
+        hardware: [...ctx.hardware].sort((a, b) => cmpId(a.key, b.key)),
+        fronts: [...ctx.fronts].sort(byFrontPosition),
+        sections: ctx.sections,
+        bbox: { min: [0, 0, 0], size: [width, height, depth] },
+        issues: ctx.issues,
+    };
+}

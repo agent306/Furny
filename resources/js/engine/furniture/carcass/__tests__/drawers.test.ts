@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mutateCatalog, seedCatalog } from '../../../testing/seedCatalog';
 import { createGenContext } from '../../context';
 import type { Content } from '../../schema';
+import { archived, withoutDefault } from '../../testing/catalogs';
 import {
     boxOfPart,
     hardwareOf,
@@ -95,7 +96,7 @@ describe('external drawers: 07 §12.3 (600 x 720 x 560, three equal drawers)', (
 
     it('divides the front block x [1.5, 598.5] y [1.5, 718.5] into three fronts', () => {
         if (!opening) throw new Error('no opening');
-        const rects = drawerFrontRects(ctx, opening, drawers(), ROOT);
+        const rects = drawerFrontRects(ctx, opening, drawers(), 'full', ROOT);
         expect(rects).toHaveLength(3);
         for (const r of rects) {
             expect(r.x0).toBe(1.5);
@@ -496,12 +497,7 @@ describe('selectSlide (07 §3.12 steps 1-5, §12.4)', () => {
     });
 
     it('uses an archived explicit slide while it fits, but never picks one', () => {
-        const archived = mutateCatalog(catalog, (draft) => {
-            for (const h of draft.hardware) {
-                if (h.code === 'SLD-BB-500') h.isActive = false;
-            }
-        });
-        const c = createGenContext(drawerTestBox(), archived);
+        const c = createGenContext(drawerTestBox(), archived('SLD-BB-500'));
         expect(
             selectSlide(c, { slideCode: 'SLD-BB-500', maxLen: 519 }).slide
                 ?.code,
@@ -517,12 +513,7 @@ describe('selectSlide (07 §3.12 steps 1-5, §12.4)', () => {
     });
 
     it('keeps an archived explicit slide whose length equals maxLen', () => {
-        const archived = mutateCatalog(catalog, (draft) => {
-            for (const h of draft.hardware) {
-                if (h.code === 'SLD-BB-500') h.isActive = false;
-            }
-        });
-        const c = createGenContext(drawerTestBox(), archived);
+        const c = createGenContext(drawerTestBox(), archived('SLD-BB-500'));
         const r = selectSlide(c, { slideCode: 'SLD-BB-500', maxLen: 500 });
         expect(r.slide?.code).toBe('SLD-BB-500');
         expect(r.issues).toEqual([]);
@@ -559,13 +550,7 @@ describe('selectSlide (07 §3.12 steps 1-5, §12.4)', () => {
     });
 
     it('warns no_default_hardware and sizes the box in 50 mm steps without a default', () => {
-        const none = mutateCatalog(catalog, (draft) => {
-            for (const h of draft.hardware) {
-                h.isDefaultFor = h.isDefaultFor.filter(
-                    (k) => k !== 'slide.side_mount',
-                );
-            }
-        });
+        const none = withoutDefault('slide.side_mount');
         const c = createGenContext(drawerTestBox(), none);
         const r = selectSlide(c, { slideCode: null, maxLen: 519 });
         expect(r.slide).toBeNull();
@@ -586,13 +571,7 @@ describe('selectSlide (07 §3.12 steps 1-5, §12.4)', () => {
     });
 
     it('reports drawer_no_slide when even the stepped box would be empty', () => {
-        const none = mutateCatalog(catalog, (draft) => {
-            for (const h of draft.hardware) {
-                h.isDefaultFor = h.isDefaultFor.filter(
-                    (k) => k !== 'slide.side_mount',
-                );
-            }
-        });
+        const none = withoutDefault('slide.side_mount');
         const c = createGenContext(drawerTestBox(), none);
         const r = selectSlide(c, { slideCode: null, maxLen: 49 });
         expect(r.boxLength).toBe(0);
@@ -663,13 +642,7 @@ describe('drawers and slide selection in a cabinet (07 §12.4)', () => {
     });
 
     it('builds the boxes without slides when the catalog has no default slide', () => {
-        const none = mutateCatalog(catalog, (draft) => {
-            for (const h of draft.hardware) {
-                h.isDefaultFor = h.isDefaultFor.filter(
-                    (k) => k !== 'slide.side_mount',
-                );
-            }
-        });
+        const none = withoutDefault('slide.side_mount');
         const { ctx } = runWithDrawers(drawerTestBox(), none);
         expect(issuesOf(ctx, 'furniture.no_default_hardware')).toMatchObject([
             { severity: 'warning', params: { roleKey: 'slide.side_mount' } },
@@ -680,6 +653,13 @@ describe('drawers and slide selection in a cabinet (07 §12.4)', () => {
         // Ls = fl(519 / 50) x 50 = 500 and the side-mount defaults apply.
         expect(partOf(ctx, `${P(1)}.side.left`).length).toBe(500);
         expect(partOf(ctx, `${P(1)}.back`).length).toBe(514);
+        // The boxes still run on (uncatalogued) slides screwed to both sides.
+        expect(partOf(ctx, 'carcass.side.left').operations.slideScrewSets).toBe(
+            3,
+        );
+        expect(
+            partOf(ctx, 'carcass.side.right').operations.slideScrewSets,
+        ).toBe(3);
     });
 });
 
@@ -697,6 +677,7 @@ describe('drawer front division (07 §4.4)', () => {
             ctx,
             opening,
             drawers({ frontHeights: [200, 250, 0] }),
+            'full',
             ROOT,
         );
         // Last = 717 - 450 - 2 x 2 = 263.
@@ -741,6 +722,15 @@ describe('drawer front division (07 §4.4)', () => {
         expect(
             issuesOf(ctx, 'furniture.drawer_too_low').map((i) => i.params),
         ).toEqual([{ sectionId: ROOT, drawer: 3 }]);
+    });
+
+    it('does not report drawer_heights_invalid for equal fronts below 80, only drawer_too_low', () => {
+        // 10 equal fronts: (717 - 9 x 2) / 10 = 69.9 high, boxes fl(29.9 / 10) x 10 = 20.
+        const { ctx } = runWithDrawers(externalBox({ count: 10 }));
+        expect(ctx.fronts).toHaveLength(10);
+        expect(ctx.fronts.every((f) => f.rect.h === 69)).toBe(true);
+        expect(issuesOf(ctx, 'furniture.drawer_heights_invalid')).toEqual([]);
+        expect(issuesOf(ctx, 'furniture.drawer_too_low')).toHaveLength(10);
     });
 
     it('accepts a last front of exactly 80', () => {
@@ -1278,6 +1268,18 @@ describe('slide screws on partitions and key prefixes', () => {
             'table.drawer.1.front',
             'table.drawer.2.front',
         ]);
+    });
+});
+
+describe('external drawers without an opening', () => {
+    it('throws: only carcass documents have drawer openings (tables bring their own, Task 38)', () => {
+        const run = runCarcass(drawerTestBox(), catalog, { fronts: true });
+        const leaf = run.layout.byId.get(ROOT);
+        if (!leaf) throw new Error('no leaf');
+        run.ctx.doc = { ...run.ctx.doc, carcass: null };
+        expect(() =>
+            drawersFor(run.ctx, run.env, run.layout, leaf, drawers()),
+        ).toThrow(/no opening/);
     });
 });
 

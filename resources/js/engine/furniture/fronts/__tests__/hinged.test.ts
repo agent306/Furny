@@ -5,6 +5,7 @@ import { contentDepth } from '../../carcass/contents';
 import { leafWeightKg } from '../../rules/weight';
 import type { Front, FurnitureDocument } from '../../schema';
 import type { GenContext, Part } from '../../types';
+import { withoutHardware } from '../../testing/catalogs';
 import {
     boxOfPart,
     hardwareOf,
@@ -331,11 +332,7 @@ describe('hinge hardware variants (07 §6.2)', () => {
     });
 
     it('warns no_default_hardware and drops the hinges when the role default is missing', () => {
-        const noFull: CatalogSnapshot = mutateCatalog(catalog, (draft) => {
-            draft.hardware = draft.hardware.filter(
-                (h) => h.code !== 'HNG-FO-SC',
-            );
-        });
+        const noFull: CatalogSnapshot = withoutHardware('HNG-FO-SC', catalog);
         const { ctx } = runWithFronts(wardrobeFixture(), noFull);
         expect(
             issuesOf(ctx, 'furniture.no_default_hardware').map((i) => i.params),

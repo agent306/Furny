@@ -1285,7 +1285,7 @@ Lookup: the row of the same board type with the largest thickness ≤ `t`; if `t
 | `furniture.drawer_too_low` | error | §3.12 | sectionId, drawer | "Drawer {drawer} is too low for a drawer box." |
 | `furniture.drawer_heights_invalid` | error | §4.4 | sectionId | "Drawer front heights don't fit the compartment." |
 | `furniture.front_too_small` | error | §4.2 | frontId | "This door is too small." |
-| `furniture.hinged_leaves_unsupported` | error | §4.2 | frontId | "A hinged door can have at most 2 leaves; split it per column." |
+| `furniture.hinged_leaves_unsupported` | error | §4.2 | frontId | "A hinged door needs 1 or 2 leaves; split wider doors per column." |
 | `furniture.sliding_front_partial` | error | §4.6 | frontId | "Sliding doors must cover the whole front." |
 | `furniture.sliding_front_multiple` | error | §4.6 | — | "Only one set of sliding doors per cabinet." |
 | `furniture.sliding_leaves_unsupported` | error | §4.6 | frontId | "Sliding doors need 2 to 4 leaves." |

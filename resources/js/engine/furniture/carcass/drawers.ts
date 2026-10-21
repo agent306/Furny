@@ -38,12 +38,13 @@ import {
     handlesFor,
 } from '../rules/hardware';
 import type { Content } from '../schema';
-import type { GenContext, PhysEdge } from '../types';
+import type { GenContext, Part, PhysEdge } from '../types';
 import { boundingVerticals, contentDepth } from './contents';
-import { coveringFront, drawerStyleOf, type Envelope } from './envelope';
+import { coveringFront, type Envelope } from './envelope';
 import type { SectionBoxInfo, SectionLayout } from './layout';
 
 type DrawersContent = Extract<Content, { type: 'drawers' }>;
+type DrawerStyle = Envelope['drawerStyle'];
 
 /** A drawer front below this height is an error `drawer_heights_invalid` (07 §4.4). */
 const MIN_DRAWER_FRONT_HEIGHT = 80;
@@ -66,6 +67,16 @@ const num = (v: unknown): number | undefined =>
     typeof v === 'number' ? v : undefined;
 const sum = (values: readonly number[]): number =>
     values.reduce((total, v) => total + v, 0);
+
+/** The `sectionId` param and entity of a drawer issue; both empty without a section. */
+function sectionRef(sectionId: string | undefined): {
+    params: Record<string, string>;
+    entityIds: string[];
+} {
+    return sectionId === undefined
+        ? { params: {}, entityIds: [] }
+        : { params: { sectionId }, entityIds: [sectionId] };
+}
 
 /** What `selectSlide` needs to know about the room for the slide. */
 export interface SlideRequest {
@@ -104,11 +115,9 @@ export function selectSlide(
     ctx: GenContext,
     request: SlideRequest,
 ): SlideSelection {
-    const { maxLen, sectionId } = request;
+    const { maxLen } = request;
     const issues: Issue[] = [];
-    const entityIds = sectionId === undefined ? [] : [sectionId];
-    const sectionParams: Record<string, string> =
-        sectionId === undefined ? {} : { sectionId };
+    const { params: sectionParams, entityIds } = sectionRef(request.sectionId);
     const noSlide = (): SlideSelection => {
         issues.push(
             furnitureIssue(
@@ -210,12 +219,8 @@ function givenHeights(
     const heights = content.frontHeights;
     if (heights === 'equal') return null;
     if (heights.length === content.count) return heights;
-    ctx.issue(
-        'furniture.drawer_heights_invalid',
-        'warning',
-        sectionId === undefined ? {} : { sectionId },
-        sectionId === undefined ? [] : [sectionId],
-    );
+    const { params, entityIds } = sectionRef(sectionId);
+    ctx.issue('furniture.drawer_heights_invalid', 'warning', params, entityIds);
     return null;
 }
 
@@ -237,27 +242,30 @@ function divide(
 
 /**
  * The drawer fronts of an external drawer leaf, top first (07 §4.4): the
- * front rectangle of `opening` with the cabinet's drawer overlay, divided
- * into `content.count` fronts with a 2 mm gap. Fractional; the parts and the
- * model rects are floored. Reports `drawer_heights_invalid`: a warning for a
- * list of the wrong length (then equal), an error for a last front below 80.
+ * front rectangle of `opening` with the drawer overlay `style` (the
+ * envelope's `drawerStyle`), divided into `content.count` fronts with a 2 mm
+ * gap. Fractional; the parts and the model rects are floored. Reports
+ * `drawer_heights_invalid`: a warning for a list of the wrong length (then
+ * equal), an error for a given last front below 80.
  */
 export function drawerFrontRects(
     ctx: GenContext,
     opening: OpeningRect,
     content: DrawersContent,
+    style: DrawerStyle,
     sectionId?: string,
 ): Rect[] {
-    const block = frontRect(opening, drawerStyleOf(ctx.doc));
+    const block = frontRect(opening, style);
     const n = content.count;
     const given = givenHeights(ctx, content, sectionId);
     const heights = divide(block.y1 - block.y0, n, DRAWER_FRONT_GAP, given);
     if (given && (heights[n - 1] ?? 0) < MIN_DRAWER_FRONT_HEIGHT) {
+        const { params, entityIds } = sectionRef(sectionId);
         ctx.issue(
             'furniture.drawer_heights_invalid',
             'error',
-            sectionId === undefined ? {} : { sectionId },
-            sectionId === undefined ? [] : [sectionId],
+            params,
+            entityIds,
         );
     }
 
@@ -270,17 +278,252 @@ export function drawerFrontRects(
     return rects;
 }
 
-/** The whole leaf as an opening with carcass edges, when the openings hold none for it. */
-function leafOpening(ctx: GenContext, leaf: SectionBoxInfo): OpeningRect {
-    const [x0, y0] = leaf.box.min;
-    const outer = { cls: 'outer', tp: ctx.t('carcass') } as const;
+/** The box geometry shared by every drawer of one leaf (07 §3.12 box table). */
+interface LeafBoxes {
+    sectionId: string;
+    behind: boolean;
+    slide: CatalogHardware | null;
+    undermount: boolean;
+    /** Slide length `Ls`. */
+    slideLength: number;
+    /** Outer width `Wb`, inner width `Win`, length `Lb`, bottom offset `bo`. */
+    Wb: number;
+    Win: number;
+    Lb: number;
+    bo: number;
+    /** Box x min and front z. */
+    bx0: number;
+    zf: number;
+    tdb: number;
+    tbt: number;
+    /** False when no box can be made (no slide length, or no inner width / length). */
+    canBuild: boolean;
+    /** Side panels or partitions that take the slide screws. */
+    verticals: Array<Part | undefined>;
+}
+
+/**
+ * Widths and length of the boxes (07 §3.12 box table) for slide `slide` of
+ * length `Ls` in an opening `Wo` wide; warns `drawer_side_too_thick` when the
+ * box sides are too thick for an undermount slide.
+ */
+function boxSizes(
+    ctx: GenContext,
+    slide: CatalogHardware | null,
+    Ls: number,
+    Wo: number,
+    sectionId: string,
+): Pick<LeafBoxes, 'undermount' | 'Wb' | 'Win' | 'Lb' | 'bo'> {
+    const tdb = ctx.t('drawer_box');
+    const specs = slide?.specs ?? {};
+    if (specs.type === 'undermount') {
+        // An undermount type implies a slide, so Ls > 0 here.
+        if (
+            tdb > (num(specs.maxSideThicknessMm) ?? DEFAULT_MAX_SIDE_THICKNESS)
+        ) {
+            ctx.issue(
+                'furniture.drawer_side_too_thick',
+                'warning',
+                { sectionId },
+                [sectionId],
+            );
+        }
+        const Win =
+            Wo -
+            (num(specs.innerWidthDeductionMm) ?? DEFAULT_INNER_WIDTH_DEDUCTION);
+        return {
+            undermount: true,
+            Win,
+            Wb: Win + 2 * tdb,
+            Lb: Ls - (num(specs.lengthDeductionMm) ?? DEFAULT_LENGTH_DEDUCTION),
+            bo: num(specs.bottomRecessMm) ?? DEFAULT_BOTTOM_RECESS,
+        };
+    }
+    const Wb = fl(
+        Wo - 2 * (num(specs.clearancePerSideMm) ?? DEFAULT_CLEARANCE_PER_SIDE),
+    );
     return {
-        x0,
-        x1: x0 + leaf.box.size[0],
-        y0,
-        y1: y0 + leaf.box.size[1],
-        edges: { left: outer, right: outer, top: outer, bottom: outer },
+        undermount: false,
+        Wb,
+        Win: Wb - 2 * tdb,
+        Lb: Ls,
+        bo: DRAWER_BOTTOM_OFFSET_SIDE_MOUNT,
     };
+}
+
+/**
+ * Drawer `j` (1 = top) of a leaf in the slot `[slotY0, slotY1]`: the box
+ * (sides, back, bottom, and an inner front behind a door), its slides and
+ * the slide screws in the bounding verticals. A box lower than 60 mm is error
+ * `drawer_too_low` and is not built.
+ */
+function drawerBox(
+    ctx: GenContext,
+    boxes: LeafBoxes,
+    prefix: string,
+    j: number,
+    [slotY0, slotY1]: [number, number],
+): void {
+    if (!boxes.canBuild) return;
+    const { sectionId, tdb, tbt, Wb, Win, Lb, bo, bx0, zf } = boxes;
+    const slotH = slotY1 - slotY0;
+    const Hb =
+        fl((slotH - DRAWER_BOX_VERTICAL_CLEARANCE) / DRAWER_BOX_HEIGHT_STEP) *
+        DRAWER_BOX_HEIGHT_STEP;
+    if (Hb < DRAWER_MIN_BOX_HEIGHT) {
+        ctx.issue(
+            'furniture.drawer_too_low',
+            'error',
+            { sectionId, drawer: j },
+            [sectionId],
+        );
+        return;
+    }
+
+    const by0 = slotY0 + fl((slotH - Hb) / 2);
+    const zRear = zf - Lb;
+    const boxMaterial = ctx.doc.materials.drawer_box.materialCode;
+    const side = (suffix: 'left' | 'right', x: number) =>
+        makePart(
+            {
+                key: `${prefix}.side.${suffix}`,
+                nameKey: 'parts.drawer_side',
+                role: 'drawer_box',
+                materialCode: boxMaterial,
+                box: { min: [x, by0, zRear], size: [tdb, Hb, Lb] },
+                thicknessAxis: 'x',
+                grainAxis: 'z',
+                banded: ['top'],
+                visibleFaces: 0,
+            },
+            ctx,
+        );
+    const grooveRoom = DRAWER_BOTTOM_GROOVE_DEPTH - 1;
+    ctx.parts.push(
+        side('left', bx0),
+        side('right', bx0 + Wb - tdb),
+        makePart(
+            {
+                key: `${prefix}.back`,
+                nameKey: 'parts.drawer_back',
+                role: 'drawer_box',
+                materialCode: boxMaterial,
+                box: {
+                    min: [bx0 + tdb, by0 + bo + tbt, zRear],
+                    size: [Win, Hb - bo - tbt, tdb],
+                },
+                thicknessAxis: 'z',
+                grainAxis: 'x',
+                banded: ['top'],
+                visibleFaces: 0,
+            },
+            ctx,
+        ),
+        makePart(
+            {
+                key: `${prefix}.bottom`,
+                nameKey: 'parts.drawer_bottom',
+                role: 'drawer_bottom',
+                materialCode: ctx.doc.materials.drawer_bottom.materialCode,
+                box: {
+                    min: [bx0 + tdb - grooveRoom, by0 + bo, zRear],
+                    size: [Win + 2 * grooveRoom, tbt, Lb],
+                },
+                thicknessAxis: 'y',
+                grainAxis: null,
+                banded: [],
+                visibleFaces: 0,
+            },
+            ctx,
+        ),
+    );
+    if (boxes.behind) {
+        ctx.parts.push(
+            makePart(
+                {
+                    key: `${prefix}.front`,
+                    nameKey: 'parts.drawer_inner_front',
+                    nameParams: { n: j },
+                    role: 'drawer_box',
+                    materialCode: boxMaterial,
+                    box: { min: [bx0, by0, zf], size: [Wb, Hb, tdb] },
+                    thicknessAxis: 'z',
+                    grainAxis: 'x',
+                    banded: ALL_EDGES,
+                    visibleFaces: 0,
+                },
+                ctx,
+            ),
+        );
+    }
+    if (boxes.slide) {
+        addHardwareLine(ctx, {
+            key: `${prefix}.slides`,
+            roleKey: boxes.undermount ? 'slide.undermount' : DEFAULT_SLIDE_ROLE,
+            code: boxes.slide.code,
+            qty: 1,
+            reasonKey: 'hardware.reason.slides_for_drawer',
+            reasonParams: { length: boxes.slideLength },
+            frontId: null,
+            sectionId,
+        });
+    }
+    for (const vertical of boxes.verticals) {
+        if (vertical) vertical.operations.slideScrewSets += 1;
+    }
+}
+
+/**
+ * The front of external drawer `j` over `rect` (07 §4.4): a solid leaf in
+ * the drawer overlay's z range, its model front and its handles
+ * (`carcass.handles.code`, horizontal by default).
+ */
+function externalDrawerFront(
+    ctx: GenContext,
+    env: Pick<Envelope, 'Dc' | 'drawerStyle'>,
+    rect: Rect,
+    prefix: string,
+    j: number,
+    sectionId: string,
+): void {
+    const fw = fl(rect.x1 - rect.x0);
+    const fh = fl(rect.y1 - rect.y0);
+    if (fw <= 0 || fh <= 0) return;
+    const [z0, z1] = leafZ(env, ctx.t('front'), env.drawerStyle);
+    const key = `${prefix}.front`;
+    const front = solidLeaf(
+        ctx,
+        key,
+        { ...rect, z0, z1 },
+        { nameKey: 'parts.drawer_front', nameParams: { n: j }, grainAxis: 'x' },
+    );
+    ctx.fronts.push({
+        id: key,
+        frontId: null,
+        kind: 'drawer',
+        rect: { x: fl(rect.x0), y: fl(rect.y0), w: fw, h: fh },
+        partKey: key,
+    });
+    handlesFor(
+        ctx,
+        {
+            key: `${prefix}.handle`,
+            frontId: null,
+            sectionId,
+            reasonKey: 'hardware.reason.handle_for_drawer',
+            entityId: key,
+        },
+        ctx.doc.carcass?.handles.code ?? null,
+        [
+            {
+                part: front.edgePart('top'),
+                w: fw,
+                h: fh,
+                count: handleCount('drawer', fw),
+            },
+        ],
+        handleOrientation(ctx, 'drawer'),
+    );
 }
 
 /**
@@ -288,6 +531,10 @@ function leafOpening(ctx: GenContext, leaf: SectionBoxInfo): OpeningRect {
  * door), the box of every drawer with its slides, slide screws and handles.
  * Parts and hardware are keyed `{keyPrefix}.{j}.…`, `j` = 1 for the top
  * drawer; the default prefix is `section.{S}.drawer` (`S` = the leaf id).
+ *
+ * External drawers take their opening from `computeOpenings`, which holds
+ * every external drawer leaf of a carcass document; a document without a
+ * carcass has none, so the table family (Task 38) needs its own opening.
  */
 export function drawersFor(
     ctx: GenContext,
@@ -297,7 +544,6 @@ export function drawersFor(
     content: DrawersContent,
     keyPrefix: string = `section.${leaf.id}.drawer`,
 ): void {
-    if (content.count < 1) return;
     const sectionId = leaf.id;
     const cover = coveringFront(ctx.doc, sectionId);
     const behind = content.behindDoor || cover !== undefined;
@@ -310,13 +556,10 @@ export function drawersFor(
         );
     }
 
-    const tf = ctx.t('front');
     const tdb = ctx.t('drawer_box');
-    const tbt = ctx.t('drawer_bottom');
     const [x0, y0, zBack] = leaf.box.min;
     const [w, h, depth] = leaf.box.size;
     const y1 = y0 + h;
-    const z1 = zBack + depth;
 
     // Slots: the vertical space of every drawer, top first.
     let slots: Array<[number, number]>;
@@ -330,243 +573,68 @@ export function drawersFor(
             return slot;
         });
     } else {
-        const opening =
-            computeOpenings(ctx, env, layout).get(sectionId) ??
-            leafOpening(ctx, leaf);
-        rects = drawerFrontRects(ctx, opening, content, sectionId);
+        const opening = computeOpenings(ctx, env, layout).get(sectionId);
+        if (!opening) {
+            throw new Error(
+                `drawersFor: no opening for the external drawers of ${sectionId}`,
+            );
+        }
+        rects = drawerFrontRects(
+            ctx,
+            opening,
+            content,
+            env.drawerStyle,
+            sectionId,
+        );
         slots = rects.map((r) => [Math.max(r.y0, y0), Math.min(r.y1, y1)]);
     }
 
     // Depth and slide: `cd` includes the inset reduction, also for inset external fronts.
     const cd =
         contentDepth(ctx, { interior: leaf.box }, sectionId) -
-        (!behind && env.drawerStyle === 'inset' ? tf : 0);
+        (!behind && env.drawerStyle === 'inset' ? ctx.t('front') : 0);
     const insetReduction = depth - cd;
     const available = cd - (behind ? BEHIND_DOOR_DEPTH_CLEARANCE : 0);
-    const maxLen = available - DRAWER_REAR_CLEARANCE - (behind ? tdb : 0);
     const selection = selectSlide(ctx, {
         slideCode: content.slideCode,
-        maxLen,
+        maxLen: available - DRAWER_REAR_CLEARANCE - (behind ? tdb : 0),
         sectionId,
         availableDepth: available,
     });
     ctx.issues.push(...selection.issues);
-    const slide = selection.slide;
-    const specs = slide?.specs ?? {};
-    const undermount = specs.type === 'undermount';
     const Ls = selection.boxLength;
 
-    // Box dimensions (07 §3.12 box table).
     const packers =
         behind && cover && PACKED_COVERS.has(cover.kind)
             ? 2 * BEHIND_DOOR_SIDE_PACKER
             : 0;
-    const Wo = w - packers;
-    let Wb: number;
-    let Win: number;
-    let Lb: number;
-    let bo: number;
-    if (undermount) {
-        Win =
-            Wo -
-            (num(specs.innerWidthDeductionMm) ?? DEFAULT_INNER_WIDTH_DEDUCTION);
-        Wb = Win + 2 * tdb;
-        Lb = Ls - (num(specs.lengthDeductionMm) ?? DEFAULT_LENGTH_DEDUCTION);
-        bo = num(specs.bottomRecessMm) ?? DEFAULT_BOTTOM_RECESS;
-        if (
-            Ls > 0 &&
-            tdb > (num(specs.maxSideThicknessMm) ?? DEFAULT_MAX_SIDE_THICKNESS)
-        ) {
-            ctx.issue(
-                'furniture.drawer_side_too_thick',
-                'warning',
-                { sectionId },
-                [sectionId],
-            );
-        }
-    } else {
-        Wb = fl(
-            Wo -
-                2 *
-                    (num(specs.clearancePerSideMm) ??
-                        DEFAULT_CLEARANCE_PER_SIDE),
-        );
-        Win = Wb - 2 * tdb;
-        Lb = Ls;
-        bo = DRAWER_BOTTOM_OFFSET_SIDE_MOUNT;
-    }
-    const canBuild = Ls > 0 && Win > 0 && Lb > 0;
-
-    const bx0 = x0 + (w - Wb) / 2;
-    const zf =
-        z1 - insetReduction - (behind ? BEHIND_DOOR_DEPTH_CLEARANCE + tdb : 0);
-    const boxMaterial = ctx.doc.materials.drawer_box.materialCode;
+    const sizes = boxSizes(ctx, selection.slide, Ls, w - packers, sectionId);
     const verticals = boundingVerticals(ctx, leaf);
-    const handleCode = ctx.doc.carcass?.handles.code ?? null;
-    const grooveRoom = DRAWER_BOTTOM_GROOVE_DEPTH - 1;
+    const boxes: LeafBoxes = {
+        sectionId,
+        behind,
+        slide: selection.slide,
+        slideLength: Ls,
+        ...sizes,
+        bx0: x0 + (w - sizes.Wb) / 2,
+        zf:
+            zBack +
+            depth -
+            insetReduction -
+            (behind ? BEHIND_DOOR_DEPTH_CLEARANCE + tdb : 0),
+        tdb,
+        tbt: ctx.t('drawer_bottom'),
+        canBuild: Ls > 0 && sizes.Win > 0 && sizes.Lb > 0,
+        verticals: [verticals.left, verticals.right],
+    };
 
-    slots.forEach(([slotY0, slotY1], index) => {
+    slots.forEach((slot, index) => {
         const j = index + 1;
         const prefix = `${keyPrefix}.${j}`;
-        const slotH = slotY1 - slotY0;
-        const Hb =
-            fl(
-                (slotH - DRAWER_BOX_VERTICAL_CLEARANCE) /
-                    DRAWER_BOX_HEIGHT_STEP,
-            ) * DRAWER_BOX_HEIGHT_STEP;
-
-        let box = canBuild;
-        if (canBuild && Hb < DRAWER_MIN_BOX_HEIGHT) {
-            ctx.issue(
-                'furniture.drawer_too_low',
-                'error',
-                { sectionId, drawer: j },
-                [sectionId],
-            );
-            box = false;
-        }
-
-        if (box) {
-            const by0 = slotY0 + fl((slotH - Hb) / 2);
-            const zRear = zf - Lb;
-            const side = (suffix: 'left' | 'right', x: number) =>
-                makePart(
-                    {
-                        key: `${prefix}.side.${suffix}`,
-                        nameKey: 'parts.drawer_side',
-                        role: 'drawer_box',
-                        materialCode: boxMaterial,
-                        box: { min: [x, by0, zRear], size: [tdb, Hb, Lb] },
-                        thicknessAxis: 'x',
-                        grainAxis: 'z',
-                        banded: ['top'],
-                        visibleFaces: 0,
-                    },
-                    ctx,
-                );
-            ctx.parts.push(
-                side('left', bx0),
-                side('right', bx0 + Wb - tdb),
-                makePart(
-                    {
-                        key: `${prefix}.back`,
-                        nameKey: 'parts.drawer_back',
-                        role: 'drawer_box',
-                        materialCode: boxMaterial,
-                        box: {
-                            min: [bx0 + tdb, by0 + bo + tbt, zRear],
-                            size: [Win, Hb - bo - tbt, tdb],
-                        },
-                        thicknessAxis: 'z',
-                        grainAxis: 'x',
-                        banded: ['top'],
-                        visibleFaces: 0,
-                    },
-                    ctx,
-                ),
-                makePart(
-                    {
-                        key: `${prefix}.bottom`,
-                        nameKey: 'parts.drawer_bottom',
-                        role: 'drawer_bottom',
-                        materialCode:
-                            ctx.doc.materials.drawer_bottom.materialCode,
-                        box: {
-                            min: [bx0 + tdb - grooveRoom, by0 + bo, zRear],
-                            size: [Win + 2 * grooveRoom, tbt, Lb],
-                        },
-                        thicknessAxis: 'y',
-                        grainAxis: null,
-                        banded: [],
-                        visibleFaces: 0,
-                    },
-                    ctx,
-                ),
-            );
-            if (behind) {
-                ctx.parts.push(
-                    makePart(
-                        {
-                            key: `${prefix}.front`,
-                            nameKey: 'parts.drawer_inner_front',
-                            nameParams: { n: j },
-                            role: 'drawer_box',
-                            materialCode: boxMaterial,
-                            box: {
-                                min: [bx0, by0, zf],
-                                size: [Wb, Hb, tdb],
-                            },
-                            thicknessAxis: 'z',
-                            grainAxis: 'x',
-                            banded: ALL_EDGES,
-                            visibleFaces: 0,
-                        },
-                        ctx,
-                    ),
-                );
-            }
-            if (slide) {
-                addHardwareLine(ctx, {
-                    key: `${prefix}.slides`,
-                    roleKey: undermount
-                        ? 'slide.undermount'
-                        : DEFAULT_SLIDE_ROLE,
-                    code: slide.code,
-                    qty: 1,
-                    reasonKey: 'hardware.reason.slides_for_drawer',
-                    reasonParams: { length: Ls },
-                    frontId: null,
-                    sectionId,
-                });
-            }
-            for (const vertical of [verticals.left, verticals.right]) {
-                if (vertical) vertical.operations.slideScrewSets += 1;
-            }
-        }
-
+        drawerBox(ctx, boxes, prefix, j, slot);
         const rect = rects[index];
-        if (behind || !rect) return;
-        const fw = fl(rect.x1 - rect.x0);
-        const fh = fl(rect.y1 - rect.y0);
-        if (fw <= 0 || fh <= 0) return;
-        const [zFront0, zFront1] = leafZ(env, tf, env.drawerStyle);
-        const key = `${prefix}.front`;
-        const front = solidLeaf(
-            ctx,
-            key,
-            { ...rect, z0: zFront0, z1: zFront1 },
-            {
-                nameKey: 'parts.drawer_front',
-                nameParams: { n: j },
-                grainAxis: 'x',
-            },
-        );
-        ctx.fronts.push({
-            id: key,
-            frontId: null,
-            kind: 'drawer',
-            rect: { x: fl(rect.x0), y: fl(rect.y0), w: fw, h: fh },
-            partKey: key,
-        });
-        handlesFor(
-            ctx,
-            {
-                key: `${prefix}.handle`,
-                frontId: null,
-                sectionId,
-                reasonKey: 'hardware.reason.handle_for_drawer',
-                entityId: key,
-            },
-            handleCode,
-            [
-                {
-                    part: front.edgePart('top'),
-                    w: fw,
-                    h: fh,
-                    count: handleCount('drawer', fw),
-                },
-            ],
-            handleOrientation(ctx, 'drawer'),
-        );
+        if (!behind && rect) {
+            externalDrawerFront(ctx, env, rect, prefix, j, sectionId);
+        }
     });
 }
