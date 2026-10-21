@@ -49,6 +49,7 @@ from app.pipeline.segments import detect_annotation_segments, detect_segments
 from app.pipeline.textparse import parse_token
 from app.pipeline.walls import WallExtraction, debug_walls_png, extract_walls, walls_to_graph
 from app.schemas.candidates import (
+    CandidateSet,
     DimensionLine,
     DimensionSpan,
     OpeningCandidate,
@@ -213,6 +214,27 @@ def run_chain(stem: str) -> ChainResult:
     lap("rooms")
     times["total"] = sum(times.values())
     return ChainResult(stem, page, pre, ocr, segs, dims, ext, graph, times, openings, rooms, face_map)
+
+
+def chain_candidates(r: ChainResult) -> CandidateSet:
+    """The ``CandidateSet`` of a chain run (Task 19): every token of the annotation region, the dimension
+    spans of the dimension lines, the wall graph, openings and room faces."""
+    return CandidateSet(
+        texts=r.ocr.tokens,
+        segments=r.segments,
+        dimension_lines=r.dims,
+        spans=find_dimension_spans(r.dims, r.ocr.tokens, r.pre.region),
+        nodes=r.graph.nodes,
+        walls=r.graph.walls,
+        gaps=r.graph.gaps,
+        openings=r.openings,
+        rooms=r.rooms,
+        theta0=r.ext.theta0,
+        t_thin=r.pre.t_thin,
+        t_median=r.ext.t_median,
+        region=r.pre.region,
+        drawing_kind_cv=r.pre.drawing_kind,
+    )
 
 
 # --- truth and registration ---------------------------------------------------------------------------
