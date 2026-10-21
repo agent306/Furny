@@ -103,13 +103,24 @@ describe('a wrong code', function (): void {
         expect(Activity::query()->where('event', 'auth.otp_locked')->count())->toBe(0);
     });
 
-    it('caps the attempt counter at five in the statement itself', function (): void {
-        // However many requests run the statement, the counter stops at five.
-        foreach (range(1, 7) as $_) {
-            DB::select('UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ? AND attempts < 5 RETURNING attempts', [$this->otp->id]);
+    it('stops at five attempts however many tries come, the right code included (the real action)', function (): void {
+        foreach (range(1, 8) as $try) {
+            $refusal = verifyRefusal(fn () => ($this->verify)($try === 8 ? '123456' : '654321'));
+
+            expect($refusal->errorCode)->toBe($try <= 5 ? 'otp_invalid' : ($try === 6 ? 'otp_too_many_attempts' : 'otp_expired'));
         }
 
-        expect($this->otp->refresh()->attempts)->toBe(5);
+        expect($this->otp->refresh()->attempts)->toBe(5)->and($this->otp->consumed_at)->toBeNull();
+    });
+
+    it('is in no frame of the exception that refuses it', function (): void {
+        try {
+            app(VerifyOtp::class)->handle(VERIFY_E164, OtpPurpose::Login, '246802', VERIFY_IP);
+            $this->fail('Expected a refusal.');
+        } catch (OtpException $exception) {
+            expect($exception->getTraceAsString())->not->toContain('246802')
+                ->and($exception->getTraceAsString())->toContain('VerifyOtp->handle(');
+        }
     });
 });
 

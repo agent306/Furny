@@ -39,7 +39,6 @@ use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media as BaseMedia;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Traits\HasRoles;
-use Throwable;
 
 /**
  * 02 §1.1. `type`, `is_active`, the verification and onboarding timestamps and the Fortify
@@ -222,18 +221,10 @@ final class User extends Authenticatable implements HasLocalePreference, HasMedi
         return $this->password !== null;
     }
 
-    /**
-     * The mail with the link to choose a new password (13 §2); the broker passes the token. The mail is queued, and
-     * a queue outage must not turn the answer for a known address into a 500 while an unknown one gets the generic
-     * answer (13 §5.5): the failure is reported and the caller carries on.
-     */
+    /** The mail with the link to choose a new password (13 §2); the broker passes the token. */
     public function sendPasswordResetNotification(#[SensitiveParameter] $token): void
     {
-        try {
-            $this->notify(new ResetPassword((string) $token));
-        } catch (Throwable $exception) {
-            report($exception);
-        }
+        $this->notify(new ResetPassword((string) $token));
     }
 
     /** The mail with the link that verifies the address; there is nothing to verify, and nobody to mail, without one. */

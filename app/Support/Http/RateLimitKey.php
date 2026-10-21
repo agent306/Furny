@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support\Http;
 
+use App\Support\Phone\PhoneNumberParser;
 use App\Support\Settings\Settings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -57,7 +58,7 @@ final class RateLimitKey
         return filter_var($email, FILTER_VALIDATE_EMAIL, FILTER_FLAG_EMAIL_UNICODE) === false ? null : $email;
     }
 
-    /** E.164 (the business country is the default region); null when the number does not parse. */
+    /** E.164 (read in the default region of the business, `PhoneNumberParser::defaultRegion`); null when the number does not parse. */
     public static function phone(mixed $value): ?string
     {
         if (! is_string($value) || trim($value) === '') {
@@ -67,17 +68,10 @@ final class RateLimitKey
         try {
             $util = PhoneNumberUtil::getInstance();
 
-            return $util->format($util->parse($value, self::defaultRegion()), PhoneNumberFormat::E164);
+            return $util->format($util->parse($value, PhoneNumberParser::defaultRegion(app(Settings::class))), PhoneNumberFormat::E164);
         } catch (NumberParseException) {
             return null;
         }
-    }
-
-    private static function defaultRegion(): string
-    {
-        $country = app(Settings::class)->business()->address['country_code'] ?? null;
-
-        return is_string($country) && preg_match('/^[A-Za-z]{2}$/', $country) === 1 ? strtoupper($country) : 'IN';
     }
 
     /** IPv4 as it is; IPv6 as its /64, since one subscriber holds a whole /64 and could otherwise rotate addresses. */

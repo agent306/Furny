@@ -3,12 +3,15 @@
 declare(strict_types=1);
 
 use App\Domain\Identity\Actions\SendOtp;
+use App\Domain\Identity\Actions\VerifyOtp;
 use App\Domain\Identity\Enums\OtpChannel;
 use App\Domain\Identity\Enums\OtpPurpose;
 use App\Domain\Identity\Models\OtpCode;
 use App\Domain\Identity\Models\User;
 use App\Domain\Identity\Otp\ArrayOtpDelivery;
+use App\Domain\Identity\Otp\LogOtpDelivery;
 use App\Domain\Identity\Otp\OtpChannelResolver;
+use App\Domain\Identity\Otp\OtpCodeGenerator;
 use App\Domain\Identity\Otp\OtpDelivery;
 use App\Domain\Identity\Otp\OtpException;
 use App\Domain\Identity\Otp\OtpLimits;
@@ -16,6 +19,7 @@ use App\Rules\TurnstileToken;
 use App\Support\Settings\Groups\WhatsAppTemplateData;
 use App\Support\Settings\Settings;
 use App\Support\Settings\SettingsGroup;
+use Illuminate\Hashing\HashManager;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Cache;
@@ -112,16 +116,35 @@ describe('the code (13 section 4.1)', function (): void {
             ->and($result->channel)->toBe(OtpChannel::Sms);
     });
 
-    it('can be any six digits, leading zeros included', function (): void {
-        $codes = [];
+    it('is drawn from 000000 to 999999 and written with its leading zeros', function (int $drawn, string $code): void {
+        $range = [];
+        $this->app->instance(OtpCodeGenerator::class, new OtpCodeGenerator(function (int $min, int $max) use ($drawn, &$range): int {
+            $range = [$min, $max];
 
-        foreach (range(1, 12) as $n) {
-            ($this->send)(otpPhone($n), '198.51.100.'.$n);
-            $codes[] = $this->delivery->lastCode();
+            return $drawn;
+        }));
+
+        ($this->send)();
+        $row = OtpCode::query()->sole();
+
+        expect($range)->toBe([0, 999999])
+            ->and($this->delivery->lastCode())->toBe($code)
+            ->and($this->delivery->sent()[0]['message'])->toStartWith("{$code} is your")
+            ->and(Hash::check($code, $row->code_hash))->toBeTrue();
+    })->with([
+        'the lowest' => [0, '000000'],
+        'one digit' => [7, '000007'],
+        'two zeros' => [4521, '004521'],
+        'no zero' => [123456, '123456'],
+        'the highest' => [999999, '999999'],
+    ]);
+
+    it('draws with the system random generator unless told otherwise', function (): void {
+        $generator = new OtpCodeGenerator;
+
+        foreach (range(1, 20) as $_) {
+            expect($generator->generate())->toMatch('/^\d{6}$/');
         }
-
-        expect($codes)->each->toMatch('/^\d{6}$/')
-            ->and(array_unique($codes))->not->toHaveCount(1);
     });
 
     it('is carried by the SMS text of 12 section 3.7, ending in the WebOTP line', function (): void {
@@ -351,7 +374,9 @@ describe('captcha escalation (13 section 4.2 step 3)', function (): void {
         }
         Http::fake(fn () => throw new ConnectionException('timeout'));
 
-        expect(otpRefusal(fn () => ($this->send)(token: 'a-token'))->errorCode)->toBe('captcha_required')
+        $refusal = otpRefusal(fn () => ($this->send)(token: 'a-token'));
+
+        expect($refusal->errorCode)->toBe('captcha_unavailable')->and($refusal->status)->toBe(503)
             ->and($this->delivery->sent())->toHaveCount(2);
     });
 
@@ -457,7 +482,7 @@ describe('channels (13 section 4.2 steps 4 and 7)', function (): void {
     it('expires the code and lets the error through when a channel fails in an unexpected way', function (): void {
         $this->app->instance(OtpDelivery::class, new class implements OtpDelivery
         {
-            public function send(OtpChannel $channel, string $e164, string $message, string $otpId): void
+            public function send(OtpChannel $channel, string $e164, string $message, string $code, string $otpId): void
             {
                 throw new LogicException('driver bug');
             }
@@ -633,6 +658,257 @@ describe('the session and the audit (13 section 17)', function (): void {
         ($this->send)(otpPhone(2), 'not-an-ip');
 
         expect(OtpCode::query()->pluck('ip')->all())->toBe([null, null]);
+    });
+});
+
+describe('reservations (parallel sends, 13 section 4.5)', function (): void {
+    it('holds the cooldown before the slow work: a send that arrives while another is being prepared is refused', function (): void {
+        // Hash::make is the slow work; a second send for the same number arrives while it runs.
+        $inner = null;
+        $racing = new class(app()) extends HashManager
+        {
+            public ?Closure $during = null;
+
+            public function make($value, array $options = []): string
+            {
+                if ($this->during !== null) {
+                    ($this->during)();
+                    $this->during = null;
+                }
+
+                return parent::make($value, $options);
+            }
+        };
+        $racing->during = function () use (&$inner): void {
+            try {
+                app(SendOtp::class)->handle(OTP_PHONE, OtpPurpose::Login, '198.51.100.9', null);
+            } catch (OtpException $exception) {
+                $inner = $exception;
+            }
+        };
+        Hash::swap($racing);
+
+        ($this->send)();
+
+        expect($inner?->errorCode)->toBe('otp_cooldown')
+            ->and($inner->context['retryAfter'])->toBeBetween(1, 60)
+            ->and($this->delivery->sent())->toHaveCount(1);
+    });
+
+    it('counts the hourly limits before the slow work too: parallel sends from one IP see each other', function (): void {
+        // Nine earlier sends from the IP; the tenth is being prepared when an eleventh arrives.
+        foreach (range(1, 9) as $n) {
+            ($this->send)(otpPhone($n));
+        }
+        $inner = null;
+        $racing = new class(app()) extends HashManager
+        {
+            public ?Closure $during = null;
+
+            public function make($value, array $options = []): string
+            {
+                if ($this->during !== null) {
+                    ($this->during)();
+                    $this->during = null;
+                }
+
+                return parent::make($value, $options);
+            }
+        };
+        $racing->during = function () use (&$inner): void {
+            try {
+                app(SendOtp::class)->handle(otpPhone(11), OtpPurpose::Login, OTP_IP, null);
+            } catch (OtpException $exception) {
+                $inner = $exception;
+            }
+        };
+        Hash::swap($racing);
+
+        ($this->send)(otpPhone(10));
+
+        expect($inner?->errorCode)->toBe('otp_rate_limited')
+            ->and($this->delivery->sent())->toHaveCount(10);
+    });
+
+    it('decides the captcha from the reserved counts, which include the send being decided', function (): void {
+        otpEnableCaptcha();
+        // Two sends reserved by other requests that have not finished: the counters are up, the session is empty.
+        RateLimiter::hit(OtpLimits::key(OtpLimits::SEND, 'phone', OTP_E164, OTP_IP), 3600);
+        RateLimiter::hit(OtpLimits::key(OtpLimits::SEND, 'phone', OTP_E164, OTP_IP), 3600);
+
+        expect(otpRefusal(fn () => ($this->send)())->errorCode)->toBe('captcha_required');
+    });
+
+    it('gives the counters and the cooldown back when the send is refused before it is tried', function (string $why): void {
+        $ipHits = 0;
+
+        if ($why === 'captcha') {
+            otpEnableCaptcha();
+            Cache::put('auth:captcha_always', true, now()->addHour());
+        } elseif ($why === 'no channel') {
+            config(['features.sms' => false, 'features.whatsapp' => false]);
+        } else {
+            // The IP has used its ten sends.
+            foreach (range(1, 10) as $_) {
+                RateLimiter::hit(OtpLimits::key(OtpLimits::SEND, 'ip', OTP_E164, OTP_IP), 3600);
+            }
+            $ipHits = 10;
+        }
+
+        otpRefusal(fn () => ($this->send)());
+
+        expect(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'phone', OTP_E164, OTP_IP)))->toBe(0)
+            ->and(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'ip', OTP_E164, OTP_IP)))->toBe($ipHits)
+            ->and(Cache::get(OtpLimits::globalKey(), 0))->toBe(0)
+            ->and(Cache::has(OtpLimits::cooldownKey(OTP_E164)))->toBeFalse();
+    })->with(['captcha', 'no channel', 'rate limit']);
+
+    it('lets the retry with a token through at once after a captcha refusal', function (): void {
+        otpEnableCaptcha();
+        Cache::put('auth:captcha_always', true, now()->addHour());
+
+        otpRefusal(fn () => ($this->send)());
+        otpCloudflare();
+        ($this->send)(token: 'a-token');
+
+        expect($this->delivery->sent())->toHaveCount(1);
+    });
+
+    it('gives the counters back but keeps the cooldown when every channel fails', function (): void {
+        $this->delivery->failOn(OtpChannel::Sms);
+
+        expect(otpRefusal(fn () => ($this->send)())->errorCode)->toBe('otp_send_failed');
+
+        expect(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'phone', OTP_E164, OTP_IP)))->toBe(0)
+            ->and(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'ip', OTP_E164, OTP_IP)))->toBe(0)
+            ->and(Cache::get(OtpLimits::globalKey(), 0))->toBe(0)
+            ->and(otpRefusal(fn () => ($this->send)())->errorCode)->toBe('otp_cooldown');
+    });
+
+    it('gives the counters back and keeps the cooldown when a channel fails in an unexpected way', function (): void {
+        $this->app->instance(OtpDelivery::class, new class implements OtpDelivery
+        {
+            public function send(OtpChannel $channel, string $e164, #[SensitiveParameter] string $message, #[SensitiveParameter] string $code, string $otpId): void
+            {
+                throw new LogicException('driver bug');
+            }
+        });
+
+        expect(fn () => ($this->send)())->toThrow(LogicException::class);
+        expect(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'phone', OTP_E164, OTP_IP)))->toBe(0)
+            ->and(Cache::has(OtpLimits::cooldownKey(OTP_E164)))->toBeTrue();
+    });
+
+    it('keeps the counters of a send that went out', function (): void {
+        ($this->send)();
+
+        expect(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'phone', OTP_E164, OTP_IP)))->toBe(1)
+            ->and(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'ip', OTP_E164, OTP_IP)))->toBe(1)
+            ->and(Cache::get(OtpLimits::globalKey()))->toBe(1)
+            ->and(Cache::has(OtpLimits::cooldownKey(OTP_E164)))->toBeTrue();
+    });
+
+    it('refuses a number over its hourly limit without counting the refused send, and frees the cooldown', function (): void {
+        foreach (range(1, 5) as $_) {
+            ($this->send)();
+            $this->travel(61)->seconds();
+        }
+
+        otpRefusal(fn () => ($this->send)());
+        otpRefusal(fn () => ($this->send)());
+
+        expect(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'phone', OTP_E164, OTP_IP)))->toBe(5)
+            ->and(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'ip', OTP_E164, OTP_IP)))->toBe(5)
+            ->and(Cache::get(OtpLimits::globalKey()))->toBe(5);
+    });
+});
+
+describe('the session count (13 section 4.1: within the hour)', function (): void {
+    beforeEach(function (): void {
+        otpEnableCaptcha();
+    });
+
+    it('stops counting a send after an hour', function (): void {
+        ($this->send)(otpPhone(1), '198.51.100.1');
+        ($this->send)(otpPhone(2), '198.51.100.2');
+        expect(otpRefusal(fn () => ($this->send)(otpPhone(3), '198.51.100.3'))->errorCode)->toBe('captcha_required');
+
+        $this->travel(61)->minutes();
+        ($this->send)(otpPhone(4), '198.51.100.4');
+
+        expect(Session::get('otp.sends'))->toBe(1);
+    });
+
+    it('restarts the window at the first send after it has passed', function (): void {
+        ($this->send)(otpPhone(1), '198.51.100.1');
+        $this->travel(59)->minutes();
+        ($this->send)(otpPhone(2), '198.51.100.2');
+
+        expect(Session::get('otp.sends'))->toBe(2);
+
+        $this->travel(2)->minutes();
+        ($this->send)(otpPhone(3), '198.51.100.3');
+        ($this->send)(otpPhone(4), '198.51.100.4');
+
+        expect(Session::get('otp.sends'))->toBe(2);
+        expect(otpRefusal(fn () => ($this->send)(otpPhone(5), '198.51.100.5'))->errorCode)->toBe('captcha_required');
+    });
+});
+
+describe('the code stays out of stack traces (SensitiveParameter)', function (): void {
+    it('is in no frame of the exception a delivery driver throws', function (): void {
+        $this->app->instance(OtpCodeGenerator::class, new OtpCodeGenerator(fn (): int => 246802));
+        $seen = new ArrayObject;
+        $this->app->instance(OtpDelivery::class, new class($seen) implements OtpDelivery
+        {
+            public function __construct(private readonly ArrayObject $seen) {}
+
+            public function send(OtpChannel $channel, string $e164, #[SensitiveParameter] string $message, #[SensitiveParameter] string $code, string $otpId): void
+            {
+                $this->seen['code'] = $code;
+
+                throw new LogicException('driver bug');
+            }
+        });
+
+        try {
+            app(SendOtp::class)->handle(OTP_PHONE, OtpPurpose::Login, OTP_IP, null);
+            $this->fail('Expected the driver error.');
+        } catch (LogicException $exception) {
+            $trace = $exception->getTraceAsString();
+        }
+
+        expect($seen['code'])->toBe('246802')
+            ->and($trace)->not->toContain($seen['code'])->not->toContain('verification code')
+            ->and($trace)->toContain('SendOtp->deliver(');
+    });
+
+    it('is not a plain argument of any parameter that carries it', function (): void {
+        foreach ([
+            [SendOtp::class, 'deliver', 'code'],
+            [SendOtp::class, 'store', 'code'],
+            [OtpDelivery::class, 'send', 'message'],
+            [OtpDelivery::class, 'send', 'code'],
+            [ArrayOtpDelivery::class, 'send', 'message'],
+            [ArrayOtpDelivery::class, 'send', 'code'],
+            [LogOtpDelivery::class, 'send', 'message'],
+            [LogOtpDelivery::class, 'send', 'code'],
+            [VerifyOtp::class, 'handle', 'code'],
+        ] as [$class, $method, $parameter]) {
+            $found = collect((new ReflectionMethod($class, $method))->getParameters())->first(fn (ReflectionParameter $p): bool => $p->getName() === $parameter);
+
+            expect($found?->getAttributes(SensitiveParameter::class))->toHaveCount(1, "{$class}::{$method}(\${$parameter})");
+        }
+    });
+});
+
+describe('the delivery gets the bare code (WhatsApp authentication templates)', function (): void {
+    it('is handed the message and the code separately', function (): void {
+        ($this->send)();
+
+        $sent = $this->delivery->sent()[0];
+
+        expect($sent['code'])->toMatch('/^\d{6}$/')->and($sent['message'])->toStartWith($sent['code'].' is your');
     });
 });
 

@@ -130,8 +130,7 @@ describe('who gets a link', function (): void {
 });
 
 describe('a queue outage (13 section 5.5)', function (): void {
-    it('reports the failure and still gives the generic answer for a known address', function (): void {
-        Exceptions::fake();
+    beforeEach(function (): void {
         // The mail is queued; the connection refuses the job.
         Queue::extend('broken', fn (): ConnectorInterface => new class implements ConnectorInterface
         {
@@ -149,6 +148,10 @@ describe('a queue outage (13 section 5.5)', function (): void {
         config(['queue.connections.broken' => ['driver' => 'broken'], 'queue.default' => 'broken']);
         // The real notification dispatcher instead of the fake of the other tests.
         Notification::swap(new ChannelManager(app()));
+    });
+
+    it('reports the failure and still gives the generic answer for a known address', function (): void {
+        Exceptions::fake();
 
         $known = ($this->send)('asha@example.com');
         $unknown = ($this->send)('nobody@example.com');
@@ -156,6 +159,16 @@ describe('a queue outage (13 section 5.5)', function (): void {
         $known->assertRedirect(route('password.request'))->assertSessionHas('status', trans('passwords.sent_generic'))->assertSessionHasNoErrors();
         expect($known->getStatusCode())->toBe($unknown->getStatusCode());
         Exceptions::assertReported(fn (RuntimeException $exception): bool => $exception->getMessage() === 'queue is down');
+    });
+
+    it('answers a JSON client with the generic message as well', function (): void {
+        Exceptions::fake();
+
+        $this->postJson(route('password.email'), ['email' => 'asha@example.com'])->assertOk()->assertExactJson(['message' => trans('passwords.sent_generic')]);
+    });
+
+    it('lets any other sender of the notification see the failure', function (): void {
+        expect(fn () => $this->user->sendPasswordResetNotification('a-token'))->toThrow(RuntimeException::class, 'queue is down');
     });
 });
 

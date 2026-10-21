@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use App\Domain\Identity\Models\User;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Support\Settings\Settings;
+use App\Support\Settings\SettingsGroup;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -200,6 +202,33 @@ describe('keys are normalised so variants cannot bypass a limit', function (): v
 
         expect(array_unique($keys, SORT_REGULAR))->toHaveCount(1);
     })->with(['otp-send', 'otp-cooldown', 'otp-verify']);
+
+    it('reads a phone typed without a country code in the region of the business, with no country assumed', function (): void {
+        $key = fn (string $phone) => limitsFor('otp-cooldown', limiterRequest('otp-cooldown', null, ['phone' => $phone]))[0]->key;
+        $settings = app(Settings::class);
+
+        // The business address decides.
+        $business = $settings->business();
+        $business->address = ['country_code' => 'ae'];
+        $settings->put(SettingsGroup::Business, $business);
+
+        expect($key('050 123 4567'))->toBe($key('+971501234567'))->not->toContain('guest:');
+
+        // No address: the first allowed country.
+        $business->address = null;
+        $settings->put(SettingsGroup::Business, $business);
+        $auth = $settings->auth();
+        $auth->otpAllowedCountryCodes = ['AE'];
+        $settings->put(SettingsGroup::Auth, $auth);
+
+        expect($key('050 123 4567'))->toBe($key('+971501234567'));
+
+        // Nothing allowed and no address: a number without a country code is not a number, so it is the IP's bucket.
+        $auth->otpAllowedCountryCodes = [];
+        $settings->put(SettingsGroup::Auth, $auth);
+
+        expect($key('9876543210'))->toContain('guest:');
+    });
 
     it('separates different phones', function (): void {
         $a = limitsFor('otp-cooldown', limiterRequest('otp-cooldown', null, ['phone' => '+919876543210']));

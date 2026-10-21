@@ -14,6 +14,7 @@ use App\Domain\Identity\Events\CustomerRegistered;
 use App\Domain\Identity\Listeners\SendWelcomeNotification;
 use App\Domain\Identity\Models\User;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Responses\EmailVerifiedResponse;
 use App\Http\Responses\GenericPasswordResetLinkResponse;
 use App\Http\Responses\LoginResponse;
@@ -44,6 +45,7 @@ use Laravel\Fortify\Contracts\VerifyEmailResponse as VerifyEmailResponseContract
 use Laravel\Fortify\Features as FortifyFeatures;
 use Laravel\Fortify\Fortify;
 use Laravel\Fortify\Http\Controllers\AuthenticatedSessionController as FortifyAuthenticatedSessionController;
+use Laravel\Fortify\Http\Controllers\PasswordResetLinkController as FortifyPasswordResetLinkController;
 
 final class FortifyServiceProvider extends ServiceProvider
 {
@@ -63,6 +65,7 @@ final class FortifyServiceProvider extends ServiceProvider
         $this->app->bind(SuccessfulPasswordResetLinkRequestResponseContract::class, GenericPasswordResetLinkResponse::class);
         $this->app->bind(FailedPasswordResetLinkRequestResponseContract::class, GenericPasswordResetLinkResponse::class);
         $this->app->bind(FortifyAuthenticatedSessionController::class, AuthenticatedSessionController::class);
+        $this->app->bind(FortifyPasswordResetLinkController::class, PasswordResetLinkController::class);
     }
 
     /**

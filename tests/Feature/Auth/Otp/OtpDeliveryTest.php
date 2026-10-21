@@ -12,6 +12,8 @@ use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 
+const DELIVERY_CODE = '482913';
+
 const DELIVERY_MESSAGE = "482913 is your Furny verification code. It expires in 10 minutes. Do not share it.\n\n@furny.test #482913";
 
 /** Everything logged from now on: [channel name, level, message, context]. */
@@ -30,7 +32,7 @@ describe('LogOtpDelivery', function (): void {
         $records = deliveryLog();
         expect(app()->environment())->toBe('testing');
 
-        (new LogOtpDelivery)->send(OtpChannel::Sms, '+919876543210', DELIVERY_MESSAGE, 'otp-id-1');
+        (new LogOtpDelivery)->send(OtpChannel::Sms, '+919876543210', DELIVERY_MESSAGE, DELIVERY_CODE, 'otp-id-1');
 
         expect($records)->toHaveCount(1);
         [$level, $message, $context] = $records[0];
@@ -46,7 +48,7 @@ describe('LogOtpDelivery', function (): void {
         config(['logging.channels.otp-dev' => ['driver' => 'single', 'path' => storage_path('logs/otp-dev-test.log')]]);
         File::delete(storage_path('logs/otp-dev-test.log'));
 
-        (new LogOtpDelivery)->send(OtpChannel::Whatsapp, '+919876543210', DELIVERY_MESSAGE, 'otp-id-1');
+        (new LogOtpDelivery)->send(OtpChannel::Whatsapp, '+919876543210', DELIVERY_MESSAGE, DELIVERY_CODE, 'otp-id-1');
 
         expect(File::exists(storage_path('logs/otp-dev-test.log')))->toBeFalse();
     });
@@ -66,7 +68,7 @@ describe('LogOtpDelivery', function (): void {
         it('writes the full message to the otp-dev channel', function (): void {
             $records = deliveryLog();
 
-            (new LogOtpDelivery)->send(OtpChannel::Sms, '+919876543210', DELIVERY_MESSAGE, 'otp-id-1');
+            (new LogOtpDelivery)->send(OtpChannel::Sms, '+919876543210', DELIVERY_MESSAGE, DELIVERY_CODE, 'otp-id-1');
 
             $contents = File::get($this->path);
 
@@ -79,7 +81,7 @@ describe('LogOtpDelivery', function (): void {
             config(['logging.channels.otp-dev' => null]);
             $records = deliveryLog();
 
-            (new LogOtpDelivery)->send(OtpChannel::Sms, '+919876543210', DELIVERY_MESSAGE, 'otp-id-1');
+            (new LogOtpDelivery)->send(OtpChannel::Sms, '+919876543210', DELIVERY_MESSAGE, DELIVERY_CODE, 'otp-id-1');
 
             expect(json_encode($records[0]))->not->toContain('482913');
         });
@@ -107,19 +109,19 @@ describe('ArrayOtpDelivery', function (): void {
 
         expect($delivery->sent())->toBe([])->and($delivery->lastCode())->toBeNull();
 
-        $delivery->send(OtpChannel::Sms, '+919876543210', DELIVERY_MESSAGE, 'otp-id-1');
+        $delivery->send(OtpChannel::Sms, '+919876543210', DELIVERY_MESSAGE, DELIVERY_CODE, 'otp-id-1');
 
-        expect($delivery->sent())->toBe([['channel' => OtpChannel::Sms, 'e164' => '+919876543210', 'message' => DELIVERY_MESSAGE, 'otpId' => 'otp-id-1']])
+        expect($delivery->sent())->toBe([['channel' => OtpChannel::Sms, 'e164' => '+919876543210', 'message' => DELIVERY_MESSAGE, 'code' => '482913', 'otpId' => 'otp-id-1']])
             ->and($delivery->lastCode())->toBe('482913');
     });
 
     it('throws for a channel it was told to fail on, and records nothing for it', function (): void {
         $delivery = (new ArrayOtpDelivery)->failOn(OtpChannel::Whatsapp);
 
-        expect(fn () => $delivery->send(OtpChannel::Whatsapp, '+919876543210', DELIVERY_MESSAGE, 'x'))->toThrow(OtpDeliveryException::class)
+        expect(fn () => $delivery->send(OtpChannel::Whatsapp, '+919876543210', DELIVERY_MESSAGE, DELIVERY_CODE, 'x'))->toThrow(OtpDeliveryException::class)
             ->and($delivery->sent())->toBe([]);
 
-        $delivery->send(OtpChannel::Sms, '+919876543210', DELIVERY_MESSAGE, 'x');
+        $delivery->send(OtpChannel::Sms, '+919876543210', DELIVERY_MESSAGE, DELIVERY_CODE, 'x');
 
         expect($delivery->sent())->toHaveCount(1);
     });

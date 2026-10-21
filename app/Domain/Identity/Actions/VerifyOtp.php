@@ -13,6 +13,7 @@ use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
+use SensitiveParameter;
 
 /**
  * Checks a typed code against the latest live code for a number and purpose (13 §4.3). The attempt counter and the
@@ -27,7 +28,7 @@ final class VerifyOtp
      * @throws ThrottleRequestsException 429 when the IP or the number has been tried too often
      * @throws OtpException `otp_invalid` (+`attemptsLeft`), `otp_expired`, `otp_too_many_attempts` (422)
      */
-    public function handle(string $e164, OtpPurpose $purpose, string $code, ?string $ip): OtpCode
+    public function handle(string $e164, OtpPurpose $purpose, #[SensitiveParameter] string $code, ?string $ip): OtpCode
     {
         $this->countAttempt($e164, $ip);
 

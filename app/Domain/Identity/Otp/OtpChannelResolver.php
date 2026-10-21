@@ -23,18 +23,20 @@ final class OtpChannelResolver
 
     /**
      * `$e164` is for the checks that depend on the number (WhatsApp-unreachable phones, 12 §7.7), which come with the
-     * notification channels.
+     * notification channels. `$reservedCount` is the place the sender reserved in the global counter for the send
+     * being decided (it reserves first, so parallel sends cannot all slip under the cap): SMS is allowed while that
+     * place is within the cap. Without one the counter is read, and SMS is allowed while there is room for one more.
      *
      * @return list<OtpChannel>
      */
-    public function available(string $e164): array
+    public function available(string $e164, ?int $reservedCount = null): array
     {
         $available = [];
 
         foreach ($this->settings->notifications()->otpChannelOrder as $name) {
             $channel = OtpChannel::tryFrom($name);
 
-            if ($channel !== null && ! in_array($channel, $available, true) && $this->usable($channel)) {
+            if ($channel !== null && ! in_array($channel, $available, true) && $this->usable($channel, $reservedCount)) {
                 $available[] = $channel;
             }
         }
@@ -42,16 +44,17 @@ final class OtpChannelResolver
         return $available;
     }
 
-    private function usable(OtpChannel $channel): bool
+    private function usable(OtpChannel $channel, ?int $reservedCount): bool
     {
         $notifications = $this->settings->notifications();
+        $cap = $this->settings->auth()->otpGlobalHourlyCap;
 
         return match ($channel) {
             OtpChannel::Whatsapp => Features::enabled('whatsapp')
                 && isset($notifications->whatsappTemplates[self::TEMPLATE_KEY]),
             OtpChannel::Sms => Features::enabled('sms')
                 && isset($notifications->smsTemplates[self::TEMPLATE_KEY])
-                && (int) Cache::get(OtpLimits::globalKey(), 0) < $this->settings->auth()->otpGlobalHourlyCap,
+                && ($reservedCount !== null ? $reservedCount <= $cap : (int) Cache::get(OtpLimits::globalKey(), 0) < $cap),
         };
     }
 }

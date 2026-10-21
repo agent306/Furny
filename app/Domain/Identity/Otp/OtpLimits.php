@@ -26,6 +26,12 @@ final class OtpLimits
         return 'otp:global:'.now()->format('YmdH');
     }
 
+    /** The cooldown of a number: set with `Cache::add` (one winner among parallel sends), its value is when it ends. */
+    public static function cooldownKey(string $e164): string
+    {
+        return 'otp:cooldown:'.hash('sha256', $e164);
+    }
+
     public static function key(string $limiter, string $kind, string $e164, ?string $ip): string
     {
         return match ($kind) {

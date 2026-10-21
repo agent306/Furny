@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Support\Phone;
 
 use App\Domain\Identity\Otp\OtpException;
+use App\Support\Settings\Settings;
 use libphonenumber\NumberParseException;
 use libphonenumber\PhoneNumberFormat;
 use libphonenumber\PhoneNumberType;
@@ -17,6 +18,24 @@ use libphonenumber\PhoneNumberUtil;
  */
 final class PhoneNumberParser
 {
+    /**
+     * The region a number typed without a country code is read in: the country of the business address; without
+     * one, the first country the auth settings allow (the business is global and configurable, so no country is
+     * assumed); with none allowed, an unknown region, which makes every such number invalid.
+     */
+    public static function defaultRegion(Settings $settings): string
+    {
+        $country = $settings->business()->address['country_code'] ?? null;
+
+        if (is_string($country) && preg_match('/^[A-Za-z]{2}$/', $country) === 1) {
+            return strtoupper($country);
+        }
+
+        $allowed = $settings->auth()->otpAllowedCountryCodes;
+
+        return strtoupper((string) ($allowed[array_key_first($allowed)] ?? 'ZZ'));
+    }
+
     /**
      * @param  list<string>  $allowedRegions  ISO 3166-1 alpha-2, upper case
      *

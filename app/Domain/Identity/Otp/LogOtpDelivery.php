@@ -7,6 +7,7 @@ namespace App\Domain\Identity\Otp;
 use App\Domain\Identity\Enums\OtpChannel;
 use App\Support\Privacy\Mask;
 use Illuminate\Support\Facades\Log;
+use SensitiveParameter;
 
 /**
  * The delivery bound until the WhatsApp and SMS channels exist. It sends nothing: it logs the masked number and the
@@ -15,8 +16,13 @@ use Illuminate\Support\Facades\Log;
  */
 final class LogOtpDelivery implements OtpDelivery
 {
-    public function send(OtpChannel $channel, string $e164, string $message, string $otpId): void
-    {
+    public function send(
+        OtpChannel $channel,
+        string $e164,
+        #[SensitiveParameter] string $message,
+        #[SensitiveParameter] string $code,
+        string $otpId,
+    ): void {
         $context = ['channel' => $channel->value, 'phone' => Mask::phone($e164), 'reference' => $otpId];
 
         if (app()->environment('local') && config('logging.channels.otp-dev') !== null) {

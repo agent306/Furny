@@ -8,6 +8,7 @@ use App\Domain\Identity\Enums\OtpChannel;
 use App\Domain\Identity\Enums\OtpPurpose;
 use App\Domain\Identity\Models\OtpCode;
 use App\Domain\Identity\Otp\OtpChannelResolver;
+use App\Domain\Identity\Otp\OtpCodeGenerator;
 use App\Domain\Identity\Otp\OtpDelivery;
 use App\Domain\Identity\Otp\OtpDeliveryException;
 use App\Domain\Identity\Otp\OtpException;
@@ -27,12 +28,19 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Facades\Validator;
+use SensitiveParameter;
 use Throwable;
 
 /**
  * Sends a verification code to a phone (13 §4.2): parse, limits, captcha escalation, channel choice, store the hash,
  * deliver. Delivery is synchronous and the plain code lives in this method and in the delivered message only: it is
  * never stored, queued, logged or broadcast.
+ *
+ * The cooldown, the hourly limits and the global cap are reserved before any slow work (the captcha call, bcrypt,
+ * the transaction): the cooldown with an atomic `Cache::add`, the counters by incrementing first and comparing the
+ * count that came back. Parallel requests therefore cannot all pass a check that none of them has counted yet. A
+ * send that is refused before it is tried gives its reservations back; one whose channels all failed gives back the
+ * counters but keeps the cooldown, as the number was still sent to.
  *
  * Whether the number belongs to an account is not asked here, so the answer is the same for known and unknown numbers.
  * The caller keeps the session challenge (`otp.challenge`), which holds what only it knows (intent, name).
@@ -42,38 +50,64 @@ final class SendOtp
     /** The send after this many earlier ones in a session, from a phone or from an IP needs a captcha (13 §4.1). */
     private const int CAPTCHA_AFTER_SENDS = 2;
 
+    /** The window of the session's send count (13 §4.1: "within the hour"). */
+    private const int SESSION_WINDOW_SECONDS = 3600;
+
     public function __construct(
         private readonly Settings $settings,
         private readonly OtpChannelResolver $channels,
         private readonly OtpDelivery $delivery,
+        private readonly OtpCodeGenerator $codes,
     ) {}
 
     /**
      * @throws OtpException `phone_*` (422), `otp_cooldown`, `otp_rate_limited` (429), `captcha_required` (422),
-     *                      `otp_unavailable`, `otp_send_failed` (503)
+     *                      `captcha_unavailable`, `otp_unavailable`, `otp_send_failed` (503)
      */
     public function handle(string $rawPhone, OtpPurpose $purpose, ?string $ip, ?string $captchaToken): OtpSendResult
     {
         $e164 = $this->parse($rawPhone)->e164;
         $ip = $ip !== null && filter_var($ip, FILTER_VALIDATE_IP) !== false ? $ip : null;
 
-        $this->assertWithinLimits($e164, $ip);
-        $this->assertCaptcha($e164, $ip, $captchaToken);
+        $this->reserveCooldown($e164);
 
-        $channels = $this->channels->available($e164);
+        // What is reserved from here on, to give back when this send does not happen.
+        $counters = [];
 
-        if ($channels === []) {
-            Log::critical('otp.no_channel', ['phone' => Mask::phone($e164)]);
+        try {
+            $phoneCount = $this->reserveHourly($e164, $ip, 'phone', $counters);
+            $ipCount = $this->reserveHourly($e164, $ip, 'ip', $counters);
+            $globalCount = $this->reserveGlobal($counters);
 
-            throw new OtpException('otp_unavailable', 503);
+            $this->assertCaptcha($captchaToken, $phoneCount, $ipCount);
+
+            $channels = $this->channels->available($e164, $globalCount);
+
+            if ($channels === []) {
+                Log::critical('otp.no_channel', ['phone' => Mask::phone($e164)]);
+
+                throw new OtpException('otp_unavailable', 503);
+            }
+
+            $code = $this->codes->generate();
+            $otp = $this->store($e164, $purpose, $channels[0], $code, $ip);
+        } catch (Throwable $exception) {
+            $this->release($counters);
+            Cache::forget(OtpLimits::cooldownKey($e164));
+
+            throw $exception;
         }
 
-        $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        $otp = $this->store($e164, $purpose, $channels[0], $code, $ip);
+        $this->countSessionSend();
 
-        $this->countSend($e164, $ip);
+        try {
+            $channel = $this->deliver($otp, $e164, $code, $channels);
+        } catch (Throwable $exception) {
+            // Nothing went out, so the counters are given back; the cooldown stays (13 §4.2).
+            $this->release($counters);
 
-        $channel = $this->deliver($otp, $e164, $code, $channels);
+            throw $exception;
+        }
 
         activity('security')
             ->causedBy(Auth::user())
@@ -92,65 +126,133 @@ final class SendOtp
     private function parse(string $rawPhone): ParsedPhone
     {
         $allowed = $this->settings->auth()->otpAllowedCountryCodes;
-        $country = $this->settings->business()->address['country_code'] ?? null;
 
-        // The business country is the region of numbers typed without a country code; without one, the first
-        // allowed country is. With no allowed country every number is refused anyway.
-        $default = is_string($country) && preg_match('/^[A-Za-z]{2}$/', $country) === 1 ? $country : (reset($allowed) ?: 'ZZ');
-
-        return PhoneNumberParser::parse($rawPhone, $default, $allowed);
+        return PhoneNumberParser::parse($rawPhone, PhoneNumberParser::defaultRegion($this->settings), $allowed);
     }
 
-    private function assertWithinLimits(string $e164, ?string $ip): void
+    /** One winner among parallel sends to a number: the first to `add` the key holds the cooldown. */
+    private function reserveCooldown(string $e164): void
     {
-        $cooldown = OtpLimits::key(OtpLimits::COOLDOWN, 'phone', $e164, $ip);
+        $key = OtpLimits::cooldownKey($e164);
+        $seconds = OtpLimits::limit(OtpLimits::COOLDOWN, 'phone')['decay'];
+        $endsAt = now()->getTimestamp() + $seconds;
 
-        if (RateLimiter::tooManyAttempts($cooldown, OtpLimits::limit(OtpLimits::COOLDOWN, 'phone')['max'])) {
-            throw new OtpException('otp_cooldown', 429, ['retryAfter' => $this->retryAfter($cooldown)]);
+        if (! Cache::add($key, $endsAt, $seconds)) {
+            $left = (int) Cache::get($key, $endsAt) - now()->getTimestamp();
+
+            throw new OtpException('otp_cooldown', 429, ['retryAfter' => max(1, min($seconds, $left))]);
+        }
+    }
+
+    /**
+     * Counts this send against the hourly limit of a number or an IP, and refuses it when the count that came back is
+     * over the limit. The count is the place in line, so it stays valid however many requests run in parallel.
+     *
+     * @param  list<array{string, int}>  $counters  reserved so far, as [key, window]; this one is added
+     */
+    private function reserveHourly(string $e164, ?string $ip, string $kind, array &$counters): int
+    {
+        $key = OtpLimits::key(OtpLimits::SEND, $kind, $e164, $ip);
+        ['max' => $max, 'decay' => $decay] = OtpLimits::limit(OtpLimits::SEND, $kind);
+
+        $count = RateLimiter::hit($key, $decay);
+        $counters[] = [$key, $decay];
+
+        if ($count > $max) {
+            throw new OtpException('otp_rate_limited', 429, ['retryAfter' => max(1, RateLimiter::availableIn($key))]);
         }
 
-        foreach (['phone', 'ip'] as $kind) {
-            $key = OtpLimits::key(OtpLimits::SEND, $kind, $e164, $ip);
+        return $count;
+    }
 
-            if (RateLimiter::tooManyAttempts($key, OtpLimits::limit(OtpLimits::SEND, $kind)['max'])) {
-                throw new OtpException('otp_rate_limited', 429, ['retryAfter' => $this->retryAfter($key)]);
+    /**
+     * The system-wide count of sends this hour; the channels decide from the place this send got in it.
+     *
+     * @param  list<array{string, int}>  $counters
+     */
+    private function reserveGlobal(array &$counters): int
+    {
+        $key = OtpLimits::globalKey();
+
+        Cache::add($key, 0, now()->addHours(2));
+        $counters[] = [$key, 0];
+
+        return (int) Cache::increment($key);
+    }
+
+    /** @param  list<array{string, int}>  $counters */
+    private function release(array $counters): void
+    {
+        foreach ($counters as [$key, $decay]) {
+            if ($decay === 0) {
+                Cache::decrement($key);
+
+                continue;
+            }
+
+            if (RateLimiter::decrement($key, $decay) < 0) {
+                RateLimiter::clear($key);
             }
         }
     }
 
-    private function retryAfter(string $key): int
+    /**
+     * From the third send on (session, phone or IP), or while the conversion monitor has the captcha switched on for
+     * everyone. The phone and IP counts are the reserved ones, which include this send.
+     */
+    private function assertCaptcha(?string $token, int $phoneCount, int $ipCount): void
     {
-        return max(1, RateLimiter::availableIn($key));
-    }
-
-    /** From the third send on (session, phone or IP), or while the conversion monitor has the captcha switched on for everyone. */
-    private function assertCaptcha(string $e164, ?string $ip, ?string $token): void
-    {
-        if (! Features::enabled('captcha') || ! $this->captchaRequired($e164, $ip)) {
+        if (! Features::enabled('captcha')) {
             return;
         }
 
+        $required = $this->sessionSends() >= self::CAPTCHA_AFTER_SENDS
+            || $phoneCount > self::CAPTCHA_AFTER_SENDS
+            || $ipCount > self::CAPTCHA_AFTER_SENDS
+            || Cache::has('auth:captcha_always');
+
+        if (! $required) {
+            return;
+        }
+
+        if ($token === null || $token === '') {
+            throw new OtpException('captcha_required', 422);
+        }
+
         // Fail closed: an SMS costs money, so a check that cannot be made is a failed check (13 §3).
-        $valid = $token !== null && $token !== '' && Validator::make(
+        $validator = Validator::make(
             ['cf_turnstile_response' => $token],
             ['cf_turnstile_response' => [new TurnstileToken('otp_send', failOpen: false)]],
-        )->passes();
+        );
 
-        if (! $valid) {
-            throw new OtpException('captcha_required', 422);
+        if ($validator->fails()) {
+            $unavailable = $validator->errors()->first('cf_turnstile_response') === __('auth.captcha_unavailable');
+
+            throw new OtpException($unavailable ? 'captcha_unavailable' : 'captcha_required', $unavailable ? 503 : 422);
         }
     }
 
-    private function captchaRequired(string $e164, ?string $ip): bool
+    /** Sends of this session in the last hour; the count restarts when its first send is older than that. */
+    private function sessionSends(): int
     {
-        return (int) Session::get('otp.sends', 0) >= self::CAPTCHA_AFTER_SENDS
-            || RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'phone', $e164, $ip)) >= self::CAPTCHA_AFTER_SENDS
-            || RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'ip', $e164, $ip)) >= self::CAPTCHA_AFTER_SENDS
-            || Cache::has('auth:captcha_always');
+        $since = (int) Session::get('otp.sends_since', 0);
+
+        return now()->getTimestamp() - $since >= self::SESSION_WINDOW_SECONDS ? 0 : (int) Session::get('otp.sends', 0);
+    }
+
+    private function countSessionSend(): void
+    {
+        $sends = $this->sessionSends();
+
+        Session::put('otp.sends', $sends + 1);
+
+        if ($sends === 0) {
+            Session::put('otp.sends_since', now()->getTimestamp());
+        }
     }
 
     /** The new code replaces every unconsumed one for the same number and purpose (13 §4.1). */
-    private function store(string $e164, OtpPurpose $purpose, OtpChannel $channel, string $code, ?string $ip): OtpCode
+    private function store(string $e164, OtpPurpose $purpose, OtpChannel $channel, #[SensitiveParameter] string $code, ?string $ip): OtpCode
     {
         $hash = Hash::make($code);
 
@@ -174,26 +276,13 @@ final class SendOtp
         });
     }
 
-    private function countSend(string $e164, ?string $ip): void
-    {
-        RateLimiter::hit(OtpLimits::key(OtpLimits::COOLDOWN, 'phone', $e164, $ip), OtpLimits::limit(OtpLimits::COOLDOWN, 'phone')['decay']);
-
-        foreach (['phone', 'ip'] as $kind) {
-            RateLimiter::hit(OtpLimits::key(OtpLimits::SEND, $kind, $e164, $ip), OtpLimits::limit(OtpLimits::SEND, $kind)['decay']);
-        }
-
-        Cache::add(OtpLimits::globalKey(), 0, now()->addHours(2));
-        Cache::increment(OtpLimits::globalKey());
-        Session::increment('otp.sends');
-    }
-
     /**
      * Tries the channels in order; the first that takes the message is the one the row records. When none does the
      * code is dead on arrival, so it is expired.
      *
      * @param  non-empty-list<OtpChannel>  $channels
      */
-    private function deliver(OtpCode $otp, string $e164, string $code, array $channels): OtpChannel
+    private function deliver(OtpCode $otp, string $e164, #[SensitiveParameter] string $code, array $channels): OtpChannel
     {
         $message = trans_icu('notifications.auth.otp.sms', [
             'code' => $code,
@@ -204,7 +293,7 @@ final class SendOtp
         try {
             foreach ($channels as $channel) {
                 try {
-                    $this->delivery->send($channel, $e164, $message, $otp->id);
+                    $this->delivery->send($channel, $e164, $message, $code, $otp->id);
                 } catch (OtpDeliveryException $exception) {
                     // The class only: a provider's error text may repeat the message, and the message holds the code.
                     Log::warning('otp.delivery_failed', ['channel' => $channel->value, 'exception' => $exception::class]);
