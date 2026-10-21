@@ -34,7 +34,7 @@ export type RpcResponse =
 export interface RpcPort {
     postMessage(msg: RpcRequest): void;
     onmessage: ((e: { data: RpcResponse }) => void) | null;
-    /** The worker failed to load or threw uncaught: fatal for the client. */
+    /** The worker failed to load or threw uncaught; the client treats it as fatal. */
     onerror?: (() => void) | null;
     /** A reply could not be deserialised: its caller is unknown, so all pending calls fail. */
     onmessageerror?: (() => void) | null;
@@ -136,7 +136,8 @@ export function createRpcClient(
         pending.clear();
         latestIdByMethod.clear();
     };
-    // Fatal: the worker is gone or broken, so later calls reject until a new client is made.
+    // Fatal by policy: an uncaught exception leaves the worker alive (HTML spec), but the event
+    // cannot tell that from a script-load failure, so later calls reject until a new client.
     port.onerror = () => {
         failed = true;
         rejectAll(new EngineWorkerError());
