@@ -2,7 +2,10 @@ declare namespace App {
 namespace Domain {
 namespace Ai {
 namespace Enums {
+export type AiFeature = 'blueprint_recognition' | 'provider_test';
 export type AiProvider = 'anthropic' | 'openai' | 'openai_compatible' | 'none';
+export type AiUsageStatus = 'succeeded' | 'failed';
+export type CreditLedgerKind = 'monthly_grant' | 'admin_grant' | 'admin_revoke' | 'reservation' | 'reservation_release' | 'consumption' | 'refund' | 'signup_grant';
 }
 }
 namespace Catalog {
@@ -40,6 +43,11 @@ namespace Enums {
 export type ImportMode = 'auto' | 'trace';
 export type ImportSourceKind = 'raster' | 'pdf_vector' | 'pdf_raster' | 'dxf' | 'heic';
 export type ImportStatus = 'uploaded' | 'queued' | 'preprocessing' | 'recognizing' | 'ready_for_review' | 'accepted' | 'discarded' | 'failed' | 'cancelled';
+}
+}
+namespace Messaging {
+namespace Enums {
+export type MessageKind = 'text' | 'system' | 'internal_note';
 }
 }
 namespace Orders {

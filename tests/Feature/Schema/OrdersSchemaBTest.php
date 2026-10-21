@@ -304,6 +304,29 @@ it('indexes quotes, deliveries and production updates as listed in 02 §8', func
         ->not->toContain('UNIQUE')->toContain('(order_id, created_at)');
 });
 
+it('indexes the order and quote join keys that 02 §8 leaves bare', function (): void {
+    // Added by the controller ruling on missing FK join-key indexes (logged in 19). Complete lists per table:
+    // the primary key, any index of 02, and the plain join-key index.
+    expect(PgSchema::indexNames('quote_lines'))->toBe(['quote_lines_pkey', 'quote_lines_quote_id_index'])
+        ->and(PgSchema::indexNames('quote_negotiations'))->toBe(['quote_negotiations_order_id_index', 'quote_negotiations_pkey', 'quote_negotiations_quote_id_index'])
+        ->and(PgSchema::indexNames('confirmation_calls'))->toBe(['confirmation_calls_order_id_index', 'confirmation_calls_pkey'])
+        ->and(PgSchema::indexNames('order_issues'))->toBe(['order_issues_order_id_index', 'order_issues_pkey'])
+        ->and(PgSchema::indexNames('payments'))->toBe(['payments_order_id_index', 'payments_pkey']);
+
+    foreach ([
+        'quote_lines.quote_id' => 'quote_lines_quote_id_index',
+        'quote_negotiations.quote_id' => 'quote_negotiations_quote_id_index',
+        'quote_negotiations.order_id' => 'quote_negotiations_order_id_index',
+        'confirmation_calls.order_id' => 'confirmation_calls_order_id_index',
+        'order_issues.order_id' => 'order_issues_order_id_index',
+        'payments.order_id' => 'payments_order_id_index',
+    ] as $name => $index) {
+        [$table, $column] = explode('.', $name);
+
+        expect(PgSchema::indexDefinition($table, $index))->not->toContain('UNIQUE')->toContain("({$column})");
+    }
+});
+
 it('allows only one sent quote per order, through a partial unique index', function (): void {
     expect(PgSchema::indexDefinition('quotes', 'quotes_one_sent_per_order'))
         ->toContain('UNIQUE')->toContain('(order_id)')->toContain("WHERE ((status)::text = 'sent'::text)");

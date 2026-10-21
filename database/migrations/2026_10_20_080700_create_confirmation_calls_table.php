@@ -12,7 +12,8 @@ return new class extends Migration
     {
         Schema::create('confirmation_calls', function (Blueprint $table): void {
             $table->ulid('id')->primary();
-            $table->foreignUlid('order_id')->constrained()->cascadeOnDelete();
+            // Plain join-key index 02 omits: calls are read per order.
+            $table->foreignUlid('order_id')->index()->constrained()->cascadeOnDelete();
             $table->foreignUlid('staff_id')->constrained('users')->restrictOnDelete();
             $table->timestampTz('called_at');
             $table->string('phone_e164', 20);

@@ -12,7 +12,8 @@ return new class extends Migration
     {
         Schema::create('quote_lines', function (Blueprint $table): void {
             $table->ulid('id')->primary();
-            $table->foreignUlid('quote_id')->constrained()->cascadeOnDelete();
+            // Postgres does not index foreign keys and 02 lists no index here: the quote's lines are read by this key.
+            $table->foreignUlid('quote_id')->index()->constrained()->cascadeOnDelete();
             $table->foreignUlid('order_item_id')->nullable()->constrained()->nullOnDelete();
             $table->string('kind', 16);
             $table->string('description', 255);

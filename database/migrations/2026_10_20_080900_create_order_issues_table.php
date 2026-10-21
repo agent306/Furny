@@ -12,7 +12,8 @@ return new class extends Migration
     {
         Schema::create('order_issues', function (Blueprint $table): void {
             $table->ulid('id')->primary();
-            $table->foreignUlid('order_id')->constrained()->cascadeOnDelete();
+            // Plain join-key index 02 omits: issues are read per order.
+            $table->foreignUlid('order_id')->index()->constrained()->cascadeOnDelete();
             $table->foreignUlid('order_item_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignUlid('raised_by')->constrained('users')->restrictOnDelete();
             $table->text('description');

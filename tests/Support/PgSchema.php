@@ -85,4 +85,20 @@ final class PgSchema
 
         return $row?->indexdef;
     }
+
+    /**
+     * Every index name of a table, sorted. Pins the complete set, so an index nobody listed fails too.
+     *
+     * @return list<string>
+     */
+    public static function indexNames(string $table): array
+    {
+        $names = array_column(
+            DB::select('select indexname from pg_indexes where schemaname = current_schema() and tablename = ?', [$table]),
+            'indexname',
+        );
+        sort($names);
+
+        return $names;
+    }
 }

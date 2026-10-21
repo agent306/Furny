@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Identity\Models;
 
+use App\Domain\Ai\Models\AiCreditLedgerEntry;
 use App\Domain\Identity\Enums\LengthUnit;
 use App\Domain\Identity\Enums\UnitSystem;
 use App\Domain\Identity\Enums\UserType;
@@ -151,6 +152,16 @@ final class User extends Authenticatable implements HasLocalePreference, HasMedi
     public function orders(): HasMany
     {
         return $this->hasMany(Order::class, 'customer_id');
+    }
+
+    /**
+     * The user's AI credit ledger (02 §7.1); the balance is the sum of its deltas.
+     *
+     * @return HasMany<AiCreditLedgerEntry, $this>
+     */
+    public function aiCreditLedgerEntries(): HasMany
+    {
+        return $this->hasMany(AiCreditLedgerEntry::class);
     }
 
     /** 02 §10: one avatar (jpg, png, webp) on the public disk with a 128 px `thumb`. */

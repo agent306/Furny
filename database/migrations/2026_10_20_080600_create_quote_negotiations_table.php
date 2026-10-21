@@ -12,8 +12,9 @@ return new class extends Migration
     {
         Schema::create('quote_negotiations', function (Blueprint $table): void {
             $table->ulid('id')->primary();
-            $table->foreignUlid('quote_id')->constrained()->cascadeOnDelete();
-            $table->foreignUlid('order_id')->constrained()->cascadeOnDelete();
+            // Plain join-key indexes 02 omits: negotiations are read per quote and per order.
+            $table->foreignUlid('quote_id')->index()->constrained()->cascadeOnDelete();
+            $table->foreignUlid('order_id')->index()->constrained()->cascadeOnDelete();
             $table->foreignUlid('customer_id')->constrained('users')->restrictOnDelete();
             $table->bigInteger('proposed_total_minor')->nullable();
             $table->text('message');

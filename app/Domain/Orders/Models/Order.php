@@ -6,6 +6,7 @@ namespace App\Domain\Orders\Models;
 
 use App\Domain\Identity\Models\Address;
 use App\Domain\Identity\Models\User;
+use App\Domain\Messaging\Models\Message;
 use App\Domain\Orders\Enums\CancelReason;
 use App\Domain\Orders\Enums\OrderStateKey;
 use App\Domain\Orders\States\OrderState;
@@ -26,8 +27,7 @@ use Spatie\ModelStates\HasStates;
 /**
  * 02 §8.1. Only what the customer types in the submission form is mass-assignable. The number,
  * state, milestones, assignees, owner and project are written by the order actions and transitions
- * (09 §2), so they are not. The two quote ids are set by the quote actions. The `messages` relation
- * arrives with the messaging tables (Task 12).
+ * (09 §2), so they are not. The two quote ids are set by the quote actions.
  *
  * @property string $id
  * @property string $number
@@ -240,6 +240,16 @@ final class Order extends Model
     public function delivery(): HasOne
     {
         return $this->hasOne(Delivery::class);
+    }
+
+    /**
+     * The order's thread, oldest first (soft-deleted messages excluded).
+     *
+     * @return HasMany<Message, $this>
+     */
+    public function messages(): HasMany
+    {
+        return $this->hasMany(Message::class)->orderBy('created_at')->orderBy('id');
     }
 
     protected static function newFactory(): OrderFactory

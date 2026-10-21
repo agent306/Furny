@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Domain\Imports\Models;
 
 use App\Domain\Ai\Enums\AiProvider;
+use App\Domain\Ai\Models\AiCreditLedgerEntry;
+use App\Domain\Ai\Models\AiUsageEvent;
 use App\Domain\Identity\Models\User;
 use App\Domain\Imports\Enums\ImportMode;
 use App\Domain\Imports\Enums\ImportSourceKind;
@@ -20,6 +22,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media as BaseMedia;
@@ -105,6 +108,26 @@ final class BlueprintImport extends Model implements HasMedia
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * The credit ledger rows about this import (reservation, release, consumption, refund), oldest first.
+     *
+     * @return MorphMany<AiCreditLedgerEntry, $this>
+     */
+    public function ledgerEntries(): MorphMany
+    {
+        return $this->morphMany(AiCreditLedgerEntry::class, 'reference')->orderBy('created_at')->orderBy('id');
+    }
+
+    /**
+     * The metered AI runs made for this import, oldest first.
+     *
+     * @return MorphMany<AiUsageEvent, $this>
+     */
+    public function usageEvents(): MorphMany
+    {
+        return $this->morphMany(AiUsageEvent::class, 'reference')->orderBy('created_at')->orderBy('id');
     }
 
     /** No further transition happens: accepted, discarded, failed or cancelled (06 §3). */

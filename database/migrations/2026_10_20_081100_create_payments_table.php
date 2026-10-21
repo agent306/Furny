@@ -12,7 +12,8 @@ return new class extends Migration
     {
         Schema::create('payments', function (Blueprint $table): void {
             $table->ulid('id')->primary();
-            $table->foreignUlid('order_id')->constrained()->restrictOnDelete();
+            // Plain join-key index 02 omits: payments are read per order, and the restrict check scans it.
+            $table->foreignUlid('order_id')->index()->constrained()->restrictOnDelete();
             $table->foreignUlid('quote_id')->nullable()->constrained()->nullOnDelete();
             $table->string('kind', 16);
             $table->bigInteger('amount_minor');

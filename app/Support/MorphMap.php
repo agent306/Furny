@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Domain\Ai\Models\AiCreditLedgerEntry;
+use App\Domain\Ai\Models\AiUsageEvent;
 use App\Domain\Catalog\Models\EdgeBand;
 use App\Domain\Catalog\Models\Finish;
 use App\Domain\Catalog\Models\HardwareItem;
@@ -21,6 +23,8 @@ use App\Domain\Identity\Models\OtpCode;
 use App\Domain\Identity\Models\StaffInvitation;
 use App\Domain\Identity\Models\User;
 use App\Domain\Imports\Models\BlueprintImport;
+use App\Domain\Messaging\Models\Message;
+use App\Domain\Messaging\Models\MessageRead;
 use App\Domain\Orders\Models\ChangeProposal;
 use App\Domain\Orders\Models\ChangeProposalItem;
 use App\Domain\Orders\Models\ConfirmationCall;
@@ -85,5 +89,9 @@ final class MorphMap
         'order_issue' => OrderIssue::class,
         'delivery' => Delivery::class,
         'payment' => Payment::class,
+        'message' => Message::class,
+        'message_read' => MessageRead::class,
+        'ai_credit_ledger_entry' => AiCreditLedgerEntry::class,
+        'ai_usage_event' => AiUsageEvent::class,
     ];
 }
