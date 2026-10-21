@@ -84,3 +84,78 @@ Brief test coverage:
 - `parallel_pair_share` considers only the longest 30 000 segments of a layer (`MAX_PAIR_SEGMENTS`, marked as a shortcut in the code). A denser layer gets an underestimated share.
 - Not read: INSERT attributes (room tags stored as ATTRIB), ELLIPSE and SPLINE entities (for example non-uniformly scaled arcs inside blocks), frozen or off layers. The spec does not list them. Task 30 may want attribute text for room names.
 - Hatch polyline paths ignore bulges. Edge-path arcs are sampled at 8 points; ellipse and spline edges are skipped.
+
+---
+
+## Fix report, round 1 (review: 4 Important, 2 Minor)
+
+All fixes were test-first. `tests/test_dxf.py` grew from 24 to 35 tests.
+
+### RED (new tests against the round-0 code)
+Run with `ulimit -v` and `timeout` guards, because the unfixed code exhausts memory on the huge-coordinate cases (it took the WSL VM down twice before I added the guard). Seven new tests failed in the normal run:
+```
+FAILED test_absurd_coordinates_fail_fast[inf]   - OverflowError: cannot convert float infinity to integer
+FAILED test_absurd_coordinates_fail_fast[nan]   - Failed: DID NOT RAISE
+FAILED test_non_wall_layers_skip_pair_statistics
+FAILED test_mirrored_insert_places_every_entity_kind_in_world_coordinates
+FAILED test_records_hold_plain_floats
+FAILED test_unexpected_errors_become_corrupt_file - ZeroDivisionError
+FAILED test_heuristic_does_not_overwrite_a_model_role
+7 failed, 24 passed
+```
+Guarded run of the other three: `1e13` and `5e8_metres` died with `MemoryError` at `layers.py:105` (the `steps` loop), and `dense_cluster` hit the 40 s timeout (exit 124).
+
+### Changes
+1. **Huge or non-finite coordinates** (`reader.py`, `layers.py`)
+   - Every record is checked at creation (`_check_sane`): non-finite values or `|v| > MAX_COORD = 1e9` (drawing units) raise `corrupt_file`.
+   - After the unit factor is known, `max|extent| × factor > 1e9` mm also raises `corrupt_file`.
+   - Decision: `corrupt_file` for both. Absurd magnitude is garbage geometry, not complexity, and `dxf_too_complex` would suggest the user could trim entities.
+   - `parallel_pair_share` also ignores non-finite segments, and the grid steps per segment are capped at `MAX_CELL_STEPS = 2000`.
+   - Tests: inf, NaN, 1e13 and 5e8 m (5e11 mm after conversion) each fail in under 1 s with `corrupt_file`/422.
+2. **Quadratic pairing** (`layers.py`)
+   - The pair test is cheaper (no `atan2`, precomputed unit vectors).
+   - At most `MAX_CANDIDATES = 256` neighbours are examined per segment, in a fixed (sorted-cell, ascending-index) order.
+   - There is a per-layer budget of `MAX_PAIR_CHECKS = 1_000_000` pair tests, and `MAX_PAIR_SEGMENTS` is now 20 000.
+   - Layers the regex classifies as dimension, door, window, room_label, furniture or other skip pairing in `_layer_stats` (share 0.0).
+   - Test: the 15 000 short-line cluster takes 0.41 s (limit 2 s), and a second call returns the identical value.
+   - Side effect: those layers now show `0.00` in the LLM layer table, and they cannot be promoted by the heuristic.
+3. **Mirrored INSERTs** (`reader.py`)
+   - New `_to_wcs(e, elevation)` uses `ezdxf.math.OCS`. It is applied to LWPOLYLINE, 2D/3D POLYLINE, TEXT and hatch boundary paths.
+   - For extrusion z < 0 the bulge sign is flipped, because a mirrored OCS reverses the sweep.
+   - MTEXT is deliberately not converted: ezdxf stores the MTEXT insertion point in WCS. Probe: after a mirrored INSERT, TEXT has insert x=-95 (OCS) while MTEXT has x=+95 (already WCS). Applying the OCS conversion to MTEXT would break it. A test covers both.
+   - Tests: mirrored LWPOLYLINE, POLYLINE, TEXT, MTEXT and HATCH all land at their world coordinates; a mirrored bulge keeps its side.
+   - Found and fixed along the way: `x % 360.0` returns 360.0 for a tiny negative `x`, so arc angles are now normalised twice.
+4. **Unmapped exceptions** (`reader.py`)
+   - `read_dxf` wraps the walk, unit guess and stats: `VisionError` passes through, anything else becomes `corrupt_file`.
+   - Test: a monkeypatched `_convert` that raises `ZeroDivisionError` gives `corrupt_file`/422.
+5. **numpy floats**
+   - Polyline vertices are coerced to `float` at conversion. Test: every record value has exactly `type float`.
+6. **Heuristic overwrite**
+   - `_guess_wall_layer` now excludes layers the model already assigned a role (`taken`).
+   - Test: the model maps L1 to furniture and L2 to door, no wall; L1 stays furniture and no wall is invented.
+
+### Gates (WSL, `furny-vision-p3`)
+Commands (from `vision/`, `UV_PROJECT_ENVIRONMENT=$HOME/.venvs/furny-vision-p3`):
+- `uv run ruff check .`: all checks passed. `uv run ruff format --check .`: 133 files already formatted. `uv run mypy app`: no issues in 77 source files.
+- `uv run pytest tests/test_dxf.py -q`: **35 passed** in 2.5 s.
+- Full suite: **1409 passed, 1 skipped, 3 xfailed, 0 failed.** That is the round-0 total (1398) plus the 11 new tests; the walls_closure flake did not occur.
+
+Caveat on how the full suite was run: in this session the WSL VM died repeatedly (`Wsl/Service/E_UNEXPECTED`) partway through a single-process full `pytest` run, at different points (at 72 % and at 79 %), and unrelated test files that pass on their own (for example `test_preprocess.py`) were in flight each time. Free memory was ample (about 19 GB) and the VM also died while idle, so I attribute it to the WSL host, not to the code. The very first unguarded RED run of the huge-coordinate tests did exhaust memory and take the VM down; that is the bug being fixed, and later runs of those tests used `ulimit -v`. I therefore ran the suite as seven consecutive `pytest` invocations that together cover every test file once, with the results below; the one-shot run succeeded before the fixes (1398 passed).
+
+| Chunk | Files | Result |
+|---|---|---|
+| 1 | tests/providers | 126 passed |
+| 2 | test_agent .. test_labeling_heuristic (includes test_dxf) | 670 passed, 1 skipped |
+| 3a | test_llm_labeler, test_logging, test_normalize | 65 passed |
+| 3b | test_ocr, test_openings, test_pdf | 115 passed, 2 xfailed |
+| 3c | test_preprocess, test_rectify | 76 passed |
+| 4a | test_reference_assemble, _dims, _labeling, _openings | 41 passed |
+| 4b | test_reference_rooms, _scale, _walls | 30 passed, 1 xfailed |
+| 5 | test_rooms .. test_walls_closure | 286 passed |
+
+Before replying I checked with `ps` in WSL that no pytest, mypy or uv process of mine is still running.
+
+### Notes and residual risks
+- The pair statistics are now bounded and deterministic, but on a very dense layer they can under-report the parallel share (documented in the `parallel_pair_share` docstring). The only consumer of the number is the heuristic wall guess and the LLM table.
+- `MAX_COORD = 1e9` is the same value in drawing units and in mm. A drawing in metres with coordinates between 1e6 and 1e9 passes the first check and is rejected by the second.
+- Not changed, as it was not in the review: INSERT attributes, ELLIPSE/SPLINE, and frozen layers.

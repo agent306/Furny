@@ -9,9 +9,9 @@ import io
 import re
 import tempfile
 from collections import Counter
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
-from math import cos, degrees, hypot, radians, sin
+from math import cos, degrees, hypot, isfinite, radians, sin
 from pathlib import Path
 from typing import Any, Literal
 
@@ -21,7 +21,7 @@ from ezdxf.entities import ArcEdge, EdgePath, LineEdge, PolylinePath
 from ezdxf.filemanagement import read as ezdxf_read
 from ezdxf.filemanagement import readfile as ezdxf_readfile
 from ezdxf.lldxf.const import DXFError
-from ezdxf.math import bulge_to_arc
+from ezdxf.math import OCS, Vec3, bulge_to_arc
 
 from app.api.errors import VisionError
 from app.pipeline.context import PipelineContext
@@ -31,6 +31,7 @@ from app.utils.geometry import Pt
 
 MAX_DXF_ENTITIES = 200_000  # model space plus exploded blocks (06 section 10.1)
 MAX_INSERT_DEPTH = 4
+MAX_COORD = 1e9  # any |coordinate| beyond this (drawing units, then mm) is not a floor plan
 MAX_SAMPLE_TEXTS = 3
 
 Kind = Literal["line", "arc", "circle", "hatch", "text", "insert_bbox"]
@@ -123,12 +124,21 @@ def _xy(p: Any) -> Pt:
     return (float(p[0]), float(p[1]))
 
 
+def _to_wcs(e: Any, elevation: float = 0.0) -> Callable[[float, float], Pt]:
+    """OCS (x, y) of ``e`` to world (x, y): entities whose extrusion is not +Z (mirrored blocks) need it."""
+    ext = e.dxf.extrusion
+    if ext.x == 0 and ext.y == 0 and ext.z > 0:
+        return lambda x, y: (float(x), float(y))
+    ocs = OCS(ext)
+    return lambda x, y: _xy(ocs.to_wcs(Vec3(x, y, elevation)))
+
+
 def _arc_end(center: Pt, radius: float, deg: float) -> Pt:
     return (center[0] + radius * cos(radians(deg)), center[1] + radius * sin(radians(deg)))
 
 
 def _arc(layer: str, center: Pt, radius: float, start: float, end: float) -> DxfEntityRecord:
-    start, end = start % 360.0, end % 360.0
+    start, end = start % 360.0 % 360.0, end % 360.0 % 360.0  # twice: -1e-16 % 360 rounds up to 360.0
     return DxfEntityRecord(
         "arc",
         layer,
@@ -175,10 +185,16 @@ def _convert(e: Any, layer: str) -> Iterator[DxfEntityRecord]:
     if kind == "LINE":
         yield DxfEntityRecord("line", layer, [_xy(e.dxf.start), _xy(e.dxf.end)])
     elif kind == "LWPOLYLINE":
-        yield from _polyline(layer, [(x, y, b) for x, y, b in e.get_points("xyb")], bool(e.closed))
+        to = _to_wcs(e, float(e.dxf.elevation))
+        flip = -1.0 if e.dxf.extrusion.z < 0 else 1.0  # a mirrored OCS reverses the bulge direction
+        verts = [(*to(x, y), flip * float(b)) for x, y, b in e.get_points("xyb")]
+        yield from _polyline(layer, verts, bool(e.closed))
     elif kind == "POLYLINE" and (e.is_2d_polyline or e.is_3d_polyline):
+        to = _to_wcs(e, float(e.dxf.elevation.z))
+        flip = -1.0 if e.dxf.extrusion.z < 0 else 1.0
         verts = [
-            (v.dxf.location.x, v.dxf.location.y, v.dxf.bulge if e.is_2d_polyline else 0.0) for v in e.vertices
+            (*to(v.dxf.location.x, v.dxf.location.y), flip * float(v.dxf.bulge) if e.is_2d_polyline else 0.0)
+            for v in e.vertices
         ]
         yield from _polyline(layer, verts, bool(e.is_closed))
     elif kind in ("ARC", "CIRCLE"):
@@ -191,6 +207,7 @@ def _convert(e: Any, layer: str) -> Iterator[DxfEntityRecord]:
         else:
             yield DxfEntityRecord("circle", layer, [], (cx, cy), float(e.dxf.radius))
     elif kind == "HATCH" and e.dxf.solid_fill:
+        to = _to_wcs(e, float(e.dxf.elevation.z))
         for path in e.paths:
             if isinstance(path, PolylinePath):
                 pts = [_xy(v) for v in path.vertices]  # shortcut: bulges of hatch polylines are ignored
@@ -199,11 +216,22 @@ def _convert(e: Any, layer: str) -> Iterator[DxfEntityRecord]:
             else:
                 continue
             if len(pts) >= 3:
-                yield DxfEntityRecord("hatch", layer, pts)
+                yield DxfEntityRecord("hatch", layer, [to(x, y) for x, y in pts])
     elif kind in ("TEXT", "MTEXT"):
         text = " ".join((e.plain_text() if kind == "MTEXT" else e.dxf.text).split())
         if text:
-            yield DxfEntityRecord("text", layer, [_xy(e.dxf.insert)], text=text)
+            # TEXT is placed in its OCS; MTEXT's insertion point is already a world point
+            x, y, z = e.dxf.insert
+            at = _to_wcs(e, float(z))(x, y) if kind == "TEXT" else (float(x), float(y))
+            yield DxfEntityRecord("text", layer, [at], text=text)
+
+
+def _check_sane(r: DxfEntityRecord) -> None:
+    """Non-finite or absurdly large coordinates make a file unusable (and would stall the pairing)."""
+    values = [v for p in r.points for v in p]
+    values += [v for v in (*(r.center or ()), r.radius) if v is not None]
+    if not all(isfinite(v) and abs(v) <= MAX_COORD for v in values):
+        raise VisionError("corrupt_file", "The DXF file has invalid coordinates.")
 
 
 def geometry_points(r: DxfEntityRecord) -> list[Pt]:
@@ -226,7 +254,9 @@ class _Collector:
                 raise VisionError("dxf_too_complex", "The DXF file has too many entities.")
             layer = parent_layer if parent_layer is not None and e.dxf.layer == "0" else e.dxf.layer
             if e.dxftype() != "INSERT":
-                self.records.extend(_convert(e, layer))
+                for r in _convert(e, layer):
+                    _check_sane(r)
+                    self.records.append(r)
                 continue
             if level >= MAX_INSERT_DEPTH:
                 continue
@@ -280,6 +310,7 @@ def _layer_stats(records: list[DxfEntityRecord], factor: float) -> dict[str, Lay
     for r in records:
         by_layer.setdefault(r.layer, []).append(r)
     stats: dict[str, LayerStats] = {}
+    roles = classify_layers_regex(list(by_layer))
     for layer, recs in by_layer.items():
         segments = [
             (
@@ -293,7 +324,8 @@ def _layer_stats(records: list[DxfEntityRecord], factor: float) -> dict[str, Lay
         stats[layer] = LayerStats(
             entity_counts=dict(Counter(r.kind for r in recs)),
             line_length_mm=sum(hypot(b[0] - a[0], b[1] - a[1]) for a, b in segments),
-            parallel_share=parallel_pair_share(segments),
+            # layers the regex already knows are not walls are never wall candidates: skip the pairing
+            parallel_share=parallel_pair_share(segments) if roles.get(layer, "wall") == "wall" else 0.0,
             sample_texts=texts,
         )
     return stats
@@ -302,17 +334,26 @@ def _layer_stats(records: list[DxfEntityRecord], factor: float) -> dict[str, Lay
 def read_dxf(data: bytes, hints: RecognizeHints, ctx: PipelineContext) -> DxfDrawing:
     """Model-space entities (blocks exploded up to four levels), unit factor and per-layer statistics.
 
-    Raises ``corrupt_file`` for unreadable files and ``dxf_too_complex`` beyond ``MAX_DXF_ENTITIES``."""
+    Raises ``corrupt_file`` for unreadable files or invalid coordinates and ``dxf_too_complex`` beyond
+    ``MAX_DXF_ENTITIES``; no other exception escapes."""
     doc = _load(data)
-    collector = _Collector()
-    collector.walk(doc.modelspace(), None, 0)
-    insunits = _insunits(doc)
-    factor, guessed = _unit_factor(insunits, collector.records, hints, ctx)
-    return DxfDrawing(
-        records=collector.records,
-        insunits=insunits,
-        unit_factor_mm=factor,
-        units_guessed=guessed,
-        layer_stats=_layer_stats(collector.records, factor),
-        extents=_extents(collector.records),
-    )
+    try:
+        collector = _Collector()
+        collector.walk(doc.modelspace(), None, 0)
+        insunits = _insunits(doc)
+        factor, guessed = _unit_factor(insunits, collector.records, hints, ctx)
+        extents = _extents(collector.records)
+        if max(abs(v) for v in extents) * factor > MAX_COORD:  # the limit again, now in mm
+            raise VisionError("corrupt_file", "The DXF file has invalid coordinates.")
+        return DxfDrawing(
+            records=collector.records,
+            insunits=insunits,
+            unit_factor_mm=factor,
+            units_guessed=guessed,
+            layer_stats=_layer_stats(collector.records, factor),
+            extents=extents,
+        )
+    except VisionError:
+        raise
+    except Exception as exc:  # hostile files raise anything from inside ezdxf
+        raise VisionError("corrupt_file", "The DXF file could not be read.") from exc

@@ -4,6 +4,7 @@ import io
 import json
 import random
 import time
+from math import cos, radians, sin
 
 import ezdxf
 import pytest
@@ -376,3 +377,118 @@ def test_parallel_pair_share_scales() -> None:
     started = time.monotonic()
     assert parallel_pair_share(segs) == 1.0
     assert time.monotonic() - started < 10
+
+
+# --- review fixes (round 1) -----------------------------------------------------------------------------
+
+
+def two_parallel_lines(x1: float, units: int = 4) -> bytes:
+    doc = ezdxf.new("R2010")
+    doc.header["$INSUNITS"] = units
+    doc.layers.add("A-WALL")
+    for y in (0.0, 230.0):
+        doc.modelspace().add_line((0, y), (x1, y), dxfattribs={"layer": "A-WALL"})
+    return dxf_bytes(doc)
+
+
+@pytest.mark.parametrize(
+    ("x1", "units"),
+    [(float("inf"), 4), (float("nan"), 4), (1e13, 4), (5e8, 6)],  # the last is 5e11 mm after conversion
+    ids=["inf", "nan", "1e13", "5e8_metres"],
+)
+def test_absurd_coordinates_fail_fast(x1: float, units: int) -> None:
+    data = two_parallel_lines(x1, units)
+    started = time.monotonic()
+    with pytest.raises(VisionError) as exc:
+        read_dxf(data, NO_HINTS, make_ctx())
+    assert (exc.value.code, exc.value.http_status) == ("corrupt_file", 422)
+    assert time.monotonic() - started < 1
+
+
+def test_dense_cluster_pairing_is_bounded() -> None:
+    # 15 000 short lines of ever-changing direction inside one 400 mm cell: no quadratic blow-up
+    segs = []
+    for i in range(15_000):
+        a = radians(i * 7.3 % 180)
+        x, y = (i % 150) * 2.0, (i // 150) * 3.0
+        segs.append(((x, y), (x + 5 * cos(a), y + 5 * sin(a))))
+    started = time.monotonic()
+    first = parallel_pair_share(segs)
+    assert time.monotonic() - started < 2
+    assert parallel_pair_share(segs) == first  # deterministic
+
+
+def test_non_wall_layers_skip_pair_statistics() -> None:
+    doc = ezdxf.new("R2010")
+    doc.header["$INSUNITS"] = 4
+    for layer in ("A-WALL", "FURN"):
+        doc.layers.add(layer)
+        for y in (0.0, 230.0):
+            doc.modelspace().add_line((0, y), (3000, y), dxfattribs={"layer": layer})
+    d, _ = read(dxf_bytes(doc))
+    assert d.layer_stats["A-WALL"].parallel_share == 1.0
+    assert d.layer_stats["FURN"].parallel_share == 0.0  # regex says furniture: not paired
+
+
+def mirrored_block_doc() -> ezdxf.document.Drawing:
+    doc = ezdxf.new("R2010")
+    doc.header["$INSUNITS"] = 4
+    blk = doc.blocks.new("B")
+    blk.add_lwpolyline([(0, 0), (10, 0), (10, 5)], dxfattribs={"layer": "0"})
+    blk.add_polyline2d([(0, 20), (10, 20)], dxfattribs={"layer": "0"})
+    blk.add_text("T", dxfattribs={"insert": (5, 5), "layer": "0"})
+    blk.add_mtext("M", dxfattribs={"insert": (5, 5), "layer": "0"})
+    blk.add_hatch(dxfattribs={"layer": "0"}).paths.add_polyline_path(
+        [(0, 0), (10, 0), (10, 10), (0, 10)], is_closed=True
+    )
+    doc.modelspace().add_blockref("B", (100, 0), dxfattribs={"xscale": -1, "layer": "A"})
+    return doc
+
+
+def test_mirrored_insert_places_every_entity_kind_in_world_coordinates() -> None:
+    d, _ = read(dxf_bytes(mirrored_block_doc()))
+    lines = sorted(r.points for r in d.records if r.kind == "line")
+    assert lines == [[(90.0, 0.0), (90.0, 5.0)], [(100.0, 0.0), (90.0, 0.0)], [(100.0, 20.0), (90.0, 20.0)]]
+    texts = sorted((r.text, r.points) for r in d.records if r.kind == "text")
+    assert texts == [("M", [(95.0, 5.0)]), ("T", [(95.0, 5.0)])]
+    (hatch,) = [r for r in d.records if r.kind == "hatch"]
+    assert sorted(hatch.points) == [(90.0, 0.0), (90.0, 10.0), (100.0, 0.0), (100.0, 10.0)]
+
+
+def test_records_hold_plain_floats() -> None:
+    doc = ezdxf.new("R2010")
+    doc.modelspace().add_lwpolyline([(0, 0, 1.0), (1000, 0, 0.0), (1000, 1000, 0.0)], format="xyb")
+    d, _ = read(dxf_bytes(doc))
+    values = [v for r in d.records for p in r.points for v in p]
+    values += [v for r in d.records for v in (r.radius, r.start_deg, r.end_deg) if v is not None]
+    assert values and {type(v) for v in values} == {float}
+
+
+def test_unexpected_errors_become_corrupt_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(e: object, layer: str) -> None:
+        raise ZeroDivisionError
+
+    monkeypatch.setattr(reader, "_convert", boom)
+    with pytest.raises(VisionError) as exc:
+        read_dxf(make_room_dxf(), NO_HINTS, make_ctx())
+    assert (exc.value.code, exc.value.http_status) == ("corrupt_file", 422)
+
+
+def test_heuristic_does_not_overwrite_a_model_role() -> None:
+    answer = '{"layers": [{"name": "L1", "role": "furniture"}, {"name": "L2", "role": "door"}]}'
+    provider = FakeProvider([make_turn(text=answer, purpose="dxf_layers")])
+    roles, _ = classify_layers(renamed(), provider, make_ctx())
+    assert (roles["L1"], roles["L2"]) == ("furniture", "door")
+    assert "wall" not in roles.values()
+
+
+def test_mirrored_insert_keeps_the_bulge_side() -> None:
+    doc = ezdxf.new("R2010")
+    doc.header["$INSUNITS"] = 4
+    blk = doc.blocks.new("B")
+    blk.add_lwpolyline([(0, 0, 1.0), (10, 0, 0.0)], format="xyb", dxfattribs={"layer": "0"})  # bows below
+    doc.modelspace().add_blockref("B", (100, 0), dxfattribs={"xscale": -1})
+    d, _ = read(dxf_bytes(doc))
+    arc = next(r for r in d.records if r.kind == "arc")
+    assert arc.center == pytest.approx((95.0, 0.0))
+    assert (arc.start_deg, arc.end_deg) == pytest.approx((180.0, 0.0))  # CCW through (95, -5)

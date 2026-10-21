@@ -4,7 +4,7 @@ unclear, then a geometric guess. Prompts and model answers are never logged."""
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from math import atan2, degrees, hypot
+from math import hypot, isfinite, radians, sin
 from typing import TYPE_CHECKING, Literal
 
 from app.pipeline.context import PipelineContext
@@ -26,7 +26,10 @@ MIN_PARALLEL_SHARE = 0.2  # heuristic wall layer: at least this share of its lin
 PAIR_MIN_MM, PAIR_MAX_MM = 50.0, 400.0  # perpendicular distance of a wall's two faces (06 section 10.3)
 PAIR_MAX_ANGLE_DEG = 1.0
 PAIR_MIN_OVERLAP = 0.5  # of the shorter segment
-MAX_PAIR_SEGMENTS = 30_000  # shortcut: only the longest segments are paired; raise it if layers get denser
+MAX_PAIR_SEGMENTS = 20_000
+MAX_CANDIDATES = 256  # neighbours examined per segment
+MAX_PAIR_CHECKS = 1_000_000  # pair tests per layer
+MAX_CELL_STEPS = 2_000  # grid cells sampled along one segment (800 m at 400 mm cells)
 MAX_TABLE_LAYERS = 200  # layers shown to the model, the longest first
 LLM_TIMEOUT_S = 60.0
 LLM_MIN_BUDGET_S = 20.0  # no layer-mapping call with less request time than this left
@@ -69,71 +72,100 @@ def classify_layers_regex(names: Sequence[str]) -> dict[str, LayerRole]:
 # --- parallel pairs ----------------------------------------------------------------------------------------
 
 
-def _is_pair(a: Segment, b: Segment) -> bool:
-    (ax, ay), (bx, by) = a
-    la = hypot(bx - ax, by - ay)
-    (cx, cy), (dx, dy) = b
-    lb = hypot(dx - cx, dy - cy)
-    ux, uy = (bx - ax) / la, (by - ay) / la
-    # sin of the angle between the two directions; both are unit vectors
-    cross = ux * (dy - cy) / lb - uy * (dx - cx) / lb
-    dot = ux * (dx - cx) / lb + uy * (dy - cy) / lb
-    if abs(degrees(atan2(cross, abs(dot)))) > PAIR_MAX_ANGLE_DEG:
+_SIN_MAX_ANGLE = sin(radians(PAIR_MAX_ANGLE_DEG))
+_Prep = tuple[float, float, float, float, float]  # x0, y0, unit x, unit y, length
+
+
+def _prep(seg: Segment) -> _Prep:
+    (x0, y0), (x1, y1) = seg
+    length = hypot(x1 - x0, y1 - y0)
+    return (x0, y0, (x1 - x0) / length, (y1 - y0) / length, length)
+
+
+def _is_pair(a: _Prep, b: _Prep) -> bool:
+    ax, ay, ux, uy, la = a
+    cx, cy, vx, vy, lb = b
+    if abs(ux * vy - uy * vx) > _SIN_MAX_ANGLE:  # directions within 1 degree (either way round)
         return False
-    dist = abs(ux * ((cy + dy) / 2 - ay) - uy * ((cx + dx) / 2 - ax))
+    ex, ey = cx + vx * lb, cy + vy * lb
+    dist = abs(ux * ((cy + ey) / 2 - ay) - uy * ((cx + ex) / 2 - ax))
     if not PAIR_MIN_MM <= dist <= PAIR_MAX_MM:
         return False
-    t0, t1 = sorted(((cx - ax) * ux + (cy - ay) * uy, (dx - ax) * ux + (dy - ay) * uy))
-    overlap = min(t1, la) - max(t0, 0.0)
-    return overlap >= PAIR_MIN_OVERLAP * min(la, lb)
+    t0, t1 = sorted(((cx - ax) * ux + (cy - ay) * uy, (ex - ax) * ux + (ey - ay) * uy))
+    return min(t1, la) - max(t0, 0.0) >= PAIR_MIN_OVERLAP * min(la, lb)
+
+
+def _candidates(i: int, cells: set[tuple[int, int]], grid: dict[tuple[int, int], list[int]]) -> list[int]:
+    """Up to ``MAX_CANDIDATES`` other segments in or next to the cells of segment ``i``, in a fixed order."""
+    seen = {i}
+    out: list[int] = []
+    for cx, cy in sorted(cells):
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for j in grid.get((cx + dx, cy + dy), ()):
+                    if j not in seen:
+                        seen.add(j)
+                        out.append(j)
+                        if len(out) >= MAX_CANDIDATES:
+                            return out
+    return out
 
 
 def parallel_pair_share(segments: Sequence[Segment]) -> float:
     """Share (by length) of the segments, in mm, that have a parallel partner: angle within 1 degree, faces
-    50-400 mm apart, projections overlapping by at least half of the shorter one."""
-    segs = [s for s in segments if hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]) >= _MIN_SEGMENT_MM]
+    50-400 mm apart, projections overlapping by at least half of the shorter one.
+
+    The work is bounded: at most ``MAX_CANDIDATES`` neighbours are examined per segment and
+    ``MAX_PAIR_CHECKS`` pairs overall (shortcut: a very dense drawing may under-report; raise them if so),
+    and only the ``MAX_PAIR_SEGMENTS`` longest segments take part. The result is deterministic."""
+    segs = [
+        _prep(s)
+        for s in segments
+        if isfinite(n := hypot(s[1][0] - s[0][0], s[1][1] - s[0][1])) and n >= _MIN_SEGMENT_MM
+    ]
     if len(segs) > MAX_PAIR_SEGMENTS:
-        segs = sorted(segs, key=lambda s: -hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]))[:MAX_PAIR_SEGMENTS]
+        segs = sorted(segs, key=lambda p: -p[4])[:MAX_PAIR_SEGMENTS]
     if len(segs) < 2:
         return 0.0
     cell = PAIR_MAX_MM
     grid: dict[tuple[int, int], list[int]] = {}
     cells_of: list[set[tuple[int, int]]] = []
-    for i, ((x0, y0), (x1, y1)) in enumerate(segs):
-        steps = int(hypot(x1 - x0, y1 - y0) / (cell / 2)) + 1
+    for i, (x0, y0, ux, uy, length) in enumerate(segs):
+        steps = min(int(length / (cell / 2)) + 1, MAX_CELL_STEPS)
         cells = {
-            (int((x0 + (x1 - x0) * k / steps) // cell), int((y0 + (y1 - y0) * k / steps) // cell))
+            (int((x0 + ux * length * k / steps) // cell), int((y0 + uy * length * k / steps) // cell))
             for k in range(steps + 1)
         }
         cells_of.append(cells)
         for c in cells:
             grid.setdefault(c, []).append(i)
     paired = [False] * len(segs)
+    checks = 0
     for i, cells in enumerate(cells_of):
         if paired[i]:
             continue
-        near = {
-            j
-            for (cx, cy) in cells
-            for dx in (-1, 0, 1)
-            for dy in (-1, 0, 1)
-            for j in grid.get((cx + dx, cy + dy), ())
-        }
-        for j in near:
-            if j != i and _is_pair(segs[i], segs[j]):
+        for j in _candidates(i, cells, grid):
+            if checks >= MAX_PAIR_CHECKS:
+                break
+            checks += 1
+            if _is_pair(segs[i], segs[j]):
                 paired[i] = paired[j] = True
                 break
-    lengths = [hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]) for s in segs]
-    return sum(n for n, p in zip(lengths, paired, strict=True) if p) / sum(lengths)
+        if checks >= MAX_PAIR_CHECKS:
+            break
+    return sum(p[4] for p, ok in zip(segs, paired, strict=True) if ok) / sum(p[4] for p in segs)
 
 
 # --- classification ----------------------------------------------------------------------------------------
 
 
-def _guess_wall_layer(stats: dict[str, LayerStats]) -> str | None:
-    """The layer with the most line length among those with enough parallel pairs (06 section 10.2)."""
+def _guess_wall_layer(stats: dict[str, LayerStats], taken: set[str]) -> str | None:
+    """The layer with the most line length among those with enough parallel pairs (06 section 10.2); layers
+    the model already gave a role are left alone."""
     eligible = [
-        n for n, s in stats.items() if s.parallel_share >= MIN_PARALLEL_SHARE and s.line_length_mm > 0
+        n
+        for n, s in stats.items()
+        if n not in taken and s.parallel_share >= MIN_PARALLEL_SHARE and s.line_length_mm > 0
     ]
     return max(eligible, key=lambda n: stats[n].line_length_mm, default=None)
 
@@ -196,6 +228,7 @@ def classify_layers(
     total = sum(s.line_length_mm for s in stats.values())
     walls = sum(s.line_length_mm for n, s in stats.items() if roles.get(n) == "wall")
     usage: list[UsageCall] = []
+    mapped: dict[str, LayerRole] = {}
     if total <= 0 or (walls > 0 and walls >= MIN_WALL_LENGTH_SHARE * total):
         return roles, usage
     if provider is not None and ctx.remaining() > LLM_MIN_BUDGET_S:
@@ -203,7 +236,7 @@ def classify_layers(
         roles.update(mapped)
         if any(r == "wall" for r in mapped.values()):
             return roles, usage
-    guess = _guess_wall_layer(stats)
+    guess = _guess_wall_layer(stats, set(mapped))
     if guess is not None:
         roles[guess] = "wall"
         ctx.warn("dxf_layers_guessed")
