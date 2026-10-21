@@ -3,15 +3,35 @@
  * `custom_box` carcasses built explicitly, valid against `FurnitureDocumentSchema`.
  * Test-only; not exported from the engine index.
  */
-import type {
-    CarcassSpec,
-    Content,
-    Front,
-    FurnitureDocument,
-    MaterialAssignments,
+import { readFileSync } from 'node:fs';
+import {
+    FurnitureDocumentSchema,
+    type CarcassSpec,
+    type Content,
+    type Front,
+    type FurnitureDocument,
+    type MaterialAssignments,
+    type Section,
+    type SectionChild,
 } from '../schema';
 
-const assign = (materialCode: string) => ({
+const WARDROBE_FIXTURE = new URL(
+    '../../../../../database/fixtures/furniture/wardrobe-3door.json',
+    import.meta.url,
+);
+
+/** The 07 §12.2 wardrobe fixture, parsed fresh; `patch` may edit it before use. */
+export function wardrobeFixture(
+    patch: (doc: FurnitureDocument) => void = () => {},
+): FurnitureDocument {
+    const doc = FurnitureDocumentSchema.parse(
+        JSON.parse(readFileSync(WARDROBE_FIXTURE, 'utf8')),
+    );
+    patch(doc);
+    return doc;
+}
+
+export const assign = (materialCode: string) => ({
     materialCode,
     edgeBandCode: null,
     finishCode: null,
@@ -35,11 +55,40 @@ export function defaultMaterials(): MaterialAssignments {
 /** Id of the single root leaf of the box documents. */
 export const BOX_ROOT_ID = 's_0000000001';
 
+/** An undivided section. */
+export const leafSection = (
+    id: string,
+    content: Content | null = { type: 'empty' },
+): Section => ({ id, split: 'none', children: [], content });
+
+/** A divided section; `children` are `[size, section]` pairs, left to right / top to bottom. */
+export const splitSection = (
+    id: string,
+    dir: 'columns' | 'rows',
+    children: Array<[SectionChild['size'], Section]>,
+): Section => ({
+    id,
+    split: dir,
+    children: children.map(([size, section]) => ({ size, section })),
+    content: null,
+});
+
+export const flex = (weight = 1): SectionChild['size'] => ({
+    mode: 'flex',
+    weight,
+});
+export const fixed = (mm: number): SectionChild['size'] => ({
+    mode: 'fixed',
+    mm,
+});
+
 export interface BoxOptions {
     width: number;
     height: number;
     depth: number;
     content?: Content | null;
+    /** Replaces the single-leaf interior (then `content` is ignored). */
+    interior?: Section;
     fronts?: Front[];
     carcass?: Partial<Omit<CarcassSpec, 'interior' | 'fronts'>>;
     materials?: Partial<MaterialAssignments>;
@@ -59,12 +108,9 @@ export function boxDocument(opts: BoxOptions): FurnitureDocument {
             placement: 'auto',
         },
         ...opts.carcass,
-        interior: {
-            id: BOX_ROOT_ID,
-            split: 'none',
-            children: [],
-            content: opts.content ?? { type: 'empty' },
-        },
+        interior:
+            opts.interior ??
+            leafSection(BOX_ROOT_ID, opts.content ?? { type: 'empty' }),
         fronts: opts.fronts ?? [],
     };
     return {

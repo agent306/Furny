@@ -511,6 +511,13 @@ export type {
     PhysEdge,
 } from './furniture/types';
 export { createGenContext } from './furniture/context';
+export { layoutSections } from './furniture/carcass/layout';
+export type {
+    Divider,
+    SectionBoxInfo,
+    SectionLabel,
+    SectionLayout,
+} from './furniture/carcass/layout';
 export { makePart, mapEdges, mapGrain } from './furniture/parts';
 export { PART_NAMES_EN, partNameEn } from './furniture/partNames';
 export {
