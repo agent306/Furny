@@ -11,6 +11,7 @@ use App\Domain\Orders\States\Draft;
 use App\Domain\Projects\Models\Project;
 use App\Policies\Concerns\AuthorizesStaff;
 use App\Policies\Concerns\ChecksProjectOwnership;
+use App\Policies\Concerns\RespondsWithCodes;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
@@ -18,7 +19,7 @@ use Illuminate\Support\Facades\Gate;
 /** 13 §8.1. */
 final class ProjectPolicy
 {
-    use AuthorizesStaff, ChecksProjectOwnership;
+    use AuthorizesStaff, ChecksProjectOwnership, RespondsWithCodes;
 
     public function viewAny(User $user): Response
     {
@@ -27,9 +28,7 @@ final class ProjectPolicy
 
     public function view(User $user, Project $project): Response
     {
-        $own = $this->ownsProject($user, $project);
-
-        return $this->allowOrDeny($own || $this->staffCan($user, PermissionName::CustomersView), $user, $own);
+        return $this->ownerOrStaffCan($user, $project, PermissionName::CustomersView);
     }
 
     /** A customer creates their own projects; staff create one for a customer with `customers.manage` (`owner_id` = that customer). */
@@ -78,9 +77,7 @@ final class ProjectPolicy
 
     private function manage(User $user, Project $project): Response
     {
-        $own = $this->ownsProject($user, $project);
-
-        return $this->allowOrDeny($own || $this->staffCan($user, PermissionName::CustomersManage), $user, $own);
+        return $this->ownerOrStaffCan($user, $project, PermissionName::CustomersManage);
     }
 
     /** A never-submitted draft is in state `draft` with `submitted_at` null; soft-deleted orders still count. */

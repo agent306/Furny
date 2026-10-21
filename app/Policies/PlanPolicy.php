@@ -10,6 +10,7 @@ use App\Domain\Projects\Models\Plan;
 use App\Domain\Projects\Models\Project;
 use App\Policies\Concerns\AuthorizesStaff;
 use App\Policies\Concerns\ChecksProjectOwnership;
+use App\Policies\Concerns\RespondsWithCodes;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Support\Facades\Gate;
 
@@ -19,7 +20,7 @@ use Illuminate\Support\Facades\Gate;
  */
 final class PlanPolicy
 {
-    use AuthorizesStaff, ChecksProjectOwnership;
+    use AuthorizesStaff, ChecksProjectOwnership, RespondsWithCodes;
 
     public function view(User $user, Plan $plan): Response
     {
@@ -33,9 +34,7 @@ final class PlanPolicy
 
     public function create(User $user, Project $project): Response
     {
-        $own = $this->ownsProject($user, $project);
-
-        return $this->allowOrDeny($own || $this->staffCan($user, PermissionName::PlansEditAny), $user, $own);
+        return $this->ownerOrStaffCan($user, $project, PermissionName::PlansEditAny);
     }
 
     public function duplicate(User $user, Plan $plan): Response
@@ -68,13 +67,11 @@ final class PlanPolicy
 
     private function edit(User $user, Plan $plan): Response
     {
-        $own = $this->ownsProjectOf($user, $plan);
-
-        return $this->allowOrDeny($own || $this->staffCan($user, PermissionName::PlansEditAny), $user, $own);
+        return $this->ownerOrStaffCan($user, $plan, PermissionName::PlansEditAny);
     }
 
     private function lockOrUnlock(User $user, Plan $plan): Response
     {
-        return $this->allowOrDeny($this->staffCan($user, PermissionName::PlansEditAny), $user, $this->ownsProjectOf($user, $plan));
+        return $this->staffCanOnly($user, $plan, PermissionName::PlansEditAny);
     }
 }

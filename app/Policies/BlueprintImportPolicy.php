@@ -11,15 +11,18 @@ use App\Domain\Imports\Models\BlueprintImport;
 use App\Domain\Projects\Models\Project;
 use App\Policies\Concerns\AuthorizesStaff;
 use App\Policies\Concerns\ChecksProjectOwnership;
+use App\Policies\Concerns\RespondsWithCodes;
 use Illuminate\Auth\Access\Response;
 
 /**
- * 13 §8.4, 06 §11. "Owner" below is the owner of the import's project; the uploader is `user_id`
- * (a staff member acting for a customer stays the uploader).
+ * 13 §8.4, 06 §11. Rights come from owning the import's project (customers) or from the ability's
+ * permission (staff). The uploader (`user_id`) grants nothing by itself; this deliberately departs from
+ * the literal "`user_id` = user" of 13 §8.4 (recorded in 19): a customer cannot reach an import of a
+ * project they do not own, and staff who lost a permission lose the import with it.
  */
 final class BlueprintImportPolicy
 {
-    use AuthorizesStaff, ChecksProjectOwnership;
+    use AuthorizesStaff, ChecksProjectOwnership, RespondsWithCodes;
 
     /**
      * The project's owner may start a trace import and, with a verified contact (email or phone,
@@ -42,67 +45,53 @@ final class BlueprintImportPolicy
 
     public function view(User $user, BlueprintImport $import): Response
     {
-        $involved = $this->isUploaderOrOwner($user, $import);
-
-        return $this->allowOrDeny($involved || $this->staffCan($user, PermissionName::CustomersView), $user, $involved);
+        return $this->ownerOrStaffCan($user, $import, PermissionName::CustomersView);
     }
 
     /** Debug media, `error_message` and `result_meta` timings. */
     public function viewDebug(User $user, BlueprintImport $import): Response
     {
-        return $this->allowOrDeny($this->staffCan($user, PermissionName::CustomersView), $user, $this->isUploaderOrOwner($user, $import));
+        return $this->staffCanOnly($user, $import, PermissionName::CustomersView);
     }
 
     public function update(User $user, BlueprintImport $import): Response
     {
-        return $this->involvedOr($user, $import, PermissionName::PlansEditAny);
+        return $this->ownerOrStaffCan($user, $import, PermissionName::PlansEditAny);
     }
 
     public function cancel(User $user, BlueprintImport $import): Response
     {
-        return $this->involvedOr($user, $import, PermissionName::PlansEditAny);
+        return $this->update($user, $import);
     }
 
     public function retry(User $user, BlueprintImport $import): Response
     {
-        return $this->involvedOr($user, $import, PermissionName::PlansEditAny);
+        return $this->update($user, $import);
     }
 
     public function accept(User $user, BlueprintImport $import): Response
     {
-        return $this->involvedOr($user, $import, PermissionName::PlansEditAny);
+        return $this->update($user, $import);
     }
 
     public function convertToTrace(User $user, BlueprintImport $import): Response
     {
-        return $this->involvedOr($user, $import, PermissionName::PlansEditAny);
+        return $this->update($user, $import);
     }
 
     public function discard(User $user, BlueprintImport $import): Response
     {
-        return $this->involvedOr($user, $import, PermissionName::AiManage);
+        return $this->ownerOrStaffCan($user, $import, PermissionName::AiManage);
     }
 
     /** Charged to the customer; free for staff with `ai.manage` while `ai.staff_unlimited` is on (06 §11.7). */
     public function rerun(User $user, BlueprintImport $import): Response
     {
-        return $this->involvedOr($user, $import, PermissionName::AiManage);
+        return $this->discard($user, $import);
     }
 
     public function refund(User $user, BlueprintImport $import): Response
     {
-        return $this->allowOrDeny($this->staffCan($user, PermissionName::AiManage), $user, $this->isUploaderOrOwner($user, $import));
-    }
-
-    private function involvedOr(User $user, BlueprintImport $import, PermissionName $permission): Response
-    {
-        $involved = $this->isUploaderOrOwner($user, $import);
-
-        return $this->allowOrDeny($involved || $this->staffCan($user, $permission), $user, $involved);
-    }
-
-    private function isUploaderOrOwner(User $user, BlueprintImport $import): bool
-    {
-        return $import->user_id === $user->id || $this->ownsProjectOf($user, $import);
+        return $this->staffCanOnly($user, $import, PermissionName::AiManage);
     }
 }

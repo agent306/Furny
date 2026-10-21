@@ -6,7 +6,9 @@ use App\Domain\Furniture\Models\FurnitureDesign;
 use App\Domain\Identity\Models\User;
 use App\Domain\Orders\Models\Order;
 use App\Domain\Orders\Models\OrderItem;
+use App\Domain\Projects\Models\Project;
 use App\Policies\FurnitureDesignPolicy;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Tests\Support\PolicyActors;
 
@@ -164,4 +166,41 @@ it('denies inactive staff every design ability through the policy', function ():
     }
 
     expect($gate->inspect('create', [FurnitureDesign::class, $design->project])->allowed())->toBeFalse();
+});
+
+it('follows the live owner of the project, not the owner_id copy on the design', function (): void {
+    $design = FurnitureDesign::factory()->create();
+    $formerOwner = $design->project->owner;
+    $newOwner = User::factory()->create();
+    $design->project->forceFill(['owner_id' => $newOwner->id])->save();
+    $design = FurnitureDesign::query()->findOrFail($design->id);
+
+    expect($design->owner_id)->toBe($formerOwner->id) // the stale copy is never consulted
+        ->and(Gate::forUser($newOwner)->inspect('update', $design)->allowed())->toBeTrue()
+        ->and(Gate::forUser($newOwner)->inspect('delete', $design)->allowed())->toBeTrue()
+        ->and(Gate::forUser($formerOwner)->inspect('view', $design)->status())->toBe(404)
+        ->and(Gate::forUser($formerOwner)->inspect('update', $design)->status())->toBe(404)
+        ->and(Gate::forUser($formerOwner)->inspect('delete', $design)->status())->toBe(404);
+});
+
+it('lets the owner of an archived project keep using its designs (archiving is not checked here)', function (): void {
+    $project = Project::factory()->archived()->create();
+    $design = FurnitureDesign::factory()->state(['project_id' => $project->id])->create();
+    $gate = Gate::forUser($project->owner);
+
+    expect($gate->inspect('view', $design)->allowed())->toBeTrue()
+        ->and($gate->inspect('update', $design)->allowed())->toBeTrue()
+        ->and($gate->inspect('create', [FurnitureDesign::class, $project])->allowed())->toBeTrue();
+});
+
+it('reads the project once when checking duplicate', function (): void {
+    $design = FurnitureDesign::factory()->create();
+    $design = FurnitureDesign::query()->findOrFail($design->id);
+    $estimator = User::factory()->estimator()->create();
+
+    DB::enableQueryLog();
+    Gate::forUser($estimator)->inspect('duplicate', $design);
+    $projectQueries = array_filter(DB::getQueryLog(), static fn (array $query): bool => str_contains($query['query'], 'from "projects"'));
+
+    expect($projectQueries)->toHaveCount(1);
 });

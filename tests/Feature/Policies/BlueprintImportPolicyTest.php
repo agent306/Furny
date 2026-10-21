@@ -153,31 +153,64 @@ it('lets only owner and admin staff refund an import', function (string $actor, 
     'inactive-admin' => null,
 ]));
 
-describe('the uploader of a staff-made import', function (): void {
-    it('may act on it although the project belongs to a customer', function (string $ability): void {
-        $production = User::factory()->production()->create();
-        $import = BlueprintImport::factory()->state(['user_id' => $production->id])->create();
+describe('the uploader (user_id) grants nothing by itself', function (): void {
+    it('hides an import from a customer who uploaded it to a project they do not own', function (string $ability): void {
+        $uploader = User::factory()->create();
+        $import = BlueprintImport::factory()->state(['user_id' => $uploader->id])->create();
 
-        expect(Gate::forUser($production)->inspect($ability, $import)->allowed())->toBeTrue();
-    })->with(['view', 'update', 'cancel', 'retry', 'accept', 'convertToTrace']);
+        $response = Gate::forUser($uploader)->inspect($ability, $import);
 
-    it('does not extend to staff who did not upload it and hold no permission', function (string $ability): void {
-        $import = BlueprintImport::factory()->create();
+        expect([$response->allowed(), $response->status()])->toBe([false, 404]);
+    })->with(['view', 'viewDebug', 'update', 'cancel', 'retry', 'accept', 'convertToTrace', 'discard', 'rerun', 'refund']);
 
-        $response = Gate::forUser(User::factory()->production()->create())->inspect($ability, $import);
+    it('denies a staff uploader who has since lost the permission, with 403', function (string $ability): void {
+        $uploader = User::factory()->estimator()->create();
+        $import = BlueprintImport::factory()->state(['user_id' => $uploader->id])->create();
+        $uploader->syncRoles('production');
+
+        $response = Gate::forUser($uploader->fresh())->inspect($ability, $import);
 
         expect([$response->allowed(), $response->status()])->toBe([false, 403]);
     })->with(['update', 'cancel', 'retry', 'accept', 'convertToTrace', 'discard', 'rerun', 'refund']);
 
-    it('may discard and rerun it but never refund it', function (): void {
-        $production = User::factory()->production()->create();
-        $import = BlueprintImport::factory()->state(['user_id' => $production->id])->create();
-        $gate = Gate::forUser($production);
+    it('still lets that staff uploader see the import through customers.view, not through the upload', function (): void {
+        $uploader = User::factory()->estimator()->create();
+        $import = BlueprintImport::factory()->state(['user_id' => $uploader->id])->create();
+        $uploader->syncRoles('production');
+        $uploader = $uploader->fresh();
 
-        expect($gate->inspect('discard', $import)->allowed())->toBeTrue()
-            ->and($gate->inspect('rerun', $import)->allowed())->toBeTrue()
-            ->and($gate->inspect('refund', $import)->allowed())->toBeFalse();
+        expect(Gate::forUser($uploader)->inspect('view', $import)->allowed())->toBeTrue();
     });
+
+    it('keeps a staff uploader\'s rights exactly those of the ability\'s permission', function (): void {
+        $estimator = User::factory()->estimator()->create();
+        $import = BlueprintImport::factory()->state(['user_id' => $estimator->id])->create();
+        $gate = Gate::forUser($estimator);
+
+        expect($gate->inspect('update', $import)->allowed())->toBeTrue() // plans.edit_any
+            ->and($gate->inspect('discard', $import)->status())->toBe(403) // no ai.manage
+            ->and($gate->inspect('refund', $import)->status())->toBe(403);
+    });
+});
+
+it('follows the live owner of the project when it changes', function (): void {
+    $import = BlueprintImport::factory()->create();
+    $formerOwner = $import->project->owner;
+    $newOwner = User::factory()->create();
+    $import->project->forceFill(['owner_id' => $newOwner->id])->save();
+    $import = BlueprintImport::query()->findOrFail($import->id);
+
+    expect(Gate::forUser($newOwner)->inspect('update', $import)->allowed())->toBeTrue()
+        ->and(Gate::forUser($formerOwner)->inspect('update', $import)->status())->toBe(404)
+        ->and(Gate::forUser($formerOwner)->inspect('view', $import)->status())->toBe(404);
+});
+
+it('lets the owner of an archived project keep using its imports (archiving is not checked here)', function (): void {
+    $project = Project::factory()->archived()->create();
+    $import = BlueprintImport::factory()->state(['project_id' => $project->id])->create();
+
+    expect(Gate::forUser($project->owner)->inspect('view', $import)->allowed())->toBeTrue()
+        ->and(Gate::forUser($project->owner)->inspect('create', [BlueprintImport::class, $project, ImportMode::Trace])->allowed())->toBeTrue();
 });
 
 it('denies inactive staff every import ability through the policy', function (): void {

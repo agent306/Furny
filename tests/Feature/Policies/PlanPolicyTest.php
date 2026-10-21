@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 use App\Domain\Identity\Models\User;
 use App\Domain\Projects\Models\Plan;
+use App\Domain\Projects\Models\Project;
 use App\Policies\PlanPolicy;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Tests\Support\PolicyActors;
 
@@ -118,4 +120,41 @@ it('denies inactive staff every plan ability through the policy', function (): v
     }
 
     expect($gate->inspect('create', [Plan::class, $plan->project])->allowed())->toBeFalse();
+});
+
+it('follows the live owner of the project when it changes', function (): void {
+    $plan = Plan::factory()->create();
+    $formerOwner = $plan->project->owner;
+    $newOwner = User::factory()->create();
+    $plan->project->forceFill(['owner_id' => $newOwner->id])->save();
+    $plan = Plan::query()->findOrFail($plan->id);
+
+    expect(Gate::forUser($newOwner)->inspect('delete', $plan)->allowed())->toBeTrue()
+        ->and(Gate::forUser($formerOwner)->inspect('delete', $plan)->status())->toBe(404)
+        ->and(Gate::forUser($formerOwner)->inspect('view', $plan)->status())->toBe(404);
+});
+
+it('lets the owner of an archived project keep using its plans (archiving is not checked here)', function (): void {
+    $project = Project::factory()->archived()->create();
+    $plan = Plan::factory()->state(['project_id' => $project->id])->create();
+    $gate = Gate::forUser($project->owner);
+
+    expect($gate->inspect('view', $plan)->allowed())->toBeTrue()
+        ->and($gate->inspect('update', $plan)->allowed())->toBeTrue()
+        ->and($gate->inspect('create', [Plan::class, $project])->allowed())->toBeTrue();
+});
+
+it('looks the soft-deleted project up once per plan instance', function (): void {
+    $plan = Plan::factory()->create();
+    $owner = $plan->project->owner;
+    $plan->project->delete();
+    $plan = Plan::query()->findOrFail($plan->id);
+
+    DB::enableQueryLog();
+    foreach (['view', 'update', 'delete'] as $ability) {
+        Gate::forUser($owner)->inspect($ability, $plan);
+    }
+    $projectQueries = array_filter(DB::getQueryLog(), static fn (array $q): bool => str_contains($q['query'], 'from "projects"'));
+
+    expect($projectQueries)->toHaveCount(2); // the plan's own relation load, then the withTrashed fallback; nothing after
 });
