@@ -120,6 +120,56 @@ it('fills the run data of the status states', function (): void {
         ->and($accepted->plan->is($plan))->toBeTrue();
 });
 
+it('writes a structurally valid ImportResultMeta with the Laravel-added keys', function (): void {
+    $meta = BlueprintImport::factory()->readyForReview()->create()->fresh()->result_meta;
+
+    expect($meta)->toHaveKeys([
+        'metaVersion', 'serviceVersion', 'pipelineVersion', 'sourceKind', 'providerRequested', 'providerUsed', 'model',
+        'fallbackReason', 'drawingKind', 'pageImage', 'planRegion', 'scale', 'detectedUnitSystem', 'confidence',
+        'reasons', 'warnings', 'timings', 'ocrTokens', 'counts', 'inspect', 'review',
+    ])
+        ->and($meta['pageImage'])->toHaveKeys(['width', 'height', 'sourcePage', 'dpi', 'rectified', 'deskewDeg', 'resampleFactor'])
+        ->and($meta['scale'])->toHaveKeys(['mmPerPixel', 'method', 'residualPct', 'samples', 'rejected', 'confidence', 'anisotropyCorrected', 'roomLabelCheck', 'usedSamples'])
+        ->and($meta['scale']['method'])->toBe('dimension_chain')
+        ->and($meta['confidence'])->toHaveKeys(['walls', 'openings', 'rooms', 'overall'])
+        ->and($meta['timings'])->toHaveKey('totalMs')
+        ->and($meta['inspect'])->toHaveKeys(['isLikelyPhoto', 'suggestedCorners'])
+        ->and($meta['review'])->toEqual(['reviewedIds' => [], 'scaleConfirmed' => true, 'unitConfirmed' => true, 'rescaleFactor' => 1])
+        ->and($meta['warnings'])->toBe([]);
+});
+
+it('builds a ready-for-review import whose scale is a unconfirmed guess', function (): void {
+    $import = BlueprintImport::factory()->scaleUnconfirmed()->create()->fresh();
+    $meta = $import->result_meta;
+
+    expect($import->status)->toBe(ImportStatus::ReadyForReview)
+        ->and($import->result_document['schemaVersion'])->toBe(1)
+        ->and($meta['review']['scaleConfirmed'])->toBeFalse()
+        ->and($meta['review']['unitConfirmed'])->toBeTrue()
+        ->and($meta['scale']['method'])->toBe('default_guess')
+        ->and($meta['scale']['confidence'])->toBeLessThan(0.5)
+        ->and($meta['scale']['residualPct'])->toBeNull()
+        ->and($meta['warnings'][0]['code'])->toBe('scale_guessed')
+        ->and($meta['warnings'][0]['params'])->toHaveKey('assumedLongEdgeMm');
+});
+
+it('does not mark an identical hints map dirty but notices false becoming null', function (): void {
+    $import = BlueprintImport::factory()->create(['hints' => ['isPhoto' => false]])->fresh();
+
+    $import->hints = ['isPhoto' => false];
+    expect($import->isDirty('hints'))->toBeFalse();
+
+    $import->hints = ['isPhoto' => null];
+    expect($import->isDirty('hints'))->toBeTrue();
+
+    $import->hints = ['isPhoto' => 0];
+    expect($import->isDirty('hints'))->toBeTrue();
+});
+
+it('refuses a hints value that is not a map', function (): void {
+    BlueprintImport::factory()->make()->hints = 42;
+})->throws(InvalidArgumentException::class);
+
 it('builds mode, source kind and credit states', function (): void {
     $trace = BlueprintImport::factory()->trace()->create()->fresh();
     $dxf = BlueprintImport::factory()->inspected(ImportSourceKind::Dxf)->create()->fresh();
@@ -172,11 +222,12 @@ it('nulls plan_id when the target plan is deleted', function (): void {
     expect($import->fresh()->plan_id)->toBeNull();
 });
 
-it('restricts deleting the uploading user', function (): void {
-    $import = BlueprintImport::factory()->create();
+it('restricts deleting the uploading user even when they own nothing else', function (): void {
+    $uploader = User::factory()->create();
+    BlueprintImport::factory()->create(['user_id' => $uploader->id]);
 
-    $import->user->forceDelete();
-})->throws(QueryException::class);
+    expect(fn () => $uploader->forceDelete())->toThrow(QueryException::class);
+});
 
 it('cascades from project to imports', function (): void {
     $import = BlueprintImport::factory()->create();

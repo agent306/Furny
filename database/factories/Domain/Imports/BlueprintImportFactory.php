@@ -13,6 +13,7 @@ use App\Domain\Projects\Models\Plan;
 use App\Domain\Projects\Models\Project;
 use Database\Factories\Support\Documents;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use stdClass;
 
 /**
  * Default: a just-uploaded, not yet inspected auto import in a new project, uploaded by that
@@ -89,10 +90,20 @@ final class BlueprintImportFactory extends Factory
             'credits_reserved' => 0,
             'credits_charged' => 1,
             'result_document' => Documents::emptyPlan(['createdWith' => 'import']),
-            'result_meta' => ['metaVersion' => 1, 'sourceKind' => 'raster', 'warnings' => []],
+            'result_meta' => self::resultMeta(),
             'review_version' => 1,
             'finished_at' => static fn (): mixed => now()->toImmutable(),
         ]);
+    }
+
+    /**
+     * Ready for review with an unconfirmed, guessed scale: `review.scaleConfirmed` is false, the
+     * scale method is `default_guess` with low confidence and the `scale_guessed` warning is set
+     * (06 §11.3: accepting is blocked until the customer confirms the scale).
+     */
+    public function scaleUnconfirmed(): static
+    {
+        return $this->readyForReview()->state(['result_meta' => self::resultMeta(scaleGuessed: true)]);
     }
 
     /** Accepted into the given plan, or into a new plan of the same project. */
@@ -140,5 +151,48 @@ final class BlueprintImportFactory extends Factory
     public function charged(int $credits): static
     {
         return $this->state(['credits_charged' => $credits]);
+    }
+
+    /**
+     * A structurally valid `ImportResultMeta` (06 §6) for a plan with no entities, plus the keys
+     * Laravel adds (`inspect`, `review`). Confirmed scale and unit unless `$scaleGuessed`.
+     *
+     * @return array<string, mixed>
+     */
+    private static function resultMeta(bool $scaleGuessed = false): array
+    {
+        return [
+            'metaVersion' => 1,
+            'serviceVersion' => '1.0.0',
+            'pipelineVersion' => '1.0.0',
+            'sourceKind' => 'raster',
+            'providerRequested' => 'anthropic',
+            'providerUsed' => 'anthropic',
+            'model' => 'test-model',
+            'fallbackReason' => null,
+            'drawingKind' => 'architectural_line_drawing',
+            'pageImage' => ['width' => 2400, 'height' => 1800, 'sourcePage' => 1, 'dpi' => null, 'rectified' => false, 'deskewDeg' => 0, 'resampleFactor' => 1],
+            'planRegion' => ['x' => 0, 'y' => 0, 'w' => 2400, 'h' => 1800],
+            'scale' => [
+                'mmPerPixel' => 5.0,
+                'method' => $scaleGuessed ? 'default_guess' : 'dimension_chain',
+                'residualPct' => $scaleGuessed ? null : 0.8,
+                'samples' => $scaleGuessed ? 0 : 6,
+                'rejected' => 0,
+                'confidence' => $scaleGuessed ? 0.3 : 0.95,
+                'anisotropyCorrected' => false,
+                'roomLabelCheck' => ['rooms' => 0, 'medianDiscrepancyPct' => null],
+                'usedSamples' => [],
+            ],
+            'detectedUnitSystem' => 'metric',
+            'confidence' => ['walls' => new stdClass, 'openings' => new stdClass, 'rooms' => new stdClass, 'overall' => $scaleGuessed ? 0.4 : 0.9],
+            'reasons' => new stdClass,
+            'warnings' => $scaleGuessed ? [['code' => 'scale_guessed', 'params' => ['assumedLongEdgeMm' => 12000], 'entityIds' => []]] : [],
+            'timings' => ['totalMs' => 42_000],
+            'ocrTokens' => ['count' => 0, 'meanConfidence' => 0, 'metricDimensionTokens' => 0, 'imperialTokens' => 0, 'roomNameTokens' => 0, 'areaTokens' => 0, 'sample' => []],
+            'counts' => ['walls' => 0, 'openings' => 0, 'rooms' => 0, 'texts' => 0, 'candidatesWalls' => 0],
+            'inspect' => ['isLikelyPhoto' => false, 'suggestedCorners' => null, 'dxf' => null],
+            'review' => ['reviewedIds' => [], 'scaleConfirmed' => ! $scaleGuessed, 'unitConfirmed' => true, 'rescaleFactor' => 1],
+        ];
     }
 }

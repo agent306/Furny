@@ -9,6 +9,7 @@ use App\Domain\Furniture\Enums\FurnitureRevisionReason;
 use App\Domain\Furniture\Models\FurnitureDesign;
 use App\Domain\Furniture\Models\FurnitureRevision;
 use App\Domain\Projects\Models\Project;
+use Database\Factories\Concerns\ProvidesTinyPng;
 use Database\Factories\Support\Documents;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -20,8 +21,7 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 final class FurnitureDesignFactory extends Factory
 {
-    /** A 1 x 1 transparent PNG, enough for the `thumbnail` collection (png only). */
-    private const string PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    use ProvidesTinyPng;
 
     protected $model = FurnitureDesign::class;
 
@@ -91,7 +91,7 @@ final class FurnitureDesignFactory extends Factory
     public function withThumbnail(): static
     {
         return $this->afterCreating(static function (FurnitureDesign $design): void {
-            $design->addMediaFromString((string) base64_decode(self::PNG, true))
+            $design->addMediaFromString(self::tinyPng())
                 ->usingFileName('thumbnail.png')
                 ->toMediaCollection('thumbnail');
         });

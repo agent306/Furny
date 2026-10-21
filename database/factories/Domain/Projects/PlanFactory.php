@@ -11,6 +11,7 @@ use App\Domain\Projects\Models\Plan;
 use App\Domain\Projects\Models\PlanRevision;
 use App\Domain\Projects\Models\Project;
 use Carbon\CarbonImmutable;
+use Database\Factories\Concerns\ProvidesTinyPng;
 use Database\Factories\Support\Documents;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -21,8 +22,7 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 final class PlanFactory extends Factory
 {
-    /** A 1 x 1 transparent PNG, enough for the `thumbnail` collection (png only). */
-    private const string PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    use ProvidesTinyPng;
 
     protected $model = Plan::class;
 
@@ -95,7 +95,7 @@ final class PlanFactory extends Factory
     public function withThumbnail(): static
     {
         return $this->afterCreating(static function (Plan $plan): void {
-            $plan->addMediaFromString((string) base64_decode(self::PNG, true))
+            $plan->addMediaFromString(self::tinyPng())
                 ->usingFileName('thumbnail.png')
                 ->toMediaCollection('thumbnail');
         });

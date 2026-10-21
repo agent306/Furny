@@ -6,6 +6,7 @@ namespace Database\Factories\Domain\Furniture;
 
 use App\Domain\Furniture\Enums\PresetCategory;
 use App\Domain\Furniture\Models\FurniturePreset;
+use Database\Factories\Concerns\ProvidesTinyPng;
 use Database\Factories\Support\Documents;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
@@ -18,8 +19,7 @@ use Illuminate\Support\Str;
  */
 final class FurniturePresetFactory extends Factory
 {
-    /** A 1 x 1 transparent PNG, enough for the `thumbnail` collection (png only). */
-    private const string PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    use ProvidesTinyPng;
 
     protected $model = FurniturePreset::class;
 
@@ -62,7 +62,7 @@ final class FurniturePresetFactory extends Factory
     public function withThumbnail(): static
     {
         return $this->afterCreating(static function (FurniturePreset $preset): void {
-            $preset->addMediaFromString((string) base64_decode(self::PNG, true))
+            $preset->addMediaFromString(self::tinyPng())
                 ->usingFileName('thumbnail.png')
                 ->toMediaCollection('thumbnail');
         });

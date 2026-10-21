@@ -118,7 +118,7 @@ final class BlueprintImport extends Model implements HasMedia
         ], true);
     }
 
-    /** The recognition run is in flight or waiting for a worker (cancel is only allowed before it starts). */
+    /** The recognition run is queued or in flight; cancel is only allowed from uploaded and queued (06 §3). */
     public function isActiveRun(): bool
     {
         return in_array($this->status, [
