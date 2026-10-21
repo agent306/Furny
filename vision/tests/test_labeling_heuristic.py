@@ -4,6 +4,8 @@ Fixture ``CandidateSet``s are built in code: a 1000 x 800 plan region, ``t_media
 rectangles and tokens from ``parse_token`` so the parsed kinds are the real ones.
 """
 
+import pytest
+
 from app.pipeline.labeling.base import Labeler, LabelingOutcome
 from app.pipeline.labeling.heuristic import HeuristicLabeler
 from app.pipeline.labeling.vendor import RecognitionVendor
@@ -20,6 +22,7 @@ from app.schemas.candidates import (
 from app.schemas.labeling import MissedRoom
 from app.schemas.meta import MetaWarning
 from app.utils.geometry import Rect
+from tests.support.labeling import checked
 from tests.test_normalize import make_ctx
 
 REGION = Rect(0, 0, 1000, 800)
@@ -69,6 +72,7 @@ def cands(
 def run(c: CandidateSet, hints: RecognizeHints | None = None) -> tuple[LabelingOutcome, list[str]]:
     ctx = make_ctx()
     outcome = HeuristicLabeler().label(None, c, hints or RecognizeHints(), ctx)  # type: ignore[arg-type]
+    checked(outcome.result)
     return outcome, [w.code for w in ctx.warnings]
 
 
@@ -88,9 +92,9 @@ def bedroom_plan() -> CandidateSet:
 # --- interface -------------------------------------------------------------------------------------------
 
 
-def test_heuristic_labeler_satisfies_the_protocols() -> None:
-    labeler: Labeler = HeuristicLabeler()
-    assert callable(labeler.label)
+def test_the_protocols_type_the_labeler_and_a_vendor() -> None:
+    """Both protocols are structural (the type checker holds the labeler and a vendor to them); a labeler
+    behind the ``Labeler`` type returns a ``LabelingOutcome``."""
 
     class Vendor:
         name = "acme"
@@ -98,8 +102,11 @@ def test_heuristic_labeler_satisfies_the_protocols() -> None:
         def recognize(self, image_png: bytes, hints: RecognizeHints, timeout_s: float) -> object:
             return None
 
+    labeler: Labeler = HeuristicLabeler()
     vendor: RecognitionVendor = Vendor()
-    assert vendor.name == "acme"
+    outcome = labeler.label(None, cands([]), RecognizeHints(), make_ctx())  # type: ignore[arg-type]
+    assert isinstance(outcome, LabelingOutcome)
+    assert vendor.recognize(b"", RecognizeHints(), 1.0) is None and vendor.name == "acme"
 
 
 # --- units -----------------------------------------------------------------------------------------------
@@ -120,16 +127,18 @@ def test_imperial_rooms() -> None:
     assert next(t for t in r.texts if t.id == "T1").normalized_text == "Bedroom"
 
 
-def metric_plan() -> CandidateSet:
-    texts = [token(f"T{k}", str(n), 100 + 150 * k, 40) for k, n in enumerate([3000, 2400, 5400], 1)]
-    spans = [
-        span("D1", (100, 60), (250, 60), ["T1"]),
-        span("D2", (250, 60), (400, 60), ["T2"]),
-        span("D3", (100, 60), (400, 60), ["T3"]),
-    ]
-    spans[2] = DimensionSpan("D3", (100, 60), (400, 60), "x", "overall", ["T3"], "L1")
-    spans[1] = span("D2", (250, 60), (400, 60), ["T2"])
+def chain(values: list[int | str], x0: float = 100, step: float = 150, y: float = 40) -> CandidateSet:
+    """A dimension chain: one token per value, each listed by its own span below it."""
+    texts, spans = [], []
+    for k, value in enumerate(values, 1):
+        x = x0 + step * (k - 1)
+        texts.append(token(f"T{k}", str(value), x + step / 2, y))
+        spans.append(span(f"D{k}", (x, y + 20), (x + step, y + 20), [f"T{k}"]))
     return cands(texts, spans=spans)
+
+
+def metric_plan() -> CandidateSet:
+    return chain([3000, 2400, 5400])
 
 
 def test_metric_from_spans() -> None:
@@ -138,25 +147,18 @@ def test_metric_from_spans() -> None:
     assert r.unit_system == "metric" and "unit_system_guessed" not in warnings
     assert {t.id: t.role for t in r.texts} == {"T1": "dimension", "T2": "dimension", "T3": "dimension"}
     by_text = {d.text_id: d for d in r.dimensions}
-    assert len(by_text) == 3
-    assert all(d.span_id is not None and d.value_mm is not None for d in by_text.values())
-    assert [(d.text_id, d.span_id, d.value_mm) for d in r.dimensions]  # one label per associated token
-    assert {d.value_mm for d in r.dimensions} == {3000, 2400, 5400}
+    assert {k: (d.span_id, d.value_mm) for k, d in by_text.items()} == {
+        "T1": ("D1", 3000), "T2": ("D2", 2400), "T3": ("D3", 5400),
+    }  # fmt: skip
     assert {d.kind for d in r.dimensions} <= {"chain_segment", "overall"}
 
 
 def test_dimension_labels_outside_the_plan_region_keep_their_role() -> None:
     """The outer dimension chains lie in the annotation margin (Task 14b ruling B1): their labels are
     dimensions, not ``ignore``; a number no span lists outside the region is ``ignore``."""
-    c = metric_plan()
-    margin = [token(f"T{k}", str(n), 100 + 150 * k, -30) for k, n in enumerate([3000, 2400, 5400], 1)]
+    c = chain([3000, 2400, 5400], y=-30)  # tokens above the region (y < 0), spans just below them
     stray = token("T9", "1800", 500, -30)
-    out, _ = run(
-        cands(
-            [*margin, stray],
-            spans=[span(s.id, (s.p0[0], -10), (s.p1[0], -10), s.near_text_ids) for s in c.spans],
-        )
-    )
+    out, _ = run(cands([*c.texts, stray], spans=c.spans))
     roles = {t.id: t.role for t in out.result.texts}
     assert roles == {"T1": "dimension", "T2": "dimension", "T3": "dimension", "T9": "ignore"}
     assert out.result.unit_system == "metric"
@@ -444,3 +446,237 @@ def test_fuzzy_room_names_use_the_dictionary_name() -> None:
         ("5 Feet Wide Corridor", "corridor"),
         ("Bathroom", "bathroom"),
     ]
+
+
+# --- fix round 1: units are weighed ----------------------------------------------------------------------
+
+
+def mixed_plan() -> CandidateSet:
+    """Twelve span-listed millimetre dimensions and three rooms sized in feet-inch."""
+    c = chain([3000 + 100 * k for k in range(12)], step=80)
+    faces = [
+        face(f"R{k}", (100 + 300 * (k - 1), 100, 380 + 300 * (k - 1), 400), (f"T{20 + k}",))
+        for k in (1, 2, 3)
+    ]
+    sizes = [token(f"T{20 + k}", f"{8 + k}'0\"X10'0\"", 240 + 300 * (k - 1), 300) for k in (1, 2, 3)]
+    return cands([*c.texts, *sizes], faces, c.spans)
+
+
+def test_mixed_units_are_weighed_not_counted() -> None:
+    """12 millimetre dimensions (weight 24) against 3 feet-inch sizes (weight 3): a metric plan; every
+    dimension keeps its value and each size text still converts by its own marks."""
+    r = run(mixed_plan())[0].result
+    assert r.unit_system == "metric"
+    assert [d.value_mm for d in r.dimensions] == [3000 + 100 * k for k in range(12)]
+    assert [(room.width_mm, room.depth_mm) for room in r.rooms] == [(2743, 3048), (3048, 3048), (3353, 3048)]
+
+
+def test_stray_quote_marks_do_not_make_a_metric_plan_imperial() -> None:
+    stray = [
+        token(f"T{k}", text, 100 + 100 * k, 700) for k, text in enumerate(["2400'", "'3000", '900"'], 40)
+    ]
+    assert [t.parsed.kind for t in stray] == ["other"] * 3
+    plan = cands([*metric_plan().texts, *stray], spans=metric_plan().spans)
+    r = run(plan)[0].result
+    assert r.unit_system == "metric" and {d.value_mm for d in r.dimensions} == {3000, 2400, 5400}
+
+
+def test_metric_lengths_with_spans_make_a_metric_plan() -> None:
+    plan = chain(["3.2 m", "2400 mm", "5.4m"])
+    assert [t.parsed.kind for t in plan.texts] == ["metric_length"] * 3
+    out, warns = run(plan)
+    assert out.result.unit_system == "metric" and warns == []
+    assert [d.value_mm for d in out.result.dimensions] == [3200, 2400, 5400]
+    assert {t.role for t in out.result.texts} == {"dimension"}
+
+
+def test_imperial_needs_more_weight_than_the_metric_dimensions() -> None:
+    feet = imperial_tokens()  # three feet-inch values: weight 3
+    one = chain([3000])  # one span-listed dimension: weight 2
+    r = run(cands([*one.texts, *feet], spans=one.spans))[0].result
+    assert r.unit_system == "imperial" and [d.value_mm for d in r.dimensions] == [None]
+    two = chain(
+        [3000, 2400]
+    )  # weight 4 against 3: not imperial, and two dimensions are not enough for metric
+    out, warns = run(cands([*two.texts, *feet], spans=two.spans))
+    assert out.result.unit_system == "unknown" and warns == ["unit_system_guessed"]
+
+
+def test_millimetre_numbers_no_span_lists_are_no_evidence() -> None:
+    texts = [token(f"T{k}", str(1000 + k), 100 + 80 * k, 700) for k in range(5)]
+    out, warns = run(cands(texts))
+    assert out.result.unit_system == "unknown" and warns == ["unit_system_guessed"]
+
+
+def test_sq_ft_areas_count_as_imperial_and_sq_m_areas_do_not() -> None:
+    feet = [token("T1", "8'6\"", 100, 700), token("T2", "9'0\"", 200, 700)]
+    sqft = run(cands([*feet, token("T3", "912 SQ.FT", 300, 700)]))[0].result.unit_system
+    sqm = run(cands([*feet, token("T3", "85 M2", 300, 700)]))[0].result.unit_system
+    assert (sqft, sqm) == ("imperial", "unknown")
+
+
+def test_quote_marks_without_digits_are_no_evidence() -> None:
+    texts = [token(f"T{k}", text, 100 + 100 * k, 700) for k, text in enumerate(["FLAT'S", "MR'S", '"NOTE"'])]
+    assert [t.parsed.kind for t in texts] == ["other"] * 3
+    assert run(cands(texts))[0].result.unit_system == "unknown"
+
+
+# --- fix round 1: names ----------------------------------------------------------------------------------
+
+
+def named_face(*words: TextToken) -> CandidateSet:
+    return cands(list(words), [face("R1", (100, 100, 600, 400), tuple(w.id for w in words))])
+
+
+def test_split_names_are_joined() -> None:
+    """``MASTER`` + ``BEDROOM`` (gap 10 px, half a text height) read as the one name."""
+    first, second = token("T1", "MASTER", 200, 200), token("T2", "BEDROOM", 288, 200)
+    assert first.parsed.kind == "other" and second.parsed.room_name == "BEDROOM"
+    r = run(named_face(first, second))[0].result
+    [room] = r.rooms
+    assert (room.name, room.type, room.name_text_id) == ("Master Bedroom", "master_bedroom", "T1")
+    assert {t.id: (t.role, t.normalized_text) for t in r.texts} == {
+        "T1": ("room_name", "Master Bedroom"), "T2": ("room_name", "Master Bedroom"),
+    }  # fmt: skip
+    assert r.missed_rooms == []
+
+
+def test_living_room_split_in_two_words() -> None:
+    first, second = token("T1", "LIVING", 200, 200), token("T2", "ROOM", 285, 200)
+    [room] = run(named_face(first, second))[0].result.rooms
+    assert (room.name, room.type) == ("Living Room", "living")
+
+
+def test_words_further_apart_than_one_and_a_half_heights_stay_apart() -> None:
+    near = run(named_face(token("T1", "MASTER", 200, 200), token("T2", "BEDROOM", 295, 200)))[0].result
+    far = run(named_face(token("T1", "MASTER", 200, 200), token("T2", "BEDROOM", 316, 200)))[0].result
+    assert near.rooms[0].name == "Master Bedroom"  # gap 29 <= 1.5 x 20
+    assert (far.rooms[0].name, far.rooms[0].type) == ("Bedroom", "bedroom")  # gap 36 > 30
+    assert {t.id: t.role for t in far.texts} == {"T1": "other", "T2": "room_name"}
+
+
+def test_two_rooms_side_by_side_are_not_one_name() -> None:
+    """``BEDROOM`` next to ``TOILET`` joins to no longer key: they stay two names."""
+    a, b = token("T1", "BEDROOM", 200, 200), token("T2", "TOILET", 290, 200)
+    r = run(cands([a, b], [face("R1", (100, 100, 600, 400), ("T1", "T2"))]))[0].result
+    assert r.rooms[0].name == "Bedroom"
+    assert r.rooms[0].name_text_id == "T1"
+
+
+def test_words_on_different_lines_or_heights_are_not_joined() -> None:
+    lower = token("T2", "BEDROOM", 288, 232)  # a line below
+    assert run(named_face(token("T1", "MASTER", 200, 200), lower))[0].result.rooms[0].name == "Bedroom"
+    small = token("T2", "BEDROOM", 288, 200, height=12)  # a different size
+    assert run(named_face(token("T1", "MASTER", 200, 200), small))[0].result.rooms[0].name == "Bedroom"
+
+
+def test_words_in_two_faces_are_not_joined() -> None:
+    a, b = token("T1", "MASTER", 200, 200), token("T2", "BEDROOM", 288, 200)
+    c = cands([a, b], [face("R1", (100, 100, 244, 400), ("T1",)), face("R2", (244, 100, 600, 400), ("T2",))])
+    assert [r.name for r in run(c)[0].result.rooms] == [None, "Bedroom"]
+
+
+def test_a_joined_name_outside_every_face_is_one_missed_room() -> None:
+    first, second = token("T1", "MASTER", 700, 500), token("T2", "BEDROOM", 788, 500)
+    out, _ = run(cands([first, second], [face("R1", (100, 100, 400, 400))]))
+    assert [(m.name, m.type) for m in out.result.missed_rooms] == [("Master Bedroom", "master_bedroom")]
+
+
+def test_numbers_stay_on_fuzzy_names() -> None:
+    texts = ["BEDROM 2", "BEDROOM 3", "TOILE 1"]
+    names = [run(named_face(token("T1", text, 250, 200)))[0].result.rooms[0].name for text in texts]
+    assert names == ["Bedroom 2", "Bedroom 3", "Toilet 1"]
+
+
+def test_abbreviations_get_the_default_name_of_their_type() -> None:
+    expected = {
+        "OTS": ("OTS", "ots"),
+        "WC": ("Toilet", "toilet"),
+        "MBR": ("Master Bedroom", "master_bedroom"),
+    }
+    for text, (name, kind) in expected.items():
+        t = token("T1", text, 250, 200)
+        [room] = run(cands([t], [face("R1", (100, 100, 400, 400), ("T1",))]))[0].result.rooms
+        assert (room.name, room.type) == (name, kind), text
+    lost = run(cands([token("T1", "OTS", 700, 500)]))[0].result.missed_rooms
+    assert [(m.name, m.type) for m in lost] == [("OTS", "ots")]
+
+
+# --- fix round 1: survivors of the review's mutation run -------------------------------------------------
+
+
+def test_corridor_on_the_left_and_right_borders_is_excluded() -> None:
+    def room(box: tuple[float, float, float, float]) -> bool:
+        return run(corridor_plan(box))[0].result.rooms[0].include
+
+    assert room((18, 200, 300, 400)) is False and room((21, 200, 300, 400)) is True
+    assert room((200, 200, 982, 400)) is False and room((200, 200, 979, 400)) is True
+
+
+def test_a_name_within_one_t_of_a_face_but_further_than_half_a_t_belongs_to_it() -> None:
+    on_wall = token("T1", "BEDROOM", 409, 250)  # 9 px past R1's edge: > 0.5 t, <= 1 t
+    assert run(cands([on_wall], [face("R1", (100, 100, 400, 400))]))[0].result.rooms[0].name == "Bedroom"
+
+
+def test_equal_height_names_go_to_the_topmost() -> None:
+    low, high = token("T1", "STORE", 250, 300), token("T2", "KITCHEN", 250, 150)
+    [room] = run(named_face(low, high))[0].result.rooms
+    assert room.name_text_id == "T2"
+    left, right = token("T1", "STORE", 400, 200), token("T2", "KITCHEN", 200, 200)
+    assert run(named_face(left, right))[0].result.rooms[0].name_text_id == "T2"
+
+
+@pytest.mark.parametrize(
+    ("support", "verdict"), [(0.39, "unsure"), (0.4, "door"), (0.45, "door"), (0.0, "unsure")]
+)
+def test_door_support_threshold(support: float, verdict: str) -> None:
+    [o] = run(cands([], openings=[opening("O1", "door", support)]))[0].result.openings
+    assert o.verdict == verdict
+
+
+# name LIVING: centre (250, 200), height 30, box x 196..304, y 185..215; a size text is 20 high
+def size_below(cy: float, cx: float = 250, tid: str = "T2") -> TextToken:
+    return token(tid, "12'0\"X14'0\"", cx, cy)
+
+
+@pytest.mark.parametrize(
+    ("cy", "cx", "found"),
+    [
+        (245, 250, True),  # 20 px under the name
+        (275, 250, True),  # 50 px under it: within 2 text heights (60)
+        (295, 250, False),  # 70 px under it: out of reach
+        (205, 250, False),  # overlaps the name's lower half
+        (150, 250, False),  # above the name
+        (245, 450, False),  # beside the name's column
+    ],
+)
+def test_size_text_below_the_name(cy: float, cx: float, found: bool) -> None:
+    name = token("T1", "LIVING", 250, 200, height=30)
+    [room] = run(cands([name, size_below(cy, cx)], [face("R1", (100, 100, 600, 400), ("T1",))]))[
+        0
+    ].result.rooms
+    assert (room.size_text is not None) is found
+
+
+def test_the_size_text_nearest_the_name_wins() -> None:
+    name = token("T1", "LIVING", 250, 200, height=30)
+    far, near = size_below(262, tid="T2"), token("T3", "9'0\"X9'0\"", 250, 240)
+    [room] = run(cands([name, far, near], [face("R1", (100, 100, 600, 400), ("T1",))]))[0].result.rooms
+    assert room.size_text == "9'0\"X9'0\"" and room.width_mm == 2743
+
+
+def test_a_size_text_another_face_lists_is_not_taken() -> None:
+    name = token("T1", "LIVING", 250, 200, height=30)
+    other = size_below(245)
+    c = cands(
+        [name, other], [face("R1", (100, 100, 600, 220), ("T1",)), face("R2", (100, 220, 600, 400), ("T2",))]
+    )
+    assert run(c)[0].result.rooms[0].size_text is None
+
+
+def test_an_unnamed_face_keeps_the_size_text_it_lists() -> None:
+    size = token("T1", SIZE_TEXT, 250, 250)
+    [room] = run(cands([size], [face("R1", (100, 100, 400, 400), ("T1",))]))[0].result.rooms
+    assert (room.name, room.size_text, room.width_mm, room.depth_mm) == (None, SIZE_TEXT, 3048, 3353)
+    outside = run(cands([size], [face("R1", (500, 100, 700, 400))]))[0].result.rooms[0]
+    assert outside.size_text is None  # no name to look below, not listed

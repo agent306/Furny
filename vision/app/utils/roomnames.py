@@ -136,10 +136,32 @@ def title_case_name(raw: str) -> str:
     return re.sub(r"[A-Za-z]+", lambda m: m.group(0).capitalize(), raw.strip())
 
 
+def _is_abbreviation(key: str) -> bool:
+    """A dictionary key that is a short form (``OTS``, ``WC``, ``MBR``, ``W.C``, ``M.BED``): at most three
+    letters or dotted."""
+    return len(re.sub(r"[^A-Z0-9]", "", key)) <= 3 or "." in key
+
+
 def room_display_name(text: str, key: str) -> str:
-    """The name to show for a room-name token ``text`` that matched dictionary ``key``: ``title_case_name`` of
-    the text when the key's words appear in it verbatim (``"LIVING ROOM"``, ``"5 FEET WIDE CORRIDOR"``), else
-    of the key itself, because the match was fuzzy (``"TOILE"`` -> ``"Toilet"``)."""
+    """The name to show for a room-name token ``text`` that matched dictionary ``key``.
+
+    - An abbreviation key (``OTS``, ``WC``, ``MBR``) gives the room type's default name
+      (``ROOM_DEFAULT_NAMES``: ``OTS``, ``Toilet``, ``Master Bedroom``).
+    - Otherwise ``title_case_name`` of the text when the key's words appear in it verbatim
+      (``"LIVING ROOM"``, ``"5 FEET WIDE CORRIDOR"``), else of the key itself, because the match was fuzzy
+      (``"TOILE"`` -> ``"Toilet"``).
+    - A number ending the text stays on the canonical name (``"BEDROM 2"`` -> ``"Bedroom 2"``).
+    """
     words, phrase = _words(text), _words(key)
-    exact = any(words[i : i + len(phrase)] == phrase for i in range(len(words) - len(phrase) + 1))
-    return title_case_name(text if exact else key)
+    numbers: list[str] = []
+    for word in reversed(words):
+        if not word.isdigit():
+            break
+        numbers.insert(0, word)
+    if _is_abbreviation(key):
+        base = ROOM_DEFAULT_NAMES[ROOM_NAMES[key]]
+    elif any(words[i : i + len(phrase)] == phrase for i in range(len(words) - len(phrase) + 1)):
+        return title_case_name(text)
+    else:
+        base = title_case_name(key)
+    return " ".join([base, *numbers])

@@ -17,7 +17,8 @@ from app.pipeline.textparse import parse_token
 from app.schemas.api import RecognizeHints
 from app.schemas.candidates import TextToken
 from app.schemas.meta import MetaWarning
-from app.utils.roomnames import title_case_name
+from app.utils.roomnames import room_display_name
+from tests.support.labeling import checked
 from tests.support.reference import (
     IMAGES,
     ChainResult,
@@ -48,6 +49,7 @@ def runs() -> dict[str, tuple[ChainResult, LabelingOutcome, list[MetaWarning]]]:
         r = run_chain(stem)
         ctx = make_ctx()
         outcome = HeuristicLabeler().label(r.page, chain_candidates(r), RecognizeHints(), ctx)
+        checked(outcome.result)
         out[stem] = (r, outcome, ctx.warnings)
     return out
 
@@ -76,7 +78,7 @@ def test_matched_rooms_get_their_names(stem: str, runs: dict) -> None:
         room = rooms[matched[t.id]]
         parsed = parse_token(t.label or "")
         assert room.name_text_id == token.id, (t.id, room)
-        assert room.name == title_case_name(token.text), (t.id, room)
+        assert room.name == room_display_name(token.text, token.parsed.room_name or ""), (t.id, room)
         assert room.type == parsed.room_type, (t.id, room)
         assert room.include is True
         right += 1
