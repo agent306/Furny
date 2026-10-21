@@ -225,6 +225,12 @@ describe('normalizeLengthInput', () => {
         ['+1,234.5mm', '1234.5mm', false],
         ['10′6″', '10\'6"', false],
         ['10’6”', '10\'6"', false],
+        // U+00B4 would otherwise be decomposed by NFKC into a space and a combining accent.
+        ['10´6″', '10\'6"', false],
+        ['5´', "5'", false],
+        // A comma not followed by exactly three digits is a decimal comma, never a thousands separator.
+        ['1,2345', '1.2345', false],
+        ['1,234', '1234', false],
         ["6''", '6"', false],
         ['3200   mm', '3200 mm', false],
         ['10 FT 6 IN', '10 ft 6 in', false],
@@ -246,6 +252,35 @@ describe('normalizeLengthInput', () => {
             ok: false,
             error: { code },
         });
+    });
+});
+
+describe('parseLength: ledger rulings (Task 3)', () => {
+    it('reads 1,2345 as a decimal comma, not as 12345', () => {
+        expect(parseLength('1,2345', { unit: 'm' })).toEqual({
+            ok: true,
+            mm: 1235,
+            rounded: true,
+        });
+        expect(parseLength('12,3456', MM)).toEqual({
+            ok: true,
+            mm: 12,
+            rounded: true,
+        });
+        expect(parseLength('1,234', MM)).toEqual({
+            ok: true,
+            mm: 1234,
+            rounded: false,
+        });
+    });
+
+    it('accepts the acute accent as a foot mark', () => {
+        expect(parseLength('10´6″', { unit: 'ftin' })).toEqual(
+            parseLength('10\'6"', { unit: 'ftin' }),
+        );
+        expect(parseLength('5´', { unit: 'ftin' })).toEqual(
+            parseLength("5'", { unit: 'ftin' }),
+        );
     });
 });
 

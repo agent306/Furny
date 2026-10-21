@@ -23,7 +23,8 @@ export type NormalizedLength =
     | { ok: true; text: string; negative: boolean }
     | { ok: false; error: ParseLengthError };
 
-const THOUSANDS_PREFIX = /^\d{1,3}(,\d{3})+(\.\d+)?/;
+// `(?!\d)`: "1,2345" is a decimal comma, not 1,234 followed by a stray digit.
+const THOUSANDS_PREFIX = /^\d{1,3}(,\d{3})+(?!\d)(\.\d+)?/;
 
 /** Step 1 of 04 §1.2: normalisation, sign extraction and comma handling. */
 export function normalizeLengthInput(input: string): NormalizedLength {
@@ -31,8 +32,10 @@ export function normalizeLengthInput(input: string): NormalizedLength {
         return fail('empty');
     }
     let s = input
+        // Before NFKC, which would turn ´ (U+00B4) into a space plus a combining accent.
+        .replace(/´/g, "'")
         .normalize('NFKC')
-        .replace(/[′’‘‛´`]/g, "'")
+        .replace(/[′’‘‛`]/g, "'")
         .replace(/[″“”‟〃]/g, '"')
         .replace(/''/g, '"')
         .replace(/[−–]/g, '-')
