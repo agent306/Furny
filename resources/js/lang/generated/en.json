@@ -16,6 +16,8 @@
     "a11y.toggle_sidebar": "Toggle sidebar",
     "a11y.tools": "Tools",
     "a11y.user_menu": "Account menu",
+    "account.toasts.session_revoked": "That device was signed out.",
+    "account.toasts.sessions_revoked": "{count, plural, =0 {No other devices were signed in.} one {Signed out # other device.} other {Signed out # other devices.}}",
     "auth_ui.welcome.create_account": "Create account",
     "auth_ui.welcome.features.design": "Design custom furniture in 2D and 3D",
     "auth_ui.welcome.features.order": "Get a quote and follow production to delivery",
