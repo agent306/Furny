@@ -64,6 +64,11 @@ FIXED_CONFIDENCE: dict[str, float] = {
 }
 MAX_META_SAMPLES = 60
 MAX_COORD_MM = 1_000_000  # the range of a document coordinate (`schemas.plan.Coord`)
+MIN_SPAN_PX = 10.0  # a sample over a shorter span is noise (a tick mark read as a dimension) ...
+MIN_MM_PER_PX, MAX_MM_PER_PX = (
+    0.25,
+    250.0,
+)  # ... and so is one whose scale no plan can have (Task 20 review N-M1)
 KNOWN_X_WORDS = ("width",)  # a null-id known dimension spans the walls across (x) for "width", else down (y)
 
 
@@ -86,6 +91,10 @@ class PxScaleSample:
     def estimate(self) -> float:
         """mm per px (step 2)."""
         return self.value_mm / self.span_px
+
+
+def _plausible(s: PxScaleSample) -> bool:
+    return s.span_px >= MIN_SPAN_PX and MIN_MM_PER_PX <= s.estimate <= MAX_MM_PER_PX
 
 
 @dataclass(frozen=True)
@@ -282,7 +291,8 @@ def _known_sample(
 def _collect(
     candidates: CandidateSet, labels: LabelingResult, hints: RecognizeHints
 ) -> tuple[list[PxScaleSample], PxScaleSample | None, list[PxScaleSample]]:
-    """The dimension samples, the known-dimension sample and the room samples (see `collect_samples`)."""
+    """The dimension samples, the known-dimension sample and the room samples (see `collect_samples`), without
+    the implausible ones: spans under ``MIN_SPAN_PX`` or scales outside ``MIN_MM_PER_PX .. MAX_MM_PER_PX``."""
     texts = {t.id: t.text for t in candidates.texts}
     spans = {s.id: s for s in candidates.spans}
     dimensions: list[PxScaleSample] = []
@@ -295,11 +305,11 @@ def _collect(
             continue
         kind: SampleKind = d.kind if d.kind in ("chain_segment", "overall") else span.kind
         text = texts.get(d.text_id, str(d.value_mm))
-        dimensions.append(
-            PxScaleSample(
-                d.value_mm, length, WEIGHT[kind], span.axis, kind, text, span.p0, span.p1, span.line_id
-            )
+        found = PxScaleSample(
+            d.value_mm, length, WEIGHT[kind], span.axis, kind, text, span.p0, span.p1, span.line_id
         )
+        if _plausible(found):
+            dimensions.append(found)
     faces = {f.id: f for f in candidates.rooms if not f.open}
     rooms: list[PxScaleSample] = []
     for r in labels.rooms:
@@ -307,8 +317,11 @@ def _collect(
         if face is None or r.width_mm is None or r.depth_mm is None or min(r.width_mm, r.depth_mm) <= 0:
             continue
         text = r.size_text or f"{r.width_mm} x {r.depth_mm}"
-        rooms.extend(_room_samples(face, r.width_mm, r.depth_mm, candidates.theta0, text))
-    return dimensions, _known_sample(candidates, labels, hints), rooms
+        pair = _room_samples(face, r.width_mm, r.depth_mm, candidates.theta0, text)
+        if all(_plausible(s) for s in pair):
+            rooms.extend(pair)
+    known = _known_sample(candidates, labels, hints)
+    return dimensions, known if known is not None and _plausible(known) else None, rooms
 
 
 def collect_samples(

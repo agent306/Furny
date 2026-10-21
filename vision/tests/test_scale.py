@@ -7,6 +7,7 @@ pixel sample dataclass is ``PxScaleSample``; ``ScaleSample`` stays the meta mode
 """
 
 import math
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -770,13 +771,32 @@ def test_open_faces_give_no_room_sample() -> None:
 
 
 def test_meta_holds_sample_ends_to_the_document_range() -> None:
-    """An absurd scale (a 10 m label on a 2 px span) still serializes: sample ends are held to +-1 000 000."""
-    plan = Plan()
-    plan.span((100, 100), (102, 100), 10000)
-    plan.span((100, 200), (102, 200), 10000, line="L2")
-    result, _ = solve(plan)
+    """The backstop: an absurd scale still serializes, sample ends held to +-1 000 000 (collection no longer
+    lets one through, see the test below)."""
+    absurd = [sample(10000, 2.0, axis="x"), sample(10000, 2.0, axis="x")]
+    result = replace(
+        solve(Plan())[0],
+        mm_per_px=5000.0,
+        used_samples=absurd,
+        inlier_flags=[True, True],
+    )
     meta = to_scale_meta(result)
-    assert result.mm_per_px == pytest.approx(5000.0)
-    assert {s.b.x for s in meta.used_samples} == {510000}
-    plan.span((1500, 300), (1502, 300), 10000, line="L3")
-    assert max(s.b.x for s in to_scale_meta(solve(plan)[0]).used_samples) == 1_000_000
+    assert {s.b.x for s in meta.used_samples} == {10000}
+    far = replace(result, used_samples=[sample(10000, 1500.0)], inlier_flags=[True])
+    assert to_scale_meta(far).used_samples[0].b.x == 1_000_000
+
+
+def test_implausible_samples_are_rejected_at_collection() -> None:
+    """Task 20 review N-M1 (carry): spans under 10 px and scales outside 0.25-250 mm/px are not samples,
+    so an absurd label gives `default_guess` instead of a 5 m/px scale."""
+    plan = Plan()
+    plan.span((100, 100), (102, 100), 10000)  # 5000 mm/px over 2 px
+    plan.span((100, 200), (150, 200), 100000, line="L2")  # 2000 mm/px
+    plan.span((100, 300), (400, 300), 30, line="L3")  # 0.1 mm/px
+    result, warnings = solve(plan)
+    assert result.method == "default_guess" and "scale_guessed" in warnings
+    assert 0.25 <= result.mm_per_px <= 250.0
+    assert collect_samples(plan.candidates(), plan.labels(), RecognizeHints()) == ([], [])
+    plan.span((100, 400), (300, 400), 2000, line="L4")  # 10 mm/px: plausible
+    plan.span((100, 500), (400, 500), 3000, line="L5")
+    assert solve(plan)[0].method == "dimension_chain"
