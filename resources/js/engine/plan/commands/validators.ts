@@ -89,6 +89,32 @@ export function checkOpeningCapacity(
         : null;
 }
 
+/** `out_of_range` unless `|value| <= MAX_COORD`. */
+export const checkCoord = (
+    field: string,
+    value: number,
+): EngineMessage | null => checkRange(field, value, -MAX_COORD, MAX_COORD);
+
+/** A free point inside the coordinate range, `field` being the name of the param. */
+export function checkPoint(
+    field: string,
+    point: { x: number; y: number },
+): EngineMessage | null {
+    return (
+        checkCoord(`${field}.x`, point.x) ?? checkCoord(`${field}.y`, point.y)
+    );
+}
+
+/** `too_large` when one more `kind` entity would not fit in `record` (`plan.too_large`). */
+export function checkCollectionCapacity(
+    record: object,
+    kind: string,
+    max: number,
+): EngineMessage | null {
+    const count = Object.keys(record).length;
+    return count + 1 > max ? message('too_large', { kind, count, max }) : null;
+}
+
 /** The distinct ids of a selection, in id order. */
 export const uniqueSorted = (ids: readonly string[]): string[] =>
     [...new Set(ids)].sort(cmpId);

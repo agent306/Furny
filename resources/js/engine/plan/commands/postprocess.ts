@@ -132,7 +132,7 @@ function affectedFaceKeys(
 const mm = (v: number): number => roundMm(v) + 0;
 
 /** Rotation as stored on a placement: `[0, 360)`, rounded to 0.01 degree. */
-function storedRotation(deg: number): number {
+export function storedRotation(deg: number): number {
     const rounded = Math.round(normDeg(deg) * 100) / 100;
     return rounded >= 360 ? 0 : rounded + 0;
 }
@@ -178,7 +178,10 @@ function deleteOrphanNodes(
     pushDeleted(out, gone);
 }
 
-/** Step 2: dimensions attached to a related wall follow its face, or go with the wall. */
+/**
+ * Step 2: dimensions attached to a related wall follow its face, or go with
+ * the wall; so does a dimension the command changed.
+ */
 function followDimensions(
     draft: Draft<PlanDocument>,
     info: PostProcessInfo,
@@ -188,7 +191,11 @@ function followDimensions(
     const gone: string[] = [];
     for (const dim of Object.values(info.doc.annotations.dimensions)) {
         const attached = dim.attachedTo;
-        if (attached === null || !related.reach.has(attached.wallId)) continue;
+        if (attached === null) continue;
+        // a dimension the command itself wrote follows its wall too (addDimension, setDimension)
+        if (!related.reach.has(attached.wallId) && !info.changed.has(dim.id)) {
+            continue;
+        }
         if (!has(info.doc.walls, attached.wallId)) {
             delete draft.annotations.dimensions[dim.id];
             gone.push(dim.id);

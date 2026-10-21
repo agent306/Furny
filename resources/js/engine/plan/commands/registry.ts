@@ -12,8 +12,12 @@ import {
     type PlanCommandContext,
     type PlanDefaults,
 } from './pipeline';
+import { ANNOTATION_COMMANDS } from './annotations';
+import { FIXTURE_COMMANDS } from './fixtures';
 import { MOVE_COMMANDS } from './moves';
 import { OPENING_COMMANDS } from './openings';
+import { PLACEMENT_COMMANDS } from './placements';
+import { ROOM_COMMANDS } from './rooms';
 import { WALL_COMMANDS } from './walls';
 
 /** Results `createPlanBus` remembers by document identity. */
@@ -29,6 +33,10 @@ export const PLAN_COMMANDS = {
     ...WALL_COMMANDS,
     ...MOVE_COMMANDS,
     ...OPENING_COMMANDS,
+    ...ROOM_COMMANDS,
+    ...PLACEMENT_COMMANDS,
+    ...FIXTURE_COMMANDS,
+    ...ANNOTATION_COMMANDS,
 } satisfies PlanCommandRegistry;
 
 export type PlanCommandType = keyof typeof PLAN_COMMANDS & string;
