@@ -4,6 +4,12 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Domain\Catalog\Models\EdgeBand;
+use App\Domain\Catalog\Models\Finish;
+use App\Domain\Catalog\Models\HardwareItem;
+use App\Domain\Catalog\Models\LabourRate;
+use App\Domain\Catalog\Models\Material;
+use App\Domain\Catalog\Models\TaxRate;
 use App\Domain\Identity\Models\Address;
 use App\Domain\Identity\Models\NotificationDelivery;
 use App\Domain\Identity\Models\NotificationPreference;
@@ -39,5 +45,11 @@ final class MorphMap
         'project' => Project::class,
         'plan' => Plan::class,
         'plan_revision' => PlanRevision::class,
+        'material' => Material::class,
+        'edge_band' => EdgeBand::class,
+        'hardware_item' => HardwareItem::class,
+        'finish' => Finish::class,
+        'labour_rate' => LabourRate::class,
+        'tax_rate' => TaxRate::class,
     ];
 }

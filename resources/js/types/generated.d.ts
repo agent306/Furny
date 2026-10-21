@@ -1,5 +1,15 @@
 declare namespace App {
 namespace Domain {
+namespace Catalog {
+namespace Enums {
+export type BoardType = 'particle_board' | 'mdf' | 'hdf' | 'plywood' | 'blockboard' | 'solid_wood' | 'glass' | 'acrylic' | 'metal_sheet';
+export type FinishType = 'none' | 'laminate' | 'veneer' | 'paint' | 'pu' | 'lacquer' | 'duco' | 'membrane';
+export type HardwareCategory = 'hinge' | 'hinge_plate' | 'drawer_slide' | 'handle' | 'knob' | 'leg' | 'plinth_leg' | 'hanging_rod' | 'rod_support' | 'shelf_support' | 'connector' | 'lock' | 'lift_mechanism' | 'sliding_track' | 'sliding_roller' | 'gas_strut' | 'damper' | 'screw_pack' | 'wall_bracket' | 'led_strip' | 'other';
+export type HardwareUnit = 'piece' | 'pair' | 'set' | 'meter' | 'pack';
+export type LabourUnit = 'sheet' | 'meter' | 'part' | 'piece' | 'item' | 'sqm' | 'hour';
+export type MaterialSurface = 'raw' | 'melamine' | 'laminate' | 'veneer' | 'painted' | 'lacquered' | 'pre_laminated';
+}
+}
 namespace Identity {
 namespace Enums {
 export type DeliveryDriver = 'meta' | 'twilio' | 'msg91' | 'log' | 'array';
