@@ -513,3 +513,36 @@ export type {
 export { createGenContext } from './furniture/context';
 export { makePart, mapEdges, mapGrain } from './furniture/parts';
 export { PART_NAMES_EN, partNameEn } from './furniture/partNames';
+export {
+    clamp,
+    columnsFromDoors,
+    commonCarcass,
+    effectiveParams,
+    emptyOverrides,
+    hingedFront,
+    interiorHeight,
+    leaf,
+    reidentify,
+    resolveDefaultMaterials,
+    shelfCount,
+    split,
+} from './furniture/templates/common';
+export type { SectionBuilders } from './furniture/templates/common';
+export type {
+    Condition,
+    ParamField,
+    TemplateCategory,
+    TemplateContext,
+    TemplateDefinition,
+} from './furniture/templates/types';
+export {
+    TEMPLATES,
+    getTemplate,
+    templateDefaultDocument,
+} from './furniture/templates/index';
+export {
+    wardrobeDoorCount,
+    wardrobeHinged,
+    wardrobeHingedParamsSchema,
+} from './furniture/templates/wardrobe_hinged';
+export type { WardrobeHingedParams } from './furniture/templates/wardrobe_hinged';
