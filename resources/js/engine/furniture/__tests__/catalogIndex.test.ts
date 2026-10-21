@@ -1,21 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { HARDWARE_ROLE_KEYS, type HardwareRoleKey } from '../../catalog/specs';
-import type { CatalogMaterial } from '../../catalog/snapshot';
+import { HARDWARE_ROLE_KEYS } from '../../catalog/specs';
+import { MATERIAL_ROLES, type CatalogMaterial } from '../../catalog/snapshot';
 import { mutateCatalog, seedCatalog } from '../../testing/seedCatalog';
 import { indexCatalog } from '../catalogIndex';
 import { DEFAULT_DENSITY } from '../rules/weight';
-
-const MATERIAL_ROLES = [
-    'carcass',
-    'back',
-    'shelf',
-    'front',
-    'top',
-    'drawer_box',
-    'drawer_bottom',
-    'plinth',
-    'leg',
-] as const;
 
 describe('indexCatalog: lookups', () => {
     const idx = indexCatalog(seedCatalog());
@@ -262,13 +250,31 @@ describe('indexCatalog: memoisation', () => {
     });
 
     it('returns different indexes for different snapshot objects', () => {
-        expect(indexCatalog(seedCatalog())).not.toBe(
-            indexCatalog(seedCatalog()),
-        );
+        const base = seedCatalog();
+        const next = mutateCatalog(base, (d) => {
+            d.version = 2;
+        });
+        expect(indexCatalog(next)).not.toBe(indexCatalog(base));
+        expect(indexCatalog(next).snapshot.version).toBe(2);
     });
 
-    it('typechecks role keys', () => {
-        const key: HardwareRoleKey = 'lock.default';
-        expect(HARDWARE_ROLE_KEYS).toContain(key);
+    it('indexes the shared seed snapshot once', () => {
+        expect(indexCatalog(seedCatalog())).toBe(indexCatalog(seedCatalog()));
+    });
+});
+
+describe('MATERIAL_ROLES', () => {
+    it('is the 9 part roles of 03 §2', () => {
+        expect([...MATERIAL_ROLES]).toEqual([
+            'carcass',
+            'back',
+            'shelf',
+            'front',
+            'top',
+            'drawer_box',
+            'drawer_bottom',
+            'plinth',
+            'leg',
+        ]);
     });
 });

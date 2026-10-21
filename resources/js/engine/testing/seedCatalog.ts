@@ -8,19 +8,40 @@ import { create } from 'mutative';
 import seedJson from '../../../../tests/fixtures/catalog/seed-snapshot.json';
 import {
     CatalogSnapshotSchema,
+    PricingSettingsSchema,
     type CatalogSnapshot,
     type PricingSettings,
 } from '../catalog/snapshot';
 import type { Draft } from 'mutative';
 
-/** A fresh, schema-parsed copy of the seed catalog on every call. */
+function deepFreeze<T>(value: T): T {
+    if (typeof value !== 'object' || value === null || Object.isFrozen(value)) {
+        return value;
+    }
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+    return value;
+}
+
+let base: CatalogSnapshot | undefined;
+
+/**
+ * The seed catalog, parsed once and deep-frozen, so it is safe to index and to
+ * share; use `mutateCatalog` for variants. A `pricing` patch is validated by
+ * `PricingSettingsSchema` and yields a new frozen snapshot sharing the rest.
+ */
 export function seedCatalog(patch?: {
     pricing?: Partial<PricingSettings>;
 }): CatalogSnapshot {
-    const parsed = CatalogSnapshotSchema.parse(seedJson);
-    return patch?.pricing
-        ? { ...parsed, pricing: { ...parsed.pricing, ...patch.pricing } }
-        : parsed;
+    base ??= deepFreeze(CatalogSnapshotSchema.parse(seedJson));
+    if (!patch?.pricing) return base;
+    return deepFreeze({
+        ...base,
+        pricing: PricingSettingsSchema.parse({
+            ...base.pricing,
+            ...patch.pricing,
+        }),
+    });
 }
 
 /**

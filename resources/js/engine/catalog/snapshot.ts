@@ -134,9 +134,13 @@ export type MaterialRole = (typeof MATERIAL_ROLES)[number];
 /** Non-negative integer (money in minor units, lengths in mm). */
 const Minor = z.number().int().nonnegative();
 const Positive = z.number().positive();
+/** Positive integer (sheet dimensions). */
+const PositiveInt = z.number().int().positive();
+/** `#rrggbb`; stored lower-case (11 §catalog, 14), so any input case is normalised. */
 const ColorHex = z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
+    .transform((hex) => hex.toLowerCase())
     .nullable();
 const Code = z.string().min(1);
 
@@ -146,8 +150,8 @@ export const CatalogMaterialSchema = z.object({
     name: z.string(),
     boardType: z.enum(BOARD_TYPES),
     thicknessMm: Positive,
-    sheetLengthMm: Minor,
-    sheetWidthMm: Minor,
+    sheetLengthMm: PositiveInt,
+    sheetWidthMm: PositiveInt,
     hasGrain: z.boolean(),
     decorName: z.string().nullable(),
     colorHex: ColorHex,
@@ -249,7 +253,7 @@ export const PricingSettingsSchema = z.object({
     installationBps: Minor,
     deliveryFlatMinor: Minor,
     kerfMm: z.number().nonnegative(),
-    sheetTrimMm: z.number().nonnegative(),
+    sheetTrimMm: Minor,
     nestingAllowRotationDefault: z.boolean(),
     sheetBillingMode: z.enum(SHEET_BILLING_MODES),
     edgePremillMm: z.number().int().min(0).max(3),
@@ -265,7 +269,7 @@ export type PricingSettings = z.output<typeof PricingSettingsSchema>;
 export const CatalogSnapshotSchema = z.object({
     version: z.number().int().nonnegative(),
     currency: z.string().min(1),
-    generatedAt: z.string(),
+    generatedAt: z.iso.datetime(),
     materials: z.array(CatalogMaterialSchema),
     edgeBands: z.array(CatalogEdgeBandSchema),
     hardware: z.array(CatalogHardwareSchema),

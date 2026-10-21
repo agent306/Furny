@@ -63,7 +63,7 @@ const DrawerSlideSpecs = z
     .looseObject({
         type: z.enum(['side_mount', 'undermount']),
         family: z.string().min(1),
-        lengthMm: Int,
+        lengthMm: Int.min(1),
         loadKg: Int.optional(),
         softClose: z.boolean().optional(),
         extension: z.enum(['full', 'partial']).optional(),
@@ -125,7 +125,7 @@ const LiftMechanismSpecs = z.looseObject({
 });
 
 const SlidingTrackSpecs = z.looseObject({
-    lengthMm: Int,
+    lengthMm: Int.min(1),
     tracks: z.union([z.literal(2), z.literal(3)]).optional(),
     system: z.enum(['top_hung', 'bottom_rolling']).optional(),
 });

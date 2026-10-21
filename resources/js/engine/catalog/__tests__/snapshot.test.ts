@@ -234,6 +234,37 @@ describe('seed-snapshot.json (08 §7, 02 §13–§14)', () => {
     });
 });
 
+describe('seed rows regression guard', () => {
+    // One JSON line per row: a change to any price, code, sortOrder, active
+    // flag, spec or other field of the seed fails this test. Update the file
+    // snapshot (`vitest -u`) only for a deliberate seed change.
+    const lines = (title: string, rows: readonly unknown[]): string =>
+        [
+            `# ${title} (${rows.length})`,
+            ...rows.map((r) => JSON.stringify(r)),
+        ].join('\n');
+
+    it('pins every row of the seed snapshot', async () => {
+        const text = [
+            JSON.stringify({
+                version: raw.version,
+                currency: raw.currency,
+                generatedAt: raw.generatedAt,
+            }),
+            lines('pricing', [raw.pricing]),
+            lines('materials', raw.materials),
+            lines('edgeBands', raw.edgeBands),
+            lines('hardware', raw.hardware),
+            lines('finishes', raw.finishes),
+            lines('labourRates', raw.labourRates),
+            lines('taxRates', raw.taxRates),
+        ].join('\n\n');
+        await expect(`${text}\n`).toMatchFileSnapshot(
+            './__snapshots__/seed-rows.txt',
+        );
+    });
+});
+
 describe('CatalogSnapshotSchema', () => {
     it('parses the seed snapshot', () => {
         const result = CatalogSnapshotSchema.safeParse(raw);
@@ -294,6 +325,40 @@ describe('CatalogSnapshotSchema', () => {
         }
     });
 
+    it('normalises hex colours to lower case', () => {
+        const upper = structuredClone(raw);
+        upper.materials[0]!.colorHex = '#AABBCC';
+        upper.edgeBands[0]!.colorHex = '#A0703C';
+        upper.finishes[0]!.colorHex = '#FfEeDd';
+        const parsed = CatalogSnapshotSchema.parse(upper);
+        expect(parsed.materials[0]!.colorHex).toBe('#aabbcc');
+        expect(parsed.edgeBands[0]!.colorHex).toBe('#a0703c');
+        expect(parsed.finishes[0]!.colorHex).toBe('#ffeedd');
+        upper.materials[0]!.colorHex = 'red';
+        expect(CatalogSnapshotSchema.safeParse(upper).success).toBe(false);
+    });
+
+    it('stores every seed colour in lower case', () => {
+        const hexes = JSON.stringify(raw).match(/"#[0-9a-fA-F]{6}"/g) ?? [];
+        expect(hexes.length).toBeGreaterThan(10);
+        for (const hex of hexes) expect(hex).toBe(hex.toLowerCase());
+        expect(seedCatalog().materials[0]!.colorHex).toBe('#f4f4f2');
+    });
+
+    it('requires an ISO datetime for generatedAt', () => {
+        const bad = { ...structuredClone(raw), generatedAt: 'yesterday' };
+        expect(CatalogSnapshotSchema.safeParse(bad).success).toBe(false);
+    });
+
+    it('requires positive sheet dimensions and an integer sheetTrimMm', () => {
+        const zero = structuredClone(raw);
+        zero.materials[0]!.sheetLengthMm = 0;
+        expect(CatalogSnapshotSchema.safeParse(zero).success).toBe(false);
+        const trim = structuredClone(raw);
+        trim.pricing.sheetTrimMm = 2.5;
+        expect(CatalogSnapshotSchema.safeParse(trim).success).toBe(false);
+    });
+
     it('lists every enum value of 08 §2.1', () => {
         expect(BOARD_TYPES).toHaveLength(9);
         expect(HARDWARE_CATEGORIES).toHaveLength(21);
@@ -312,6 +377,19 @@ describe('hardware spec schemas (08 §2.3)', () => {
             const r = parseHardwareSpecs(h.category, h.specs);
             expect(r.success, h.code).toBe(true);
         }
+    });
+
+    it('rejects slide and track lengths below 1 mm', () => {
+        expect(
+            parseHardwareSpecs('drawer_slide', {
+                type: 'side_mount',
+                family: 'f',
+                lengthMm: 0,
+            }).success,
+        ).toBe(false);
+        expect(
+            parseHardwareSpecs('sliding_track', { lengthMm: 0 }).success,
+        ).toBe(false);
     });
 
     it('rejects a hinge without overlay (16 §7.1)', () => {
@@ -435,22 +513,27 @@ describe('seedCatalog / mutateCatalog (test helpers)', () => {
         expect(seed.pricing.marginBps).toBe(3500);
     });
 
-    it('applies a pricing patch without touching the file data', () => {
+    it('applies a validated pricing patch without touching the base', () => {
         const patched = seedCatalog({
             pricing: { marginBps: 0, pricesIncludeTax: true },
         });
         expect(patched.pricing.marginBps).toBe(0);
         expect(patched.pricing.pricesIncludeTax).toBe(true);
         expect(patched.pricing.overheadBps).toBe(1000);
+        expect(patched.materials).toBe(seedCatalog().materials);
         expect(seedCatalog().pricing.marginBps).toBe(3500);
+        expect(Object.isFrozen(patched)).toBe(true);
+        expect(() => seedCatalog({ pricing: { edgePremillMm: 9 } })).toThrow();
+        expect(() => seedCatalog({ pricing: { sheetTrimMm: 1.5 } })).toThrow();
     });
 
-    it('returns an independent copy on every call', () => {
+    it('parses once and returns the same deep-frozen snapshot', () => {
         const a = seedCatalog();
-        const b = seedCatalog();
-        expect(a).not.toBe(b);
-        expect(a).toEqual(b);
-        expect(a.materials[0]).not.toBe(b.materials[0]);
+        expect(seedCatalog()).toBe(a);
+        expect(Object.isFrozen(a)).toBe(true);
+        expect(Object.isFrozen(a.materials[0])).toBe(true);
+        expect(Object.isFrozen(a.hardware[0]!.specs)).toBe(true);
+        expect(Object.isFrozen(a.pricing)).toBe(true);
     });
 
     it('mutateCatalog returns a new frozen snapshot and leaves the base alone', () => {
