@@ -2,6 +2,7 @@
 
 import itertools
 import math
+import time
 
 import numpy as np
 import pytest
@@ -100,9 +101,16 @@ def test_bar_ticks_and_extension_lines() -> None:
     assert len(found) == 1
     assert found[0].tick_positions == pytest.approx([1.0, 601.0], abs=0.01)
 
-    far = [
+    gap = [
         seg("S2", (300, LINE_Y + 3.5), (300, LINE_Y + 250)),
         seg("S3", (900, LINE_Y + 3.5), (900, LINE_Y + 250)),
+    ]
+    assert (
+        len(find_dimension_lines([line, *gap], tokens, REGION)) == 1
+    )  # LSD-sized gap: 2 px + half the width + 1
+    far = [
+        seg("S2", (300, LINE_Y + 6), (300, LINE_Y + 250)),
+        seg("S3", (900, LINE_Y + 6), (900, LINE_Y + 250)),
     ]
     assert find_dimension_lines([line, *far], tokens, REGION) == []
 
@@ -326,3 +334,273 @@ def test_raster_dot_blob_ticks() -> None:
     lines = find_dimension_lines([line], tokens, REGION, ink=ink)
     assert len(lines) == 1
     assert [lines[0].p0[0] + t for t in lines[0].tick_positions] == pytest.approx([300, 1200], abs=2.0)
+
+
+# --- fix round 1 ----------------------------------------------------------------------------------------
+
+
+def labelled_line(y: float, x0: int = 300, x1: int = 900) -> tuple[list[Segment], list[TextToken]]:
+    segments = [seg(f"S{y}", (x0 - 1.0, y), (x1 + 1.0, y)), slash(f"A{y}", x0, y), slash(f"B{y}", x1, y)]
+    return segments, [tok(f"T{y}", "6000", (x0 + x1) / 2, y - 19)]
+
+
+def test_span_ids_follow_line_order_with_many_lines() -> None:
+    segments: list[Segment] = []
+    tokens: list[TextToken] = []
+    for n in range(12):
+        segs, toks = labelled_line(40.0 + 50 * n)
+        segments += segs
+        tokens += toks
+    region = Rect(0, 0, 2400, 700)
+    lines = find_dimension_lines(segments, tokens, region)
+    assert [ln.id for ln in lines] == [f"L{n}" for n in range(1, 13)]
+    assert [ln.p0[1] for ln in lines] == sorted(ln.p0[1] for ln in lines)
+    spans = find_dimension_spans(lines, tokens, region)
+    assert [s.id for s in spans] == [f"D{n}" for n in range(1, 13)]
+    assert [s.line_id for s in spans] == [ln.id for ln in lines]  # L10 comes after L9, not after L1
+    assert [s.p0[1] for s in spans] == [ln.p0[1] for ln in lines]
+
+
+def test_label_across_check_in_near_text_ids() -> None:
+    ticks = [300, 1200]
+    near = tok("T1", "9000", 520, LINE_Y - 19)
+    far = tok("T2", "9000", 980, LINE_Y - 19 - 80)  # projects inside the span but 99 px > 2.5 x 22 away
+    lines = find_dimension_lines(chain_segments(ticks), [near, far], REGION)
+    spans = find_dimension_spans(lines, [near, far], REGION)
+    assert [s.near_text_ids for s in spans] == [["T1"]]
+
+
+def test_label_must_be_on_the_line_not_a_stub() -> None:
+    # The label sits over the 81 px stub; the stub is shorter than 0.04 L = 96 px, so it is no line.
+    stub = seg("S1", (299, LINE_Y), (380, LINE_Y))
+    label = tok("T1", "6000", 340, LINE_Y - 19)
+    assert find_dimension_lines([stub, slash("S2", 300), slash("S3", 380)], [label], REGION) == []
+
+
+def test_slanted_tick_at_70_degrees_is_not_a_tick() -> None:
+    line = seg("S1", (299, LINE_Y), (901, LINE_Y))
+    tokens = labels_over([300, 900], ["6000"])
+    r = 10.0  # 20 px long, 20 degrees off the perpendicular: outside both 90 +- 10 and 45 +- 15
+    dx, dy = r * math.cos(math.radians(70)), r * math.sin(math.radians(70))
+    ticks = [
+        seg("S2", (300 - dx, LINE_Y + dy), (300 + dx, LINE_Y - dy)),
+        seg("S3", (900 - dx, LINE_Y + dy), (900 + dx, LINE_Y - dy)),
+    ]
+    assert find_dimension_lines([line, *ticks], tokens, REGION) == []
+    dx, dy = r * math.cos(math.radians(82)), r * math.sin(math.radians(82))  # within 90 +- 10
+    ticks = [
+        seg("S2", (300 - dx, LINE_Y + dy), (300 + dx, LINE_Y - dy)),
+        seg("S3", (900 - dx, LINE_Y + dy), (900 + dx, LINE_Y - dy)),
+    ]
+    assert len(find_dimension_lines([line, *ticks], tokens, REGION)) == 1
+
+
+def test_ticks_just_beyond_the_line_ends() -> None:
+    line = seg("S1", (304, LINE_Y), (896, LINE_Y))  # the ticks at 300 / 900 are 4 px beyond its ends
+    bars = [seg("S2", (300, LINE_Y - 8), (300, LINE_Y + 8)), seg("S3", (900, LINE_Y - 8), (900, LINE_Y + 8))]
+    tokens = labels_over([300, 900], ["6000"])
+    assert len(find_dimension_lines([line, *bars], tokens, REGION)) == 1
+    far = [seg("S2", (290, LINE_Y - 8), (290, LINE_Y + 8)), seg("S3", (910, LINE_Y - 8), (910, LINE_Y + 8))]
+    assert find_dimension_lines([line, *far], tokens, REGION) == []  # 14 px beyond: another object
+    ink = np.zeros((700, 2400), np.uint8)
+    ink[LINE_Y - 1 : LINE_Y + 2, 304:897] = 255
+    for x in (300, 900):
+        ink[LINE_Y - 8 : LINE_Y + 9, x - 1 : x + 2] = 255
+    assert len(find_dimension_lines([line], tokens, REGION, ink=ink)) == 1
+    ink[:] = 0
+    ink[LINE_Y - 1 : LINE_Y + 2, 304:897] = 255
+    for x in (290, 910):
+        ink[LINE_Y - 8 : LINE_Y + 9, x - 1 : x + 2] = 255
+    assert find_dimension_lines([line], tokens, REGION, ink=ink) == []
+
+
+# --- raster negatives and mutation killers ---
+
+
+def line_ink(x0: int = 299, x1: int = 1201) -> np.ndarray:
+    ink = np.zeros((700, 2400), np.uint8)
+    ink[LINE_Y - 1 : LINE_Y + 2, x0:x1] = 255
+    return ink
+
+
+def vstroke(ink: np.ndarray, x: int, y0: int, y1: int, step: int = 1) -> None:
+    for y in range(y0, y1 + 1, step):
+        ink[y, x - 1 : x + 2] = 255
+
+
+LINE = seg("S1", (299, LINE_Y), (1201, LINE_Y), 3.0)
+LABELS = labels_over([300, 1200], ["9000"])
+
+
+def ticks_of(ink: np.ndarray) -> list[float]:
+    lines = find_dimension_lines([LINE], LABELS, REGION, ink=ink)
+    return [round(lines[0].p0[0] + t) for t in lines[0].tick_positions] if lines else []
+
+
+def test_ink_bar_ticks_baseline() -> None:
+    ink = line_ink()
+    for x in (300, 1200):
+        vstroke(ink, x, LINE_Y - 8, LINE_Y + 8)
+    assert ticks_of(ink) == pytest.approx([300, 1200], abs=2)
+
+
+@pytest.mark.parametrize("extent", [(150, 450), (LINE_Y - 400, LINE_Y + 300)])
+def test_long_thin_stroke_crossing_the_line_is_not_a_tick(extent: tuple[int, int]) -> None:
+    ink = line_ink()
+    for x in (300, 1200):
+        vstroke(ink, x, LINE_Y - 8, LINE_Y + 8)
+    vstroke(ink, 750, *extent)  # 300 px, 120 px beyond ... crossing the line in the middle
+    assert ticks_of(ink) == pytest.approx([300, 1200], abs=2)
+    tilted = line_ink()
+    for x in (300, 1200):
+        vstroke(tilted, x, LINE_Y - 8, LINE_Y + 8)
+    for t in range(-150, 151):  # a thin 300 px stroke at 60 degrees
+        tilted[round(LINE_Y + t * 0.866), round(750 + t * 0.5)] = 255
+    assert ticks_of(tilted) == pytest.approx([300, 1200], abs=2)
+
+
+@pytest.mark.parametrize("overshoot", [0, 2, 4, 8])
+def test_raster_extension_lines_overshoot(overshoot: int) -> None:
+    walls = [
+        SWall((300, 400), (2100, 400), 12),
+        SWall((300, 320), (1200, 320), 2, style="single"),
+        SWall((300, 230), (300, 320 + overshoot), 2, style="single"),
+        SWall((1200, 230), (1200, 320 + overshoot), 2, style="single"),
+    ]
+    pre, segments = raster([], walls=walls)
+    tokens = labels_over([300, 1200], ["9000"], 320)
+    for ink in (None, pre.ink):
+        lines = find_dimension_lines(segments, tokens, pre.region, ink=ink)
+        assert len(lines) == 1, (overshoot, ink is None)
+        xs = [lines[0].p0[0] + t for t in lines[0].tick_positions]
+        assert xs == pytest.approx([300, 1200], abs=4.0)
+
+
+@pytest.mark.parametrize("overshoot", [0, 2, 4, 8, 12])
+def test_ink_extension_lines_overshoot(overshoot: int) -> None:
+    ink = line_ink()
+    for x in (300, 1200):
+        vstroke(ink, x, LINE_Y - 90, LINE_Y + overshoot)  # an extension line ending `overshoot` px beyond
+    assert ticks_of(ink) == pytest.approx([300, 1200], abs=2)
+
+
+def test_ink_stroke_crossing_by_20_px_is_not_an_extension_line() -> None:
+    ink = line_ink()
+    for x in (300, 1200):
+        vstroke(ink, x, LINE_Y - 90, LINE_Y + 20)
+    assert ticks_of(ink) == []
+
+
+def test_ink_slanted_stub_is_not_an_extension_line() -> None:
+    ink = line_ink()
+    for x in (300, 1200):
+        for t in range(0, 100):  # 45 degrees, 140 px long, ending on the line
+            ink[LINE_Y - t, x + t : x + t + 2] = 255
+    assert ticks_of(ink) == []
+
+
+def test_text_glyphs_beside_the_line_are_not_ticks() -> None:
+    ink = line_ink()
+    for x in range(310, 1190, 22):  # a row of "1" stems 2 px above the line (gap rows 317, 318)
+        ink[LINE_Y - 14 : LINE_Y - 2, x : x + 2] = 255
+    assert ticks_of(ink) == []
+
+
+def test_too_short_run_is_not_a_tick() -> None:
+    ink = line_ink()
+    for x in (300, 1200):
+        vstroke(ink, x, LINE_Y - 4, LINE_Y + 4)  # 9 px < 0.005 L = 12 px
+    assert ticks_of(ink) == []
+
+
+def test_dotted_stroke_is_not_a_tick() -> None:
+    ink = line_ink()
+    for x in (300, 1200):
+        vstroke(ink, x, LINE_Y - 12, LINE_Y + 12, step=2)  # every other row: 50 % inked
+    assert ticks_of(ink) == []
+
+
+def test_off_centre_stroke_is_not_a_tick() -> None:
+    ink = line_ink()
+    for x in (300, 1200):
+        vstroke(ink, x, LINE_Y - 16, LINE_Y + 54)  # 16 px above, 54 px below: not centred, not a stub
+    assert ticks_of(ink) == []
+
+
+def test_big_dot_is_not_a_blob() -> None:
+    ink = line_ink()
+    yy, xx = np.mgrid[0:700, 0:2400]
+    for x in (300, 1200):
+        ink[(xx - x) ** 2 + (yy - LINE_Y) ** 2 <= 15**2] = 255  # 31 px across > 0.0068 L = 16 px
+    assert ticks_of(ink) == []
+
+
+def test_small_dot_blob_below_probe_length() -> None:
+    ink = line_ink()
+    yy, xx = np.mgrid[0:700, 0:2400]
+    for x in (300, 1200):
+        ink[(xx - x) ** 2 + (yy - LINE_Y) ** 2 <= 25] = 255  # 11 px: shorter than the 12 px probe
+    assert ticks_of(ink) == pytest.approx([300, 1200], abs=2)
+
+
+# --- deadline and cost ---
+
+
+class _StopError(Exception):
+    pass
+
+
+def test_check_deadline_is_called_and_can_abort() -> None:
+    calls: list[int] = []
+    segments, tokens = labelled_line(300.0)
+    find_dimension_lines(segments, tokens, REGION, check_deadline=lambda: calls.append(1))
+    assert len(calls) >= len(segments)  # once per candidate
+
+    def stop() -> None:
+        raise _StopError
+
+    with pytest.raises(_StopError):
+        find_dimension_lines(segments, tokens, REGION, check_deadline=stop)
+    ink = line_ink()
+    for x in (300, 1200):
+        vstroke(ink, x, LINE_Y - 8, LINE_Y + 8)
+    seen = {"n": 0}
+
+    def stop_when_probing() -> None:
+        seen["n"] += 1
+        if seen["n"] > 1:  # the first call is the single candidate; later ones come from the ink probing
+            raise _StopError
+
+    with pytest.raises(_StopError):
+        find_dimension_lines([LINE], LABELS, REGION, ink=ink, check_deadline=stop_when_probing)
+
+
+def test_many_long_segments_stay_fast() -> None:
+    rng = np.random.default_rng(7)
+    size = (4000, 3000)
+    region = Rect(0, 0, *size)
+    ink = np.zeros((size[1], size[0]), np.uint8)
+    segments: list[Segment] = []
+    for n in range(3000):  # long thin strokes everywhere, some of them on top of each other
+        x, y = int(rng.integers(0, 3000)), int(rng.integers(0, 2950))
+        length = int(rng.integers(300, 900))
+        segments.append(seg(f"S{n}", (x, y), (x + length, y)))
+        ink[y - 1 : y + 2, x : x + length] = 255
+    for n in range(40):  # dimension chains with slash ticks (L = 4000: ticks are 20 ... 120 px long)
+        y = 60 + 70 * n
+        segments += [
+            seg(f"C{n}", (299, y), (1501, y)),
+            slash(f"A{n}", 300, y, 12),
+            slash(f"B{n}", 1500, y, 12),
+        ]
+        ink[y - 1 : y + 2, 299:1502] = 255
+        for x in (300, 1500):
+            ink[y - 15 : y + 16, x - 1 : x + 2] = 255
+    tokens = [
+        tok(f"T{n}", "6000", int(rng.integers(0, 4000)), int(rng.integers(0, 3000))) for n in range(400)
+    ]
+    tokens += [tok(f"U{n}", "6000", 900, 60 + 70 * n - 19) for n in range(40)]
+    started = time.perf_counter()
+    lines = find_dimension_lines(segments, tokens, region, ink=ink)
+    assert time.perf_counter() - started < 10.0
+    assert len(lines) >= 40
