@@ -336,10 +336,10 @@ export function underTopDrawers(
             'furniture.table_drawers_dont_fit',
             'warning',
             {
-                available: fl(row.bay[1] - row.bay[0]),
+                available: Math.max(0, fl(row.bay[1] - row.bay[0])),
                 required: 2 * f.tc + k * wsMin + (k - 1) * spacing,
             },
-            ['table.drawer'],
+            [],
         );
         return;
     }

@@ -872,10 +872,20 @@ describe('under-top drawers on four legs', () => {
                 severity: 'warning',
                 messageKey: 'engine.furniture.issue.table_drawers_dont_fit',
                 params: { available: 0, required: 87 },
-                entityIds: ['table.drawer'],
+                entityIds: [],
             },
         ]);
         expect(keys(none).filter((k) => k.includes('drawer'))).toEqual([]);
+        // legs wider than the table leave a negative bay: reported as 0
+        const crossed = run(
+            diningTable((d) => {
+                d.dims.width = 120;
+                d.table.storage.drawers = withCount(1, 'front');
+            }),
+        );
+        expect(
+            issuesOf(crossed, 'furniture.table_drawers_dont_fit'),
+        ).toMatchObject([{ params: { available: 0, required: 87 } }]);
         // a bay with room for the front but not for a box with inner width
         const narrow = (W: number, count: number) =>
             run(
