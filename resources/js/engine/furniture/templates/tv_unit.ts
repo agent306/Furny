@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Front, FurnitureDocument, Section } from '../schema';
 import type { SectionBuilders } from './common';
 import {
+    tracked,
     carcassDocument,
     commonCarcass,
     defaultSlideCode,
@@ -91,11 +92,7 @@ export const tvUnit: TemplateDefinition<TvUnitParams> = {
         const sections: Section[] = [];
         const builders: SectionBuilders = columns.map(({ weight, content }) => [
             { mode: 'flex', weight },
-            () => {
-                const section = leaf(content, ctx);
-                sections.push(section);
-                return section;
-            },
+            tracked(sections, () => leaf(content, ctx)),
         ]);
         const interior = split('columns', builders, ctx);
         const column = (index: number): string[] => [

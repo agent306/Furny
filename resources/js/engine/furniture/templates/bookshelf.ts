@@ -5,6 +5,8 @@
 import { z } from 'zod';
 import type { Front, FurnitureDocument, Section } from '../schema';
 import {
+    tracked,
+    BOARD_THICKNESS,
     booleanField,
     carcassDocument,
     commonCarcass,
@@ -29,7 +31,6 @@ const SHELF_PITCH = 330;
 const PLINTH_HEIGHT = 60;
 const LOWER_PART_HEIGHT = 700;
 const MIN_UPPER_HEIGHT = 200;
-const BOARD_THICKNESS = 18;
 
 export const bookshelfParamsSchema = z.object({
     width: z.number().int().min(300).max(2400),
@@ -116,14 +117,9 @@ export const bookshelf: TemplateDefinition<BookshelfParams> = {
                             evenSplit(
                                 'columns',
                                 columns,
-                                () => {
-                                    const section = leaf(
-                                        shelvesContent(1),
-                                        ctx,
-                                    );
-                                    lower.push(section);
-                                    return section;
-                                },
+                                tracked(lower, () =>
+                                    leaf(shelvesContent(1), ctx),
+                                ),
                                 ctx,
                             ),
                     ],

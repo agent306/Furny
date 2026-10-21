@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import type { FurnitureDocument } from '../schema';
 import {
+    BOARD_THICKNESS,
     carcassDocument,
     commonCarcass,
     dimensionFields,
@@ -18,7 +19,6 @@ import {
 import type { TemplateDefinition } from './types';
 
 const COUNT_MAX = 6;
-const BOARD_THICKNESS = 18;
 /** Height per row and width per column for the `'auto'` counts. */
 const AUTO_ROW_HEIGHT = 350;
 const AUTO_COLUMN_WIDTH = 900;

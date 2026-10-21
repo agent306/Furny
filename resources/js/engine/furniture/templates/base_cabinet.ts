@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import type { Front, FurnitureDocument, Section } from '../schema';
 import {
+    tracked,
     booleanField,
     carcassDocument,
     commonCarcass,
@@ -97,7 +98,7 @@ export const baseCabinet: TemplateDefinition<BaseCabinetParams> = {
                 break;
             }
             case 'door_drawer': {
-                let shelvesRow: Section | undefined;
+                const shelvesRow: Section[] = [];
                 interior = split(
                     'rows',
                     [
@@ -107,14 +108,16 @@ export const baseCabinet: TemplateDefinition<BaseCabinetParams> = {
                         ],
                         [
                             { mode: 'flex', weight: 1 },
-                            () => (shelvesRow = leaf(shelvesContent(1), ctx)),
+                            tracked(shelvesRow, () =>
+                                leaf(shelvesContent(1), ctx),
+                            ),
                         ],
                     ],
                     ctx,
                 );
                 fronts = [
                     hingedFront(
-                        [(shelvesRow as Section).id],
+                        [(shelvesRow[0] as Section).id],
                         'auto',
                         'auto',
                         ctx,

@@ -5,8 +5,12 @@ import { z } from 'zod';
 import type { Front, FurnitureDocument, Section } from '../schema';
 import type { SectionBuilders } from './common';
 import {
+    autoDoorCount,
+    BOARD_THICKNESS,
+    DOORS_MAX,
+    outerHingeSide,
+    tracked,
     carcassDocument,
-    clamp,
     columnsFromDoors,
     commonCarcass,
     dimensionFields,
@@ -21,10 +25,6 @@ import {
 } from './common';
 import type { TemplateDefinition } from './types';
 
-const DOORS_MAX = 12;
-/** Width per door for `doors = 'auto'`. */
-const AUTO_DOOR_WIDTH = 600;
-const BOARD_THICKNESS = 18;
 const FRONT_KINDS = ['hinged', 'flap_up'] as const;
 
 export const loftCabinetParamsSchema = z.object({
@@ -62,11 +62,7 @@ export const loftCabinet: TemplateDefinition<LoftCabinetParams> = {
     generate(params, ctx): FurnitureDocument {
         const requested =
             params.doors === 'auto'
-                ? clamp(
-                      Math.round(params.width / AUTO_DOOR_WIDTH),
-                      1,
-                      DOORS_MAX,
-                  )
+                ? autoDoorCount(params.width)
                 : params.doors;
         // Fewer doors when the width cannot give each one 100 mm.
         const doors = fitDoors(requested, params.width - 2 * BOARD_THICKNESS);
@@ -75,11 +71,7 @@ export const loftCabinet: TemplateDefinition<LoftCabinetParams> = {
         const sections: Section[] = [];
         const builders: SectionBuilders = columns.map((doorsInColumn) => [
             { mode: 'flex', weight: doorsInColumn },
-            () => {
-                const column = leaf({ type: 'empty' }, ctx);
-                sections.push(column);
-                return column;
-            },
+            tracked(sections, () => leaf({ type: 'empty' }, ctx)),
         ]);
         // A divided section needs two children, so a single column is the root itself.
         const interior =
@@ -87,18 +79,13 @@ export const loftCabinet: TemplateDefinition<LoftCabinetParams> = {
                 ? split('columns', builders, ctx)
                 : (builders[0] as SectionBuilders[number])[1]();
 
-        const hingeSide = (doorsInColumn: number, index: number) => {
-            if (doorsInColumn !== 1) return 'auto';
-            if (index === 0) return 'left';
-            return index === columns.length - 1 ? 'right' : 'auto';
-        };
         const fronts: Front[] = columns.map((doorsInColumn, index) => {
             const covers = [(sections[index] as Section).id];
             return params.frontKind === 'hinged'
                 ? hingedFront(
                       covers,
                       doorsInColumn,
-                      hingeSide(doorsInColumn, index),
+                      outerHingeSide(doorsInColumn, index, columns.length),
                       ctx,
                   )
                 : otherFront('flap_up', covers, 1, ctx);

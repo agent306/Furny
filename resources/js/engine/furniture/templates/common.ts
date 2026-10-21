@@ -8,6 +8,7 @@
  */
 import { MATERIAL_ROLES, type MaterialRole } from '../../catalog/snapshot';
 import { EngineInputError } from '../../errors';
+import { DEFAULT_SHELF_FRONT_SETBACK } from '../constants';
 import type {
     CarcassSpec,
     Content,
@@ -20,6 +21,9 @@ import type {
     TemplateKey,
 } from '../schema';
 import type { ParamField, TemplateContext, TemplateDefinition } from './types';
+
+/** Board thickness of the count heuristics and clamps (the seed boards are 18 mm). */
+export const BOARD_THICKNESS = 18;
 
 export function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
@@ -158,9 +162,46 @@ export function columnsFromDoors(
     return singleColumnSide === 'right' ? [...pairs, 1] : [1, ...pairs];
 }
 
+/** Most doors a door-count parameter allows. */
+export const DOORS_MAX = 12;
+/** Width per door for `doors = 'auto'`. */
+const AUTO_DOOR_WIDTH = 600;
+
+/** `doors = 'auto'` resolves to `clamp(round(width / 600), 1, 12)`. */
+export function autoDoorCount(width: number): number {
+    return clamp(Math.round(width / AUTO_DOOR_WIDTH), 1, DOORS_MAX);
+}
+
+/**
+ * Hinge side of the door(s) of column `index` of `count` (07 §2.4.1): a
+ * single-door column hinges on the carcass-outer side (`left` when first,
+ * `right` when last, else `auto`); a double-door column is `auto`.
+ */
+export function outerHingeSide(
+    doorsInColumn: number,
+    index: number,
+    count: number,
+): Front['hingeSide'] {
+    if (doorsInColumn !== 1) return 'auto';
+    if (index === 0) return 'left';
+    return index === count - 1 ? 'right' : 'auto';
+}
+
+/**
+ * Wraps a section builder so the section it builds is also appended to
+ * `into`: the templates use it to find the sections their fronts cover.
+ */
+export function tracked(into: Section[], build: () => Section): () => Section {
+    return () => {
+        const section = build();
+        into.push(section);
+        return section;
+    };
+}
+
 /** `ih`: the count heuristics' interior height, assuming 18 mm boards. */
 export function interiorHeight(H: number, plinthHeight: number): number {
-    return H - plinthHeight - 2 * 18;
+    return H - plinthHeight - 2 * BOARD_THICKNESS;
 }
 
 /** Number of shelves that fit `h` at roughly `pitch` spacing (a count, not a part size). */
@@ -175,8 +216,6 @@ export function shelfCount(h: number, pitch: number): number {
 // yields a document without a size error. Like `interiorHeight` these assume
 // 18 mm boards and are heuristics, not envelope arithmetic.
 
-/** Board thickness the clamps assume for dividers and sides. */
-const CLAMP_BOARD = 18;
 /** Narrowest section / door share `validateFurniture` accepts (100 mm). */
 const MIN_SECTION_WIDTH = 100;
 /** Shortest section height `validateFurniture` accepts (80 mm). */
@@ -192,7 +231,8 @@ export function maxColumns(interiorWidth: number): number {
     return Math.max(
         1,
         Math.floor(
-            (interiorWidth + CLAMP_BOARD) / (MIN_SECTION_WIDTH + CLAMP_BOARD),
+            (interiorWidth + BOARD_THICKNESS) /
+                (MIN_SECTION_WIDTH + BOARD_THICKNESS),
         ),
     );
 }
@@ -202,7 +242,8 @@ export function maxRows(interiorHeight: number): number {
     return Math.max(
         1,
         Math.floor(
-            (interiorHeight + CLAMP_BOARD) / (MIN_SECTION_HEIGHT + CLAMP_BOARD),
+            (interiorHeight + BOARD_THICKNESS) /
+                (MIN_SECTION_HEIGHT + BOARD_THICKNESS),
         ),
     );
 }
@@ -214,7 +255,10 @@ export function maxRows(interiorHeight: number): number {
 export function fitDoors(doors: number, interiorWidth: number): number {
     for (let n = doors; n > 1; n--) {
         const dividers = columnsFromDoors(n).length - 1;
-        if ((interiorWidth - dividers * CLAMP_BOARD) / n >= MIN_SECTION_WIDTH) {
+        if (
+            (interiorWidth - dividers * BOARD_THICKNESS) / n >=
+            MIN_SECTION_WIDTH
+        ) {
             return n;
         }
     }
@@ -227,7 +271,7 @@ export function fitDoors(doors: number, interiorWidth: number): number {
  */
 export function fitDrawers(count: number, height: number): number {
     return clamp(
-        Math.floor((height + 2 * CLAMP_BOARD) / MIN_DRAWER_PITCH),
+        Math.floor((height + 2 * BOARD_THICKNESS) / MIN_DRAWER_PITCH),
         1,
         count,
     );
@@ -429,7 +473,10 @@ export function drawersContent(
 }
 
 /** An adjustable `shelves` content. */
-export function shelvesContent(count: number, frontSetback = 20): Content {
+export function shelvesContent(
+    count: number,
+    frontSetback = DEFAULT_SHELF_FRONT_SETBACK,
+): Content {
     return { type: 'shelves', count, adjustable: true, frontSetback };
 }
 

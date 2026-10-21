@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Front, FurnitureDocument, Section } from '../schema';
 import type { SectionBuilders } from './common';
 import {
+    tracked,
     carcassDocument,
     commonCarcass,
     dimensionFields,
@@ -50,14 +51,9 @@ export const shoeRack: TemplateDefinition<ShoeRackParams> = {
         const ih = interiorHeight(params.height, PLINTH_HEIGHT);
 
         const sections: Section[] = [];
-        const column = (): Section => {
-            const section = leaf(
-                shelvesContent(shelfCount(ih, SHELF_PITCH)),
-                ctx,
-            );
-            sections.push(section);
-            return section;
-        };
+        const column = tracked(sections, () =>
+            leaf(shelvesContent(shelfCount(ih, SHELF_PITCH)), ctx),
+        );
         const builders: SectionBuilders = Array.from(
             { length: columns },
             () => [{ mode: 'flex', weight: 1 }, column],

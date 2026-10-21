@@ -6,7 +6,11 @@ import { z } from 'zod';
 import type { Front, FurnitureDocument, Section } from '../schema';
 import type { SectionBuilders } from './common';
 import {
-    clamp,
+    autoDoorCount,
+    BOARD_THICKNESS,
+    DOORS_MAX,
+    outerHingeSide,
+    tracked,
     columnsFromDoors,
     commonCarcass,
     emptyOverrides,
@@ -19,13 +23,9 @@ import {
 } from './common';
 import type { ParamField, TemplateDefinition } from './types';
 
-const DOORS_MAX = 12;
-/** Width per door for `doors = 'auto'`. */
-const AUTO_DOOR_WIDTH = 600;
 const SHELF_PITCH = 400;
 /** Height of one internal drawer including its share of the divider. */
 const INTERNAL_DRAWER_HEIGHT = 180;
-const BOARD_THICKNESS = 18;
 const HANGING_ZONE_TOP = 350;
 const ROD_TOP_CLEARANCE = 60;
 const SHELF_FRONT_SETBACK = 20;
@@ -139,9 +139,7 @@ const defaults: WardrobeHingedParams = {
 
 /** Resolves `doors = 'auto'` to `clamp(round(width / 600), 1, 12)`. */
 export function wardrobeDoorCount(params: WardrobeHingedParams): number {
-    return params.doors === 'auto'
-        ? clamp(Math.round(params.width / AUTO_DOOR_WIDTH), 1, DOORS_MAX)
-        : params.doors;
+    return params.doors === 'auto' ? autoDoorCount(params.width) : params.doors;
 }
 
 export const wardrobeHinged: TemplateDefinition<WardrobeHingedParams> = {
@@ -229,25 +227,18 @@ export const wardrobeHinged: TemplateDefinition<WardrobeHingedParams> = {
         const columnBuilders: SectionBuilders = columns.map(
             (doorsInColumn, index) => [
                 { mode: 'flex', weight: doorsInColumn },
-                () => {
-                    const column = buildColumn(doorsInColumn, index);
-                    columnSections.push(column);
-                    return column;
-                },
+                tracked(columnSections, () =>
+                    buildColumn(doorsInColumn, index),
+                ),
             ],
         );
         const interior = split('columns', columnBuilders, ctx);
 
-        const hingeSide = (doorsInColumn: number, index: number) => {
-            if (doorsInColumn !== 1) return 'auto';
-            if (index === 0) return 'left';
-            return index === columns.length - 1 ? 'right' : 'auto';
-        };
         const fronts: Front[] = columns.map((doorsInColumn, index) =>
             hingedFront(
                 [(columnSections[index] as Section).id],
                 doorsInColumn,
-                hingeSide(doorsInColumn, index),
+                outerHingeSide(doorsInColumn, index, columns.length),
                 ctx,
             ),
         );

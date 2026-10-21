@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Content, FurnitureDocument, Section } from '../schema';
 import type { SectionBuilders } from './common';
 import {
+    tracked,
     carcassDocument,
     commonCarcass,
     defaultSlideCode,
@@ -63,11 +64,7 @@ export const dressingUnit: TemplateDefinition<DressingUnitParams> = {
             content: Content,
         ): SectionBuilders[number] => [
             { mode: 'flex', weight },
-            () => {
-                const section = leaf(content, ctx);
-                top.push(section);
-                return section;
-            },
+            tracked(top, () => leaf(content, ctx)),
         ];
         const drawerColumn = (): SectionBuilders[number] => [
             { mode: 'flex', weight: 1 },

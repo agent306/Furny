@@ -10,6 +10,7 @@ import {
 } from '../constants';
 import type { FurnitureDocument, Section } from '../schema';
 import {
+    BOARD_THICKNESS,
     carcassDocument,
     clamp,
     commonCarcass,
@@ -27,7 +28,6 @@ import {
 } from './common';
 import type { TemplateDefinition } from './types';
 
-const BOARD_THICKNESS = 18;
 const SHELF_PITCH = 400;
 const HANGING_ZONE_TOP = 350;
 const LEAVES_MIN = 2;

@@ -9,6 +9,7 @@ import { seedCatalog } from '../../../testing/seedCatalog';
 import { indexCatalog } from '../../catalogIndex';
 import { generateFurniture } from '../../generate';
 import { FurnitureDocumentSchema, type FurnitureDocument } from '../../schema';
+import type { Part } from '../../types';
 import { partOverlaps, sameDrawerBox } from '../../testing/overlaps';
 import { isSaveBlocking, validateFurniture } from '../../validate';
 import { TEMPLATES, getTemplate, templateDefaultDocument } from '../index';
@@ -175,17 +176,20 @@ function expected(
 
 /**
  * Part boxes may touch but never intersect. The one exception is a grooved
- * back, whose edge sits in the groove of the sides, top and bottom: grooving
- * is not modelled as an operation (07 §3.4), so those boxes overlap by the
- * 7 mm tongue.
+ * back against the sides, top and bottom: its edge sits in their groove, and
+ * grooving is not modelled as an operation (07 §3.4), so those boxes overlap
+ * by the 7 mm tongue. The back against anything else (shelves, dividers,
+ * drawer boxes, the plinth) must still not overlap.
  */
+const TONGUE_PARTNER = /^carcass\.(side\.(left|right)|top|bottom)$/;
 function overlapsOf(doc: FurnitureDocument): string[] {
     const grooved = doc.carcass?.back.type === 'grooved';
-    const isBack = (key: string) => key.startsWith('carcass.back');
+    const inGroove = (a: Part, b: Part): boolean =>
+        grooved &&
+        ((a.key.startsWith('carcass.back') && TONGUE_PARTNER.test(b.key)) ||
+            (b.key.startsWith('carcass.back') && TONGUE_PARTNER.test(a.key)));
     return partOverlaps(generateFurniture(doc, snapshot).parts, {
-        ignore: (a, b) =>
-            sameDrawerBox(a, b) ||
-            (grooved && (isBack(a.key) || isBack(b.key))),
+        ignore: (a, b) => sameDrawerBox(a, b) || inGroove(a, b),
     });
 }
 
@@ -195,8 +199,8 @@ const errorsOf = (doc: FurnitureDocument) =>
 /** No error, and for the defaults not even a warning. */
 function expectValid(doc: FurnitureDocument) {
     expect(() => FurnitureDocumentSchema.parse(doc)).not.toThrow();
-    expect(errorsOf(doc)).toEqual([]);
-    expect(overlapsOf(doc)).toEqual([]);
+    expect(errorsOf(doc)).toStrictEqual([]);
+    expect(overlapsOf(doc)).toStrictEqual([]);
 }
 
 const columnsOf = (doc: FurnitureDocument) =>
@@ -205,25 +209,147 @@ const fronts = (doc: FurnitureDocument) => doc.carcass?.fronts ?? [];
 
 // --- Definitions ---------------------------------------------------------------
 
-/** key -> [category, width, height, depth ranges] from the §2.4 tables. */
-const SPEC: Record<
-    CarcassKey,
-    [string, [number, number], [number, number], [number, number]]
-> = {
-    wardrobe_sliding: ['wardrobe', [1200, 3600], [1800, 2700], [550, 750]],
-    loft_cabinet: ['wardrobe', [400, 3600], [300, 1000], [300, 750]],
-    base_cabinet: ['kitchen', [150, 1200], [700, 950], [450, 650]],
-    wall_cabinet: ['kitchen', [300, 1200], [300, 1000], [250, 400]],
-    tall_cabinet: ['kitchen', [300, 900], [1800, 2400], [450, 650]],
-    bookshelf: ['shelving', [300, 2400], [600, 2400], [200, 450]],
-    open_shelf_wall: ['shelving', [300, 2400], [150, 1200], [150, 400]],
-    tv_unit: ['tv_unit', [900, 3000], [300, 700], [300, 550]],
-    shoe_rack: ['storage', [400, 1500], [600, 1800], [300, 420]],
-    chest_of_drawers: ['storage', [400, 1600], [500, 1400], [350, 600]],
-    sideboard: ['storage', [900, 2700], [600, 1000], [350, 550]],
-    bedside_table: ['storage', [300, 700], [400, 700], [300, 500]],
-    dressing_unit: ['storage', [900, 1800], [1500, 2200], [400, 600]],
-    custom_box: ['other', [150, 6000], [100, 3000], [100, 1200]],
+// Field builders for the expected §2.4 tables (written out, not taken from common.ts).
+const labelOf = (key: string) => `templates.fields.${key}`;
+const L = (key: string, min: number, max: number, extra = {}) => ({
+    key,
+    kind: 'length',
+    labelKey: labelOf(key),
+    min,
+    max,
+    step: 10,
+    ...extra,
+});
+const I = (key: string, min: number, max: number, extra = {}) => ({
+    key,
+    kind: 'int',
+    labelKey: labelOf(key),
+    min,
+    max,
+    ...extra,
+});
+const SEL = (key: string, values: string[], extra = {}) => ({
+    key,
+    kind: 'select',
+    labelKey: labelOf(key),
+    options: values.map((value) => ({
+        value,
+        labelKey: `templates.options.${value}`,
+    })),
+    ...extra,
+});
+const B = (key: string, extra = {}) => ({
+    key,
+    kind: 'boolean',
+    labelKey: labelOf(key),
+    ...extra,
+});
+const DIMS = (
+    w: [number, number],
+    h: [number, number],
+    d: [number, number],
+) => [L('width', ...w), L('height', ...h), L('depth', ...d)];
+
+/** key -> [category, the complete field list in UI order] from the §2.4 tables. */
+const SPEC: Record<CarcassKey, [string, unknown[]]> = {
+    wardrobe_sliding: [
+        'wardrobe',
+        [
+            ...DIMS([1200, 3600], [1800, 2700], [550, 750]),
+            I('leaves', 2, 4, { allowAuto: true }),
+            L('plinthHeight', 0, 150, { advanced: true }),
+        ],
+    ],
+    loft_cabinet: [
+        'wardrobe',
+        [
+            ...DIMS([400, 3600], [300, 1000], [300, 750]),
+            I('doors', 1, 12, { allowAuto: true }),
+            SEL('frontKind', ['hinged', 'flap_up']),
+        ],
+    ],
+    base_cabinet: [
+        'kitchen',
+        [
+            ...DIMS([150, 1200], [700, 950], [450, 650]),
+            SEL('variant', ['door', 'drawers', 'door_drawer', 'basket']),
+            I('drawerCount', 2, 5, {
+                visibleIf: { key: 'variant', equals: 'drawers' },
+            }),
+            B('countertop'),
+            L('plinthHeight', 80, 150, { advanced: true }),
+        ],
+    ],
+    wall_cabinet: [
+        'kitchen',
+        [
+            ...DIMS([300, 1200], [300, 1000], [250, 400]),
+            SEL('frontKind', ['hinged', 'flap_up', 'open']),
+        ],
+    ],
+    tall_cabinet: [
+        'kitchen',
+        [...DIMS([300, 900], [1800, 2400], [450, 650]), B('applianceNiche')],
+    ],
+    bookshelf: [
+        'shelving',
+        [
+            ...DIMS([300, 2400], [600, 2400], [200, 450]),
+            I('columns', 1, 6, { allowAuto: true }),
+            B('lowerDoors'),
+        ],
+    ],
+    open_shelf_wall: [
+        'shelving',
+        [
+            ...DIMS([300, 2400], [150, 1200], [150, 400]),
+            I('rows', 1, 6, { allowAuto: true }),
+            I('columns', 1, 6, { allowAuto: true }),
+        ],
+    ],
+    tv_unit: [
+        'tv_unit',
+        [
+            ...DIMS([900, 3000], [300, 700], [300, 550]),
+            SEL('mounting', ['floor', 'wall']),
+            SEL('layout', ['drawers_open_door', 'doors_open_doors', 'flaps']),
+        ],
+    ],
+    shoe_rack: ['storage', DIMS([400, 1500], [600, 1800], [300, 420])],
+    chest_of_drawers: [
+        'storage',
+        [
+            ...DIMS([400, 1600], [500, 1400], [350, 600]),
+            I('drawerCount', 2, 8, { allowAuto: true }),
+            // `auto` is the width-dependent default `width > 1000 ? 2 : 1` (accepted)
+            SEL('columns', ['auto', '1', '2']),
+            SEL('slideType', ['side_mount', 'undermount'], {
+                advanced: true,
+            }),
+        ],
+    ],
+    sideboard: [
+        'storage',
+        [...DIMS([900, 2700], [600, 1000], [350, 550]), L('legHeight', 0, 250)],
+    ],
+    bedside_table: [
+        'storage',
+        [
+            ...DIMS([300, 700], [400, 700], [300, 500]),
+            SEL('variant', ['drawer_open', 'two_drawers', 'drawer_door']),
+        ],
+    ],
+    dressing_unit: [
+        'storage',
+        [...DIMS([900, 1800], [1500, 2200], [400, 600]), I('drawerRows', 2, 4)],
+    ],
+    custom_box: [
+        'other',
+        [
+            ...DIMS([150, 6000], [100, 3000], [100, 1200]),
+            SEL('mounting', ['floor', 'wall', 'loft']),
+        ],
+    ],
 };
 
 /** key -> defaults of §2.4 (an `'auto'` stays `'auto'`). */
@@ -301,7 +427,7 @@ const DEFAULTS: Record<CarcassKey, Record<string, unknown>> = {
 
 describe.each(CARCASS_KEYS)('%s definition', (key) => {
     const t = template(key);
-    const [category, width, height, depth] = SPEC[key];
+    const [category, fields] = SPEC[key];
 
     it('is registered with its spec metadata', () => {
         expect(TEMPLATES[key]).toBe(t);
@@ -316,35 +442,13 @@ describe.each(CARCASS_KEYS)('%s definition', (key) => {
         });
     });
 
-    it('lists width, height, depth first with the §2.4 ranges', () => {
-        expect(t.fields.slice(0, 3)).toMatchObject([
-            {
-                key: 'width',
-                kind: 'length',
-                min: width[0],
-                max: width[1],
-                step: 10,
-            },
-            {
-                key: 'height',
-                kind: 'length',
-                min: height[0],
-                max: height[1],
-                step: 10,
-            },
-            {
-                key: 'depth',
-                kind: 'length',
-                min: depth[0],
-                max: depth[1],
-                step: 10,
-            },
-        ]);
+    it('lists exactly the §2.4 fields, in order, with every attribute', () => {
+        expect(t.fields).toStrictEqual(fields);
     });
 
     it('has the code defaults of §2.4, one per field', () => {
-        expect(t.defaults).toEqual(DEFAULTS[key]);
-        expect(Object.keys(t.defaults).sort()).toEqual(
+        expect(t.defaults).toStrictEqual(DEFAULTS[key]);
+        expect(Object.keys(t.defaults).sort()).toStrictEqual(
             t.fields.map((f) => f.key).sort(),
         );
     });
@@ -387,13 +491,13 @@ describe.each(CARCASS_KEYS)('%s definition', (key) => {
     it('generates a valid, deterministic default with no error or warning', () => {
         const doc = gen(key);
         expectValid(doc);
-        expect(gen(key)).toEqual(doc);
+        expect(gen(key)).toStrictEqual(doc);
         const issues = validateFurniture(doc, snapshot);
-        expect(issues.filter((i) => i.severity !== 'info')).toEqual([]);
+        expect(issues.filter((i) => i.severity !== 'info')).toStrictEqual([]);
         expect(isSaveBlocking(issues)).toBe(false);
         const viaIndex = templateDefaultDocument(key, {}, catalog, testIds());
-        expect(viaIndex.document).toEqual(doc);
-        expect(viaIndex.issues).toEqual(issues);
+        expect(viaIndex.document).toStrictEqual(doc);
+        expect(viaIndex.issues).toStrictEqual(issues);
     });
 });
 
@@ -404,7 +508,7 @@ describe('wardrobe_sliding (§2.4.2)', () => {
         front(1, 'sliding', [S(1)], leaves, 'auto');
 
     it('default: 3 flex columns of shelves / hanging zone / shelves, one sliding front', () => {
-        expect(gen('wardrobe_sliding')).toEqual(
+        expect(gen('wardrobe_sliding')).toStrictEqual(
             expected('wardrobe_sliding', [2400, 2100, 650], {
                 plinth: plinth('plinth', 100, 0),
                 handles: {
@@ -449,18 +553,18 @@ describe('wardrobe_sliding (§2.4.2)', () => {
         const kinds = (doc.carcass?.interior.children ?? []).map((c) =>
             c.section.split === 'none' ? c.section.content?.type : 'rows',
         );
-        expect(kinds).toEqual(['shelves', 'rows', 'shelves', 'rows']);
-        expect(columnsOf(doc)).toEqual([flex(), flex(), flex(), flex()]);
-        expect(fronts(doc)).toEqual([track(4)]);
+        expect(kinds).toStrictEqual(['shelves', 'rows', 'shelves', 'rows']);
+        expect(columnsOf(doc)).toStrictEqual([flex(), flex(), flex(), flex()]);
+        expect(fronts(doc)).toStrictEqual([track(4)]);
     });
 
     it('plinthHeight 0 means no plinth; the setback is always 0', () => {
         expect(
             gen('wardrobe_sliding', { plinthHeight: 0 }).carcass?.plinth,
-        ).toEqual(NO_PLINTH);
+        ).toStrictEqual(NO_PLINTH);
         expect(
             gen('wardrobe_sliding', { plinthHeight: 60 }).carcass?.plinth,
-        ).toEqual(plinth('plinth', 60, 0));
+        ).toStrictEqual(plinth('plinth', 60, 0));
     });
 
     it('falls back to the default handle when the catalog has no flush handle', () => {
@@ -484,7 +588,7 @@ describe('wardrobe_sliding (§2.4.2)', () => {
 describe('loft_cabinet (§2.4.3)', () => {
     it('default: loft mounting, nailed back, empty columns with doors', () => {
         // 1800 -> 3 doors -> columnsFromDoors(3) = [1, 2]
-        expect(gen('loft_cabinet')).toEqual(
+        expect(gen('loft_cabinet')).toStrictEqual(
             expected('loft_cabinet', [1800, 600, 600], {
                 mounting: 'loft',
                 back: { type: 'nailed' },
@@ -504,7 +608,7 @@ describe('loft_cabinet (§2.4.3)', () => {
 
     it('flap_up gives one flap_up front per column, one leaf each', () => {
         const out = fronts(gen('loft_cabinet', { frontKind: 'flap_up' }));
-        expect(out).toEqual([
+        expect(out).toStrictEqual([
             front(1, 'flap_up', [S(2)], 1, 'auto'),
             front(2, 'flap_up', [S(3)], 1, 'auto'),
         ]);
@@ -512,9 +616,23 @@ describe('loft_cabinet (§2.4.3)', () => {
 
     it('a single door has no column split', () => {
         const doc = gen('loft_cabinet', { width: 600, doors: 1 });
-        expect(doc.carcass?.interior).toEqual(leafAt(1, empty));
-        expect(fronts(doc)).toEqual([door(1, [S(1)], 1, 'left')]);
+        expect(doc.carcass?.interior).toStrictEqual(leafAt(1, empty));
+        expect(fronts(doc)).toStrictEqual([door(1, [S(1)], 1, 'left')]);
         expectValid(doc);
+    });
+
+    it("doors 'auto' is clamp(round(width / 600), 1, 12) away from the default", () => {
+        const doors = (width: number) =>
+            fronts(gen('loft_cabinet', { width })).reduce(
+                (n, f) => n + (f.leaves as number),
+                0,
+            );
+        expect(doors(400)).toBe(1); // round(0.67)
+        expect(doors(890)).toBe(1); // round(1.48)
+        expect(doors(900)).toBe(2); // round(1.5)
+        expect(doors(1500)).toBe(3); // round(2.5); 700 mm per door would give 2
+        expect(doors(2100)).toBe(4); // round(3.5); 700 mm per door would give 3
+        expect(doors(3600)).toBe(6);
     });
 
     it('doors above what the width holds are reduced (a door needs 100 mm)', () => {
@@ -544,7 +662,7 @@ describe('base_cabinet (§2.4.4)', () => {
     const legs = plinth('legs', 100, 50);
 
     it('default (door): shelves(1) with one auto door, on legs with a kickboard', () => {
-        expect(gen('base_cabinet')).toEqual(
+        expect(gen('base_cabinet')).toStrictEqual(
             expected('base_cabinet', [600, 850, 560], {
                 plinth: legs,
                 interior: leafAt(1, shelves(1)),
@@ -554,7 +672,7 @@ describe('base_cabinet (§2.4.4)', () => {
     });
 
     it('drawers: the undermount slide, no front', () => {
-        expect(gen('base_cabinet', { variant: 'drawers' })).toEqual(
+        expect(gen('base_cabinet', { variant: 'drawers' })).toStrictEqual(
             expected('base_cabinet', [600, 850, 560], {
                 plinth: legs,
                 interior: leafAt(1, drawers(3, SLIDE_UNDER)),
@@ -568,7 +686,7 @@ describe('base_cabinet (§2.4.4)', () => {
     });
 
     it('door_drawer: a fixed 150 drawer row over shelves, the door on row 2', () => {
-        expect(gen('base_cabinet', { variant: 'door_drawer' })).toEqual(
+        expect(gen('base_cabinet', { variant: 'door_drawer' })).toStrictEqual(
             expected('base_cabinet', [600, 850, 560], {
                 plinth: legs,
                 interior: node(
@@ -583,7 +701,7 @@ describe('base_cabinet (§2.4.4)', () => {
     });
 
     it('basket: two pull-out baskets behind a one-leaf door', () => {
-        expect(gen('base_cabinet', { variant: 'basket' })).toEqual(
+        expect(gen('base_cabinet', { variant: 'basket' })).toStrictEqual(
             expected('base_cabinet', [600, 850, 560], {
                 plinth: legs,
                 interior: leafAt(1, {
@@ -598,24 +716,26 @@ describe('base_cabinet (§2.4.4)', () => {
 
     it('countertop: 20 mm front overhang and the PB25-WHITE top material', () => {
         const doc = gen('base_cabinet', { countertop: true });
-        expect(doc.carcass?.countertop).toEqual({
+        expect(doc.carcass?.countertop).toStrictEqual({
             enabled: true,
             overhangFront: 20,
             overhangLeft: 0,
             overhangRight: 0,
         });
-        expect(doc.materials).toEqual({
+        expect(doc.materials).toStrictEqual({
             ...MATERIALS,
             top: assign('PB25-WHITE'),
         });
-        expect(gen('base_cabinet').materials.top).toEqual(assign('PB18-WHITE'));
+        expect(gen('base_cabinet').materials.top).toStrictEqual(
+            assign('PB18-WHITE'),
+        );
         expectValid(doc);
     });
 
     it('plinthHeight sets the leg height', () => {
         expect(
             gen('base_cabinet', { plinthHeight: 150 }).carcass?.plinth,
-        ).toEqual(plinth('legs', 150, 50));
+        ).toStrictEqual(plinth('legs', 150, 50));
     });
 
     it('fewer drawers when the height leaves boxes under 60 mm', () => {
@@ -665,7 +785,7 @@ describe('wall_cabinet (§2.4.5)', () => {
     ) => expected('wall_cabinet', dims, { mounting: 'wall', interior, fronts });
 
     it('default: wall mounting, 2 shelves above 600 mm, one auto door', () => {
-        expect(gen('wall_cabinet')).toEqual(
+        expect(gen('wall_cabinet')).toStrictEqual(
             wall(leafAt(1, shelves(2)), [door(1, [S(1)], 'auto', 'auto')]),
         );
     });
@@ -679,7 +799,7 @@ describe('wall_cabinet (§2.4.5)', () => {
     });
 
     it('flap_up: a flap_up front over the root', () => {
-        expect(gen('wall_cabinet', { frontKind: 'flap_up' })).toEqual(
+        expect(gen('wall_cabinet', { frontKind: 'flap_up' })).toStrictEqual(
             wall(leafAt(1, shelves(2)), [
                 front(1, 'flap_up', [S(1)], 1, 'auto'),
             ]),
@@ -687,7 +807,7 @@ describe('wall_cabinet (§2.4.5)', () => {
     });
 
     it('open: no front', () => {
-        expect(gen('wall_cabinet', { frontKind: 'open' })).toEqual(
+        expect(gen('wall_cabinet', { frontKind: 'open' })).toStrictEqual(
             wall(leafAt(1, shelves(2)), []),
         );
     });
@@ -702,7 +822,7 @@ describe('tall_cabinet (§2.4.6)', () => {
         });
 
     it('default: two rows of shelves, a door on each', () => {
-        expect(gen('tall_cabinet')).toEqual(
+        expect(gen('tall_cabinet')).toStrictEqual(
             tall(
                 node(
                     1,
@@ -719,7 +839,7 @@ describe('tall_cabinet (§2.4.6)', () => {
     });
 
     it('with an appliance niche: a fixed 600 open row between, doors on rows 1 and 3', () => {
-        expect(gen('tall_cabinet', { applianceNiche: true })).toEqual(
+        expect(gen('tall_cabinet', { applianceNiche: true })).toStrictEqual(
             tall(
                 node(
                     1,
@@ -747,7 +867,7 @@ describe('bookshelf (§2.4.7)', () => {
         });
 
     it('default: 2 columns of shelfCount(1704, 330) = 4 shelves, no front setback', () => {
-        expect(gen('bookshelf')).toEqual(
+        expect(gen('bookshelf')).toStrictEqual(
             book(
                 node(
                     1,
@@ -768,9 +888,9 @@ describe('bookshelf (§2.4.7)', () => {
         expect(count(1600)).toBe(2);
         expect(count(1601)).toBe(3);
         expect(count(2400)).toBe(3);
-        expect(gen('bookshelf', { width: 600 }).carcass?.interior).toEqual(
-            leafAt(1, shelves(4, 0)),
-        );
+        expect(
+            gen('bookshelf', { width: 600 }).carcass?.interior,
+        ).toStrictEqual(leafAt(1, shelves(4, 0)));
     });
 
     it('height 2100 gives 5 shelves per column', () => {
@@ -781,7 +901,7 @@ describe('bookshelf (§2.4.7)', () => {
     });
 
     it('lowerDoors: rows with a fixed 700 lower part and one auto door per lower column', () => {
-        expect(gen('bookshelf', { lowerDoors: true })).toEqual(
+        expect(gen('bookshelf', { lowerDoors: true })).toStrictEqual(
             book(
                 node(
                     1,
@@ -815,7 +935,7 @@ describe('bookshelf (§2.4.7)', () => {
 
     it('lowerDoors with one column splits only the rows', () => {
         const doc = gen('bookshelf', { width: 600, lowerDoors: true });
-        expect(doc.carcass?.interior).toEqual(
+        expect(doc.carcass?.interior).toStrictEqual(
             node(
                 1,
                 'rows',
@@ -823,13 +943,15 @@ describe('bookshelf (§2.4.7)', () => {
                 [fixed(700), leafAt(3, shelves(1))],
             ),
         );
-        expect(fronts(doc)).toEqual([door(1, [S(3)], 'auto', 'auto')]);
+        expect(fronts(doc)).toStrictEqual([door(1, [S(3)], 'auto', 'auto')]);
     });
 
     it('a low shelf keeps 200 mm above a shorter lower part', () => {
         // ih = 600 - 60 - 36 = 504: lower = 504 - 18 - 200 = 286
         const doc = gen('bookshelf', { height: 600, lowerDoors: true });
-        expect(doc.carcass?.interior.children[1]?.size).toEqual(fixed(286));
+        expect(doc.carcass?.interior.children[1]?.size).toStrictEqual(
+            fixed(286),
+        );
         expectValid(doc);
     });
 
@@ -865,7 +987,7 @@ describe('open_shelf_wall (§2.4.8)', () => {
         });
 
     it('default 1200 x 400: 1 row of 2 columns, over_sides, no back, no fronts', () => {
-        expect(gen('open_shelf_wall')).toEqual(
+        expect(gen('open_shelf_wall')).toStrictEqual(
             open(
                 node(
                     1,
@@ -878,7 +1000,7 @@ describe('open_shelf_wall (§2.4.8)', () => {
     });
 
     it('2 rows of 2 columns at height 800', () => {
-        expect(gen('open_shelf_wall', { height: 800 })).toEqual(
+        expect(gen('open_shelf_wall', { height: 800 })).toStrictEqual(
             open(
                 node(
                     1,
@@ -914,19 +1036,19 @@ describe('open_shelf_wall (§2.4.8)', () => {
                 ? ['rows', root.children.length]
                 : [root?.split, root?.children.length];
         };
-        expect(shape({ height: 150, width: 300 })).toEqual(['none', 0]);
-        expect(shape({ height: 524, width: 300 })).toEqual(['none', 0]); // round(1.497)
-        expect(shape({ height: 525, width: 300 })).toEqual(['rows', 2]); // round(1.5)
-        expect(shape({ height: 1200, width: 300 })).toEqual(['rows', 3]);
-        expect(shape({ width: 900 })).toEqual(['none', 0]);
-        expect(shape({ width: 901 })).toEqual(['columns', 2]);
-        expect(shape({ width: 2400 })).toEqual(['columns', 3]);
+        expect(shape({ height: 150, width: 300 })).toStrictEqual(['none', 0]);
+        expect(shape({ height: 524, width: 300 })).toStrictEqual(['none', 0]); // round(1.497)
+        expect(shape({ height: 525, width: 300 })).toStrictEqual(['rows', 2]); // round(1.5)
+        expect(shape({ height: 1200, width: 300 })).toStrictEqual(['rows', 3]);
+        expect(shape({ width: 900 })).toStrictEqual(['none', 0]);
+        expect(shape({ width: 901 })).toStrictEqual(['columns', 2]);
+        expect(shape({ width: 2400 })).toStrictEqual(['columns', 3]);
     });
 
     it('one row and one column is a single empty leaf', () => {
         expect(
             gen('open_shelf_wall', { width: 300 }).carcass?.interior,
-        ).toEqual(leafAt(1, empty));
+        ).toStrictEqual(leafAt(1, empty));
     });
 
     it('fewer rows and columns when the size cannot give each 80 / 100 mm', () => {
@@ -935,9 +1057,9 @@ describe('open_shelf_wall (§2.4.8)', () => {
         expect(root({ width: 300, columns: 6, rows: 1 })?.children.length).toBe(
             2,
         );
-        expect(root({ height: 150, width: 300, rows: 6, columns: 1 })).toEqual(
-            leafAt(1, empty),
-        );
+        expect(
+            root({ height: 150, width: 300, rows: 6, columns: 1 }),
+        ).toStrictEqual(leafAt(1, empty));
         for (const [width, height] of [
             [300, 150],
             [1520, 180],
@@ -974,7 +1096,7 @@ describe('tv_unit (§2.4.9)', () => {
         });
 
     it('default drawers_open_door: columns w1 drawers(2) | w2 empty | w1 shelves(1) + a right door on column 3', () => {
-        expect(gen('tv_unit')).toEqual(
+        expect(gen('tv_unit')).toStrictEqual(
             tv(
                 node(
                     1,
@@ -989,7 +1111,7 @@ describe('tv_unit (§2.4.9)', () => {
     });
 
     it('doors_open_doors: a left door on column 1 and a right door on column 3', () => {
-        expect(gen('tv_unit', { layout: 'doors_open_doors' })).toEqual(
+        expect(gen('tv_unit', { layout: 'doors_open_doors' })).toStrictEqual(
             tv(
                 node(
                     1,
@@ -1004,7 +1126,7 @@ describe('tv_unit (§2.4.9)', () => {
     });
 
     it('flaps: three equal empty columns, one flap_down each', () => {
-        expect(gen('tv_unit', { layout: 'flaps' })).toEqual(
+        expect(gen('tv_unit', { layout: 'flaps' })).toStrictEqual(
             tv(
                 node(
                     1,
@@ -1024,9 +1146,9 @@ describe('tv_unit (§2.4.9)', () => {
 
     it('wall mounting has no legs', () => {
         const doc = gen('tv_unit', { mounting: 'wall' });
-        expect(doc.carcass?.plinth).toEqual(NO_PLINTH);
+        expect(doc.carcass?.plinth).toStrictEqual(NO_PLINTH);
         expect(doc.carcass?.mounting).toBe('wall');
-        expect(doc.carcass?.construction).toEqual({
+        expect(doc.carcass?.construction).toStrictEqual({
             top: 'over_sides',
             bottom: 'between_sides',
         });
@@ -1071,7 +1193,7 @@ describe('shoe_rack (§2.4.10)', () => {
         });
 
     it('default 800: 2 columns of shelfCount(904, 180) = 4, hinges left then right', () => {
-        expect(gen('shoe_rack')).toEqual(
+        expect(gen('shoe_rack')).toStrictEqual(
             rack(
                 node(
                     1,
@@ -1087,17 +1209,29 @@ describe('shoe_rack (§2.4.10)', () => {
     it('max(1, ceil(width / 600)) columns; the first hinges left, the others right', () => {
         const sides = (width: number) =>
             fronts(gen('shoe_rack', { width })).map((f) => f.hingeSide);
-        expect(sides(400)).toEqual(['left']);
-        expect(sides(600)).toEqual(['left']);
-        expect(sides(601)).toEqual(['left', 'right']);
-        expect(sides(1200)).toEqual(['left', 'right']);
-        expect(sides(1500)).toEqual(['left', 'right', 'right']);
+        expect(sides(400)).toStrictEqual(['left']);
+        expect(sides(600)).toStrictEqual(['left']);
+        expect(sides(601)).toStrictEqual(['left', 'right']);
+        expect(sides(1200)).toStrictEqual(['left', 'right']);
+        expect(sides(1500)).toStrictEqual(['left', 'right', 'right']);
+    });
+
+    it('shelves follow shelfCount(height - 96, 180)', () => {
+        const count = (height: number) =>
+            gen('shoe_rack', { height }).carcass?.interior.children[0]?.section
+                .content;
+        expect(count(600)).toMatchObject({ count: 2 }); // 504 / 180 = 2.8
+        expect(count(700)).toMatchObject({ count: 2 }); // 604 / 180 = 3.36
+        expect(count(900)).toMatchObject({ count: 3 }); // 804 / 180 = 4.47
+        expect(count(1100)).toMatchObject({ count: 5 }); // 1004 / 180 = 5.58
+        expect(count(1500)).toMatchObject({ count: 7 }); // 1404 / 180 = 7.8
+        expect(count(1800)).toMatchObject({ count: 8 }); // 1704 / 180 = 9.47
     });
 
     it('a single column is the root leaf', () => {
         const doc = gen('shoe_rack', { width: 500 });
-        expect(doc.carcass?.interior).toEqual(leafAt(1, shelves(4)));
-        expect(fronts(doc)).toEqual([door(1, [S(1)], 1, 'left')]);
+        expect(doc.carcass?.interior).toStrictEqual(leafAt(1, shelves(4)));
+        expect(fronts(doc)).toStrictEqual([door(1, [S(1)], 1, 'left')]);
         expectValid(doc);
     });
 });
@@ -1115,13 +1249,13 @@ describe('chest_of_drawers (§2.4.11)', () => {
         });
 
     it("default 800 x 1000: one column, drawerCount 'auto' = 4, side-mount slides, no fronts", () => {
-        expect(gen('chest_of_drawers')).toEqual(
+        expect(gen('chest_of_drawers')).toStrictEqual(
             chest(leafAt(1, drawers(4, SLIDE_SIDE))),
         );
     });
 
     it('width 1100 gives 2 columns of drawers', () => {
-        expect(gen('chest_of_drawers', { width: 1100 })).toEqual(
+        expect(gen('chest_of_drawers', { width: 1100 })).toStrictEqual(
             chest(
                 node(
                     1,
@@ -1218,11 +1352,13 @@ describe('sideboard (§2.4.12)', () => {
         });
 
     it('default: shelves | 3 drawers | shelves with a door on each side, on 150 mm legs', () => {
-        expect(gen('sideboard')).toEqual(board(plinth('legs', 150, 0)));
+        expect(gen('sideboard')).toStrictEqual(board(plinth('legs', 150, 0)));
     });
 
     it('legHeight 0 means no plinth', () => {
-        expect(gen('sideboard', { legHeight: 0 })).toEqual(board(NO_PLINTH));
+        expect(gen('sideboard', { legHeight: 0 })).toStrictEqual(
+            board(NO_PLINTH),
+        );
     });
 
     it('fewer drawers when the height leaves boxes under 60 mm', () => {
@@ -1256,7 +1392,7 @@ describe('bedside_table (§2.4.13)', () => {
         });
 
     it('drawer_open: a fixed 150 drawer over an empty compartment', () => {
-        expect(gen('bedside_table')).toEqual(
+        expect(gen('bedside_table')).toStrictEqual(
             table(
                 node(
                     1,
@@ -1269,13 +1405,13 @@ describe('bedside_table (§2.4.13)', () => {
     });
 
     it('two_drawers: one leaf of two drawers', () => {
-        expect(gen('bedside_table', { variant: 'two_drawers' })).toEqual(
+        expect(gen('bedside_table', { variant: 'two_drawers' })).toStrictEqual(
             table(leafAt(1, drawers(2, SLIDE_SIDE))),
         );
     });
 
     it('drawer_door: a fixed 150 drawer over shelves behind a one-leaf door', () => {
-        expect(gen('bedside_table', { variant: 'drawer_door' })).toEqual(
+        expect(gen('bedside_table', { variant: 'drawer_door' })).toStrictEqual(
             table(
                 node(
                     1,
@@ -1341,14 +1477,16 @@ describe('dressing_unit (§2.4.18)', () => {
         });
 
     it('default drawerRows 3: rows[flex columns(3) / fixed 510 columns(2)], doors on top columns 1 and 3', () => {
-        expect(gen('dressing_unit')).toEqual(unit(3, [3, 4, 5], [7, 8], 6));
+        expect(gen('dressing_unit')).toStrictEqual(
+            unit(3, [3, 4, 5], [7, 8], 6),
+        );
     });
 
     it('drawerRows sets the fixed row to 170 per row and the drawers per column', () => {
-        expect(gen('dressing_unit', { drawerRows: 2 })).toEqual(
+        expect(gen('dressing_unit', { drawerRows: 2 })).toStrictEqual(
             unit(2, [3, 4, 5], [7, 8], 6),
         );
-        expect(gen('dressing_unit', { drawerRows: 4 })).toEqual(
+        expect(gen('dressing_unit', { drawerRows: 4 })).toStrictEqual(
             unit(4, [3, 4, 5], [7, 8], 6),
         );
     });
@@ -1356,7 +1494,7 @@ describe('dressing_unit (§2.4.18)', () => {
 
 describe('custom_box (§2.4.19)', () => {
     it('default: common defaults, one empty root leaf, no fronts', () => {
-        expect(gen('custom_box')).toEqual(
+        expect(gen('custom_box')).toStrictEqual(
             expected('custom_box', [600, 720, 560], {
                 interior: leafAt(1, empty),
                 fronts: [],
@@ -1377,14 +1515,14 @@ describe('custom_box (§2.4.19)', () => {
 
 describe('carcass templates together', () => {
     it('registers the wardrobe and the 14 carcass templates', () => {
-        expect(Object.keys(TEMPLATES).sort()).toEqual(
+        expect(Object.keys(TEMPLATES).sort()).toStrictEqual(
             ['wardrobe_hinged', ...CARCASS_KEYS].sort(),
         );
     });
 
     it("an explicit count equal to the 'auto' result gives the same document", () => {
         const same = (key: CarcassKey, explicit: Record<string, unknown>) =>
-            expect(gen(key, explicit)).toEqual(gen(key));
+            expect(gen(key, explicit)).toStrictEqual(gen(key));
         same('wardrobe_sliding', { leaves: 3 });
         same('loft_cabinet', { doors: 3 });
         same('bookshelf', { columns: 2 });

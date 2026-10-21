@@ -6,6 +6,7 @@ import { testIds } from '../../../testing/ids';
 import type { FurnitureDocument, Section } from '../../schema';
 import { archived, withoutDefault } from '../../testing/catalogs';
 import {
+    autoDoorCount,
     clamp,
     columnsFromDoors,
     commonCarcass,
@@ -22,10 +23,12 @@ import {
     lengthField,
     maxColumns,
     maxRows,
+    outerHingeSide,
     reidentify,
     resolveDefaultMaterials,
     shelfCount,
     split,
+    tracked,
 } from '../common';
 import type { TemplateContext } from '../types';
 import { wardrobeHinged } from '../wardrobe_hinged';
@@ -448,6 +451,11 @@ describe('count clamps (07 gap, log 19)', () => {
         expect(fitDoors(3, 364)).toBe(3);
         expect(fitDoors(4, 364)).toBe(3); // 346 / 4 < 100
         expect(fitDoors(12, 364)).toBe(3);
+        // exactly 100 mm per door still fits; one mm less does not
+        expect(fitDoors(2, 200)).toBe(2);
+        expect(fitDoors(2, 199)).toBe(1);
+        expect(fitDoors(3, 318)).toBe(3); // (318 - one divider) / 3
+        expect(fitDoors(3, 317)).toBe(2);
         expect(fitDoors(2, 50)).toBe(1);
         expect(fitDoors(1, 50)).toBe(1);
     });
@@ -528,5 +536,35 @@ describe('field constructors', () => {
             { key: 'height', min: 3, max: 4 },
             { key: 'depth', min: 5, max: 6, helpKey: 'h' },
         ]);
+    });
+});
+
+describe('door helpers', () => {
+    it('autoDoorCount is clamp(round(width / 600), 1, 12)', () => {
+        expect(autoDoorCount(100)).toBe(1);
+        expect(autoDoorCount(899)).toBe(1);
+        expect(autoDoorCount(900)).toBe(2);
+        expect(autoDoorCount(1500)).toBe(3);
+        expect(autoDoorCount(7200)).toBe(12);
+        expect(autoDoorCount(9000)).toBe(12);
+    });
+
+    it('outerHingeSide hinges a single-door column on the outer side', () => {
+        expect(outerHingeSide(2, 0, 3)).toBe('auto');
+        expect(outerHingeSide(1, 0, 3)).toBe('left');
+        expect(outerHingeSide(1, 0, 1)).toBe('left');
+        expect(outerHingeSide(1, 2, 3)).toBe('right');
+        expect(outerHingeSide(1, 1, 3)).toBe('auto');
+    });
+
+    it('tracked appends each built section to the list, in build order', () => {
+        const ctx = ctxFor();
+        const into: Section[] = [];
+        const a = tracked(into, () => leaf({ type: 'empty' }, ctx));
+        const b = tracked(into, () => leaf({ type: 'empty' }, ctx));
+        const second = b();
+        const first = a();
+        expect(into).toStrictEqual([second, first]);
+        expect(first.id).toBe('s_0000000002');
     });
 });

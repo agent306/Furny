@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Content, FurnitureDocument, Section } from '../schema';
 import type { SectionBuilders } from './common';
 import {
+    tracked,
     carcassDocument,
     commonCarcass,
     defaultSlideCode,
@@ -60,11 +61,8 @@ export const sideboard: TemplateDefinition<SideboardParams> = {
             interiorHeight(params.height, params.legHeight),
         );
         const sections: Section[] = [];
-        const column = (content: Content) => () => {
-            const section = leaf(content, ctx);
-            sections.push(section);
-            return section;
-        };
+        const column = (content: Content) =>
+            tracked(sections, () => leaf(content, ctx));
         const flex = { mode: 'flex', weight: 1 } as const;
         const builders: SectionBuilders = [
             [flex, column(shelvesContent(1))],

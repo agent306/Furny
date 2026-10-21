@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import type { FurnitureDocument, Section } from '../schema';
 import {
+    tracked,
     booleanField,
     carcassDocument,
     commonCarcass,
@@ -52,32 +53,28 @@ export const tallCabinet: TemplateDefinition<TallCabinetParams> = {
 
     generate(params, ctx): FurnitureDocument {
         // Top and bottom rows (the niche, when present, sits between them).
-        let upper: Section | undefined;
-        let lower: Section | undefined;
-        const row = (count: number, keep: (s: Section) => void) => () => {
-            const section = leaf(shelvesContent(count), ctx);
-            keep(section);
-            return section;
-        };
+        const rows: Section[] = [];
+        const row = (count: number) =>
+            tracked(rows, () => leaf(shelvesContent(count), ctx));
         const flex = { mode: 'flex', weight: 1 } as const;
         const interior = params.applianceNiche
             ? split(
                   'rows',
                   [
-                      [flex, row(2, (s) => (upper = s))],
+                      [flex, row(2)],
                       [
                           { mode: 'fixed', mm: NICHE_HEIGHT },
                           () => leaf({ type: 'empty' }, ctx),
                       ],
-                      [flex, row(2, (s) => (lower = s))],
+                      [flex, row(2)],
                   ],
                   ctx,
               )
             : split(
                   'rows',
                   [
-                      [flex, row(2, (s) => (upper = s))],
-                      [flex, row(3, (s) => (lower = s))],
+                      [flex, row(2)],
+                      [flex, row(3)],
                   ],
                   ctx,
               );
@@ -96,8 +93,8 @@ export const tallCabinet: TemplateDefinition<TallCabinetParams> = {
                 },
                 interior,
                 fronts: [
-                    hingedFront([(upper as Section).id], 'auto', 'auto', ctx),
-                    hingedFront([(lower as Section).id], 'auto', 'auto', ctx),
+                    hingedFront([(rows[0] as Section).id], 'auto', 'auto', ctx),
+                    hingedFront([(rows[1] as Section).id], 'auto', 'auto', ctx),
                 ],
             },
         );

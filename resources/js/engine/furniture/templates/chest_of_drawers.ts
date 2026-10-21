@@ -6,6 +6,7 @@
 import { z } from 'zod';
 import type { FurnitureDocument } from '../schema';
 import {
+    BOARD_THICKNESS,
     carcassDocument,
     clamp,
     commonCarcass,
@@ -28,7 +29,6 @@ const DRAWER_COUNT_MAX = 8;
 const AUTO_DRAWER_HEIGHT = 200;
 const PLINTH_HEIGHT = 80;
 const PLINTH_SETBACK = 20;
-const BOARD_THICKNESS = 18;
 /** Wider chests get two columns. */
 const TWO_COLUMN_WIDTH = 1000;
 const COLUMNS = ['auto', '1', '2'] as const;

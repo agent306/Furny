@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import type { Content, Front, FurnitureDocument, Section } from '../schema';
 import {
+    tracked,
     carcassDocument,
     commonCarcass,
     defaultSlideCode,
@@ -55,7 +56,7 @@ export const bedsideTable: TemplateDefinition<BedsideTableParams> = {
     generate(params, ctx): FurnitureDocument {
         const slide = defaultSlideCode(ctx, 'side_mount');
         // One drawer over a lower compartment: open, or shelved behind a door.
-        const drawerOver = (lower: Content, keep?: (s: Section) => void) =>
+        const drawerOver = (lower: Content, into: Section[] = []) =>
             split(
                 'rows',
                 [
@@ -65,11 +66,7 @@ export const bedsideTable: TemplateDefinition<BedsideTableParams> = {
                     ],
                     [
                         { mode: 'flex', weight: 1 },
-                        () => {
-                            const section = leaf(lower, ctx);
-                            keep?.(section);
-                            return section;
-                        },
+                        tracked(into, () => leaf(lower, ctx)),
                     ],
                 ],
                 ctx,
@@ -86,7 +83,7 @@ export const bedsideTable: TemplateDefinition<BedsideTableParams> = {
                 break;
             case 'drawer_door': {
                 const lower: Section[] = [];
-                interior = drawerOver(shelvesContent(1), (s) => lower.push(s));
+                interior = drawerOver(shelvesContent(1), lower);
                 fronts = [
                     hingedFront([(lower[0] as Section).id], 1, 'auto', ctx),
                 ];
