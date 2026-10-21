@@ -1,5 +1,7 @@
 """Plan region: the part of the page that holds the floor plan (06 §7.6 step 7)."""
 
+from collections.abc import Callable
+
 import cv2
 import numpy as np
 
@@ -9,20 +11,20 @@ from app.utils.geometry import Rect, odd
 CLOSE_FRAC = 0.02  # closing kernel, fraction of the long edge
 NEAR_FRAC = 0.05  # components this close (fraction of the long edge) belong to one drawing
 SIBLING_MIN_SHARE = 0.30  # another drawing with this share of the main plan's wall pixels is warned about
-MAX_COMPONENTS = 2000  # pairwise grouping bound
+MAX_COMPONENTS = 2000  # grouping bound: the largest components by wall pixels
 INK_LINK_FRAC = 0.005  # ink closing kernel for linking wall components, fraction of the long edge
 EXPAND_FRAC = 0.06  # dimension chains live outside the walls
 ANNOTATION_GROW_FRAC = 0.15  # ... and reach up to ~0.15 L beyond them (Task 14b ruling B1)
 
 
-def _groups(boxes: np.ndarray, near: float, linked: np.ndarray) -> np.ndarray:
+def _groups(boxes: np.ndarray, near: float, linked: np.ndarray, poll: Callable[[], None]) -> np.ndarray:
     """Group label per box: boxes (x0, y0, x1, y1) whose gap is at most ``near``, and the index pairs in
-    ``linked`` (k, 2), belong together, transitively (union-find over the pairs)."""
+    ``linked`` (k, 2), belong together, transitively (union-find over the pairs).
+
+    Close pairs come from a sweep over the boxes sorted by ``x0``: box ``i`` is only compared with the
+    boxes after it that start at most ``near`` past its right edge, so the cost follows the number of
+    boxes overlapping in x (no ``n x n`` arrays); ``poll`` is called every 64 boxes."""
     n = len(boxes)
-    gap_x = np.maximum(boxes[None, :, 0] - boxes[:, None, 2], boxes[:, None, 0] - boxes[None, :, 2])
-    gap_y = np.maximum(boxes[None, :, 1] - boxes[:, None, 3], boxes[:, None, 1] - boxes[None, :, 3])
-    close = np.maximum(np.maximum(gap_x, gap_y), 0) <= near
-    close[linked[:, 0], linked[:, 1]] = True
     parent = list(range(n))
 
     def find(i: int) -> int:
@@ -31,10 +33,25 @@ def _groups(boxes: np.ndarray, near: float, linked: np.ndarray) -> np.ndarray:
             i = parent[i]
         return i
 
-    for i, j in zip(*np.nonzero(np.triu(close | close.T, 1)), strict=True):
-        ri, rj = find(int(i)), find(int(j))
+    def union(i: int, j: int) -> None:
+        ri, rj = find(i), find(j)
         if ri != rj:
             parent[max(ri, rj)] = min(ri, rj)
+
+    order = np.argsort(boxes[:, 0], kind="stable")
+    x0, y0, x1, y1 = (boxes[order, k] for k in range(4))
+    reach = np.searchsorted(x0, x1 + near, side="right")  # boxes [i + 1, reach) start close enough in x
+    for i in range(n):
+        if i % 64 == 0:
+            poll()
+        j = np.arange(i + 1, int(reach[i]))
+        if j.size == 0:
+            continue
+        gap_y = np.maximum(y0[j] - y1[i], y0[i] - y1[j])
+        for k in j[gap_y <= near].tolist():
+            union(int(order[i]), int(order[k]))
+    for i, j in linked.tolist():
+        union(int(i), int(j))
     return np.array([find(i) for i in range(n)], np.intp)
 
 
@@ -97,13 +114,14 @@ def detect_plan_region(
     n, labels, stats, _ = cv2.connectedComponentsWithStats(closed, connectivity=8)
     counts = np.bincount(labels[thick > 0].astype(np.intp), minlength=n)
     comps = np.flatnonzero(counts[1:] > 0) + 1
-    if comps.size > MAX_COMPONENTS:  # bound the pairwise grouping: the smallest ones cannot be the plan
+    if comps.size > MAX_COMPONENTS:  # bound the grouping: the smallest ones cannot be the plan
         comps = comps[np.argsort(-counts[comps], kind="stable")[:MAX_COMPONENTS]]
     x, y = stats[comps, cv2.CC_STAT_LEFT], stats[comps, cv2.CC_STAT_TOP]
     boxes = np.stack(
         [x, y, x + stats[comps, cv2.CC_STAT_WIDTH], y + stats[comps, cv2.CC_STAT_HEIGHT]], axis=1
     )
-    group = _groups(boxes.astype(np.int64), NEAR_FRAC * long_edge, _ink_links(labels, comps, thick, ink))
+    links = _ink_links(labels, comps, thick, ink)
+    group = _groups(boxes.astype(np.int64), NEAR_FRAC * long_edge, links, ctx.check_deadline)
     pixels = np.bincount(group, weights=counts[comps], minlength=len(comps))
     main = int(np.argmax(pixels))
     rivals = int((pixels >= SIBLING_MIN_SHARE * pixels[main]).sum()) - 1

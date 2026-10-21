@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import cv2
@@ -371,3 +372,60 @@ def test_region_joins_pieces_linked_by_ink_and_drops_an_unlinked_drawing() -> No
     # Discriminating: without the frame lines the halves are two drawings and the one below is the largest.
     bare = preprocess(page_of(render_plan(size, [*halves, *other])), make_ctx()).region
     assert bare.y + bare.h > 1500
+
+
+def test_region_grouping_matches_the_pairwise_rule() -> None:
+    """Task 16c (review Minor 3): the sweep over x-sorted boxes groups exactly like the old all-pairs rule
+    (gap <= near in both axes, plus the ink links), without n x n arrays."""
+    from app.pipeline.region import _groups
+
+    rng = np.random.default_rng(7)
+    xy = rng.integers(0, 3000, (300, 2))
+    wh = rng.integers(1, 120, (300, 2))
+    boxes = np.hstack([xy, xy + wh]).astype(np.int64)
+    linked = np.array([[3, 250], [17, 18]], np.intp)
+    near = 40.0
+
+    def brute() -> list[int]:
+        parent = list(range(len(boxes)))
+
+        def find(i: int) -> int:
+            while parent[i] != i:
+                i = parent[i]
+            return i
+
+        pairs = [tuple(p) for p in linked.tolist()]
+        for i in range(len(boxes)):
+            for j in range(i + 1, len(boxes)):
+                gx = max(boxes[j, 0] - boxes[i, 2], boxes[i, 0] - boxes[j, 2])
+                gy = max(boxes[j, 1] - boxes[i, 3], boxes[i, 1] - boxes[j, 3])
+                if max(gx, gy, 0) <= near:
+                    pairs.append((i, j))
+        for i, j in pairs:
+            ri, rj = find(i), find(j)
+            if ri != rj:
+                parent[max(ri, rj)] = min(ri, rj)
+        return [find(i) for i in range(len(boxes))]
+
+    calls: list[int] = []
+    got = _groups(boxes, near, linked, lambda: calls.append(1))
+    assert got.tolist() == brute()
+    assert len(calls) >= len(boxes) // 64
+
+
+def test_region_grouping_of_many_components_is_bounded_and_polls_the_deadline() -> None:
+    """2000+ wall components (a hatched sheet): grouping stays fast and stops at the deadline."""
+    from app.api.errors import VisionError
+
+    thick = np.zeros((3000, 3000), np.uint8)
+    for k in range(2500):
+        y, x = divmod(k, 50)
+        thick[60 * y + 10 : 60 * y + 30, 60 * x + 10 : 60 * x + 30] = 255
+    start = time.perf_counter()
+    detect_plan_region(thick, np.zeros_like(thick), make_ctx())
+    assert time.perf_counter() - start < 3.0
+    ctx = make_ctx()
+    ctx.deadline = 0.0
+    with pytest.raises(VisionError) as err:
+        detect_plan_region(thick, np.zeros_like(thick), ctx)
+    assert err.value.code == "deadline_exceeded"
