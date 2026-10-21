@@ -205,6 +205,8 @@ it('records cancellation and hold details the way the transitions will', functio
     $heldInProduction = Order::factory()->onHoldFrom(InProduction::class)->create()->fresh();
 
     expect($cancelled->cancel_reason)->toBe(CancelReason::StaffCancelled)
+        ->and($cancelled->cancel_note)->toBeString()->not->toBeEmpty()
+        ->and($held->cancel_note)->toBeNull()
         ->and($cancelled->state_before_hold)->toBeNull()
         ->and($held->state)->toBeInstanceOf(OnHold::class)
         ->and($held->state_before_hold)->toBe(OrderStateKey::InReview)
@@ -213,6 +215,32 @@ it('records cancellation and hold details the way the transitions will', functio
         ->and($heldInProduction->production_started_at)->toBeInstanceOf(CarbonImmutable::class)
         ->and($heldInProduction->completed_at)->toBeNull();
 });
+
+it('puts an order on hold from a state between two milestones, after that state', function (): void {
+    $negotiating = Order::factory()->inState(Negotiating::class)->create()->fresh();
+    $held = Order::factory()->onHoldFrom(Negotiating::class)->create()->fresh();
+
+    expect($held->state)->toBeInstanceOf(OnHold::class)
+        ->and($held->state_before_hold)->toBe(OrderStateKey::Negotiating)
+        ->and($held->submitted_at)->toBeInstanceOf(CarbonImmutable::class)
+        ->and($held->reviewed_at)->toBeInstanceOf(CarbonImmutable::class)
+        ->and($held->quoted_at)->toBeInstanceOf(CarbonImmutable::class)
+        ->and($held->accepted_at)->toBeNull()
+        ->and($held->state_changed_at->greaterThan($held->quoted_at->addMinutes(30)))->toBeTrue()
+        ->and($held->state_changed_at->greaterThan($negotiating->state_changed_at))->toBeTrue();
+});
+
+it('enters the states between two milestones strictly after the last milestone, and on hold after that', function (string $stateClass, string $lastMilestone): void {
+    $order = Order::factory()->inState($stateClass)->create()->fresh();
+
+    expect($order->state_changed_at->greaterThan($order->{$lastMilestone}))->toBeTrue()
+        ->and($order->state_changed_at->lessThanOrEqualTo(now()->addSecond()))->toBeTrue();
+})->with([
+    'changes_proposed' => [ChangesProposed::class, 'reviewed_at'],
+    'negotiating' => [Negotiating::class, 'quoted_at'],
+    'rework' => [Rework::class, 'completed_at'],
+    'on_hold' => [OnHold::class, 'reviewed_at'],
+]);
 
 it('sets the expected delivery date from confirmation on and full progress from completion on', function (): void {
     $accepted = Order::factory()->inState(Accepted::class)->create()->fresh();

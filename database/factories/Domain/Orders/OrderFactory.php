@@ -30,10 +30,28 @@ use LogicException;
  */
 final class OrderFactory extends Factory
 {
-    /** The milestone each rank sets (02 §8.1), reached in this order. */
-    private const array MILESTONES = [
-        1 => 'submitted_at', 2 => 'reviewed_at', 3 => 'quoted_at', 4 => 'accepted_at', 5 => 'confirmed_at',
-        6 => 'production_started_at', 7 => 'completed_at', 8 => 'customer_approved_at', 9 => 'delivered_at', 10 => 'closed_at',
+    /**
+     * The happy path of 09 §1: every state on it with the milestone it sets (02 §8.1), in the order
+     * they are reached. This is the single source of the ranks and the milestones below.
+     */
+    private const array PATH = [
+        'submitted' => 'submitted_at',
+        'in_review' => 'reviewed_at',
+        'quoted' => 'quoted_at',
+        'accepted' => 'accepted_at',
+        'confirmed' => 'confirmed_at',
+        'in_production' => 'production_started_at',
+        'completed' => 'completed_at',
+        'ready_for_delivery' => 'customer_approved_at',
+        'delivered' => 'delivered_at',
+        'closed' => 'closed_at',
+    ];
+
+    /** The states that sit beside a path state, set no milestone of their own and return to it. */
+    private const array BESIDE = [
+        'changes_proposed' => 'in_review',
+        'negotiating' => 'quoted',
+        'rework' => 'completed',
     ];
 
     protected $model = Order::class;
@@ -58,11 +76,7 @@ final class OrderFactory extends Factory
      */
     public function inState(string $stateClass): static
     {
-        if (! is_subclass_of($stateClass, OrderState::class)) {
-            throw new InvalidArgumentException(sprintf('%s is not an order state class.', $stateClass));
-        }
-
-        $key = OrderStateKey::from($stateClass::$name);
+        $key = self::keyOf($stateClass);
 
         // A hold needs a state to resume to: in review, unless onHoldFrom() says otherwise.
         $heldFrom = $key === OrderStateKey::OnHold ? OrderStateKey::InReview : null;
@@ -73,11 +87,7 @@ final class OrderFactory extends Factory
     /** On hold, as T26 leaves it: `state_before_hold` is `$stateClass` and its milestones are set. */
     public function onHoldFrom(string $stateClass): static
     {
-        if (! is_subclass_of($stateClass, OrderState::class)) {
-            throw new InvalidArgumentException(sprintf('%s is not an order state class.', $stateClass));
-        }
-
-        $before = OrderStateKey::from($stateClass::$name);
+        $before = self::keyOf($stateClass);
 
         if (in_array($before, [OrderStateKey::Draft, OrderStateKey::Closed, OrderStateKey::Cancelled, OrderStateKey::OnHold], true)) {
             throw new InvalidArgumentException(sprintf('An order cannot be put on hold from %s (09 T26).', $before->value));
@@ -124,6 +134,7 @@ final class OrderFactory extends Factory
                 'submitted_at' => $submittedAt,
                 'cancelled_at' => $now->subHour(),
                 'cancel_reason' => CancelReason::StaffCancelled,
+                'cancel_note' => 'Cancelled by staff on the customer\'s request.',
                 'state_changed_at' => $now->subHour(),
             ];
         }
@@ -131,10 +142,8 @@ final class OrderFactory extends Factory
         $rank = self::rankOf($path);
         $changedAt = $now;
 
-        foreach (self::MILESTONES as $reached => $column) {
-            if ($reached <= $rank) {
-                $attributes[$column] = $changedAt = self::reachedAt($now, $reached);
-            }
+        foreach (array_slice(array_values(self::PATH), 0, $rank) as $index => $column) {
+            $attributes[$column] = $changedAt = self::reachedAt($now, $index + 1);
         }
 
         // The states between two milestones (changes proposed, negotiating, rework) and the hold itself happen later.
@@ -161,49 +170,41 @@ final class OrderFactory extends Factory
         return $attributes;
     }
 
-    /** Milestone `$rank` was reached `11 - $rank` hours ago, so later ones are always later and none is in the future. */
+    /** Milestone `$rank` was reached `(path length + 1) - $rank` hours ago, so later ones are always later and none is in the future. */
     private static function reachedAt(CarbonImmutable $now, int $rank): CarbonImmutable
     {
-        return $now->subHours(11 - $rank);
+        return $now->subHours(count(self::PATH) + 1 - $rank);
     }
 
     /**
-     * Position on the happy path of 09 §1; changes proposed and negotiating sit beside the state
-     * they return to (in review, quoted), rework beside completed.
+     * Position on the happy path (0 for a draft); a state beside a path state has that state's rank.
      */
     private static function rankOf(OrderStateKey $key): int
     {
-        return match ($key) {
-            OrderStateKey::Draft => 0,
-            OrderStateKey::Submitted => 1,
-            OrderStateKey::InReview, OrderStateKey::ChangesProposed => 2,
-            OrderStateKey::Quoted, OrderStateKey::Negotiating => 3,
-            OrderStateKey::Accepted => 4,
-            OrderStateKey::Confirmed => 5,
-            OrderStateKey::InProduction => 6,
-            OrderStateKey::Completed, OrderStateKey::Rework => 7,
-            OrderStateKey::ReadyForDelivery => 8,
-            OrderStateKey::Delivered => 9,
-            OrderStateKey::Closed => 10,
-            OrderStateKey::Cancelled, OrderStateKey::OnHold => throw new LogicException(sprintf('%s is off the happy path.', $key->value)),
-        };
+        if ($key === OrderStateKey::Draft) {
+            return 0;
+        }
+
+        $index = array_search(self::BESIDE[$key->value] ?? $key->value, array_keys(self::PATH), true);
+
+        return $index === false
+            ? throw new LogicException(sprintf('%s is off the happy path.', $key->value))
+            : $index + 1;
     }
 
     /** The milestone column a state sets itself, if it has one. */
     private static function milestoneOf(OrderStateKey $key): ?string
     {
-        return match ($key) {
-            OrderStateKey::Submitted => 'submitted_at',
-            OrderStateKey::InReview => 'reviewed_at',
-            OrderStateKey::Quoted => 'quoted_at',
-            OrderStateKey::Accepted => 'accepted_at',
-            OrderStateKey::Confirmed => 'confirmed_at',
-            OrderStateKey::InProduction => 'production_started_at',
-            OrderStateKey::Completed => 'completed_at',
-            OrderStateKey::ReadyForDelivery => 'customer_approved_at',
-            OrderStateKey::Delivered => 'delivered_at',
-            OrderStateKey::Closed => 'closed_at',
-            default => null,
-        };
+        return self::PATH[$key->value] ?? null;
+    }
+
+    /** The key of one of the 16 `OrderState` classes; anything else is refused. */
+    private static function keyOf(string $stateClass): OrderStateKey
+    {
+        if (! is_subclass_of($stateClass, OrderState::class)) {
+            throw new InvalidArgumentException(sprintf('%s is not an order state class.', $stateClass));
+        }
+
+        return OrderStateKey::from($stateClass::$name);
     }
 }

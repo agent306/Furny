@@ -37,20 +37,43 @@ final class PgSchema
     }
 
     /**
-     * information_schema row of one column: data_type, udt_name, character_maximum_length, is_nullable, column_default.
+     * information_schema row of one column: data_type, udt_name, character_maximum_length, numeric_precision,
+     * numeric_scale, is_nullable, column_default.
      *
      * @return array<string, mixed>
      */
     public static function column(string $table, string $column): array
     {
         $row = DB::selectOne(
-            'select data_type, udt_name, character_maximum_length, is_nullable, column_default
+            'select data_type, udt_name, character_maximum_length, numeric_precision, numeric_scale, is_nullable, column_default
              from information_schema.columns
              where table_schema = current_schema() and table_name = ? and column_name = ?',
             [$table, $column],
         );
 
         return (array) $row;
+    }
+
+    /**
+     * Every column of the given tables that has a database default, as `table.column`, sorted. The
+     * complement (`column_default IS NULL`) is every column the spec gives no default.
+     *
+     * @param  list<string>  $tables
+     * @return list<string>
+     */
+    public static function defaultedColumns(array $tables): array
+    {
+        $marks = implode(', ', array_fill(0, count($tables), '?'));
+        $rows = DB::select(
+            "select table_name || '.' || column_name as name
+             from information_schema.columns
+             where table_schema = current_schema() and table_name in ({$marks}) and column_default is not null",
+            $tables,
+        );
+        $names = array_column($rows, 'name');
+        sort($names);
+
+        return $names;
     }
 
     public static function indexDefinition(string $table, string $index): ?string

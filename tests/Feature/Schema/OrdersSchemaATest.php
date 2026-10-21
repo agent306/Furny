@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\DB;
 use Tests\Support\PgSchema;
 
 /**
- * 02 §8.1–§8.4 and §15 group 8 (orders, items and change proposals; quotes and the other order tables arrive in Task 11).
+ * 02 §8.1–§8.4 and §15 group 8 (orders, items and change proposals; quotes and the other order tables are pinned in OrdersSchemaBTest).
  */
 it('creates orders with the columns of 02 §8.1', function (): void {
     expect(PgSchema::columns('orders'))->toBe(PgSchema::sorted([
@@ -54,10 +54,10 @@ it('declares every milestone and activity timestamp of orders as a nullable time
 ]);
 
 it('defaults orders as in 02 §8.1', function (): void {
-    expect(PgSchema::column('orders', 'state')['column_default'])->toContain("'draft'")
-        ->and(PgSchema::column('orders', 'needs_installation')['column_default'])->toBe('true')
-        ->and(PgSchema::column('orders', 'production_progress')['column_default'])->toMatch("/^'?0'?/")
-        ->and(PgSchema::column('orders', 'state_changed_at')['column_default'])->toBe('now()');
+    expect(PgSchema::column('orders', 'state')['column_default'])->toMatch("/^'draft'::character varying$/")
+        ->and(PgSchema::column('orders', 'needs_installation')['column_default'])->toMatch('/^true$/')
+        ->and(PgSchema::column('orders', 'production_progress')['column_default'])->toMatch("/^'?0'?(::\\w+)?$/")
+        ->and(PgSchema::column('orders', 'state_changed_at')['column_default'])->toMatch('/^now\(\)$/');
 });
 
 it('indexes orders as listed in 02 §8.1', function (): void {
@@ -87,8 +87,8 @@ it('creates order_items with the columns of 02 §8.2', function (): void {
 });
 
 it('defaults order_items as in 02 §8.2 and makes (order_id, furniture_design_id) unique', function (): void {
-    expect(PgSchema::column('order_items', 'quantity')['column_default'])->toMatch("/^'?1'?/")
-        ->and(PgSchema::column('order_items', 'sort_order')['column_default'])->toMatch("/^'?0'?/")
+    expect(PgSchema::column('order_items', 'quantity')['column_default'])->toMatch("/^'?1'?(::\\w+)?$/")
+        ->and(PgSchema::column('order_items', 'sort_order')['column_default'])->toMatch("/^'?0'?(::\\w+)?$/")
         ->and(PgSchema::indexDefinition('order_items', 'order_items_order_id_furniture_design_id_unique'))
         ->toContain('UNIQUE')->toContain('(order_id, furniture_design_id)');
 });
@@ -111,7 +111,7 @@ it('creates change_proposals with the columns of 02 §8.3', function (): void {
 });
 
 it('defaults change_proposals.status to draft and makes (order_id, number) unique', function (): void {
-    expect(PgSchema::column('change_proposals', 'status')['column_default'])->toContain("'draft'")
+    expect(PgSchema::column('change_proposals', 'status')['column_default'])->toMatch("/^'draft'::character varying$/")
         ->and(PgSchema::indexDefinition('change_proposals', 'change_proposals_order_id_number_unique'))
         ->toContain('UNIQUE')->toContain('(order_id, number)');
 });
@@ -137,21 +137,19 @@ it('creates change_proposal_items with the columns of 02 §8.4', function (): vo
 });
 
 it('defaults change_proposal_items as in 02 §8.4 and makes (change_proposal_id, order_item_id) unique', function (): void {
-    expect(PgSchema::column('change_proposal_items', 'staff_draft_version')['column_default'])->toMatch("/^'?1'?/")
-        ->and(PgSchema::column('change_proposal_items', 'decision')['column_default'])->toContain("'pending'")
+    expect(PgSchema::column('change_proposal_items', 'staff_draft_version')['column_default'])->toMatch("/^'?1'?(::\\w+)?$/")
+        ->and(PgSchema::column('change_proposal_items', 'decision')['column_default'])->toMatch("/^'pending'::character varying$/")
         ->and(PgSchema::indexDefinition('change_proposal_items', 'change_proposal_items_change_proposal_id_order_item_id_unique'))
         ->toContain('UNIQUE')->toContain('(change_proposal_id, order_item_id)');
 });
 
-it('leaves accepted_quote_id and current_quote_id without foreign keys until the quotes table exists', function (): void {
-    $constrained = DB::select(
-        "select a.attname as col
-         from pg_constraint c
-         join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any (c.conkey)
-         where c.contype = 'f' and c.conrelid = 'orders'::regclass and a.attname in ('accepted_quote_id', 'current_quote_id')",
-    );
-
-    expect($constrained)->toBe([]);
+it('gives only the columns with a spec default a database default (column_default IS NULL elsewhere)', function (): void {
+    expect(PgSchema::defaultedColumns(['orders', 'order_items', 'change_proposals', 'change_proposal_items']))->toBe(PgSchema::sorted([
+        'orders.state', 'orders.needs_installation', 'orders.production_progress', 'orders.state_changed_at',
+        'order_items.quantity', 'order_items.sort_order',
+        'change_proposals.status',
+        'change_proposal_items.staff_draft_version', 'change_proposal_items.decision',
+    ]));
 });
 
 it('declares the foreign key actions of 02 §8.1–§8.4', function (): void {
@@ -160,10 +158,11 @@ it('declares the foreign key actions of 02 §8.1–§8.4', function (): void {
         "select conrelid::regclass::text as tbl, a.attname as col, c.confdeltype as action, c.confrelid::regclass::text as ref
          from pg_constraint c
          join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any (c.conkey)
-         where c.contype = 'f' and c.conrelid::regclass::text in ({$tables})",
+         where c.contype = 'f' and c.conrelid::regclass::text in ({$tables})
+           and a.attname not in ('accepted_quote_id', 'current_quote_id')",
     ))->mapWithKeys(static fn (object $row): array => ["{$row->tbl}.{$row->col}" => "{$row->action}:{$row->ref}"]);
 
-    // r = restrict (R), c = cascade (C), n = set null (N); the two quote ids get their FKs with Task 11.
+    // r = restrict (R), c = cascade (C), n = set null (N); the keys to quotes are pinned in OrdersSchemaBTest.
     expect($actions->all())->toEqual([
         'orders.project_id' => 'r:projects',
         'orders.customer_id' => 'r:users',

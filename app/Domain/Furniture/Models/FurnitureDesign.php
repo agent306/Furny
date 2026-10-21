@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Furniture\Models;
 
 use App\Domain\Identity\Models\User;
+use App\Domain\Orders\Models\Order;
 use App\Domain\Projects\Models\Project;
 use App\Support\Casts\AsJsonDocument;
 use App\Support\Casts\AsJsonMap;
@@ -24,8 +25,7 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media as BaseMedia;
 /**
  * 02 §5.1. `owner_id` (the project's customer), the optimistic-lock counter, save stamps, current
  * revision and the order lock are written only by the create, save, checkpoint and order actions,
- * so they are not mass-assignable. `locked_by_order_id` has no foreign key until the orders tables
- * exist (02 §15 group 8).
+ * so they are not mass-assignable.
  *
  * @property string $id
  * @property string $project_id
@@ -115,6 +115,14 @@ final class FurnitureDesign extends Model implements HasMedia
     public function currentRevision(): BelongsTo
     {
         return $this->belongsTo(FurnitureRevision::class, 'current_revision_id');
+    }
+
+    /**
+     * @return BelongsTo<Order, $this>
+     */
+    public function lockedByOrder(): BelongsTo
+    {
+        return $this->belongsTo(Order::class, 'locked_by_order_id');
     }
 
     /** An order holds the design: the customer cannot edit it (09 §2). */

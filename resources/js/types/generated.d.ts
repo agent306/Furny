@@ -44,10 +44,20 @@ export type ImportStatus = 'uploaded' | 'queued' | 'preprocessing' | 'recognizin
 }
 namespace Orders {
 namespace Enums {
+export type CallOutcome = 'confirmed' | 'no_answer' | 'callback_requested' | 'wrong_number' | 'customer_wants_changes' | 'customer_declined';
 export type CancelReason = 'customer_withdrew' | 'quote_declined' | 'declined_on_call' | 'unresponsive' | 'staff_cancelled' | 'duplicate' | 'other';
 export type ChangeProposalStatus = 'draft' | 'sent' | 'resolved' | 'withdrawn';
+export type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'rejected';
+export type NegotiationStatus = 'open' | 'answered_with_revision' | 'answered_keep_price' | 'closed';
 export type OrderStateKey = 'draft' | 'submitted' | 'in_review' | 'changes_proposed' | 'quoted' | 'negotiating' | 'accepted' | 'confirmed' | 'in_production' | 'completed' | 'rework' | 'ready_for_delivery' | 'delivered' | 'closed' | 'cancelled' | 'on_hold';
+export type PaymentGateway = 'razorpay' | 'stripe';
+export type PaymentKind = 'advance' | 'balance' | 'refund' | 'adjustment';
+export type PaymentMethod = 'cash' | 'bank_transfer' | 'upi' | 'card' | 'cheque' | 'online_gateway';
+export type PaymentStatus = 'pending' | 'succeeded' | 'failed' | 'refunded';
+export type ProductionVisibility = 'customer' | 'internal';
 export type ProposalItemDecision = 'pending' | 'approved' | 'rejected';
+export type QuoteLineKind = 'furniture' | 'materials' | 'hardware' | 'labour' | 'finishing' | 'installation' | 'delivery' | 'discount' | 'custom';
+export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'declined' | 'superseded' | 'expired' | 'withdrawn';
 }
 }
 namespace Projects {

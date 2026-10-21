@@ -23,8 +23,16 @@ use App\Domain\Identity\Models\User;
 use App\Domain\Imports\Models\BlueprintImport;
 use App\Domain\Orders\Models\ChangeProposal;
 use App\Domain\Orders\Models\ChangeProposalItem;
+use App\Domain\Orders\Models\ConfirmationCall;
+use App\Domain\Orders\Models\Delivery;
 use App\Domain\Orders\Models\Order;
+use App\Domain\Orders\Models\OrderIssue;
 use App\Domain\Orders\Models\OrderItem;
+use App\Domain\Orders\Models\Payment;
+use App\Domain\Orders\Models\ProductionUpdate;
+use App\Domain\Orders\Models\Quote;
+use App\Domain\Orders\Models\QuoteLine;
+use App\Domain\Orders\Models\QuoteNegotiation;
 use App\Domain\Projects\Models\Plan;
 use App\Domain\Projects\Models\PlanRevision;
 use App\Domain\Projects\Models\Project;
@@ -69,5 +77,13 @@ final class MorphMap
         'order_item' => OrderItem::class,
         'change_proposal' => ChangeProposal::class,
         'change_proposal_item' => ChangeProposalItem::class,
+        'quote' => Quote::class,
+        'quote_line' => QuoteLine::class,
+        'quote_negotiation' => QuoteNegotiation::class,
+        'confirmation_call' => ConfirmationCall::class,
+        'production_update' => ProductionUpdate::class,
+        'order_issue' => OrderIssue::class,
+        'delivery' => Delivery::class,
+        'payment' => Payment::class,
     ];
 }

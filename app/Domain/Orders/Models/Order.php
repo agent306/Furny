@@ -19,14 +19,15 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\ModelStates\HasStates;
 
 /**
  * 02 §8.1. Only what the customer types in the submission form is mass-assignable. The number,
  * state, milestones, assignees, owner and project are written by the order actions and transitions
- * (09 §2), so they are not. `accepted_quote_id` and `current_quote_id` get their relations and
- * foreign keys with the quotes table (Task 11).
+ * (09 §2), so they are not. The two quote ids are set by the quote actions. The `messages` relation
+ * arrives with the messaging tables (Task 12).
  *
  * @property string $id
  * @property string $number
@@ -175,6 +176,70 @@ final class Order extends Model
     public function changeProposals(): HasMany
     {
         return $this->hasMany(ChangeProposal::class)->orderBy('number');
+    }
+
+    /**
+     * @return BelongsTo<Quote, $this>
+     */
+    public function acceptedQuote(): BelongsTo
+    {
+        return $this->belongsTo(Quote::class, 'accepted_quote_id');
+    }
+
+    /**
+     * @return BelongsTo<Quote, $this>
+     */
+    public function currentQuote(): BelongsTo
+    {
+        return $this->belongsTo(Quote::class, 'current_quote_id');
+    }
+
+    /**
+     * @return HasMany<Quote, $this>
+     */
+    public function quotes(): HasMany
+    {
+        return $this->hasMany(Quote::class)->orderBy('version');
+    }
+
+    /**
+     * @return HasMany<QuoteNegotiation, $this>
+     */
+    public function negotiations(): HasMany
+    {
+        return $this->hasMany(QuoteNegotiation::class)->orderBy('created_at');
+    }
+
+    /**
+     * @return HasMany<ConfirmationCall, $this>
+     */
+    public function confirmationCalls(): HasMany
+    {
+        return $this->hasMany(ConfirmationCall::class)->orderBy('called_at');
+    }
+
+    /**
+     * @return HasMany<ProductionUpdate, $this>
+     */
+    public function productionUpdates(): HasMany
+    {
+        return $this->hasMany(ProductionUpdate::class)->orderBy('created_at');
+    }
+
+    /**
+     * @return HasMany<OrderIssue, $this>
+     */
+    public function issues(): HasMany
+    {
+        return $this->hasMany(OrderIssue::class)->orderBy('created_at');
+    }
+
+    /**
+     * @return HasOne<Delivery, $this>
+     */
+    public function delivery(): HasOne
+    {
+        return $this->hasOne(Delivery::class);
     }
 
     protected static function newFactory(): OrderFactory

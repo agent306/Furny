@@ -168,10 +168,10 @@ it('declares the foreign key actions of 02 §4–§5', function (): void {
         "select conrelid::regclass::text as tbl, a.attname as col, c.confdeltype as action
          from pg_constraint c
          join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any (c.conkey)
-         where c.contype = 'f' and c.conrelid::regclass::text in ({$tables})",
+         where c.contype = 'f' and c.conrelid::regclass::text in ({$tables}) and a.attname <> 'locked_by_order_id'",
     ))->mapWithKeys(static fn (object $row): array => ["{$row->tbl}.{$row->col}" => $row->action]);
 
-    // r = restrict (R), c = cascade (C), n = set null (N); locked_by_order_id has no FK until Task 11.
+    // r = restrict (R), c = cascade (C), n = set null (N); the lock's key to orders is pinned in OrdersSchemaBTest.
     expect($actions->all())->toEqual([
         'furniture_presets.created_by' => 'n',
         'furniture_designs.project_id' => 'c',

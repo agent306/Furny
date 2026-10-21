@@ -11,13 +11,13 @@ use App\Domain\Furniture\Models\FurniturePreset;
 use App\Domain\Furniture\Models\FurnitureRevision;
 use App\Domain\Furniture\Models\FurnitureTemplateSetting;
 use App\Domain\Identity\Models\User;
+use App\Domain\Orders\Models\Order;
 use App\Domain\Projects\Models\Project;
 use App\Support\Json\JsonDocument;
 use Carbon\CarbonImmutable;
 use Database\Factories\Support\Documents;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 
 /**
  * 02 §5, §10, §11 and 03 §2.
@@ -88,7 +88,7 @@ it('lets the design follow an explicit project through for()', function (): void
 
 it('detects a locked design through locked_by_order_id', function (): void {
     $design = FurnitureDesign::factory()->create();
-    DB::table('furniture_designs')->where('id', $design->id)->update(['locked_by_order_id' => (string) Str::ulid()]);
+    DB::table('furniture_designs')->where('id', $design->id)->update(['locked_by_order_id' => Order::factory()->create()->id]);
 
     expect($design->fresh()->isLocked())->toBeTrue();
 });
