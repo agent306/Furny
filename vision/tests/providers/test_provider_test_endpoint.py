@@ -2,6 +2,8 @@
 
 import io
 import json
+import threading
+import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -235,3 +237,40 @@ def test_requires_bearer_and_valid_body(client: TestClient) -> None:
     bad = client.post("/v1/providers/test", headers=AUTH, json={"provider": "gemini"})
     assert bad.status_code == 400
     assert bad.json()["error"]["code"] == "invalid_request"
+
+
+@pytest.mark.parametrize(
+    "echoed",
+    ["sk-ant-api03-********wXyZ", "sk-proj-********abcd", "sk-ant-api03-AbCd…wXyZ", "sk-********1234"],
+)
+def test_masked_keys_echoed_by_the_provider_are_scrubbed(client: TestClient, echoed: str) -> None:
+    use(client, FakeProvider([ProviderAuthError(f"401 Incorrect API key provided: {echoed}.")]))
+
+    response = post(client)
+
+    assert response.json()["error"]["code"] == "provider_auth_failed"
+    assert echoed not in response.text
+    assert "sk-" not in response.text.replace("[REDACTED]", "")
+
+
+def test_hung_provider_is_cut_off_after_the_timeout(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = threading.Event()
+
+    def hang(conversation: list[Any]) -> Any:
+        release.wait(10)
+        return make_turn(text=ANSWER)
+
+    monkeypatch.setattr("app.api.providers.TEST_TIMEOUT_S", 0.2)
+    use(client, FakeProvider([hang]))
+    started = time.perf_counter()
+    try:
+        body = post(client).json()
+    finally:
+        release.set()
+
+    assert time.perf_counter() - started < 5
+    assert body["ok"] is False
+    assert body["error"]["code"] == "llm_timeout"
+    assert body["usage"] is None

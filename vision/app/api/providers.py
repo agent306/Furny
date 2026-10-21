@@ -6,10 +6,12 @@ No concurrency slot: the spec defines none for this endpoint (recorded in the ga
 import functools
 import io
 import json
+import re
 import time
 from dataclasses import replace
 from typing import Any, cast
 
+import anyio
 import anyio.to_thread
 from fastapi import APIRouter, Depends, Request
 from PIL import Image, ImageDraw
@@ -53,6 +55,8 @@ TEST_TIMEOUT_S = 60
 # Room for adaptive thinking plus the tiny JSON answer.
 TEST_MAX_OUTPUT_TOKENS = 2048
 MIN_SECRET_LENGTH = 8
+# Providers echo masked keys in 401 text (`sk-proj-****abcd`, `sk-ant-api03-AbCd…wXyZ`).
+_MASKED_KEY = re.compile(r"sk-[\w*…-]{6,}")
 
 router = APIRouter(dependencies=[Depends(require_token)])
 
@@ -69,7 +73,7 @@ def _check_image() -> bytes:
 
 def _scrub(text: str, settings: Settings) -> str:
     """Strip secret values and presigned query strings from a provider's error text."""
-    text = RedactionFilter().redact(text)
+    text = _MASKED_KEY.sub("[REDACTED]", RedactionFilter().redact(text))
     secrets = (
         settings.vision_service_token,
         settings.anthropic_api_key,
@@ -141,20 +145,27 @@ async def test_provider(body: ProviderTestRequest, request: Request) -> dict[str
 
     started = time.perf_counter()
     try:
-        turn = await anyio.to_thread.run_sync(
-            functools.partial(
-                provider.complete,
-                [UserMessage(parts)],
-                system=system,
-                tools=[],
-                tool_choice="none",
-                output_schema=schema,
-                effort="low",
-                max_output_tokens=TEST_MAX_OUTPUT_TOKENS,
-                timeout_s=TEST_TIMEOUT_S,
-                purpose="provider_test",
+        # abandon_on_cancel: a hung adapter must not pin the request; its thread is left to the SDK timeout.
+        with anyio.fail_after(TEST_TIMEOUT_S):
+            turn = await anyio.to_thread.run_sync(
+                functools.partial(
+                    provider.complete,
+                    [UserMessage(parts)],
+                    system=system,
+                    tools=[],
+                    tool_choice="none",
+                    output_schema=schema,
+                    effort="low",
+                    max_output_tokens=TEST_MAX_OUTPUT_TOKENS,
+                    timeout_s=TEST_TIMEOUT_S,
+                    purpose="provider_test",
+                ),
+                abandon_on_cancel=True,
             )
-        )
+    except TimeoutError:
+        return _failure(
+            provider, started, "llm_timeout", "The provider did not answer in time.", None, settings
+        ).wire()
     except ProviderError as err:
         registry.record_provider_error(provider.name, err.code)
         usage = err.usage[-1] if err.usage else None
