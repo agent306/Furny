@@ -1,0 +1,29 @@
+{
+ "source": "hdb-3room.webp",
+ "units": "source_px",
+ "method": {
+   "traced": "Task 18. Source px of hdb-3room.webp. Each room's polygon is the face of the verified wall truth (hdb-3room.drawing-walls.json, Task 16c, profile-checked) that holds its point: the centre lines polygonized with shapely and simplified by 0.5 px, so it is rough by half a wall thickness. The kitchen has no wall of its own: it is the living/kitchen face's part left of the toilet-1 / store wall line (I1 and I17: x 297 at y 181 to x 299 at y 364 and down to y 480) and above the bedroom-1 wall line y 480 (the counter run left of the store and toilet 1), and the living room is that face minus it. Both polygons are cleaned of the cut's sub-pixel slivers (buffer +-0.5 px, simplify 0.5 px).",
+   "points": "Interior points lie on paper: the 9 x 9 px window around each reads gray 255 (minimum) on the decoded image. They were moved off labels, dimension lines and door arcs: the Task 16c truth-test points of toilets 1-3, the store, bedroom 3, the balcony and the bay sat on glyphs or lines.",
+   "labels": "As printed. Toilet 2's TOILET is overprinted by the vertical 1900 and the replayed OCR has no token for it; toilet 3's reads TOILE (parsed as TOILET). The store, the 600 recess beside the balcony and the bay above toilet 3 carry no label.",
+   "open": "kitchen: open onto the living room (no wall, no door; the counter line at x 297 ends at y 480 and the living room continues below). Every other room is closed by walls, doors or windows.",
+   "not_rooms": "None inside the outline: the truth's 11 faces are all listed (plus the kitchen).",
+   "judgement_calls": [
+       "Kitchen cut-out: the kitchen has no wall of its own; its polygon is the living/kitchen face of the wall truth left of the I1 / I17 line (x 297-299) and above y 480, and the living room's polygon is that face minus it. It is open onto the living room (opens_onto living) and is scored as open_in_host when it shares the living room's face.",
+       "Bay (x 938-1118, y 115-178, above toilet 3) and 600 recess (x 832-888, y 804-925, beside the balcony) are faces of the verified wall truth with label null, tagged kind 'ledge' (review M1 ruling): the recess is about 0.72 m2 (below 06 section 8.6's 1 m2 post-scale filter) and the bay an AC ledge reached only through toilet 3's window. Ledges are not habitable rooms: they are neutral in the metric (excluded from the matched count and the >= 7 target, like not_rooms)."
+   ]
+ },
+ "rooms": [
+  {"id": "toilet-1", "point": [360, 320], "label": "TOILET", "open": false, "polygon": [[418.0, 180.0], [297.0, 181.0], [299.0, 364.0], [418.0, 364.0]]},
+  {"id": "toilet-2", "point": [680, 330], "label": "TOILET", "open": false, "polygon": [[765.0, 178.0], [648.0, 179.0], [648.0, 364.0], [765.0, 364.0]]},
+  {"id": "toilet-3", "point": [1010, 230], "label": "TOILET", "open": false, "polygon": [[1115.0, 360.0], [1115.0, 178.0], [980.0, 178.0], [980.0, 360.0]]},
+  {"id": "bedroom-1", "point": [522, 337], "label": "BEDROOM", "open": false, "polygon": [[648.0, 179.0], [418.0, 180.0], [418.0, 364.0], [368.0, 364.0], [368.0, 480.0], [648.0, 480.0]]},
+  {"id": "bedroom-2", "point": [844, 344], "label": "BEDROOM", "open": false, "polygon": [[938.0, 174.0], [765.0, 178.0], [765.0, 364.0], [648.0, 364.0], [648.0, 480.0], [980.0, 480.0], [980.0, 178.0], [938.0, 178.0]]},
+  {"id": "bedroom-3", "point": [940, 690], "label": "BEDROOM", "open": false, "polygon": [[1115.0, 811.0], [1115.0, 360.0], [980.0, 360.0], [980.0, 480.0], [821.0, 480.0], [821.0, 803.0], [832.0, 804.0], [888.0, 804.0], [888.0, 810.0]]},
+  {"id": "store", "point": [340, 425], "label": null, "open": false, "polygon": [[368.0, 364.0], [299.0, 364.0], [299.0, 480.0], [368.0, 480.0]]},
+  {"id": "living", "point": [443, 588], "label": "LIVING ROOM", "open": false, "polygon": [[155.0, 548.0], [147.0, 548.0], [147.0, 592.0], [150.0, 592.0], [150.0, 800.5], [427.0, 800.5], [427.0, 796.0], [575.0, 796.0], [575.0, 803.0], [821.0, 803.0], [821.0, 480.0], [155.0, 480.0]]},
+  {"id": "kitchen", "point": [230, 330], "label": "KITCHEN", "open": true, "opens_onto": "living", "polygon": [[146.0, 182.0], [146.0, 228.0], [155.0, 228.0], [155.0, 480.0], [299.0, 480.0], [299.0, 364.0], [297.0, 181.0]]},
+  {"id": "balcony", "point": [600, 880], "label": "BALCONY", "open": false, "polygon": [[832.0, 804.0], [821.0, 803.0], [575.0, 803.0], [575.0, 796.0], [505.0, 796.0], [505.0, 912.0], [575.0, 912.0], [575.0, 921.5], [832.0, 925.0]]},
+  {"id": "recess", "kind": "ledge", "point": [860, 865], "label": null, "open": false, "polygon": [[888.0, 804.0], [832.0, 804.0], [832.0, 925.0], [888.0, 927.0]]},
+  {"id": "bay", "kind": "ledge", "point": [960, 160], "label": null, "open": false, "polygon": [[938.0, 116.0], [938.0, 178.0], [1115.0, 178.0], [1115.0, 171.0], [1118.5, 171.0], [1118.5, 115.0]]}
+ ]
+}

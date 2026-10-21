@@ -1,0 +1,24 @@
+# Nixpacks plan for furny-vision (Python provider). Coolify base directory: /vision
+providers = ["python"]
+
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.12"
+PYTHONUNBUFFERED = "1"
+PYTHONDONTWRITEBYTECODE = "1"
+PIP_NO_CACHE_DIR = "1"
+OMP_NUM_THREADS = "2"               # OpenCV/ONNX threads per worker; prevents CPU oversubscription
+
+[phases.setup]
+nixPkgs = ["...", "curl"]
+# rapidocr pulls opencv-python (non-headless), which needs libGL/glib at import time.
+nixLibs = ["...", "libGL", "glib", "zlib", "stdenv.cc.cc.lib"]
+aptPkgs = ["libgl1", "libglib2.0-0"]
+
+[phases.build]
+cmds = [
+  'python -c "import cv2, numpy, scipy, shapely, onnxruntime, rapidocr, pdfplumber, pypdfium2, ezdxf, pi_heif, fastapi; print(cv2.__version__)"',
+  'python -c "from rapidocr import RapidOCR; RapidOCR()"',
+]
+
+[start]
+cmd = "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --timeout-graceful-shutdown 30"
