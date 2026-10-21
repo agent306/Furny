@@ -21,6 +21,7 @@ import {
 import {
     FURNITURE_COMMANDS,
     createFurnitureBus,
+    furnitureEntityIdsOf,
     furniturePathToEntityId,
 } from '../registry';
 
@@ -635,4 +636,110 @@ describe('changedIds of the commands', () => {
             expect(result.changedIds).toEqual(new Set(expected));
         },
     );
+});
+
+describe('changedIds across several patches', () => {
+    /** Events of the given kinds, in order. */
+    function watch(bus: ReturnType<typeof furnitureBus>) {
+        const seen: Array<{ kind: string; ids: ReadonlySet<string> }> = [];
+        bus.subscribe((e) => seen.push({ kind: e.kind, ids: e.changedIds }));
+        return seen;
+    }
+
+    // s_5 is rows.children[1]; inserting at rows[0] shifts it to index 2 after
+    // the content of s_5 was set, so a path read against the wrong document
+    // names s_4 instead of s_5.
+    const sequence = (bus: ReturnType<typeof furnitureBus>) =>
+        bus.transaction('test.sequence', () => {
+            ok(
+                bus.execute('furniture.setContent', {
+                    sectionId: S.rod,
+                    content: { type: 'empty' },
+                }),
+            );
+            ok(
+                bus.execute('furniture.insertChild', {
+                    parentId: S.rows,
+                    index: 0,
+                }),
+            );
+        });
+
+    it('reports the section whose content changed on commit, undo and redo of a transaction', () => {
+        const bus = furnitureBus();
+        const seen = watch(bus);
+        sequence(bus);
+        bus.undo();
+        bus.redo();
+        expect(seen.map((e) => e.kind)).toEqual([
+            'execute',
+            'execute',
+            'commit',
+            'undo',
+            'redo',
+        ]);
+        for (const kind of ['commit', 'undo', 'redo']) {
+            const ids = seen.find((e) => e.kind === kind)!.ids;
+            expect(ids, kind).toContain(S.rod);
+            expect(ids, kind).toContain(S.rows);
+        }
+    });
+
+    it('reports it on a rollback', () => {
+        const bus = furnitureBus();
+        const seen = watch(bus);
+        bus.beginTransaction('test.sequence');
+        ok(
+            bus.execute('furniture.setContent', {
+                sectionId: S.rod,
+                content: { type: 'empty' },
+            }),
+        );
+        ok(
+            bus.execute('furniture.insertChild', {
+                parentId: S.rows,
+                index: 0,
+            }),
+        );
+        bus.rollbackTransaction();
+        expect(seen.at(-1)!.kind).toBe('rollback');
+        expect(seen.at(-1)!.ids).toContain(S.rod);
+    });
+
+    it('reports the dragged child through a replace merge', () => {
+        const bus = furnitureBus();
+        ok(
+            bus.execute('furniture.insertChild', {
+                parentId: S.rows,
+                index: 0,
+            }),
+        );
+        bus.seal();
+        const seen = watch(bus);
+        for (const mm of [300, 320, 340]) {
+            ok(
+                bus.execute(
+                    'furniture.setChildSize',
+                    {
+                        parentId: S.rows,
+                        index: 2,
+                        size: { mode: 'fixed', mm },
+                        drag: true,
+                    },
+                    { merge: true },
+                ),
+            );
+        }
+        expect(seen.map((e) => e.kind)).toEqual(['execute', 'merge', 'merge']);
+        for (const e of seen) expect(e.ids, e.kind).toContain(S.rod);
+    });
+
+    it('reports nothing for no patch and * for a patch outside the tree', () => {
+        expect(furnitureEntityIdsOf(wardrobeFixture(), [])).toEqual(new Set());
+        expect(
+            furnitureEntityIdsOf(wardrobeFixture(), [
+                { op: 'replace', path: ['dims', 'width'], value: 1 },
+            ]),
+        ).toEqual(new Set(['*']));
+    });
 });

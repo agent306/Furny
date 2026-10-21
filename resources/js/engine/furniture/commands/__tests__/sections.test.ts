@@ -561,6 +561,36 @@ describe('mergeSections', () => {
     });
 });
 
+describe('mergeSections and drawers', () => {
+    it('sets behindDoor on the drawers of the merged section when a door covers it', () => {
+        // s_4 holds drawers in front of the cabinet; the door only covers s_5.
+        // Merging s_3 puts the drawers under that door.
+        const doc = wardrobeFixture((d) => {
+            sectionOf(d, S.empty).content = DRAWERS(false);
+            d.carcass!.fronts[1]!.covers = [S.rod];
+        });
+        const { after } = roundTrip(
+            'furniture.mergeSections',
+            { sectionId: S.rows },
+            doc,
+        );
+        expect(sectionOf(after, S.rows).content).toEqual(DRAWERS(true));
+        expect(frontsOf(after)[1]!.covers).toEqual([S.rows]);
+    });
+
+    it('leaves the drawers in front when nothing covers the merged section', () => {
+        const { after } = roundTrip(
+            'furniture.mergeSections',
+            { sectionId: S.rows },
+            wardrobeFixture((d) => {
+                sectionOf(d, S.empty).content = DRAWERS(true);
+                d.carcass!.fronts = [d.carcass!.fronts[0]!];
+            }),
+        );
+        expect(sectionOf(after, S.rows).content).toEqual(DRAWERS(false));
+    });
+});
+
 describe('setContent', () => {
     it('replaces the content of a leaf; undo restores', () => {
         const content: Content = {

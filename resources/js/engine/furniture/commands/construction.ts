@@ -100,8 +100,8 @@ const setPlinth = defineFurnitureCommand<SetPlinthParams>({
             ...(height === undefined ? {} : { height: mm(height) }),
             ...(setback === undefined ? {} : { setback: mm(setback) }),
         });
-        // No plinth, no height (07 §9), whatever height was asked for.
-        if (p.type === 'none') plinth.height = 0;
+        // No plinth, no height (07 §9), whoever sets the height.
+        if (plinth.type === 'none') plinth.height = 0;
     },
     mergeKey: () => 'plinth',
 });

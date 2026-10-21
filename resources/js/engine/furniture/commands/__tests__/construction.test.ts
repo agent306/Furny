@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { diningTable } from '../../testing/docs';
-import { furnitureBus, refused, roundTrip } from '../../testing/commands';
+import { furnitureBus, ok, refused, roundTrip } from '../../testing/commands';
 
 describe('setConstruction', () => {
     it('sets top and bottom independently', () => {
@@ -54,6 +54,18 @@ describe('setPlinth', () => {
             height: 80,
         });
         expect(withHeight.after.carcass!.plinth.height).toBe(0);
+    });
+
+    it('keeps height 0 while the plinth type is none, whoever sets the height', () => {
+        const bus = furnitureBus();
+        ok(bus.execute('furniture.setMounting', { mounting: 'wall' }));
+        ok(bus.execute('furniture.setPlinth', { height: 120 }));
+        expect(bus.getDoc().carcass!.plinth).toMatchObject({
+            type: 'none',
+            height: 0,
+        });
+        ok(bus.execute('furniture.setPlinth', { type: 'plinth', height: 120 }));
+        expect(bus.getDoc().carcass!.plinth.height).toBe(120);
     });
 
     it('merges the given fields into the plinth', () => {

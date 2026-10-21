@@ -64,6 +64,14 @@ describe('addFront', () => {
         expect(sectionOf(after, S.shelves).content).toEqual(DRAWERS(true));
     });
 
+    it('lists each covered section once', () => {
+        const { after } = roundTrip('furniture.addFront', {
+            ...NEW_FRONT,
+            covers: [S.rod, S.rod],
+        });
+        expect(frontsOf(after)[2]!.covers).toEqual([S.rod]);
+    });
+
     it('refuses an unknown section, empty covers and a table document', () => {
         const bus = furnitureBus();
         expect(
@@ -119,6 +127,14 @@ describe('updateFront', () => {
         );
         expect(sectionOf(after, S.shelves).content).toEqual(DRAWERS(false));
         expect(sectionOf(after, S.rod).content).toEqual(DRAWERS(true));
+    });
+
+    it('lists each covered section once', () => {
+        const { after } = roundTrip('furniture.updateFront', {
+            frontId: FR.left,
+            patch: { covers: [S.rod, S.empty, S.rod] },
+        });
+        expect(frontsOf(after)[0]!.covers).toEqual([S.rod, S.empty]);
     });
 
     it('merges under front:{frontId}', () => {

@@ -2,6 +2,7 @@
  * The furniture command bus (07 §9, 04 §6.1): the 28 furniture commands, the
  * furniture pipeline and the patch-path mapping, wired into the generic bus.
  */
+import { apply, type Patches } from 'mutative';
 import { createCommandBus } from '../../commands/bus';
 import type { AnyCommandDef, CommandBus } from '../../commands/types';
 import { newId as generateId } from '../../ids';
@@ -46,7 +47,7 @@ const KEYED_OVERRIDES: ReadonlySet<string> = new Set(['parts', 'hardware']);
 const isIndex = (v: unknown): v is number => typeof v === 'number';
 
 /**
- * Patch path -> changed entity id: the `pathToEntityId` of the furniture bus
+ * Patch path -> changed entity id: the per-path mapping of the furniture bus
  * (04 §6.3).
  *
  * - `['overrides', 'parts' | 'hardware', key, ...]` -> `key`.
@@ -58,11 +59,15 @@ const isIndex = (v: unknown): v is number => typeof v === 'number';
  * - Anything else (dimensions, materials, construction, table, notes, a whole
  *   collection) -> `'*'`.
  *
- * Sections, fronts and extras sit in arrays, so a path holds indices, not
- * ids: they are read from `doc`, the document the bus holds when it reads the
- * patches (the one the patches apply to). An index that document does not
- * have (an entity being added) is a change of the collection or the parent;
- * without `doc` these paths are `'*'`.
+ * Contract: a reported section id means that section **and its subtree** may
+ * have changed (a structural change reports the section whose `children`
+ * changed, not the children). A reported front or extra id means that item
+ * changed; `'*'` means anything may have changed (a collection grew or shrank).
+ * Sections, fronts and extras sit in arrays, so a path holds indices, not ids:
+ * they are read from `doc`, which must be the document the patch applies to
+ * (`furnitureEntityIdsOf` walks a patch list so that this holds for each
+ * patch). An index `doc` does not have (an entity being added) is a change of
+ * the parent or the collection. Without `doc` these paths are `'*'`.
  */
 export function furniturePathToEntityId(
     path: (string | number)[],
@@ -105,6 +110,39 @@ export function furniturePathToEntityId(
     return section.id;
 }
 
+/** The patch paths that can name a section, front or extra item: the only ones whose meaning depends on the doc. */
+const indexed = (path: (string | number)[]): boolean =>
+    path[0] === 'carcass'
+        ? path[1] === 'interior' || path[1] === 'fronts'
+        : path[0] === 'overrides' &&
+          (path[1] === 'extraParts' || path[1] === 'extraHardware');
+
+/**
+ * The entity ids `patches` touch, for the bus' `entityIdsOf`: each patch is
+ * read by `furniturePathToEntityId` against the document it applies to, that
+ * is `base` with the patches before it applied. `base` is the pre-command
+ * document for a command, a redo, a transaction commit and a replace merge,
+ * and the post-command document for an undo (04 §6.2). The contract of the
+ * ids is that of `furniturePathToEntityId`.
+ */
+export function furnitureEntityIdsOf(
+    base: FurnitureDocument,
+    patches: Patches,
+): Set<string> {
+    const ids = new Set<string>();
+    let doc = base;
+    patches.forEach((patch, at) => {
+        const path = patch.path as (string | number)[];
+        const id = furniturePathToEntityId(path, doc);
+        if (id !== null) ids.add(id);
+        // Patches that cannot move a section, front or extra do not change what the next one means.
+        if (at < patches.length - 1 && indexed(path)) {
+            doc = apply(doc, [patch]) as FurnitureDocument;
+        }
+    });
+    return ids;
+}
+
 export interface FurnitureBusConfig<M extends FurnitureCommandRegistry> {
     initial: FurnitureDocument;
     catalog: CatalogIndex;
@@ -132,21 +170,17 @@ export function createFurnitureBus<
         catalog: cfg.catalog,
         newId: cfg.newId ?? generateId,
     };
-    const bus: CommandBus<FurnitureDocument, FurnitureCommandContext, M> =
-        createCommandBus<FurnitureDocument, FurnitureCommandContext, M>({
-            initial: cfg.initial,
-            registry: cfg.registry ?? (FURNITURE_COMMANDS as unknown as M),
-            pipeline: furniturePipeline,
-            pathToEntityId: (path) =>
-                furniturePathToEntityId(path, bus.getDoc()),
-            messageKeyPrefix: FURNITURE_COMMAND_KEY_PREFIX,
-            getContext: () => context,
-            ...(cfg.maxHistory === undefined
-                ? {}
-                : { maxHistory: cfg.maxHistory }),
-            ...(cfg.mergeBaseCache === undefined
-                ? {}
-                : { mergeBaseCache: cfg.mergeBaseCache }),
-        });
-    return bus;
+    return createCommandBus<FurnitureDocument, FurnitureCommandContext, M>({
+        initial: cfg.initial,
+        registry: cfg.registry ?? (FURNITURE_COMMANDS as unknown as M),
+        pipeline: furniturePipeline,
+        pathToEntityId: (path) => furniturePathToEntityId(path),
+        entityIdsOf: furnitureEntityIdsOf,
+        messageKeyPrefix: FURNITURE_COMMAND_KEY_PREFIX,
+        getContext: () => context,
+        ...(cfg.maxHistory === undefined ? {} : { maxHistory: cfg.maxHistory }),
+        ...(cfg.mergeBaseCache === undefined
+            ? {}
+            : { mergeBaseCache: cfg.mergeBaseCache }),
+    });
 }

@@ -61,6 +61,24 @@ describe('setTable', () => {
         expect(after.table!.storage.endCabinets!.width).toBe(400);
     });
 
+    it('replaces a storage content of another kind instead of merging the two', () => {
+        const shelves = {
+            type: 'shelves',
+            count: 2,
+            adjustable: true,
+            frontSetback: 20,
+        } as const;
+        const { after } = roundTrip(
+            'furniture.setTable',
+            { patch: { storage: { endCabinets: { content: shelves } } } },
+            studyDesk(),
+        );
+        expect(after.table!.storage.endCabinets).toEqual({
+            width: 400,
+            content: shelves,
+        });
+    });
+
     it('sets nullable objects: null clears, an object fills', () => {
         const filled = roundTrip(
             'furniture.setTable',

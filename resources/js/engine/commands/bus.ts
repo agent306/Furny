@@ -205,7 +205,19 @@ export function createCommandBus<
     const patchDoc = (base: D, patches: Patches): D =>
         apply(base, patches, { enableAutoFreeze: shouldAutoFreeze() }) as D;
 
-    function idsOf(...lists: Patches[]): ReadonlySet<string> {
+    /**
+     * The entities `lists` touch. `base` is the document the first patch
+     * applies to; the lists run in order, each on the result of the one
+     * before.
+     */
+    function idsOf(base: D, ...lists: Patches[]): ReadonlySet<string> {
+        if (cfg.entityIdsOf !== undefined) {
+            const ids = new Set<string>();
+            for (const id of cfg.entityIdsOf(base, lists.flat())) {
+                if (id !== null) ids.add(id);
+            }
+            return ids;
+        }
         const ids = new Set<string>();
         for (const list of lists) {
             for (const patch of list) {
@@ -430,7 +442,7 @@ export function createCommandBus<
             const out = run.value;
             // doc -> base -> new doc, so ids touched by the old drag count too
             const patches = [...top.inversePatches, ...out.patches];
-            const changedIds = idsOf(patches);
+            const changedIds = idsOf(doc, patches);
             const entry =
                 out.patches.length === 0
                     ? null
@@ -452,7 +464,7 @@ export function createCommandBus<
             if (!merging) sealTop();
             return resultOf(out, new Set());
         }
-        const changedIds = idsOf(out.patches);
+        const changedIds = idsOf(doc, out.patches);
 
         // 04 §6.2-3 `compose`: run on the current document, append the patches.
         if (merging) {
@@ -497,7 +509,7 @@ export function createCommandBus<
         const patches =
             direction === 'undo' ? entry.inversePatches : entry.patches;
         const next = patchDoc(doc, patches);
-        const changedIds = idsOf(patches);
+        const changedIds = idsOf(doc, patches);
         mergeBase = null;
         const sealed = withSealed(entry);
         const prevDoc = doc;
@@ -552,7 +564,7 @@ export function createCommandBus<
         const start = f.marks[0]!;
         const kept = f.steps.filter((s) => s.history);
         const forward = f.steps.flatMap((s) => s.forward);
-        const changedIds = idsOf(forward);
+        const changedIds = idsOf(start.doc, forward);
         const entry =
             kept.length === 0
                 ? null
@@ -594,7 +606,7 @@ export function createCommandBus<
         const mark = f.marks.at(-1)!;
         const undone = f.steps.slice(mark.steps).toReversed();
         const patches = undone.flatMap((s) => s.inverse);
-        const changedIds = idsOf(patches);
+        const changedIds = idsOf(doc, patches);
         const prevDoc = doc;
         // the restored document may predate auto-freeze (e.g. `initial`)
         doc = shouldAutoFreeze() ? deepFreeze(mark.doc) : mark.doc;

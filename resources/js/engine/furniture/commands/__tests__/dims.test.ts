@@ -101,6 +101,36 @@ describe('setDims', () => {
         expect(bus.getDoc()).toEqual(original);
     });
 
+    it('a merge re-runs only the latest params: the editor seals between fields (07 §9)', () => {
+        // Documented limitation of replace merges (04 §6.2): different fields
+        // in one burst lose the earlier ones, so a field change is sealed
+        // (blur, pointer-up) before the next field is edited.
+        const bus = furnitureBus();
+        ok(bus.execute('furniture.setDims', { width: 2000 }));
+        ok(bus.execute('furniture.setDims', { height: 1800 }, { merge: true }));
+        expect(bus.getDoc().dims).toEqual({
+            width: 1800,
+            height: 1800,
+            depth: 600,
+        });
+
+        const sealed = furnitureBus();
+        ok(sealed.execute('furniture.setDims', { width: 2000 }));
+        sealed.seal();
+        ok(
+            sealed.execute(
+                'furniture.setDims',
+                { height: 1800 },
+                { merge: true },
+            ),
+        );
+        expect(sealed.getDoc().dims).toEqual({
+            width: 2000,
+            height: 1800,
+            depth: 600,
+        });
+    });
+
     it('opens a new entry without merge: true, and after seal()', () => {
         const bus = furnitureBus();
         ok(bus.execute('furniture.setDims', { width: 1900 }));

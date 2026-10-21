@@ -245,6 +245,16 @@ export interface CommandBusConfig<
     pipeline?: Pipeline<D, C>;
     /** 04 §6.3. `null` ignores the patch; `'*'` means "everything". */
     pathToEntityId(path: (string | number)[]): string | null;
+    /**
+     * Optional, replaces `pathToEntityId` when set: the entity ids of
+     * `patches`, which apply in order starting from `base` (the document the
+     * bus holds when the change happens: the pre-command document for a
+     * command, a redo, a transaction commit and a replace merge, the
+     * pre-undo document for an undo and a rollback). For documents whose
+     * patch paths hold indices rather than ids, so that a path can be read
+     * only against the document it applies to. `null` entries are ignored.
+     */
+    entityIdsOf?(base: D, patches: Patches): Iterable<string | null>;
     /** History cap; default 200. */
     maxHistory?: number;
     /** Prefix of the bus' own message keys, e.g. `engine.plan.command` -> `engine.plan.command.invalid_params`. */

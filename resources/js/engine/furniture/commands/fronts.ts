@@ -42,7 +42,7 @@ const addFront = defineFurnitureCommand<AddFrontParams, { frontId: string }>({
     validate: (doc, p) => checkCovers(doc, p.covers),
     run(d, p, ctx, out) {
         const id = ctx.newId('fr');
-        carcassOf(d).fronts.push({ ...p, id });
+        carcassOf(d).fronts.push({ ...p, covers: [...new Set(p.covers)], id });
         syncBehindDoor(d);
         out.result = { frontId: id };
     },
@@ -72,7 +72,12 @@ const updateFront = defineFurnitureCommand<UpdateFrontParams>({
     },
     run(d, p) {
         const front = carcassOf(d).fronts.find((f) => f.id === p.frontId)!;
-        mergeFields(front, p.patch);
+        mergeFields(front, {
+            ...p.patch,
+            ...(p.patch.covers === undefined
+                ? {}
+                : { covers: [...new Set(p.patch.covers)] }),
+        });
         syncBehindDoor(d);
     },
     mergeKey: (p) => `front:${p.frontId}`,
