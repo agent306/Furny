@@ -252,3 +252,8 @@ Ruling: assembly_per_part equal-share drawer exclusion on mixed cut-list rows st
 Spec 19 (deviation): 08 §4.3 #7 hinge install says "plates included" but §4.7 worked example bills hinges only (12); implementation follows §4.7.
 Task 44: minor (deferred): pricing.ts quantity not validated positive int; glass labour test mirrors implementation with float ceil/round instead of literal; unknown catalog codes silently skipped in priceBom untested; add shortcut comment at equal-share loop (pricing.ts:884).
 Task 44: complete (commits 76a6009..13628a1, review clean)
+Task 45: impl a4e290e (DONE; 27 diff tests, 5091 full). Decisions: content null = empty; nullable construction objects one item on object path; section_changed before/after {id,split,content}; own English names for front kinds/field labels/roles; highlightMap compares extruded geometry too.
+Task 45: review a4e290e: spec ✅ (07 §10.1–§10.4; implementer's English names fill genuine spec gaps, exported as CHANGE_FIELD_LABELS_EN for Task 51), quality Approved. Controller verified Bom.hardware is merged per code (bom.ts:230), so the diff's Map-by-code is safe.
+Task 45: minor (deferred): notes null vs '' counts as a change (diff.ts:1619); highlightMap extruded-geometry comparison beyond §10.4 is untested (diffHighlight.ts:1662; spec-19 note); no test for ≤2% price change = minor, table-family document, table.top.thickness 'material' union.
+Carry Task 51: CHANGE_FIELD_LABELS_EN + front-kind/role English names are diff params (spec-fixed English exception) — keep out of the translation-coverage gate.
+Task 45: complete (commits 12dd076..a4e290e, review clean)
