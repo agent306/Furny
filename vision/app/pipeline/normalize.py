@@ -89,18 +89,20 @@ def _skew_of(img: np.ndarray) -> float:
 
 
 def _user_quad(corners: list[tuple[float, float]], shape: tuple[int, ...]) -> np.ndarray | None:
-    """User corners (0..1 of the preview frame, TL TR BR BL) in pixels; None if they are not a sane quad."""
+    """User corners (0..1 of the preview frame, any order) in pixels; None if they are not a sane quad."""
     if len(corners) != 4:
         return None
     h, w = shape[:2]
     quad = np.array(
         [(min(1.0, max(0.0, x)) * w, min(1.0, max(0.0, y)) * h) for x, y in corners], dtype=np.float32
     )
-    if not cv2.isContourConvex(quad.reshape(4, 1, 2)):
+    # The order is normalised, so a reversed or rotated list cannot produce a mirrored warp.
+    ordered = rectify.order_corners(quad)
+    if ordered is None or not cv2.isContourConvex(ordered.reshape(4, 1, 2)):
         return None
-    if cv2.contourArea(quad.reshape(4, 1, 2)) < _USER_CORNERS_MIN_AREA_FRAC * w * h:
+    if cv2.contourArea(ordered.reshape(4, 1, 2)) < _USER_CORNERS_MIN_AREA_FRAC * w * h:
         return None
-    return quad
+    return ordered
 
 
 def _rectify(

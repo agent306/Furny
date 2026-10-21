@@ -82,6 +82,27 @@ def test_user_corners_win_over_detection_and_unphoto_hint() -> None:
     assert abs(page.page_image.width - 2000) <= 1  # full frame kept (1600 -> 2000 upscale)
 
 
+@pytest.mark.parametrize(
+    "corners",
+    [
+        [(0.1, 0.1), (0.9, 0.1), (0.9, 0.9), (0.1, 0.9)],  # TL TR BR BL
+        [(0.1, 0.9), (0.9, 0.9), (0.9, 0.1), (0.1, 0.1)],  # reversed
+        [(0.9, 0.9), (0.1, 0.9), (0.1, 0.1), (0.9, 0.1)],  # rotated start
+        [(0.1, 0.1), (0.9, 0.1), (0.1, 0.9), (0.9, 0.9)],  # bow-tie order
+    ],
+)
+def test_user_corner_order_does_not_mirror_the_warp(corners: list[tuple[float, float]]) -> None:
+    img = np.full((2000, 3000, 3), 255, np.uint8)
+    img[300:500, 400:600] = 0  # marker near the top-left of the user region (300..2700 x 200..1800)
+    page = run(img, corners=corners)
+    assert page.page_image.rectified is True
+    ys, xs = np.nonzero(page.image[:, :, 0] < 128)
+    h, w = page.image.shape[:2]
+    # Marker centre (500, 400) -> ((500-300)/2400, (400-200)/1600) of the output = (0.083, 0.125).
+    assert xs.mean() / w == pytest.approx(200 / 2400, abs=0.01)
+    assert ys.mean() / h == pytest.approx(200 / 1600, abs=0.01)
+
+
 def test_degenerate_user_corners_are_ignored_with_warning() -> None:
     ctx = make_ctx()
     page = run(line_drawing(), ctx, corners=[(0.1, 0.1), (0.2, 0.1), (0.2, 0.12), (0.1, 0.12)])
@@ -159,6 +180,20 @@ def test_deskew() -> None:
     # Canvas grew to fit the rotated content, and the result is straight now.
     assert page.image.shape[1] > 2000
     assert estimate_skew_deg(cv2.cvtColor(page.image, cv2.COLOR_BGR2GRAY)) == pytest.approx(0.0, abs=0.2)
+
+
+def test_deskew_border_is_white() -> None:
+    h, w = 1500, 2000
+    grey = np.full((h, w, 3), 200, np.uint8)
+    grey[:] = np.minimum(grey, line_drawing(w, h))
+    m = cv2.getRotationMatrix2D(((w - 1) / 2, (h - 1) / 2), -3, 1)
+    tilted = cv2.warpAffine(grey, m, (w, h), flags=cv2.INTER_CUBIC, borderValue=(200, 200, 200))
+    page = run(tilted)
+    assert page.page_image.deskew_deg == pytest.approx(-3.0, abs=0.2)
+    out = page.image
+    assert (out[0, 0] == 255).all() and (out[-1, -1] == 255).all()  # expanded canvas corners: white fill
+    centre = out[out.shape[0] // 3 : 2 * out.shape[0] // 3, out.shape[1] // 3 : 2 * out.shape[1] // 3]
+    assert np.median(centre) == 200  # content background untouched
 
 
 def test_deskew_transform_maps_content() -> None:

@@ -80,6 +80,19 @@ def test_axis_aligned_quad_is_not_photo() -> None:
     assert quad_is_axis_aligned(explicit, canvas.shape) is True
 
 
+@pytest.mark.parametrize("moved", range(4))
+def test_axis_aligned_threshold_is_one_and_a_half_percent_of_diagonal_for_any_corner(moved: int) -> None:
+    shape = (800, 1000, 3)
+    tol = 0.015 * math.hypot(1000, 800)  # 19.2 px
+    frame = np.array([(0, 0), (999, 0), (999, 799), (0, 799)], dtype=np.float32)
+    inward = [(1, 0), (-1, 0), (-1, 0), (1, 0)][moved]  # displace one corner along x, into the frame
+    under, over = frame.copy(), frame.copy()
+    under[moved] += np.array(inward, dtype=np.float32) * (tol - 0.5)
+    over[moved] += np.array(inward, dtype=np.float32) * (tol + 0.5)
+    assert quad_is_axis_aligned(under, shape) is True
+    assert quad_is_axis_aligned(over, shape) is False  # one corner is enough ("any corner")
+
+
 def test_tilted_quad_is_not_axis_aligned() -> None:
     assert quad_is_axis_aligned(CORNERS, (CANVAS[1], CANVAS[0], 3)) is False
 

@@ -18,8 +18,11 @@ _CONTRAST_WORK_EDGE = 500
 _ILLUMINATION_WORK_EDGE = 800  # the background is smooth, so the closing runs on a downscaled copy
 
 
-def _order_corners(pts: np.ndarray) -> np.ndarray | None:
-    """TL = min x+y, BR = max x+y, TR = min y-x, BL = max y-x; None when two roles pick one point."""
+def order_corners(pts: np.ndarray) -> np.ndarray | None:
+    """Four points in any order -> TL, TR, BR, BL (float32).
+
+    TL = min x+y, BR = max x+y, TR = min y-x, BL = max y-x; None when two roles pick one point.
+    """
     s = pts.sum(axis=1)
     d = pts[:, 1] - pts[:, 0]
     idx = [int(np.argmin(s)), int(np.argmin(d)), int(np.argmax(s)), int(np.argmax(d))]
@@ -47,7 +50,7 @@ def detect_page_quad(img: np.ndarray) -> np.ndarray | None:
     for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:_TOP_CONTOURS]:
         approx = cv2.approxPolyDP(contour, _APPROX_EPS_FRAC * cv2.arcLength(contour, True), True)
         if len(approx) == 4 and cv2.isContourConvex(approx) and cv2.contourArea(approx) >= min_area:
-            ordered = _order_corners(approx.reshape(4, 2).astype(np.float32))
+            ordered = order_corners(approx.reshape(4, 2).astype(np.float32))
             if ordered is not None:
                 quad: np.ndarray = ordered / np.float32(f)
                 return quad.astype(np.float32)
