@@ -20,6 +20,7 @@ from app.api.deps import require_token
 from app.api.errors import VisionError
 from app.config import Settings
 from app.logging import RedactionFilter
+from app.pipeline.labeling.prompts import JSON_SCHEMA_INSTRUCTION_TEMPLATE
 from app.providers import registry
 from app.providers.base import (
     ImagePart,
@@ -34,12 +35,6 @@ from app.providers.errors import ProviderError
 from app.providers.usage import usage_call_out
 from app.schemas.api import ProviderTestError, ProviderTestRequest, ProviderTestResponse
 from app.utils.json_schema import parse_json_object
-
-# Local copy until Task 26 replaces it with the import from the prompts module (06 §9.3).
-JSON_SCHEMA_INSTRUCTION_TEMPLATE = (
-    "Output format: a single JSON object, no markdown fences, no commentary, "
-    "that validates against this JSON Schema:\n{schema_json}"
-)
 
 SYSTEM_PROMPT = "You are a connectivity check."
 PROMPT_WITH_IMAGE = "Is the black square in the top-left quadrant? Answer with the JSON object."
