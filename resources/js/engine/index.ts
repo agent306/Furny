@@ -226,3 +226,27 @@ export {
     doorSwingSectors,
 } from './plan/conflicts';
 export type { ConflictKind, PlacementConflict } from './plan/conflicts';
+export {
+    SNAP_KINDS,
+    buildSnapIndex,
+    defaultSnapSettings,
+    gridStepFor,
+    rawStepFor,
+    snapPoint,
+} from './plan/snapping';
+export type {
+    SnapFaceItem,
+    SnapFootprintItem,
+    SnapGuide,
+    SnapIndex,
+    SnapItemIndex,
+    SnapInput,
+    SnapKeyPointItem,
+    SnapKind,
+    SnapMarker,
+    SnapModifiers,
+    SnapNodeItem,
+    SnapResult,
+    SnapSettings,
+    SnapWallItem,
+} from './plan/snapping';
