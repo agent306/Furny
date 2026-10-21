@@ -12,6 +12,7 @@ use App\Http\Controllers\Auth\StaffInvitationController;
 use App\Http\Controllers\CspReportController;
 use App\Http\Controllers\LegalController;
 use App\Http\Controllers\ManifestController;
+use App\Http\Controllers\MediaController;
 use App\Http\Controllers\NotFoundController;
 use App\Http\Controllers\WelcomeController;
 use App\Support\Http\StatelessRoute;
@@ -88,6 +89,12 @@ Route::middleware('signed')->prefix('staff/invitations')->name('staff.invitation
     Route::get('{invitation}', [StaffInvitationController::class, 'show'])->name('show');
     Route::post('{invitation}', [StaffInvitationController::class, 'accept'])->name('accept');
 });
+
+// Private files (13 §8.9): signed in, policy-checked per model and collection, then a redirect to a 15-minute storage URL.
+Route::get('media/{media:uuid}', [MediaController::class, 'show'])
+    ->middleware(['auth', 'active'])
+    ->whereUuid('media')
+    ->name('media.show');
 
 // A URL that matches nothing is a 404 raised inside the `web` group, so the Error page renders in the
 // layout of the signed-in user, with their session and the shared props (10 §4.10).

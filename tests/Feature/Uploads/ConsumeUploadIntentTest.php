@@ -58,6 +58,7 @@ it('attaches the processed file to the collection and marks the intent consumed'
         ->and($media->file_name)->toBe(basename($intent->processed_key))
         ->and($media->mime_type)->toBe('image/png')
         ->and($media->model_id)->toBe($user->id)
+        ->and([$media->getCustomProperty('width'), $media->getCustomProperty('height')])->toBe([800, 600])
         ->and($user->getMedia('avatar'))->toHaveCount(1);
     Storage::disk('s3-public')->assertExists($media->getPathRelativeToRoot());
 

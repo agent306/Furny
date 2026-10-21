@@ -8,9 +8,12 @@ import {
     Calendar,
     Camera,
     Check,
+    ChevronLeft,
+    ChevronRight,
     CirclePause,
     CirclePlay,
     CircleX,
+    CloudUpload,
     Copy,
     Download,
     EllipsisVertical,
@@ -62,6 +65,7 @@ import {
     UserPlus,
     WifiOff,
     Wrench,
+    X,
 } from '@lucide/vue';
 
 /**
@@ -85,6 +89,8 @@ export const ICONS = {
     calendar: Calendar,
     camera: Camera,
     check: Check,
+    'chevron-left': ChevronLeft,
+    'chevron-right': ChevronRight,
     copy: Copy,
     download: Download,
     'ellipsis-vertical': EllipsisVertical,
@@ -131,12 +137,14 @@ export const ICONS = {
     sun: Sun,
     'thumbs-up': ThumbsUp,
     truck: Truck,
+    'upload-cloud': CloudUpload,
     user: User,
     'user-check': UserCheck,
     'user-cog': UserCog,
     'user-plus': UserPlus,
     'wifi-off': WifiOff,
     wrench: Wrench,
+    x: X,
     'x-circle': CircleX,
 } as const;
 

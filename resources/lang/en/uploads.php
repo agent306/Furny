@@ -19,5 +19,41 @@ return [
         'upload_processing_failed' => "We couldn't process this file. Please try again.",
         'upload_invalid' => "This upload can't be used. Please upload the file again.",
         'invalid_target' => "This upload doesn't belong to anything we can find.",
+
+        // Refusals the browser finds before the server is asked (15 §9.10) and failures on the way.
+        'type' => "{name}: this file type isn't allowed.",
+        'size' => '{name} is larger than {max}.',
+        'count' => '{max, plural, one {You can attach one file.} other {You can attach up to # files.}}',
+        'network' => "The upload didn't go through. Please check your connection and try again.",
+        'timeout' => 'Checking the file took too long. Please try again.',
+        'failed' => 'Something went wrong with this upload. Please try again.',
+    ],
+
+    'drop_here' => 'Drag files here or <browse>browse</browse>',
+    'take_photo' => 'Take photo',
+    'remove' => 'Remove {name}',
+    'status' => [
+        'preparing' => 'Preparing…',
+        'uploading' => 'Uploading {percent}%',
+        'checking' => 'Checking…',
+        'ready' => 'Ready',
+    ],
+
+    'gallery' => [
+        'more' => '{count, plural, one {# more photo} other {# more photos}}',
+    ],
+
+    'lightbox' => [
+        'title' => 'Photo viewer',
+        'carousel' => 'carousel',
+        'counter' => '{index} / {count}',
+        'announce' => 'Photo {index} of {count}',
+        'previous' => 'Previous photo',
+        'next' => 'Next photo',
+        'download' => 'Download',
+    ],
+
+    'attachment' => [
+        'download' => 'Download {name}',
     ],
 ];

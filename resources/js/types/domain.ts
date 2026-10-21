@@ -21,3 +21,6 @@ export type StaffRoleOption = {
     description: string;
     assignable: boolean;
 };
+
+export type MediaData = App.Domain.Shared.Data.MediaData;
+export type UploadPurpose = App.Domain.Shared.Enums.UploadPurpose;

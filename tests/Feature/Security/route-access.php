@@ -35,6 +35,8 @@ return [
     'legal.terms' => $entry('public'),
     'legal.privacy' => $entry('public'),
     'manifest' => $entry('public'),
+    // Private files (13 §8.9): any signed-in user; the policy of the file's owner decides, with 404 for the rest.
+    'media.show' => $entry('any'),
     'csp.report' => $entry('public'),
     'fallback' => $entry('public'),
     'unmatched.plain' => $entry('public'),

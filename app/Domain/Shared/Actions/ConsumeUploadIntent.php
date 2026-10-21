@@ -43,6 +43,7 @@ final class ConsumeUploadIntent
             // `ready` again and its file must still be there.
             $media = $model->addMediaFromDisk($processedKey, 's3')
                 ->preservingOriginal()
+                ->withCustomProperties(['width' => $intent->width, 'height' => $intent->height])
                 ->usingName(FileName::sanitize($intent->original_filename, pathinfo($processedKey, PATHINFO_EXTENSION)))
                 ->usingFileName(basename($processedKey))
                 ->toMediaCollection($collection);

@@ -162,6 +162,17 @@ defaultLengthUnit: string,
 }
 namespace Shared {
 namespace Data {
+export type MediaData = {
+id: string,
+name: string,
+mimeType: string,
+size: number,
+url: string,
+thumbUrl: string | null,
+largeUrl: string | null,
+width: number | null,
+height: number | null,
+};
 export type PresignTargetData = {
 type: string,
 id: string,
