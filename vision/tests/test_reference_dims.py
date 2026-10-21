@@ -30,8 +30,8 @@ from tests.support.reference import (
 pytestmark = pytest.mark.reference
 
 OUTER_OVERALL = {"top-overall": 11000, "bottom-overall": 11100, "right-mid": 7600, "right-overall": 8900}
-# recall, precision, free ends; HDB against the truth corrected in Task 16c (14b walls: 0.856 / 0.915)
-WALL_FLOOR = {"hdb-3room": (0.856, 0.915, 34), "brochure-2bhk": (0.908, 0.856, 18)}
+# recall, precision, free ends after Task 16c (HDB against its corrected truth)
+WALL_FLOOR = {"hdb-3room": (0.888, 0.943, 18), "brochure-2bhk": (0.923, 0.865, 18)}
 
 
 @pytest.fixture(scope="module")
@@ -140,7 +140,7 @@ def test_walls_do_not_regress(chains: dict[str, ChainResult], stem: str) -> None
     r = chains[stem]
     m = wall_metrics(load_truth(stem, r.page, "drawing-walls"), r.graph)
     recall, precision, free_ends = WALL_FLOOR[stem]
-    # The floors are the values before Task 16c as reported (3 decimals).
+    # The floors are the Task 16c values as reported (3 decimals).
     assert round(m.recall, 3) >= recall and round(m.precision, 3) >= precision, m
     assert sum(w.free_ends for w in r.graph.walls) <= free_ends
 

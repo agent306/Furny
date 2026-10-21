@@ -186,7 +186,7 @@ def run_chain(stem: str) -> ChainResult:
         check_deadline=ctx.check_deadline,
     )
     lap("dimensions")
-    ext = extract_walls(page, pre, segs, dims, ctx, ink=ocr.ink_notext, tokens=ocr.tokens)
+    ext = extract_walls(page, pre, segs, dims, ctx, ink=ocr.ink_notext)
     lap("walls")
     graph = walls_to_graph(ext, pre.region, check_deadline=ctx.check_deadline)
     lap("graph")
@@ -325,22 +325,54 @@ def bounded_faces(graph: WallGraph) -> list[Any]:
     return list(polygonize(unary_union(lines)))
 
 
-def outer_cycle_free_ends(graph: WallGraph) -> int | None:
-    """Free wall ends on the boundary of the union of all bounded faces (None when there is no face)."""
-    faces = bounded_faces(graph)
-    if not faces:
-        return None
-    outline = unary_union(faces).buffer(0)
-    boundary = (
-        outline.exterior
-        if outline.geom_type == "Polygon"
-        else unary_union([g.exterior for g in outline.geoms])
-    )
-    free = 0
+def truth_outline(truth: Truth) -> Any:
+    """The union of the bounded faces of the truth's centre lines (the dwelling as drawn), in page px."""
+    lines = [LineString([w.a, w.b]) for w in truth.walls if math.dist(w.a, w.b) > 0]
+    return unary_union(list(polygonize(unary_union(lines)))).buffer(0)
+
+
+def free_end_points(graph: WallGraph) -> list[tuple[float, float]]:
+    """The graph's free wall ends: nodes that only one wall touches."""
+    degree: dict[str, int] = {}
     for w in graph.walls:
-        if w.free_ends and LineString([w.a, w.b]).distance(boundary) < 1e-6:
-            free += w.free_ends
-    return free
+        for n in (w.a_node, w.b_node):
+            degree[n] = degree.get(n, 0) + 1
+    return [graph.nodes[n] for n, k in sorted(degree.items()) if k == 1]
+
+
+def outer_cycle_free_ends(graph: WallGraph, truth: Truth) -> int:
+    """Free wall ends of ``graph`` on the outer cycle: within ``0.5 t`` of an outer-outline truth wall (a
+    truth wall lying along the boundary of ``truth_outline``). A break in the extracted outline leaves free
+    ends there; a wall stub drawn outward from the outline (the HDB balcony's black stub, a truth wall) or
+    a partition dangling into a room ends away from it.
+
+    Task 16c: Task 16b counted the free ends of every wall *touching* the boundary of the extracted faces,
+    which counts those stubs and dangling partitions too (the truths themselves score 2 and 1 on it)."""
+    boundary = truth_outline(truth).boundary
+    outer = [
+        w
+        for w in truth.walls
+        if LineString([w.a, w.b]).buffer(0.5).difference(boundary.buffer(1.0)).area < 1e-6
+    ]
+    count = 0
+    for p in free_end_points(graph):
+        pt = np.array([p], np.float64)
+        if any(
+            _dist_to_segments(pt, np.array([w.a]), np.array([w.b]))[0, 0] <= 0.5 * w.thickness_px
+            for w in outer
+        ):
+            count += 1
+    return count
+
+
+def enclosed_share(graph: WallGraph, truth: Truth) -> float:
+    """Share of the truth's outline area that the extracted graph's bounded faces cover (1.0: the extracted
+    outer outline closes around the whole dwelling)."""
+    outline = truth_outline(truth)
+    faces = bounded_faces(graph)
+    if not faces or outline.area <= 0:
+        return 0.0
+    return float(unary_union(faces).buffer(0).intersection(outline).area / outline.area)
 
 
 def faces_containing(graph: WallGraph, points_px: list[tuple[float, float]]) -> int:

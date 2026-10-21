@@ -1372,3 +1372,20 @@ def test_throttled_deadline_runs_first_then_at_most_every_interval() -> None:
         poll()
     assert calls <= 3
     assert graphmod._throttled(None) is None
+
+
+def test_nodes_placed_on_one_point_are_one_node() -> None:
+    """Task 16c (HDB top-right corner): a bold corner stroke and a black block fuse into one wall, and a
+    12 px jog connector between them is too short to stay. Its two nodes are placed on one point (x from
+    the vertical wall, y from the connector); they become one node, so the walls on either side meet
+    there instead of each keeping a free end on the same point."""
+    raw = [
+        RawWall((1725.87, 178.62), (1446.97, 179.37), 12.0, "filled"),
+        RawWall((1725.87, 178.62), (1726.14, 277.97), 8.2, "filled"),
+        RawWall((1726.14, 277.97), (1714.0, 278.0), 20.0, "filled"),
+        RawWall((1711.92, 195.99), (1712.71, 489.0), 28.6, "filled"),
+    ]
+    g = build_wall_graph(raw, r=12.0, t_median=12.0, L=1709.0, theta0_deg=0.1)
+    points = list(g.nodes.values())
+    assert len(set(points)) == len(points)
+    assert sum(w.free_ends for w in g.walls) == 2  # the two outer ends only

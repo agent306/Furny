@@ -1064,12 +1064,34 @@ def _project_openings(openings: list[Seg], a: Pt, b: Pt, length: float) -> tuple
     return tuple(merged)
 
 
-def _assemble(edges: list[_Edge], placed: dict[int, Pt], check: Check) -> WallGraph:
-    edges = [
-        e
+def _merge_coincident(edges: list[_Edge], placed: dict[int, Pt]) -> list[_Edge]:
+    """Nodes that a zero-length wall joins (placement put both on one point: a short jog between two
+    axis-aligned walls takes x from one and y from the other) become one node, and the zero-length wall
+    goes; otherwise the walls on either side would each keep a free end at the same point (Task 16c)."""
+    parent: dict[int, int] = {}
+
+    def find(q: int) -> int:
+        while parent.get(q, q) != q:
+            q = parent[q]
+        return q
+
+    for e in edges:
+        if math.hypot(placed[e.a][0] - placed[e.b][0], placed[e.a][1] - placed[e.b][1]) <= _ZERO:
+            ra, rb = find(e.a), find(e.b)
+            if ra != rb:
+                parent[max(ra, rb)] = min(ra, rb)
+    if not parent:
+        return edges
+    out = [
+        _Edge(find(e.a), find(e.b), e.line, e.thickness, e.source, e.openings, e.wi)
         for e in edges
-        if math.hypot(placed[e.a][0] - placed[e.b][0], placed[e.a][1] - placed[e.b][1]) > _ZERO
+        if find(e.a) != find(e.b)
     ]
+    return _dedupe(out)
+
+
+def _assemble(edges: list[_Edge], placed: dict[int, Pt], check: Check) -> WallGraph:
+    edges = _merge_coincident(edges, placed)
     used = sorted({n for e in edges for n in (e.a, e.b)})
 
     def node_key(q: int) -> tuple[float, float, float, float]:

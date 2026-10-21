@@ -1,11 +1,9 @@
-"""Wall extraction on the two reference blueprints (Task 16b), end to end (`tests/support/reference.py`).
+"""Wall extraction on the reference blueprints (Tasks 16b / 16c), end to end (`tests/support/reference.py`).
 
-Truths:
-- ``<stem>.walls.json`` is the P2 engine fixture geometry (the brief's acceptance truth), registered by a
-  similarity on the four outer corners;
-- ``<stem>.drawing-walls.json`` is traced from the images themselves (diagnostic truth, see the Task 16b
-  report: the P2 fixtures are simplified recreations whose interior walls are up to ~1 m away from the
-  drawn ones, and the HDB photo is ~4 % anisotropic, so no similarity registers it to 0.5 t).
+Truth: ``<stem>.drawing-walls.json``, the walls traced from the images themselves (ruling B1; the HDB
+truth was corrected in Task 16c to the controller's centre-line convention, see its ``method`` note).
+``<stem>.walls.json`` (the P2 engine fixture geometry, a simplified recreation of each drawing) is kept for
+topology and room names only; its four registered outer corners locate the plan in the region tests.
 """
 
 import numpy as np
@@ -15,6 +13,8 @@ from tests.support.reference import (
     IMAGES,
     ChainResult,
     bounded_faces,
+    enclosed_share,
+    load_page,
     load_truth,
     outer_cycle_free_ends,
     run_chain,
@@ -66,12 +66,15 @@ def test_brochure_region_excludes_the_key_plan_and_the_site_strip(chains: dict[s
 
 @pytest.mark.parametrize("stem", list(IMAGES))
 def test_traced_truth_recall_and_precision(chains: dict[str, ChainResult], stem: str) -> None:
-    """The brief's recall / precision targets, against the walls traced from the image itself."""
+    """The brief's recall / precision targets, against the walls traced from the image itself (the HDB
+    truth corrected in Task 16c); the brochure must not fall below 0.90 / 0.85 (Task 16c)."""
     r = chains[stem]
     m = wall_metrics(load_truth(stem, r.page, "drawing-walls"), r.graph)
     recall, precision = TARGETS[stem]
     assert m.recall >= recall, m
     assert m.precision >= precision, m
+    if stem == "brochure-2bhk":
+        assert m.recall >= 0.90 and m.precision >= 0.85, m
 
 
 def test_hdb_truth_closes_into_the_rooms() -> None:
@@ -108,30 +111,33 @@ def test_hdb_truth_closes_into_the_rooms() -> None:
     assert {w["kind"] for w in raw["walls"]} == {"exterior", "interior", "half", "black", "jog"}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Task 16b blocker: the P2 fixtures are simplified recreations of the drawings (walls up to ~1 m "
-    "off; HDB photo ~4 % anisotropic, similarity residuals up to 23 px > 0.5 t); needs a controller ruling",
-)
-@pytest.mark.parametrize("stem", list(IMAGES))
-def test_p2_truth_recall_and_precision(chains: dict[str, ChainResult], stem: str) -> None:
-    r = chains[stem]
-    m = wall_metrics(load_truth(stem, r.page), r.graph)
-    recall, precision = TARGETS[stem]
-    assert m.recall >= recall and m.precision >= precision, m
+def test_hdb_outline_is_closed(chains: dict[str, ChainResult]) -> None:
+    """Ruling B2: the HDB outer outline closes. No free wall end lies on the outer cycle (the truth's outer
+    outline walls) and the extracted faces cover the dwelling the truth outlines."""
+    r = chains["hdb-3room"]
+    truth = load_truth("hdb-3room", r.page, "drawing-walls")
+    assert outer_cycle_free_ends(r.graph, truth) == 0
+    assert enclosed_share(r.graph, truth) >= 0.95
 
 
 @pytest.mark.xfail(
     strict=True,
-    reason="Task 16b blocker: windows and slider doors between walls of different drawing styles (bold line, "
-    "black block, double line) or wider than 18 t are not bridged by 06 §8.1 step 8; needs a ruling",
+    reason="Task 16c blocker (NEEDS_CONTEXT): 3 bounded faces. The interior partitions break on rules beyond "
+    "ruling B2: 1.5-2.5 t gaps (neither merged nor openings: the living-room slider, the brochure's toilet "
+    "window), doors at a partition's end against a perpendicular wall (bedroom 3), face lines erased under "
+    "labels (toilets 1 and 2) and dimension ticks or lines cutting partition faces (bedroom 2, toilet 3)",
 )
-def test_hdb_outline_is_closed_and_rooms_are_faces(chains: dict[str, ChainResult]) -> None:
+def test_hdb_rooms_are_faces(chains: dict[str, ChainResult]) -> None:
     r = chains["hdb-3room"]
     L = r.pre.region.long_side
-    faces = [f for f in bounded_faces(r.graph) if f.area >= (0.03 * L) ** 2]
-    assert outer_cycle_free_ends(r.graph) == 0
-    assert len(faces) >= 8
+    assert len([f for f in bounded_faces(r.graph) if f.area >= (0.03 * L) ** 2]) >= 7
+
+
+def test_brochure_outline_free_ends(chains: dict[str, ChainResult]) -> None:
+    """The brief: brochure outer-cycle free ends <= 7 (the count before Task 16c, on Task 16b's definition);
+    on the outer-outline definition the brochure has 2 (the toilet window's jambs, a 1.5-2.5 t gap)."""
+    r = chains["brochure-2bhk"]
+    assert outer_cycle_free_ends(r.graph, load_truth("brochure-2bhk", r.page, "drawing-walls")) <= 2
 
 
 def test_metrics_score_a_perfect_extraction() -> None:
@@ -139,8 +145,7 @@ def test_metrics_score_a_perfect_extraction() -> None:
     matches, and one far away does not."""
     from app.schemas.candidates import WallCandidate, WallGraph
 
-    r = run_chain("brochure-2bhk")
-    truth = load_truth("brochure-2bhk", r.page, "drawing-walls")
+    truth = load_truth("brochure-2bhk", load_page("brochure-2bhk"), "drawing-walls")
 
     def graph(shift: float) -> WallGraph:
         walls = [
@@ -167,3 +172,46 @@ def test_metrics_score_a_perfect_extraction() -> None:
     far = wall_metrics(truth, graph(10_000.0))
     assert far.recall == 0.0 and far.precision == 0.0
     assert far.extracted_len == pytest.approx(far.truth_len)
+
+
+def _truth_graph(stem: str, drop: str | None = None) -> tuple[object, object]:
+    """The truth as a wall graph (its walls, nodes shared by position), without wall ``drop``."""
+    from app.schemas.candidates import WallCandidate, WallGraph
+
+    truth = load_truth(stem, load_page(stem), "drawing-walls")
+    walls = [w for w in truth.walls if w.id != drop]
+    ids: dict[tuple[float, float], str] = {}
+    for w in walls:
+        for p in (w.a, w.b):
+            ids.setdefault(p, f"N{len(ids) + 1}")
+    degree = {n: 0 for n in ids.values()}
+    for w in walls:
+        degree[ids[w.a]] += 1
+        degree[ids[w.b]] += 1
+    out = [
+        WallCandidate(
+            w.id,
+            w.a,
+            w.b,
+            ids[w.a],
+            ids[w.b],
+            w.thickness_px,
+            "filled",
+            1.0,
+            int(degree[ids[w.a]] == 1) + int(degree[ids[w.b]] == 1),
+            (),
+        )
+        for w in walls
+    ]
+    return WallGraph(nodes={n: p for p, n in ids.items()}, walls=out, gaps=[]), truth
+
+
+@pytest.mark.parametrize("stem", list(IMAGES))
+def test_outer_cycle_metrics_score_the_truth(stem: str) -> None:
+    """The truth scores 0 outer-cycle free ends and encloses itself; with an outer wall removed (HDB: the
+    living room's left wall piece X9b, brochure: W1) the free ends it leaves on the outline count."""
+    graph, truth = _truth_graph(stem)
+    assert outer_cycle_free_ends(graph, truth) == 0  # type: ignore[arg-type]
+    assert enclosed_share(graph, truth) == pytest.approx(1.0)  # type: ignore[arg-type]
+    broken, _ = _truth_graph(stem, drop={"hdb-3room": "X9b", "brochure-2bhk": "W1"}[stem])
+    assert outer_cycle_free_ends(broken, truth) == 2  # type: ignore[arg-type]

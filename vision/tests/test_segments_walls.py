@@ -60,12 +60,16 @@ def run(
     page: NormalizedPage | None = None,
     t_thin: float | None = None,
     use_dimensions: bool = True,
+    region: Rect | None = None,
 ) -> Run:
-    """The pipeline up to the wall graph on a synthetic render (tokens stand in for OCR)."""
+    """The pipeline up to the wall graph on a synthetic render (tokens stand in for OCR); ``region``
+    overrides the detected plan region."""
     page = page or page_of(img)
     pre = preprocess(page, make_ctx())
     if t_thin is not None:
         pre = dataclasses.replace(pre, t_thin=t_thin)
+    if region is not None:
+        pre = dataclasses.replace(pre, region=region)
     tokens = tokens or []
     mask = np.zeros(pre.ink.shape, np.uint8)
     for tk in tokens:
@@ -76,7 +80,7 @@ def run(
     ocr = OcrResult(tokens=tokens, text_mask=mask, ink_notext=ink_notext)
     segments = detect_segments(page, pre, ocr, make_ctx())
     dims = find_dimension_lines(segments, tokens, pre.region, ink=ink_notext) if use_dimensions else []
-    ext = extract_walls(page, pre, segments, dims, make_ctx(), ink=ink_notext, tokens=tokens)
+    ext = extract_walls(page, pre, segments, dims, make_ctx(), ink=ink_notext)
     return Run(page, pre, segments, ext, walls_to_graph(ext, pre.region))
 
 
@@ -227,7 +231,7 @@ def test_dimension_lines_not_walls() -> None:
     assert_plan_topology(r.graph)
     assert not any(w.a[1] < 250 or w.b[1] < 250 for w in r.graph.walls)
     # Discriminating: without the dimension line exclusion the chain's line is a (sketch) wall.
-    ext = extract_walls(r.page, r.pre, r.segments, [], make_ctx())
+    ext = extract_walls(r.page, r.pre, r.segments, [], make_ctx(), ink=r.pre.ink)
     assert any(w.p0[1] < 250 and w.p1[1] < 250 for w in ext.raw)
 
 
@@ -474,7 +478,7 @@ def test_door_leaf_touching_the_jamb_is_not_a_wall(monkeypatch: pytest.MonkeyPat
     assert gap.u1 - gap.u0 == pytest.approx(90, abs=6)
     # Discriminating: without the leaf-length test the leaf is a dangling sketch wall.
     monkeypatch.setattr(wallmod, "LEAF_MAX", 0.0)
-    ext = extract_walls(r.page, r.pre, r.segments, [], make_ctx())
+    ext = extract_walls(r.page, r.pre, r.segments, [], make_ctx(), ink=r.pre.ink)
     assert any(abs(w.p0[0] - 550) < 6 and abs(w.p1[0] - 550) < 6 for w in ext.raw)
 
 
@@ -584,7 +588,7 @@ def test_extract_walls_checks_the_deadline() -> None:
     ctx = make_ctx()
     ctx.deadline = 0.0
     with pytest.raises(VisionError) as err:
-        extract_walls(r.page, r.pre, r.segments, [], ctx)
+        extract_walls(r.page, r.pre, r.segments, [], ctx, ink=r.pre.ink)
     assert err.value.code == "deadline_exceeded"
 
 
@@ -596,7 +600,7 @@ def test_tracing_a_large_page_is_fast() -> None:
     page = page_of(img)
     pre = preprocess(page, make_ctx())
     started = time.perf_counter()
-    ext = extract_walls(page, pre, [], [], make_ctx())
+    ext = extract_walls(page, pre, [], [], make_ctx(), ink=pre.ink)
     elapsed = time.perf_counter() - started
     graph = walls_to_graph(ext, pre.region)
     assert elapsed < 8.0, elapsed  # about 1.2 s here
@@ -791,3 +795,57 @@ def test_jog_between_column_and_wall_stays_connected(monkeypatch: pytest.MonkeyP
     assert sum(w.free_ends for w in r.graph.walls) == 0
     monkeypatch.setattr(wallmod, "_join", lambda a, b, dropped: [])
     assert sum(w.free_ends for w in run(img).graph.walls) > 0
+
+
+def _exterior_walls(graph: WallGraph) -> int:
+    """How many of the plan's four exterior walls are in ``graph`` along >= 90 % of their length."""
+    found = 0
+    for (ax, ay), (bx, by) in zip(CORNERS, CORNERS[1:] + CORNERS[:1], strict=True):
+        span = math.hypot(bx - ax, by - ay)
+        on = [
+            w
+            for w in graph.walls
+            if (ax == bx and abs(w.a[0] - ax) <= 4 and abs(w.b[0] - ax) <= 4)
+            or (ay == by and abs(w.a[1] - ay) <= 4 and abs(w.b[1] - ay) <= 4)
+        ]
+        found += sum(length_of(w) for w in on) >= 0.9 * span
+    return found
+
+
+def test_double_line_plan_with_one_solid_column_keeps_its_exterior_walls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Task 16c (ratified `solid_envelope`): one solid column's hull covers far less than half of the
+    region, so it sets no envelope and the double-line exterior walls stay.
+
+    The region is given as the whole page: `detect_plan_region` (06 §7.6 step 7, ruling R4) finds a plan by
+    its thick and bold strokes, and this plan's only thick stroke is the column, so the detected region
+    is the column's box (a Task 16c finding, reported to the controller)."""
+    column = SWall((700, 700), (700, 780), 40, "filled")
+    img = render_plan(SIZE, [*plan("double"), column])
+    page = Rect(0, 0, SIZE[0], SIZE[1])
+    r = run(img, region=page)
+    assert _exterior_walls(r.graph) == 4
+    assert any(w.source == "filled" for w in r.ext.raw)  # precondition: the column is a solid wall
+    # Discriminating: were the column's hull taken as the outline, the exterior walls would be dropped.
+    monkeypatch.setattr(candmod, "ENVELOPE_MIN_COVER", 0.0)
+    assert _exterior_walls(run(img, region=page).graph) == 0
+
+
+def test_dimension_line_beside_a_partition_is_readmitted_but_makes_no_wall() -> None:
+    """Task 16c (ratified `wall_face_dims`, review Minor 2): a real dimension line drawn 18 px beside a
+    double-line partition pairs with the partition's near face, so the guard re-admits it as a wall
+    candidate. It still makes no wall: the face is spoken for by its own partner 14 px away (one pair per
+    stretch), so the partition stays one wall centred between its faces and nothing is centred between the
+    face and the dimension line."""
+    dim_line = SWall((1225, 400), (1225, 1400), 2, style="single")
+    r = run(render_plan(SIZE, [*plan("double"), dim_line]), use_dimensions=False)
+    seg = next(s for s in r.segments if abs(s.p0[0] - 1225) <= 2 and abs(s.p1[0] - 1225) <= 2)
+    dim = DimensionLine("L1", seg.p0, seg.p1, [0.0, seg.length], seg.id)
+    L = float(r.pre.region.long_side)
+    assert candmod.wall_face_dims(r.segments, [dim], r.pre.ink, r.pre.t_thin, L) == {seg.id}  # re-admitted
+    ext = extract_walls(r.page, r.pre, r.segments, [dim], make_ctx(), ink=r.pre.ink)
+    graph = walls_to_graph(ext, r.pre.region)
+    assert_plan_topology(graph)
+    assert [(w.a[0] + w.b[0]) / 2 for w in vertical_at(graph, 1200, tol=3)] == [pytest.approx(1200, abs=1.5)]
+    assert not [w for w in ext.raw if abs((w.p0[0] + w.p1[0]) / 2 - 1216) < 4]

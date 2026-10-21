@@ -412,9 +412,12 @@ def _attach_widths(segs: list[Segment], pre: Preprocessed) -> list[Segment]:
 
 
 def _trim_to_stroke(p0: Pt, p1: Pt, width: float, dt: np.ndarray) -> tuple[Pt, Pt]:
-    """A wide (not thin) segment cut back to where its stroke is at least half its width: an LSD edge of a
-    wall that runs on along a window's face line is snapped onto the wall's centre, and without this the
-    wall would span the window."""
+    """A wide (not thin) segment with its ends cut back to the first and last points where its stroke is
+    at least half its width: an LSD edge of a wall that runs on past the wall's end along a window's face
+    line is snapped onto the wall's centre, and without this the wall would reach into the window.
+
+    Only the ends are trimmed. Everything between the first and last such point is kept, so a segment
+    that spans wall, window and wall again is not split at the window."""
     a, b = np.asarray(p0, np.float64), np.asarray(p1, np.float64)
     n = max(2, math.ceil(float(np.hypot(*(b - a)))) + 1)
     t = np.linspace(0.0, 1.0, n)
@@ -443,8 +446,14 @@ def _raster_segments(pre: Preprocessed, ocr: OcrResult, ctx: PipelineContext, re
     centre_lines: list[Segment] = []
     others: list[Segment] = []  # end caps and ink-less segments: no stroke width to measure
     for a, b, wd, ok in zip(p0, p1, width, snapped, strict=True):
+        thin = float(wd) <= THIN_FACTOR * pre.t_thin
+        if ok and not thin:  # before the merge: an over-long wide segment would absorb a stroke beside it
+            ta, tb = _trim_to_stroke(
+                (float(a[0]), float(a[1])), (float(b[0]), float(b[1])), float(wd), pre.dt
+            )
+            a, b = np.array(ta), np.array(tb)
         q0, q1 = _canonical(a, b)
-        seg = Segment("", q0, q1, float(wd), float(wd) <= THIN_FACTOR * pre.t_thin, source)
+        seg = Segment("", q0, q1, float(wd), thin, source)
         (centre_lines if ok else others).append(seg)
     merged = merge_collinear(centre_lines, check_deadline=ctx.check_deadline)
     merged_others = merge_collinear(others, check_deadline=ctx.check_deadline)

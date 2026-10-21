@@ -4,8 +4,9 @@
 
 1. filled walls: the thick-ink mask, with wide solid walls that Sauvola hollowed out (a uniform dark
    area thresholds as background, so an 80 px wall on a 3000 px page arrives as two ~25 px bands) closed
-   again where the hole between the bands is as dark as the bands; on ``pdf_vector`` pages also the dark
-   filled polygons and the stroked segments at least ``2.5 t_thin`` wide (``source = vector``);
+   again where the hole between the bands is as dark as the bands; on raster pages the bold strokes
+   outside it (ruling R2); on ``pdf_vector`` pages the dark filled polygons and the stroked segments at
+   least ``2.5 t_thin`` wide (``source = vector``);
 2. (dimension lines of 06 §8.4 step 1 never take part);
 3. double-line walls: pairs of parallel thin segments whose strip is hollow or filled;
 4. single-line walls, only for sketches (fill and double masks cover < 0.2 % of the region);
@@ -13,8 +14,12 @@
 then (5) closes it, (6) skeletonises it and traces the 8-neighbourhood pixel graph into straight pieces,
 (7) snaps them onto the dominant orientation ``theta0`` (short off-axis pieces are dropped) and (8) merges
 collinear pieces into one raw wall per wall run: tiny breaks close, empty gaps of ``2.5 t .. 18 t``
-between walls of similar thickness become ``openings_px`` of that raw wall. A thin piece that leaves a
-gap's jamb and is as long as the gap is wide (``0.8 g .. 1.1 g``) is a door leaf, not a wall.
+between walls of similar thickness become ``openings_px`` of that raw wall (a bold stroke's gaps are
+measured against the drawing's wall thickness ``t_wall``, ruling B2). A thin piece that leaves a gap's jamb
+and is as long as the gap is wide (``0.8 g .. 1.1 g``) is a door leaf, not a wall. Facing ends of runs the
+walk left apart are linked (``_link_runs``): a partition ending in an offset block by a connector, runs of
+different drawing styles across a window, slider or door by a bridging wall (ruling B2). Last, walls that
+dangle outside the closed outline along extension lines are cut out (``_drop_dangling_extensions``).
 
 Step 2's candidate segments and step 3's double-line pairing live in ``wall_candidates.py``.
 
@@ -23,6 +28,7 @@ candidates. This module talks to later stages only through ``app.schemas.candida
 arrays (06 I12).
 """
 
+import bisect
 import itertools
 import math
 import time
@@ -32,6 +38,8 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
+from shapely.geometry import LineString, Point
+from shapely.ops import polygonize, unary_union
 from skimage.morphology import skeletonize
 
 from app.pipeline.binarize import Preprocessed, sauvola_window
@@ -45,9 +53,10 @@ from app.pipeline.wall_candidates import (
     double_mask,
     sample,
     solid_envelope,
+    touches_tick,
     wall_face_dims,
 )
-from app.schemas.candidates import DimensionLine, RawWall, Segment, TextToken, WallGraph, WallSource
+from app.schemas.candidates import DimensionLine, RawWall, Segment, WallGraph, WallSource
 from app.utils.geometry import Pt, Rect
 
 __all__ = [
@@ -61,17 +70,18 @@ __all__ = [
 # `source_mask` labels. 06 names filled/double/single; vector walls get their own label so that the
 # pixels of a `pdf_vector` page's walls can be told apart from the raster thick mask.
 SRC_FILLED, SRC_DOUBLE, SRC_SINGLE, SRC_VECTOR = 1, 2, 3, 4
+SRC_BOLD = 5  # tracing only: R2 bold strokes (`filled`, and 1 in `source_mask`)
 _SOURCES: dict[int, WallSource] = {
     SRC_FILLED: "filled",
     SRC_DOUBLE: "double_line",
     SRC_SINGLE: "single_line",
     SRC_VECTOR: "vector",
+    SRC_BOLD: "filled",
 }
 _SOURCE_RANK: dict[WallSource, int] = {"filled": 0, "vector": 1, "double_line": 2, "single_line": 3}
 
 VECTOR_WALL_FACTOR = 2.5  # stroked vector segments at least this many t_thin wide are walls
 BOLD_MIN_LEN_FRAC = 0.04  # raster bold strokes (not thin) at least 0.04 L long are solid walls (ruling R2)
-BOLD_IN_THICK_MAX = 0.5  # ... unless more than half of the stroke already lies in `thick`
 TEXT_SHARE_MAX = 0.5  # a `thick` component with more than half of its pixels in text boxes is text
 SINGLE_COVERAGE = 0.002  # sketches: fill and double masks cover less than this share of the region
 SINGLE_MIN_LEN_FRAC = 0.05
@@ -87,6 +97,21 @@ MERGE_GAP = 1.5  # gaps up to 1.5 t close
 GAP_MIN, GAP_MAX = 2.5, 18.0  # gap candidates: 2.5 t <= g <= 18 t
 SIMILAR_THICKNESS = 1.5  # thickness ratio of the two walls beside a gap candidate
 GAP_WALL_MAX = 0.1  # a gap whose centre line is more than 10 % wall is crossed by a wall: no opening
+GAP_BAND = 0.45  # ... tested on lines up to 0.45 t (the thinner wall's) to either side of it too
+BRIDGE_OFFSET_TWALL = 1.0  # mixed-style bridging (ruling B2): parallel runs at most 1 t_wall apart across ...
+BRIDGE_GAP_TWALL = 18.0  # ... and 18 t_wall along, with opening evidence in the gap's strip:
+EVIDENCE_ANGLE_DEG = 3.0  # thin lines parallel within 3 degrees ...
+EVIDENCE_LINES = 2  # ... at least two distinct ones ...
+EVIDENCE_COVER = 0.8  # ... each covering 80 % of the gap ...
+EVIDENCE_CLUSTER_PX = 1.5  # ... (pieces less than this apart across are one line)
+EVIDENCE_STRIP = (
+    0.75  # ... within 0.75 max(t, t_wall) beyond the runs' lines (frame lines run along the faces)
+)
+ARC_RADIUS = (0.8, 1.1)  # ... or a door swing arc of radius 0.8 .. 1.1 g about a jamb ...
+ARC_COVER = 0.6  # ... inked along 60 % of its quarter circle
+JOG_MIN_PX = 1.0  # a bridge's line this far from a run's line gets a connector
+OUTSIDE_ANGLE_DEG = 3.0  # a dangling wall outside the outline along an extension line (within 3 degrees ...
+OUTSIDE_COVER = 0.5  # ... over half of its length) is that extension line (Task 16c)
 LEAF_MIN, LEAF_MAX = 0.8, 1.1  # door leaf length, fractions of the gap width
 LEAF_MIN_ANGLE_DEG = 30.0  # a leaf leaves its wall at least this steeply
 DUPLICATE_ANGLE_DEG = 1.0
@@ -132,10 +157,10 @@ def _throttled(check: Check) -> Check:
 # --- steps 1, 3, 4: wall masks -------------------------------------------------------------------------
 
 
-def _drop_text(mask: np.ndarray, text: np.ndarray | None) -> np.ndarray:
+def _drop_text(mask: np.ndarray, text: np.ndarray) -> np.ndarray:
     """``mask`` without its components that lie mostly (> 50 %) in text boxes (ruling R6); a wall that a
     label overlaps keeps its pixels."""
-    if text is None or not mask.any() or not (text & (mask > 0)).any():
+    if not mask.any() or not (text & (mask > 0)).any():
         return mask
     n, labels = cv2.connectedComponents(mask, connectivity=8)
     total = np.bincount(labels.ravel().astype(np.intp), minlength=n)
@@ -147,7 +172,7 @@ def _drop_text(mask: np.ndarray, text: np.ndarray | None) -> np.ndarray:
     return out
 
 
-def _filled_mask(pre: Preprocessed, crop: Rect, long_edge: int, text: np.ndarray | None) -> np.ndarray:
+def _filled_mask(pre: Preprocessed, crop: Rect, long_edge: int, text: np.ndarray) -> np.ndarray:
     """``thick`` (without text components, see ``_drop_text``) with Sauvola holes closed: pixels between
     thick bands at most one Sauvola window apart that are as dark as the bands (below the midpoint of wall
     grey and paper grey).
@@ -208,19 +233,29 @@ def _vector_mask(page: NormalizedPage, cands: Sequence[Segment], t_thin: float, 
 
 def _bold_mask(cands: Sequence[Segment], thick: np.ndarray, crop: Rect, L: float) -> np.ndarray:
     """Raster bold strokes as solid walls (ruling R2; 06 §8.1 step 1 only takes ``thick``): segments that are
-    not thin (wider than ``1.8 t_thin``), at least ``0.04 L`` long and not already in ``thick`` (at most half
-    of their length), drawn as butt-ended quads of their stroke width. Bold outline strokes are too narrow
-    for ``thick`` and too wide to be line work."""
+    not thin (wider than ``1.8 t_thin``) and at least ``0.04 L`` long, drawn as butt-ended quads of their
+    stroke width where they are not already in ``thick``. Bold outline strokes are too narrow for ``thick``
+    and too wide to be line work.
+
+    The test is per stretch (Task 16c): every stretch of the stroke outside ``thick`` at least as long as
+    the stroke is wide is drawn. A stroke whose width wavers about the thick kernel lies partly in
+    ``thick`` (on HDB the bold outline next to its black blocks); judged as a whole it would be skipped and
+    the stretch outside ``thick`` lost."""
     mask = np.zeros((crop.h, crop.w), np.uint8)
     origin = np.array((crop.x, crop.y), np.float64)
+    min_len = BOLD_MIN_LEN_FRAC * L
     for s in cands:
-        if s.is_thin or s.source == "vector" or s.length < BOLD_MIN_LEN_FRAC * L:
+        if s.is_thin or s.source == "vector" or s.length < min_len:
             continue
         a, b = np.asarray(s.p0) - origin, np.asarray(s.p1) - origin
-        t = np.linspace(0.0, 1.0, max(2, math.ceil(s.length / 2.0)))[:, None]
-        if float((sample(thick, a + t * (b - a)) > 0).mean()) > BOLD_IN_THICK_MAX:
-            continue
-        _quad(mask, a, b, s.width_px)
+        n = max(2, math.ceil(s.length) + 1)
+        t = np.linspace(0.0, 1.0, n)
+        outside = sample(thick, a + t[:, None] * (b - a)) == 0
+        edges = np.flatnonzero(np.diff(np.concatenate(([0], outside.astype(np.int8), [0]))))
+        for lo, hi in zip(edges[::2].tolist(), edges[1::2].tolist(), strict=True):
+            t0, t1 = float(t[lo]), float(t[hi - 1])
+            if (t1 - t0) * s.length >= s.width_px:
+                _quad(mask, a + t0 * (b - a), a + t1 * (b - a), s.width_px)
     return mask
 
 
@@ -449,6 +484,17 @@ class _Piece:
     free0: bool
     free1: bool
     axis: str = "d"  # "h" (along theta0), "v" (theta0 + 90) or "d" (diagonal)
+    bold: bool = False  # an R2 bold stroke (ruling R2), drawn with the stroke's width
+
+    @property
+    def style(self) -> str:
+        """How the wall is drawn: ``bold`` stroke, solid ``block`` (``thick``), ``double`` line, ``single``
+        line or ``vector``."""
+        if self.bold:
+            return "bold"
+        return {"filled": "block", "double_line": "double", "single_line": "single"}.get(
+            self.source, "vector"
+        )
 
 
 def _vertex_indices(pts: np.ndarray, eps: float) -> list[int]:
@@ -504,11 +550,17 @@ def _pieces(
                 thickness = 2.0 * float(np.median(sample(dt, seg)))
                 labels = sample(source, seg)
                 labels = labels[labels > 0]
-                src: WallSource = (
-                    _SOURCES[int(np.bincount(labels, minlength=5).argmax())] if labels.size else "filled"
-                )
+                label = int(np.bincount(labels, minlength=6).argmax()) if labels.size else SRC_FILLED
                 chain.append(
-                    _Piece(a.copy(), b.copy(), max(thickness, 1.0), src, fa and i0 == 0, fb and i1 == last)
+                    _Piece(
+                        a.copy(),
+                        b.copy(),
+                        max(thickness, 1.0),
+                        _SOURCES[label],
+                        fa and i0 == 0,
+                        fb and i1 == last,
+                        bold=label == SRC_BOLD,
+                    )
                 )
             if chain:
                 out.append(chain)
@@ -528,7 +580,7 @@ def _snap_one(p: _Piece, theta0: float, L: float) -> _Piece | None:
         half = np.array((math.cos(target), math.sin(target))) * (length / 2.0)
         mid = (p.p0 + p.p1) / 2.0
         k = round((ang - delta - theta0) / 90.0) % 2
-        return _Piece(mid - half, mid + half, p.thickness, p.source, p.free0, p.free1, "hv"[k])
+        return _Piece(mid - half, mid + half, p.thickness, p.source, p.free0, p.free1, "hv"[k], p.bold)
     if length >= DIAGONAL_MIN_FRAC * L:
         return p
     return None
@@ -539,7 +591,8 @@ def _snap(chains: list[list[_Piece]], theta0: float, L: float) -> list[_Piece]:
     other pieces of at least 0.03 L as diagonals and drop shorter off-axis ones (06 §8.1 step 7).
 
     A kept piece after a dropped head (or before a dropped tail) of its path is extended along its own
-    line to the projection of the path's end node (a diagonal whose skeleton curls into a junction). When
+    line to the projection of the path's end node (a diagonal whose skeleton curls into a junction), and
+    joined to the node by a connector piece when the node lies beside its line (``_close_end``). When
     that end is free (a skeleton curling into a corner of a wall's end), the kept piece inherits the free
     end instead, so the end is still refined to the end of the wall.
 
@@ -554,8 +607,8 @@ def _snap(chains: list[list[_Piece]], theta0: float, L: float) -> list[_Piece]:
             continue
         kept_idx = [k for k, _ in kept]
         pieces = [q for _, q in kept]
-        _close_end(chain, kept_idx[0], pieces[0], head=True)
-        _close_end(chain, kept_idx[-1], pieces[-1], head=False)
+        out.extend(_close_end(chain, kept_idx[0], pieces[0], head=True))
+        out.extend(_close_end(chain, kept_idx[-1], pieces[-1], head=False))
         out.extend(pieces)
         for (ka, a), (kb, b) in itertools.pairwise(kept):
             if kb > ka + 1:
@@ -585,15 +638,24 @@ def _join(a: _Piece, b: _Piece, dropped: list[_Piece]) -> list[_Piece]:
     ]
 
 
-def _close_end(chain: list[_Piece], kept_at: int, piece: _Piece, *, head: bool) -> None:
+def _close_end(chain: list[_Piece], kept_at: int, piece: _Piece, *, head: bool) -> list[_Piece]:
     """Close the path's head (or tail) after dropped pieces: inherit a free end, or extend to the end
-    node's projection."""
+    node's projection. When the node lies off the piece's line by more than half the piece's thickness (a
+    wall meeting a black block's corner beside its centre line), a connector piece from the extended end
+    to the node keeps the junction (Task 16c); it is returned."""
     if kept_at == (0 if head else len(chain) - 1):
-        return  # nothing was dropped at this end
+        return []  # nothing was dropped at this end
     if chain[0].free0 if head else chain[-1].free1:
         setattr(piece, "free0" if head else "free1", True)
-    else:
-        _extend_to(piece, chain[0].p0 if head else chain[-1].p1, at_start=head)
+        return []
+    node = chain[0].p0 if head else chain[-1].p1
+    _extend_to(piece, node, at_start=head)
+    end = piece.p0 if head else piece.p1
+    if float(np.hypot(*(node - end))) <= 0.5 * piece.thickness:
+        return []
+    dropped = chain[:kept_at] if head else chain[kept_at + 1 :]
+    thickness = float(np.median([p.thickness for p in dropped]))
+    return [_Piece(end.copy(), node.copy(), thickness, dropped[0].source, False, False)]
 
 
 def _extend_to(p: _Piece, target: np.ndarray, *, at_start: bool) -> None:
@@ -644,13 +706,16 @@ def _march_free_ends(pieces: list[_Piece], wall: np.ndarray) -> None:
 # --- step 8: collinear runs and gap candidates ----------------------------------------------------------
 
 
+_Member = tuple[float, float, float, float, WallSource, str]  # s0, s1, offset, thickness, source, style
+
+
 @dataclass(slots=True)
 class _Run:
     u: np.ndarray
     n: np.ndarray
     s0: float
     s1: float
-    members: list[tuple[float, float, float, float, WallSource]]  # (s0, s1, offset, thickness, source)
+    members: list[_Member]
     openings: list[tuple[float, float]]
     free0: bool
     free1: bool
@@ -668,6 +733,19 @@ class _Run:
         b = self.u * self.s1 + self.n * off
         openings = tuple((o0 - self.s0, o1 - self.s0) for o0, o1 in self.openings)
         return RawWall((float(a[0]), float(a[1])), (float(b[0]), float(b[1])), thick, source, openings)
+
+    def style(self) -> str:
+        """The members' style covering most of the run's length."""
+        by_style: dict[str, float] = defaultdict(float)
+        for m in self.members:
+            by_style[m[5]] += m[1] - m[0]
+        return min(by_style, key=lambda k: (-by_style[k], k))
+
+    def thickness(self) -> float:
+        lengths = [m[1] - m[0] for m in self.members]
+        return math.fsum(m[3] * w for m, w in zip(self.members, lengths, strict=True)) / (
+            math.fsum(lengths) or 1.0
+        )
 
 
 def _direction_groups(pieces: list[_Piece], theta0: float) -> list[tuple[np.ndarray, list[_Piece]]]:
@@ -704,18 +782,42 @@ def _longest_direction(pieces: list[_Piece]) -> np.ndarray:
     return np.asarray(d / float(np.hypot(d[0], d[1])))
 
 
-def _gap_is_empty(wall: np.ndarray, u: np.ndarray, n: np.ndarray, off: float, g0: float, g1: float) -> bool:
+def _gap_is_empty(
+    wall: np.ndarray, u: np.ndarray, n: np.ndarray, off: float, g0: float, g1: float, half: float = 0.0
+) -> bool:
+    """No line of the gap's strip (offsets ``off - half .. off + half``) is more than 10 % wall: a wall
+    crossing the gap, or one running along it inside the strip (a jogged wall's piece beside the line of
+    two collinear blocks), means the gap is no opening."""
     along = np.arange(g0 + 1.0, g1 - 1.0 + 1e-9, 1.0)
     if along.size == 0:
         return True
-    pts = along[:, None] * u[None, :] + (n * off)[None, :]
-    return float((sample(wall, pts) > 0).mean()) <= GAP_WALL_MAX
+    for k in np.linspace(-half, half, 5) if half > 0 else (0.0,):
+        pts = along[:, None] * u[None, :] + (n * (off + k))[None, :]
+        if float((sample(wall, pts) > 0).mean()) > GAP_WALL_MAX:
+            return False
+    return True
 
 
-def _runs(pieces: list[_Piece], theta0: float, wall: np.ndarray, poll: Check) -> list[_Run]:
+def _wall_thickness(pieces: list[_Piece]) -> float | None:
+    """``t_wall`` (ruling B2): the length-weighted median thickness of the drawing's solid-block and
+    double-line pieces, the thickness its walls are drawn with; None when it has none (a drawing of bold
+    strokes only)."""
+    walls = [p for p in pieces if p.style in ("block", "double")]
+    if not walls:
+        return None
+    return _weighted_median([p.thickness for p in walls], [float(np.hypot(*(p.p1 - p.p0))) for p in walls])
+
+
+def _runs(
+    pieces: list[_Piece], theta0: float, wall: np.ndarray, poll: Check, t_wall: float | None = None
+) -> list[_Run]:
     """Collinear pieces (same direction, offset within ``0.5 t``) joined along their line: breaks up to
     ``1.5 t`` close, empty gaps of ``2.5 t .. 18 t`` between walls of similar thickness become openings,
-    anything else ends the run."""
+    anything else ends the run.
+
+    A bold stroke's ``t`` in these gap rules is ``t_wall`` (ruling B2, a deviation from 06 §8.1 step 8):
+    an outline drawn as a bold stroke stands for a wall of the drawing's wall thickness, so its windows and
+    sliders (up to ``18 t_wall``) are gaps of that wall, not of the pen."""
     out: list[_Run] = []
     for u, group in _direction_groups(pieces, theta0):
         poll()
@@ -725,9 +827,10 @@ def _runs(pieces: list[_Piece], theta0: float, wall: np.ndarray, poll: Check) ->
             a, b = float(p.p0 @ u), float(p.p1 @ u)
             off = float((p.p0 + p.p1) @ n) / 2.0
             fa, fb = (p.free0, p.free1) if a <= b else (p.free1, p.free0)
-            items.append((min(a, b), max(a, b), off, p.thickness, p.source, fa, fb))
+            t_gap = t_wall if p.bold and t_wall is not None else p.thickness
+            items.append((min(a, b), max(a, b), off, p.thickness, p.source, fa, fb, p.style, t_gap))
         items.sort(key=lambda it: it[2])
-        lines: list[list[tuple[float, float, float, float, WallSource, bool, bool]]] = []
+        lines: list[list[tuple[float, float, float, float, WallSource, bool, bool, str, float]]] = []
         anchor_off, anchor_t = 0.0, 0.0
         for it in items:
             tol = max(MERGE_OFFSET * min(anchor_t, it[3]), MERGE_OFFSET_MIN_PX)
@@ -739,18 +842,20 @@ def _runs(pieces: list[_Piece], theta0: float, wall: np.ndarray, poll: Check) ->
         for line in lines:
             line.sort(key=lambda it: (it[0], it[1]))
             run: _Run | None = None
-            last_t = 0.0
-            for s0, s1, off, t, src, fa, fb in line:
+            last_t = last_tg = 0.0
+            for s0, s1, off, t, src, fa, fb, style, tg in line:
                 if run is not None:
                     gap = s0 - run.s1
-                    t_gap = (last_t + t) / 2.0
-                    similar = max(last_t, t) <= SIMILAR_THICKNESS * min(last_t, t)
-                    if gap <= MERGE_GAP * max(last_t, t):
+                    t_gap = (last_tg + tg) / 2.0
+                    similar = max(last_tg, tg) <= SIMILAR_THICKNESS * min(last_tg, tg)
+                    if gap <= MERGE_GAP * max(last_tg, tg):
                         pass
                     elif (
                         GAP_MIN * t_gap <= gap <= GAP_MAX * t_gap
                         and similar
-                        and _gap_is_empty(wall, u, n, (off + _mean_offset(run)) / 2.0, run.s1, s0)
+                        and _gap_is_empty(
+                            wall, u, n, (off + _mean_offset(run)) / 2.0, run.s1, s0, GAP_BAND * min(last_t, t)
+                        )
                     ):
                         run.openings.append((run.s1, s0))
                     else:
@@ -762,8 +867,8 @@ def _runs(pieces: list[_Piece], theta0: float, wall: np.ndarray, poll: Check) ->
                     run.free1 = fb
                 if s1 >= run.s1:
                     run.s1 = s1
-                    last_t = t
-                run.members.append((s0, s1, off, t, src))
+                    last_t, last_tg = t, tg
+                run.members.append((s0, s1, off, t, src, style))
             if run is not None:
                 out.append(run)
     return out
@@ -773,6 +878,173 @@ def _mean_offset(run: _Run) -> float:
     lengths = [m[1] - m[0] for m in run.members]
     total = math.fsum(lengths) or 1.0
     return math.fsum(m[2] * w for m, w in zip(run.members, lengths, strict=True)) / total
+
+
+def _point(run: _Run, s: float, off: float) -> Pt:
+    q = run.u * s + run.n * off
+    return (float(q[0]), float(q[1]))
+
+
+def _link_runs(
+    runs: list[_Run], thin: np.ndarray, ink: np.ndarray, t_wall: float | None, poll: Check
+) -> list[RawWall]:
+    """Raw walls that join facing ends of parallel runs the collinear walk left apart (Task 16c):
+
+    - a **jog**: two free ends at most ``1.5 t`` apart along their line whose lines are less than half the
+      thicker wall apart across (a partition ending in a black block whose centre line lies beside its own)
+      get a connector between them, as ``_join`` joins a path's pieces;
+    - a **bridge** (ruling B2, a deviation from 06 §8.1 step 8): runs drawn in different styles (a black
+      block, a bold stroke, a double line) with at least one free facing end, parallel within 2 degrees
+      (one direction group: the snapped axes, or diagonals within 1 degree), at most ``1 t_wall`` apart
+      across and ``18 t_wall`` along, with opening evidence in the gap's strip (at least two thin parallel
+      lines each covering 80 % of the gap, window frames or a slider, or a door swing arc at one of the
+      jambs) are bridged: a wall of the thicker run's thickness along the evidence lines' centre (the
+      thicker run's line for an arc) spans the gap as one opening, with a connector at each end where a
+      run's line jogs from it.
+
+    Each run end is linked at most once, nearest gap first."""
+    found: list[tuple[float, int, int, str]] = []
+    groups: dict[tuple[float, float], list[int]] = defaultdict(list)  # runs of one direction group
+    for k, r in enumerate(runs):  # share their direction exactly
+        groups[(float(r.u[0]), float(r.u[1]))].append(k)
+    offs = [_mean_offset(r) for r in runs]
+    thick = [r.thickness() for r in runs]
+    for members in groups.values():
+        poll()
+        members.sort(key=lambda k: offs[k])
+        keys = [offs[k] for k in members]
+        reach = max(0.5 * max(thick[k] for k in members), BRIDGE_OFFSET_TWALL * (t_wall or 0.0))
+        for i in members:
+            a = runs[i]
+            lo, hi = bisect.bisect_left(keys, offs[i] - reach), bisect.bisect_right(keys, offs[i] + reach)
+            for j in members[lo:hi]:
+                b = runs[j]
+                if i == j or b.s0 <= a.s1:
+                    continue
+                gap = b.s0 - a.s1
+                delta = abs(offs[j] - offs[i])
+                ta, tb = thick[i], thick[j]
+                if a.free1 and b.free0 and gap <= MERGE_GAP * max(ta, tb) and delta <= 0.5 * max(ta, tb):
+                    found.append((gap, i, j, "jog"))
+                elif (
+                    t_wall is not None
+                    and (a.free1 or b.free0)
+                    and a.style() != b.style()
+                    and delta <= BRIDGE_OFFSET_TWALL * t_wall
+                    and gap <= BRIDGE_GAP_TWALL * t_wall
+                ):
+                    found.append((gap, i, j, "bridge"))
+    out: list[RawWall] = []
+    ends: set[int] = set()
+    starts: set[int] = set()
+    for gap, i, j, kind in sorted(found):
+        if i in ends or j in starts:
+            continue
+        a, b = runs[i], runs[j]
+        a_off, b_off = offs[i], offs[j]
+        thin_t = min(thick[i], thick[j])
+        if kind == "jog":
+            out.append(RawWall(_point(a, a.s1, a_off), _point(a, b.s0, b_off), thin_t, a.wall().source))
+        else:
+            k = i if thick[i] >= thick[j] else j
+            strip = EVIDENCE_STRIP * max(thick[k], t_wall or 0.0)
+            line = _opening_line(a, a_off, b_off, a.s1, b.s0, strip, thin, ink)
+            if line is None:
+                continue
+            off = offs[k] if math.isnan(line) else line
+            out.append(
+                RawWall(
+                    _point(a, a.s1, off),
+                    _point(a, b.s0, off),
+                    thick[k],
+                    runs[k].wall().source,
+                    ((0.0, gap),),
+                )
+            )
+            for s_end, o in ((a.s1, a_off), (b.s0, b_off)):
+                if abs(o - off) > JOG_MIN_PX:
+                    out.append(RawWall(_point(a, s_end, o), _point(a, s_end, off), thin_t, "filled"))
+        ends.add(i)
+        starts.add(j)
+    return out
+
+
+def _opening_line(
+    run: _Run,
+    a_off: float,
+    b_off: float,
+    g0: float,
+    g1: float,
+    strip: float,
+    thin: np.ndarray,
+    ink: np.ndarray,
+) -> float | None:
+    """Opening evidence in the gap ``[g0, g1]`` along ``run``'s line between offsets ``a_off`` and ``b_off``
+    (ruling B2): the centre offset of the thin lines parallel to it (within 3 degrees) inside the gap's
+    strip (``strip`` beyond both runs' lines) when at least two distinct ones each cover >= 80 % of the
+    gap; NaN for a door swing arc at one of the jambs instead; None without evidence."""
+    gap = g1 - g0
+    lo = min(a_off, b_off) - strip
+    hi = max(a_off, b_off) + strip
+    if thin.size:
+        p0, p1 = thin[:, :2], thin[:, 2:]
+        d = p1 - p0
+        length = np.hypot(d[:, 0], d[:, 1])
+        ok = np.abs(d @ run.u) >= np.cos(np.radians(EVIDENCE_ANGLE_DEG)) * np.maximum(length, 1e-9)
+        t0, t1 = p0 @ run.u, p1 @ run.u
+        c0, c1 = np.maximum(np.minimum(t0, t1), g0), np.minimum(np.maximum(t0, t1), g1)
+        ok &= c1 > c0
+        # offset of each line over the gap: at the middle of its clipped stretch
+        mid = (c0 + c1) / 2.0
+        k = np.where(np.abs(t1 - t0) > 1e-9, (mid - t0) / np.where(np.abs(t1 - t0) > 1e-9, t1 - t0, 1.0), 0.5)
+        offs = (p0 + k[:, None] * d) @ run.n
+        ok &= (offs >= lo) & (offs <= hi)
+        idx = np.flatnonzero(ok)
+        if idx.size:
+            order = idx[np.argsort(offs[idx], kind="stable")]
+            clusters: list[list[int]] = []
+            for m in order.tolist():
+                if clusters and offs[m] - offs[clusters[-1][-1]] <= EVIDENCE_CLUSTER_PX:
+                    clusters[-1].append(m)
+                else:
+                    clusters.append([m])
+            centres = []
+            for cl in clusters:
+                spans = sorted((float(c0[m]), float(c1[m])) for m in cl)
+                covered, end = 0.0, -math.inf
+                for x0, x1 in spans:
+                    x0 = max(x0, end)
+                    if x1 > x0:
+                        covered += x1 - x0
+                    end = max(end, x1)
+                if covered >= EVIDENCE_COVER * gap:
+                    w = np.array([float(c1[m] - c0[m]) for m in cl])
+                    centres.append(float(np.average(offs[cl], weights=w)))
+            if len(centres) >= EVIDENCE_LINES:
+                return float(np.mean(centres))
+    # The hinge sits at a jamb, on the line of either run (they may jog across the opening).
+    jambs = [
+        (run.u * g + run.n * off, toward)
+        for g, toward in ((g0, run.u), (g1, -run.u))
+        for off in (a_off, b_off)
+    ]
+    if any(_door_arc(ink, c, toward, run.n * side, gap) for c, toward in jambs for side in (1.0, -1.0)):
+        return math.nan
+    return None
+
+
+def _door_arc(ink: np.ndarray, hinge: np.ndarray, toward: np.ndarray, out: np.ndarray, gap: float) -> bool:
+    """A door swing: ink along >= 60 % of the quarter circle about ``hinge`` from ``toward`` (the closed
+    leaf, across the gap) to ``out`` (the open leaf), for a radius of 0.8 .. 1.1 of the gap (within 2 px)."""
+    ang = np.linspace(0.0, math.pi / 2.0, 33)
+    dirs = np.cos(ang)[:, None] * toward[None, :] + np.sin(ang)[:, None] * out[None, :]
+    for radius in np.linspace(ARC_RADIUS[0] * gap, ARC_RADIUS[1] * gap, 7):
+        hit = np.zeros(len(ang), bool)
+        for dr in (-2.0, -1.0, 0.0, 1.0, 2.0):
+            hit |= sample(ink, hinge[None, :] + dirs * (radius + dr)) > 0
+        if float(hit.mean()) >= ARC_COVER:
+            return True
+    return False
 
 
 def _drop_leaves(runs: list[_Run]) -> list[_Run]:
@@ -916,16 +1188,16 @@ def extract_walls(
     dimension_lines: list[DimensionLine],
     ctx: PipelineContext,
     *,
-    ink: np.ndarray | None = None,
-    tokens: Sequence[TextToken] = (),
+    ink: np.ndarray,
 ) -> WallExtraction:
     """Wall masks and raw wall centre lines of the plan region (06 §8.1 steps 1-8); see the module doc.
 
-    ``segments`` are the stage's line segments (06 §7.9) and ``dimension_lines`` the result of
-    ``find_dimension_lines``; neither takes part in walls. ``ink`` is the page's text-free ink
-    (``OcrResult.ink_notext``). ``tokens`` is kept for the stage interface; no rule reads it since Task 14b
-    moved the stacked-chain text-height rule into ``find_dimension_lines``. ``ctx.check_deadline`` is
-    polled throughout.
+    ``segments`` are the plan region's line segments (``detect_segments``, 06 §7.9; never the annotation
+    region's ``A…`` segments, which are the dimension stage's) and ``dimension_lines`` the result of
+    ``find_dimension_lines``; dimension lines take no part in walls. ``ink`` is the page's text-free ink
+    (``OcrResult.ink_notext``, ruling R6: never raw ink). No rule reads OCR tokens (Task 14b moved the
+    stacked-chain text-height rule into ``find_dimension_lines``), so the stage takes none.
+    ``ctx.check_deadline`` is polled throughout.
     """
     poll = _throttled(ctx.check_deadline)
     poll()
@@ -933,21 +1205,20 @@ def extract_walls(
     crop = pre.region.clip(w, h)
     mask = np.zeros((h, w), np.uint8)
     source_full = np.zeros((h, w), np.uint8)
-    ink_used = pre.ink if ink is None else ink
     L = float(crop.long_side)
-    del tokens  # see the docstring
-    faces = wall_face_dims(segments, dimension_lines, ink_used, pre.t_thin, L) if crop.w and crop.h else set()
+    faces = wall_face_dims(segments, dimension_lines, ink, pre.t_thin, L) if crop.w and crop.h else set()
     dims = [d for d in dimension_lines if d.segment_id not in faces]
-    cands = candidate_segments(segments, dims, pre.t_thin, ink_used)
+    cands = candidate_segments(segments, dims, pre.t_thin, ink)
     theta0 = dominant_orientation(cands)
     if crop.w <= 0 or crop.h <= 0:
         return WallExtraction(mask, source_full, [], theta0, max(1.0, 2.0 * pre.t_thin))
     ys, xs = slice(crop.y, crop.y + crop.h), slice(crop.x, crop.x + crop.w)
 
-    text = None if ink is None else ((pre.ink[ys, xs] > 0) & (ink[ys, xs] == 0))
+    text = (pre.ink[ys, xs] > 0) & (ink[ys, xs] == 0)
     filled = _filled_mask(pre, crop, max(h, w), text)
-    if page.source_kind != "pdf_vector":
-        filled |= _bold_mask(cands, filled, crop, L)
+    bold = _bold_mask(cands, filled, crop, L) if page.source_kind != "pdf_vector" else np.zeros_like(filled)
+    bold[filled > 0] = 0
+    filled |= bold
     poll()
     vector = (
         _vector_mask(page, cands, pre.t_thin, crop)
@@ -955,7 +1226,7 @@ def extract_walls(
         else np.zeros_like(filled)
     )
     envelope = solid_envelope(filled, L)
-    double = double_mask(cands, ink_used[ys, xs], crop, L, pre.t_thin, poll, envelope)
+    double = double_mask(cands, ink[ys, xs], crop, L, pre.t_thin, poll, envelope)
     poll()
     covered = int(np.count_nonzero(filled | double | vector))
     single = (
@@ -968,6 +1239,7 @@ def extract_walls(
         (SRC_SINGLE, single),
         (SRC_DOUBLE, double),
         (SRC_FILLED, filled),
+        (SRC_BOLD, bold),
         (SRC_VECTOR, vector),
     ):
         source[layer > 0] = label
@@ -976,11 +1248,13 @@ def extract_walls(
     poll()
     source[wall == 0] = 0  # pixels closed in by step 5 keep no label of their own
     mask[ys, xs] = wall
-    source_full[ys, xs] = source
+    source_full[ys, xs] = np.where(source == SRC_BOLD, SRC_FILLED, source)
     if not wall.any():
         return WallExtraction(mask, source_full, [], theta0, max(1.0, 2.0 * pre.t_thin))
 
-    raw = _trace_raw_walls(wall, source, theta0, L, poll)
+    origin_xy = np.array((crop.x, crop.y, crop.x, crop.y), np.float64)
+    thin = np.array([(*s.p0, *s.p1) for s in cands if s.is_thin], np.float64).reshape(-1, 4) - origin_xy
+    raw = _trace_raw_walls(wall, source, theta0, L, poll, thin, ink[ys, xs])
     origin = (float(crop.x), float(crop.y))
     raw = [
         RawWall(
@@ -999,13 +1273,116 @@ def extract_walls(
         )
     else:
         t_median = max(1.0, 2.0 * pre.t_thin)
+    extensions = [s for s in segments if s.is_thin and any(touches_tick(s, d, pre.t_thin) for d in dims)]
+    raw = _drop_dangling_extensions(raw, extensions, crop, theta0, t_median, poll)
     return WallExtraction(mask, source_full, raw, theta0, t_median)
 
 
-def _trace_raw_walls(
-    wall: np.ndarray, source: np.ndarray, theta0: float, L: float, poll: Check
+def _drop_dangling_extensions(
+    raw: list[RawWall],
+    extensions: Sequence[Segment],
+    region: Rect,
+    theta0: float,
+    t_median: float,
+    poll: Check,
 ) -> list[RawWall]:
-    """Steps 6-8 on the region's wall mask (crop coordinates)."""
+    """``raw`` without the walls that are extension lines outside the plan's outline (Task 16c).
+
+    The outline is the union of the bounded faces of the wall graph of ``raw``. A graph wall with a free
+    end that lies outside it and runs along an extension line (a thin line touching a dimension tick,
+    ruling R6's definition, within 3 degrees and its thickness across, over half of its length) is cut out
+    of the raw walls it came from: a pair of extension lines drawn a wall's width apart pairs into a
+    double-line wall, and extension lines continuing a wall past the outline extend it. Without a closed
+    outline nothing is dropped. Repeats once for a chain of such walls."""
+    for _ in range(2):
+        if not raw or not extensions:
+            return raw
+        graph = _graph_of(raw, region, theta0, t_median, poll)  # the graph `walls_to_graph` builds
+        lines = [LineString([w.a, w.b]) for w in graph.walls if math.dist(w.a, w.b) > 0]
+        faces = list(polygonize(unary_union(lines))) if lines else []
+        if not faces:
+            return raw
+        outline = unary_union(faces).buffer(1.0)
+        cuts = [
+            w
+            for w in graph.walls
+            if w.free_ends
+            and not outline.contains(Point((w.a[0] + w.b[0]) / 2.0, (w.a[1] + w.b[1]) / 2.0))
+            and any(_runs_along(w.a, w.b, e, w.thickness_px) for e in extensions)
+        ]
+        if not cuts:
+            return raw
+        for w in cuts:
+            raw = [piece for r in raw for piece in _cut(r, w.a, w.b, w.thickness_px)]
+    return raw
+
+
+def _runs_along(a: Pt, b: Pt, e: Segment, thickness: float) -> bool:
+    """The extension line ``e`` runs along the wall ``a``-``b``: parallel within 3 degrees, within the
+    wall's thickness of its centre line and covering at least half of its length."""
+    d = np.subtract(b, a)
+    length = float(np.hypot(*d))
+    ed = np.subtract(e.p1, e.p0)
+    if length < 1e-9 or e.length < 1e-9:
+        return False
+    u = d / length
+    if abs(float(u @ ed)) < math.cos(math.radians(OUTSIDE_ANGLE_DEG)) * e.length:
+        return False
+    n = np.array((-u[1], u[0]))
+    q0, q1 = np.subtract(e.p0, a), np.subtract(e.p1, a)
+    if max(abs(float(q0 @ n)), abs(float(q1 @ n))) > thickness:
+        return False
+    t0, t1 = sorted((float(q0 @ u), float(q1 @ u)))
+    return min(t1, length) - max(t0, 0.0) >= OUTSIDE_COVER * length
+
+
+def _cut(r: RawWall, a: Pt, b: Pt, thickness: float) -> list[RawWall]:
+    """``r`` without its stretch along the graph wall ``a``-``b`` (when ``r`` runs along it: parallel within 3
+    degrees and within half the thickness of its line); openings in the kept pieces are kept."""
+    d = np.subtract(r.p1, r.p0)
+    length = float(np.hypot(*d))
+    w = np.subtract(b, a)
+    w_len = float(np.hypot(*w))
+    if length < 1e-9 or w_len < 1e-9:
+        return [r]
+    u = d / length
+    if abs(float(u @ w)) < math.cos(math.radians(OUTSIDE_ANGLE_DEG)) * w_len:
+        return [r]
+    n = np.array((-u[1], u[0]))
+    qa, qb = np.subtract(a, r.p0), np.subtract(b, r.p0)
+    if max(abs(float(qa @ n)), abs(float(qb @ n))) > 0.5 * max(thickness, r.thickness_px):
+        return [r]
+    c0, c1 = sorted((float(qa @ u), float(qb @ u)))
+    if c1 <= 0.0 or c0 >= length:
+        return [r]
+    out = []
+    for lo, hi in ((0.0, c0), (c1, length)):
+        if hi - lo < 1.0:
+            continue
+        p0 = np.asarray(r.p0) + u * lo
+        p1 = np.asarray(r.p0) + u * hi
+        openings = tuple(
+            (max(o0, lo) - lo, min(o1, hi) - lo) for o0, o1 in r.openings_px if min(o1, hi) - max(o0, lo) > 0
+        )
+        out.append(
+            RawWall(
+                (float(p0[0]), float(p0[1])), (float(p1[0]), float(p1[1])), r.thickness_px, r.source, openings
+            )
+        )
+    return out
+
+
+def _trace_raw_walls(
+    wall: np.ndarray,
+    source: np.ndarray,
+    theta0: float,
+    L: float,
+    poll: Check,
+    thin: np.ndarray | None = None,
+    ink: np.ndarray | None = None,
+) -> list[RawWall]:
+    """Steps 6-8 on the region's wall mask (crop coordinates); ``thin`` (k, 4) are the thin candidate
+    segments and ``ink`` the text-free ink, the opening evidence of ``_link_runs``."""
     dt = cv2.distanceTransform(wall, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
     skel = skeletonize(wall > 0)  # type: ignore[no-untyped-call]
     poll()
@@ -1019,8 +1396,16 @@ def _trace_raw_walls(
     eps = max(EPS_MIN, EPS_FACTOR * t_skel)
     pieces = _snap(_pieces(edges, deg, dt, source, eps, poll), theta0, L)
     _march_free_ends(pieces, wall)
-    runs = _drop_leaves(_runs(pieces, theta0, wall, poll))
-    return [r.wall() for r in runs if r.s1 - r.s0 > 1e-6]
+    t_wall = _wall_thickness(pieces)
+    runs = [r for r in _drop_leaves(_runs(pieces, theta0, wall, poll, t_wall)) if r.s1 - r.s0 > 1e-6]
+    links = _link_runs(
+        runs,
+        np.zeros((0, 4)) if thin is None else thin,
+        np.zeros_like(wall) if ink is None else ink,
+        t_wall,
+        poll,
+    )
+    return [*(r.wall() for r in runs), *links]
 
 
 def walls_to_graph(
@@ -1030,15 +1415,19 @@ def walls_to_graph(
     0.006 L)``, ``L`` = the region's long side and ``theta0_deg = ext.theta0``. Near-identical duplicate
     raw walls are dropped first. The raw walls' ``openings_px`` come back as ``graph.gaps`` (the gap
     candidates, ids consistent with ``graph.walls``)."""
+    return _graph_of(ext.raw, region, ext.theta0, ext.t_median, check_deadline)
+
+
+def _graph_of(
+    raw: list[RawWall], region: Rect, theta0: float, t_median: float, check: Callable[[], None] | None
+) -> WallGraph:
     L = float(region.long_side)
-    raw = dedupe_raw_walls(ext.raw)
+    raw = dedupe_raw_walls(raw)
     if not raw or L <= 0:
         return WallGraph(nodes={}, walls=[], gaps=[])
-    t_median = max(ext.t_median, 1e-3)
+    t_median = max(t_median, 1e-3)
     r = max(t_median, SNAP_RADIUS_FRAC * L)
-    return build_wall_graph(
-        raw, r=r, t_median=t_median, L=L, theta0_deg=float(ext.theta0), check_deadline=check_deadline
-    )
+    return build_wall_graph(raw, r=r, t_median=t_median, L=L, theta0_deg=float(theta0), check_deadline=check)
 
 
 _DEBUG_COLOURS: dict[int, tuple[int, int, int]] = {

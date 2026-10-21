@@ -25,6 +25,7 @@ __all__ = [
     "is_extension",
     "sample",
     "solid_envelope",
+    "touches_tick",
     "wall_face_dims",
 ]
 
@@ -123,23 +124,20 @@ def wall_face_dims(
     return faces
 
 
-def is_extension(s: Segment, d: DimensionLine, t_thin: float, ink: np.ndarray) -> bool:
-    """``s`` is an extension line of ``d`` (ruling R6): perpendicular to it (within 10 degrees), meeting its
-    line within ``2 t_thin`` of one of its ticks with one end (within ``3 t_thin``), and overshooting it in
-    the ink: past the far edge of the dimension line the stroke runs on for ``t_thin .. 3 t_thin`` and stops
-    (drafting convention; LSD often cuts the stub off at the crossing, so the ink is probed, not the
-    segment). A partition face that stops at a line (a T junction) has no ink beyond it and a line passing
-    through runs on, so neither is removed when a wall face was taken for a dimension line."""
+def _tick_crossing(s: Segment, d: DimensionLine, t_thin: float) -> tuple[float, float, float] | None:
+    """Where ``s`` meets ``d`` at one of its ticks: ``s`` perpendicular to ``d`` (within 10 degrees) and its
+    line meeting ``d``'s within ``2 t_thin`` of a tick. Returns ``(k, mx, my)``: the meeting point
+    ``(mx, my)`` at ``k`` along ``s`` from ``s.p0``; None otherwise."""
     dx, dy = d.p1[0] - d.p0[0], d.p1[1] - d.p0[1]
     length = math.hypot(dx, dy)
     sx, sy = s.p1[0] - s.p0[0], s.p1[1] - s.p0[1]
     s_len = math.hypot(sx, sy)
     if length == 0.0 or s_len == 0.0 or not d.tick_positions:
-        return False
+        return None
     ux, uy = dx / length, dy / length
     vx, vy = sx / s_len, sy / s_len
     if abs(ux * vx + uy * vy) > math.sin(math.radians(EXTENSION_ANGLE_DEG)):
-        return False
+        return None
     # Meeting point of the two lines: s.p0 + v * k, with zero offset from d's line.
     h0 = -(s.p0[0] - d.p0[0]) * uy + (s.p0[1] - d.p0[1]) * ux
     rate = -vx * uy + vy * ux  # offset change per unit along s (|rate| >= cos 10 degrees)
@@ -147,7 +145,34 @@ def is_extension(s: Segment, d: DimensionLine, t_thin: float, ink: np.ndarray) -
     mx, my = s.p0[0] + vx * k, s.p0[1] + vy * k
     along = (mx - d.p0[0]) * ux + (my - d.p0[1]) * uy
     if not any(abs(along - t) <= EXTENSION_TICK_THIN * t_thin for t in d.tick_positions):
+        return None
+    return k, mx, my
+
+
+def touches_tick(s: Segment, d: DimensionLine, t_thin: float) -> bool:
+    """``s`` is a thin line touching one of ``d``'s ticks (ruling R6's definition of an extension line):
+    perpendicular to ``d``, meeting it at a tick and reaching it (the meeting point within ``3 t_thin`` of
+    ``s``'s extent), whatever it runs on beyond."""
+    hit = _tick_crossing(s, d, t_thin)
+    if hit is None:
         return False
+    reach = EXTENSION_OVERSHOOT_THIN[1] * t_thin
+    return -reach <= hit[0] <= s.length + reach
+
+
+def is_extension(s: Segment, d: DimensionLine, t_thin: float, ink: np.ndarray) -> bool:
+    """``s`` is an extension line of ``d`` (ruling R6): perpendicular to it (within 10 degrees), meeting its
+    line within ``2 t_thin`` of one of its ticks with one end (within ``3 t_thin``), and overshooting it in
+    the ink: past the far edge of the dimension line the stroke runs on for ``t_thin .. 3 t_thin`` and stops
+    (drafting convention; LSD often cuts the stub off at the crossing, so the ink is probed, not the
+    segment). A partition face that stops at a line (a T junction) has no ink beyond it and a line passing
+    through runs on, so neither is removed when a wall face was taken for a dimension line."""
+    hit = _tick_crossing(s, d, t_thin)
+    if hit is None:
+        return False
+    k, mx, my = hit
+    s_len = s.length
+    vx, vy = (s.p1[0] - s.p0[0]) / s_len, (s.p1[1] - s.p0[1]) / s_len
     reach = EXTENSION_OVERSHOOT_THIN[1] * t_thin
     if min(abs(k), abs(s_len - k)) > reach:
         return False  # the line passes through: the meeting point is far from both ends
