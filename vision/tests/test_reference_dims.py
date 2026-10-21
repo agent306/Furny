@@ -33,9 +33,11 @@ from tests.support.reference import (
 pytestmark = pytest.mark.reference
 
 OUTER_OVERALL = {"top-overall": 11000, "bottom-overall": 11100, "right-mid": 7600, "right-overall": 8900}
-# recall, precision, free ends after Task 16c fix round 1 (HDB against its corrected truth; the
-# fix-round truth corrections, not the pipeline, moved HDB recall from 0.892 to 0.889)
-WALL_FLOOR = {"hdb-3room": (0.889, 0.963, 9), "brochure-2bhk": (0.912, 0.865, 17)}
+# recall, precision, free ends after Task 17 (Task 16c: HDB 0.889 / 0.963 / 9, brochure 0.912 / 0.865 / 17).
+# Task 17's partition-end doors (R-b) and deferred door-leaf pairs raised HDB to 0.927 / 0.973 / 8; the
+# brochure's recall rose to 0.920 and its precision fell by 0.001 (its entrance leaf, a free stub, moved a
+# pixel), above the brief's 0.85.
+WALL_FLOOR = {"hdb-3room": (0.927, 0.973, 8), "brochure-2bhk": (0.920, 0.864, 15)}
 
 
 @pytest.fixture(scope="module")
@@ -165,7 +167,7 @@ def test_walls_do_not_regress(chains: dict[str, ChainResult], stem: str) -> None
     r = chains[stem]
     m = wall_metrics(load_truth(stem, r.page, "drawing-walls"), r.graph)
     recall, precision, free_ends = WALL_FLOOR[stem]
-    # The floors are the Task 16c values as reported (3 decimals).
+    # The floors are the Task 17 values as reported (3 decimals).
     assert round(m.recall, 3) >= recall and round(m.precision, 3) >= precision, m
     assert sum(w.free_ends for w in r.graph.walls) <= free_ends
 

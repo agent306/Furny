@@ -1,7 +1,8 @@
 """Intermediate (pre-assembly) candidate types shared by the pipeline stages (06 section 7-8).
 
 Extended task by task; this module currently holds ``ParsedText``, ``TextToken``, ``Segment``,
-``DimensionLine``, ``DimensionSpan``, ``RawWall``, ``WallCandidate``, ``GapCandidate`` and ``WallGraph``.
+``DimensionLine``, ``DimensionSpan``, ``RawWall``, ``WallCandidate``, ``GapCandidate``, ``WallGraph`` and
+``OpeningCandidate``.
 """
 
 import math
@@ -174,3 +175,30 @@ class WallGraph:
     nodes: dict[str, Pt]
     walls: list[WallCandidate]
     gaps: list[GapCandidate]
+
+
+OpeningKind = Literal["door", "window", "opening"]
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningCandidate:
+    """A door, window or passage in wall ``wall_id`` (06 section 8.5), over ``[u0, u1]`` px along its centre
+    line from the wall's ``a`` end.
+
+    ``type`` is a ``DoorType`` for doors (``single_swing``, ``double_swing``, ``bifold``), a ``WindowType``
+    for windows (``casement``, ``sliding_window``) and ``"opening"`` for passages. ``hinge`` is the jamb the
+    leaf turns on (``start`` = ``u0``) and ``swing`` the side it opens to (``left`` = ``+n``, the wall's left
+    normal, 04 section 2.1); both keep their defaults (``start``, ``left``) when nothing is hinged.
+    ``support`` is the door evidence (arc support plus the leaf bonus), the window's frame-line coverage, or
+    0.0 for a passage.
+    """
+
+    id: str
+    wall_id: str
+    u0: float
+    u1: float
+    kind: OpeningKind
+    type: str
+    hinge: Literal["start", "end"]
+    swing: Literal["left", "right"]
+    support: float

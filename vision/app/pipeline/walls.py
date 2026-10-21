@@ -18,8 +18,14 @@ between walls of similar thickness become ``openings_px`` of that raw wall (a bo
 measured against the drawing's wall thickness ``t_wall``, ruling B2). A thin piece that leaves a gap's jamb
 and is as long as the gap is wide (``0.8 g .. 1.1 g``) is a door leaf, not a wall. Facing ends of runs the
 walk left apart are linked (``_link_runs``): a partition ending in an offset block by a connector, runs of
-different drawing styles across a window, slider or door by a bridging wall (ruling B2). Last, walls that
-dangle outside the closed outline along extension lines are cut out (``_drop_dangling_extensions``).
+different drawing styles across a window, slider or door by a bridging wall (ruling B2). A partition whose
+free end holds a door closing against a crossing wall is carried through to it as an opening
+(``_partition_doors``, Task 16c ruling R-b). Last, walls that dangle outside the closed outline along
+extension lines are cut out (``_drop_dangling_extensions``).
+
+Door leaves (thin lines with a swing arc about one end, ``opening_evidence.door_leaves``) pair with a much
+longer line only after every other pair (Task 17): beside a wall's face, a leaf took the face from its
+partner.
 
 Step 2's candidate segments and step 3's double-line pairing live in ``wall_candidates.py``.
 
@@ -46,9 +52,10 @@ from app.pipeline.binarize import Preprocessed, sauvola_window
 from app.pipeline.context import PipelineContext
 from app.pipeline.graph import build_wall_graph
 from app.pipeline.normalize import NormalizedPage
-from app.pipeline.opening_evidence import door_arc, frame_lines
+from app.pipeline.opening_evidence import door_arc, door_leaves, frame_lines
 from app.pipeline.segments import dominant_orientation
 from app.pipeline.wall_candidates import (
+    DOUBLE_MIN_LEN_FRAC,
     Check,
     candidate_segments,
     double_mask,
@@ -110,6 +117,8 @@ EVIDENCE_CLUSTER_PX = 1.5  # ... (pieces less than this apart across are one lin
 EVIDENCE_STRIP = (
     0.75  # ... within 0.75 max(t, t_wall) beyond the runs' lines (frame lines run along the faces)
 )
+PARTITION_DOOR_CROSS_DEG = 60.0  # a partition-end door closes against a run crossing its line this steeply
+PARTITION_DOOR_NIB = 0.15  # its hinge may sit behind a jamb nib up to 0.15 g deep
 JOG_MIN_PX = 1.0  # a bridge's line this far from a run's line gets a connector
 OUTSIDE_ANGLE_DEG = 3.0  # a dangling wall outside the outline along an extension line (within 3 degrees ...
 OUTSIDE_COVER = 0.5  # ... over half of its length) is that extension line (Task 16c)
@@ -923,6 +932,7 @@ def _link_runs(
     t_wall: float | None,
     poll: Check,
     origin: tuple[float, float] = (0.0, 0.0),
+    linked: set[tuple[int, int]] | None = None,
 ) -> list[RawWall]:
     """Raw walls that join facing ends of parallel runs the collinear walk left apart (Task 16c):
 
@@ -938,9 +948,10 @@ def _link_runs(
       thicker run's line for an arc) spans the gap as one opening, with a connector at each end where a
       run's line jogs from it.
 
-    Each run end is linked at most once, nearest gap first. ``ink`` (the arcs' thin ink) may be the whole
-    page, with the runs' coordinate origin at ``origin`` in it: a door swinging out of the plan region
-    keeps its whole arc."""
+    Each run end is linked at most once, nearest gap first; ``linked`` receives the linked ends as
+    ``(run index, 0 | 1)`` (its ``s0`` / ``s1`` end). ``ink`` (the arcs' thin ink) may be the whole page,
+    with the runs' coordinate origin at ``origin`` in it: a door swinging out of the plan region keeps its
+    whole arc."""
     found: list[tuple[float, int, int, str]] = []
     groups: dict[tuple[float, float], list[int]] = defaultdict(list)  # runs of one direction group
     for k, r in enumerate(runs):  # share their direction exactly
@@ -1006,6 +1017,94 @@ def _link_runs(
                     out.append(RawWall(_point(a, s_end, o), _point(a, s_end, off), thin_t, "filled"))
         ends.add(i)
         starts.add(j)
+    if linked is not None:
+        linked.update((i, 1) for i in ends)
+        linked.update((j, 0) for j in starts)
+    return out
+
+
+def _partition_doors(
+    runs: list[_Run],
+    ink: np.ndarray,
+    t_wall: float | None,
+    poll: Check,
+    origin: tuple[float, float] = (0.0, 0.0),
+    linked: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+) -> list[RawWall]:
+    """Raw walls that carry a partition through the door at its free end to the wall the door closes
+    against (Task 16c ruling R-b, Task 17; a deviation from 06 §8.1 step 8, which only links collinear
+    pieces).
+
+    A free run end (not ``linked`` by ``_link_runs``) looks along its line for the nearest run crossing it
+    at 60 degrees or more, its centre line hit within ``18 t`` (``t`` the larger of the partition's and
+    ``t_wall``); the gap ``g`` runs from the end to that run's face (at least ``1.5 t`` of the partition).
+    With a door swing arc (``door_arc``, ruling B2's arc evidence: one thin curve of radius ``0.85 ..
+    1.15 r`` centred within ``0.5 t`` of a jamb, inked on 60 % of its samples with 45 contiguous degrees,
+    solid walls removed) about either jamb, opening to either side, a wall of the partition's thickness
+    runs from the end to the crossing run's centre line, with ``(0, g)`` as its opening. The jambs are the
+    partition's end and the crossing run's face; as drawn, the leaf may close on that run's face or on its
+    centre line (``r = g`` or the distance to the centre line), and the hinge may sit behind a nib up to
+    ``0.15 g`` deep (the HDB bedroom-3 door)."""
+    origin_xy = np.asarray(origin)
+    lines = []
+    for r in runs:
+        off = r.offset()
+        lines.append((r.u * r.s0 + r.n * off, r.u * r.s1 + r.n * off, r.thickness()))
+    cos_cross = math.cos(math.radians(PARTITION_DOOR_CROSS_DEG))
+    out: list[RawWall] = []
+    for k, r in enumerate(runs):
+        t_k = r.thickness()
+        cap = BRIDGE_GAP_TWALL * max(t_k, t_wall or 0.0)
+        for end, free, e, v in ((0, r.free0, lines[k][0], -r.u), (1, r.free1, lines[k][1], r.u)):
+            if not free or (k, end) in linked:
+                continue
+            best: tuple[float, float] | None = None  # (distance to the crossing centre line, gap)
+            for j, (p, q, t_j) in enumerate(lines):
+                w = q - p
+                length = float(np.hypot(*w))
+                if j == k or length < 1e-9 or abs(float(v @ w)) > cos_cross * length:
+                    continue
+                wu = w / length
+                denom = float(v[0] * wu[1] - v[1] * wu[0])
+                rel = p - e
+                lam = float(rel[0] * wu[1] - rel[1] * wu[0]) / denom
+                mu = float(rel[0] * v[1] - rel[1] * v[0]) / denom
+                gap = lam - t_j / 2.0
+                if not -t_j / 2.0 <= mu <= length + t_j / 2.0 or lam > cap or gap < MERGE_GAP * t_k:
+                    continue
+                if best is None or lam < best[0]:
+                    best = (lam, gap)
+            if best is None:
+                continue
+            poll()
+            lam, gap = best
+            n = np.array((-v[1], v[0]))
+            nib = PARTITION_DOOR_NIB * gap
+            # (hinge, toward the closing jamb, radius): at the partition's end, closing on the crossing wall's
+            # face or centre line; at the face or centre line, closing on the end; either one behind a nib
+            hinges = (
+                (e, v, gap),
+                (e, v, lam),
+                (e + v * nib, v, gap - nib),
+                (e + v * gap, -v, gap),
+                (e + v * lam, -v, lam),
+                (e + v * (gap - nib), -v, gap - nib),
+            )
+            if any(
+                door_arc(ink, c + origin_xy, toward, n * side, radius, t_k)
+                for c, toward, radius in hinges
+                for side in (1.0, -1.0)
+            ):
+                hit = e + v * lam
+                out.append(
+                    RawWall(
+                        (float(e[0]), float(e[1])),
+                        (float(hit[0]), float(hit[1])),
+                        t_k,
+                        r.wall().source,
+                        ((0.0, gap),),
+                    )
+                )
     return out
 
 
@@ -1233,7 +1332,13 @@ def extract_walls(
     )
     envelope = solid_envelope(filled, L)
     dim_ends = np.array([(*d.p0, *d.p1) for d in dimension_lines], np.float64).reshape(-1, 4)
-    double = double_mask(cands, ink[ys, xs], crop, L, pre.t_thin, poll, envelope, dim_ends)
+    # Door arcs are read on the page's thin ink: solid strokes (a jamb block) removed, so none merges with
+    # an arc, and the whole page, so an exterior door's swing past the region's margin stays whole.
+    arc_ink = ink.copy()
+    arc_ink[ys, xs][cv2.dilate(filled, np.ones((5, 5), np.uint8)) > 0] = 0
+    leaves = door_leaves(cands, arc_ink, pre.t_thin, DOUBLE_MIN_LEN_FRAC * L)
+    poll()
+    double = double_mask(cands, ink[ys, xs], crop, L, pre.t_thin, poll, envelope, dim_ends, leaves)
     poll()
     covered = int(np.count_nonzero(filled | double | vector))
     single = (
@@ -1261,10 +1366,6 @@ def extract_walls(
 
     origin_xy = np.array((crop.x, crop.y, crop.x, crop.y), np.float64)
     thin = np.array([(*s.p0, *s.p1) for s in cands if s.is_thin], np.float64).reshape(-1, 4) - origin_xy
-    # Door arcs are read on the page's thin ink: solid strokes (a jamb block) removed, so none merges with
-    # an arc, and the whole page, so an exterior door's swing past the region's margin stays whole.
-    arc_ink = ink.copy()
-    arc_ink[ys, xs][cv2.dilate(filled, np.ones((5, 5), np.uint8)) > 0] = 0
     raw = _trace_raw_walls(wall, source, theta0, L, poll, thin, arc_ink, (float(crop.x), float(crop.y)))
     origin = (float(crop.x), float(crop.y))
     raw = [
@@ -1412,8 +1513,10 @@ def _trace_raw_walls(
     _march_free_ends(pieces, wall)
     t_wall = _wall_thickness(pieces)
     runs = [r for r in _drop_leaves(_runs(pieces, theta0, wall, poll, t_wall)) if r.s1 - r.s0 > 1e-6]
-    links = _link_runs(runs, thin, ink, t_wall, poll, origin)
-    return [*(r.wall() for r in runs), *links]
+    linked: set[tuple[int, int]] = set()
+    links = _link_runs(runs, thin, ink, t_wall, poll, origin, linked)
+    doors = _partition_doors(runs, ink, t_wall, poll, origin, linked)
+    return [*(r.wall() for r in runs), *links, *doors]
 
 
 def walls_to_graph(

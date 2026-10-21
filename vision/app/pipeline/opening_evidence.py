@@ -3,15 +3,20 @@ partition-end doors) and the openings stage (06 §8.5):
 
 - a door swing arc about a jamb (``door_arc``, Task 16c): one thin curve of radius about the gap width;
 - window frame lines (``frame_lines``): thin lines parallel to the wall inside the gap's strip, clustered
-  across and measured along the gap.
+  across and measured along the gap;
+- open door leaves (``door_leaves``, Task 17): thin lines with a door swing arc about one of their ends.
 """
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 
-__all__ = ["FrameLine", "door_arc", "frame_lines", "ink_at"]
+from app.schemas.candidates import Segment
+
+__all__ = ["FrameLine", "door_arc", "door_leaves", "frame_lines", "ink_at"]
 
 ARC_RADIUS = (0.85, 1.15)  # a door swing: a thin arc of radius 0.85 .. 1.15 g about a jamb ...
 ARC_STEP_DEG = 1.0  # ... sampled every degree, 3 degrees clear of the closed and the open leaf ...
@@ -24,6 +29,8 @@ ARC_HIT_PX = 2  # ... within 2 px of the arc's radius ...
 ARC_CLEAR_PX = 5  # ... with paper 5 px inside and outside it (hatching and tile grids have ink there)
 ARC_CENTRE_STEP = 2.0  # hinge offsets tried, up to 0.5 t (+ 2 px) from the jamb point
 ARC_TRIES = 3  # best (centre, radius) hypotheses scored
+LEAF_PROBE_DEG = (30.0, 45.0, 60.0)  # a leaf's arc is probed here first (2 of 3 inked) ...
+LEAF_HINGE_THIN = 8.0  # ... and checked with the hinge within 4 t_thin + 2 px of the leaf's end
 
 
 def door_arc(
@@ -221,4 +228,36 @@ def frame_lines(
         out.append(
             FrameLine(float(np.average(offs[cl], weights=w)), sum(b - a for a, b in merged), tuple(merged))
         )
+    return out
+
+
+def door_leaves(segments: Sequence[Segment], ink: np.ndarray, t_thin: float, min_length: float) -> set[str]:
+    """Ids of the thin segments (at least ``min_length`` long) that are open door leaves: a door swing arc
+    (``door_arc``) of radius about the segment's length turns about one of its ends, from the segment to
+    the perpendicular through that end, on either side. A leaf drawn beside a wall's face is no face: it
+    would pair with the face into a wall (the HDB toilet-3 door, Task 17). ``ink`` is the thin ink (solid
+    strokes removed), in the segments' coordinates."""
+    cand = [s for s in segments if s.is_thin and s.length >= min_length]
+    if not cand:
+        return set()
+    near = cv2.dilate((ink > 0).astype(np.uint8), np.ones((5, 5), np.uint8))
+    out: set[str] = set()
+    ang = np.radians(np.array(LEAF_PROBE_DEG))
+    for s in cand:
+        a, b = np.asarray(s.p0, np.float64), np.asarray(s.p1, np.float64)
+        length = float(np.hypot(*(b - a)))
+        for hinge, tip in ((a, b), (b, a)):
+            leaf = (tip - hinge) / length
+            for side in (1.0, -1.0):
+                toward = np.array((-leaf[1], leaf[0])) * side
+                probe = hinge[None, :] + length * (
+                    np.cos(ang)[:, None] * toward[None, :] + np.sin(ang)[:, None] * leaf[None, :]
+                )
+                if np.count_nonzero(ink_at(near, probe)) < 2:
+                    continue
+                if door_arc(ink, hinge, toward, leaf, length, LEAF_HINGE_THIN * t_thin):
+                    out.add(s.id)
+                    break
+            if s.id in out:
+                break
     return out

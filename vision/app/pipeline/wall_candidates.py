@@ -42,6 +42,7 @@ DOUBLE_D_MIN_THIN, DOUBLE_D_MAX_FRAC = 1.5, 0.02  # line distance: >= 1.5 t_thin
 DOUBLE_OVERLAP = 0.6  # of the shorter segment
 HOLLOW_MAX, FILLED_MIN = 0.15, 0.85  # ink share of the strip between the two lines
 DOUBLE_CLAIM_TOL_PX = 1.0  # claims of one segment side may touch by this much
+LEAF_FACE_RATIO = 1.5  # a door leaf beside a line this much longer (a face) pairs last (Task 17)
 REJOIN_GAP_THIN = 3.0  # thin pieces cut by a dimension line: within this many t_thin of it, this far apart
 REJOIN_ANGLE_DEG, REJOIN_OFFSET_PX = 1.5, 2.0  # ... on one line: within 1.5 degrees and 2 px
 
@@ -239,6 +240,7 @@ def double_mask(
     poll: Check,
     envelope: np.ndarray | None = None,
     dims: np.ndarray | None = None,
+    leaves: frozenset[str] | set[str] = frozenset(),
 ) -> np.ndarray:
     """Quadrilaterals between paired parallel thin lines (06 §8.1 step 3).
 
@@ -254,6 +256,12 @@ def double_mask(
     line broken by a T junction still pairs with both pieces of the opposite face. A quad is extended by
     ``d / 2`` at an end where one of its lines runs on (a corner or junction), not where both stop (a
     door jamb), so corners close without narrowing openings.
+
+    ``leaves`` are the ids of door leaves (``opening_evidence.door_leaves``, Task 17): a leaf's pair with a
+    line more than 1.5 times as long (a wall's face) comes after all others. A leaf drawn beside a face is
+    closer to it than the face's partner; paired first, it took the face's stretch and the wall was lost
+    (the HDB toilet-3 door). Deferred, it yields to the face's own partner and pairs only where nothing
+    else does. A leaf drawn as two lines, or a threshold's two lines, still pair as before.
     """
     mask = np.zeros((crop.h, crop.w), np.uint8)
     thin = [s for s in cands if s.is_thin]
@@ -273,7 +281,16 @@ def double_mask(
     pairs = _pair_candidates(p0, p1, length, unit, d_min, d_max, poll)
     if not pairs:
         return mask
-    pairs.sort(key=lambda p: (p.d, -p.overlap, p.i, p.j))
+    leaf = np.array([s.id in leaves for s in thin])
+
+    def beside_face(p: _Pair) -> bool:
+        """A door leaf beside a much longer line (a wall's face)."""
+        return bool(
+            (leaf[p.i] and length[p.j] > LEAF_FACE_RATIO * length[p.i])
+            or (leaf[p.j] and length[p.i] > LEAF_FACE_RATIO * length[p.j])
+        )
+
+    pairs.sort(key=lambda p: (beside_face(p), p.d, -p.overlap, p.i, p.j))
     claims: dict[int, list[tuple[float, float]]] = defaultdict(list)
     for count, pr in enumerate(pairs):
         if count % 256 == 0:

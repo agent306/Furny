@@ -176,6 +176,23 @@ def test_gap_candidate(hinge: str) -> None:
     assert len(partition_raw[0].openings_px) == 1
 
 
+@pytest.mark.parametrize(("hinge", "side"), [("start", 1), ("start", -1), ("end", 1), ("end", -1)])
+def test_gap_candidate_door_hinge_and_swing(hinge: str, side: int) -> None:
+    """Preflight K18: 06 §16.1 places the door hinge/swing case with the gap candidates. The partition runs
+    down the screen (d = (0, 1), n = (1, 0)): a leaf on side +1 swings to screen right, toward +n."""
+    from app.pipeline.openings import find_openings
+
+    door = SDoor(PARTITION, 500, 90, hinge=hinge, side=side)  # type: ignore[arg-type]
+    r = run(render_plan(SIZE, plan("filled"), doors=[door]))
+    (o,) = find_openings(r.graph, r.pre, r.segments, r.pre.ink)
+    host = next(w for w in r.graph.walls if w.id == o.wall_id)
+    assert host.a[1] < host.b[1]  # the partition's graph wall runs down from y 300
+    y0 = host.a[1]
+    assert (o.kind, o.type) == ("door", "single_swing")
+    assert (o.hinge, o.swing) == (hinge, "left" if side == 1 else "right")
+    assert y0 + o.u0 == pytest.approx(800, abs=4) and y0 + o.u1 == pytest.approx(890, abs=4)
+
+
 def test_small_break_is_closed() -> None:
     img = render_plan(SIZE, plan("filled"), gaps=[SGap(PARTITION, 500, 20)])  # 20 < 1.5 t = 21
     r = run(img)
