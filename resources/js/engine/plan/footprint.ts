@@ -3,7 +3,7 @@
  * rectangle a placement or fixture occupies in plan space; `mirrored` never
  * changes it (03 §1: mirroring affects rendering only).
  */
-import { add, frontVector, rot, scale, sub, type Vec2 } from '../geometry/vec2';
+import { add, frontVector, scale, sub, type Vec2 } from '../geometry/vec2';
 import type { Fixture, FurniturePlacement } from './schema';
 
 export { frontVector, rotationFromFront } from '../geometry/vec2';
@@ -46,7 +46,8 @@ function build(
     rotation: number,
 ): Footprint {
     const f = frontVector(rotation);
-    const r = rot({ x: 1, y: 0 }, (rotation * Math.PI) / 180);
+    // Right-hand axis r = rot((1,0), θ) = (f.y, −f.x), exact where f is.
+    const r = { x: f.y, y: -f.x };
     const halfW = scale(r, width / 2);
     const depthVec = scale(f, depth);
     const backLeft = sub(backCenter, halfW);

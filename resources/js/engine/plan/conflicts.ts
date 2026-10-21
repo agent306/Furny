@@ -4,8 +4,9 @@
  * a door swing or stand in front of a glazed opening. The door swing sectors
  * double as the editor's clearance zones (05 §10.6).
  */
-import { intersectionArea } from '../geometry/clip';
+import { intersection, intersectionArea } from '../geometry/clip';
 import {
+    area,
     ensureCW,
     ringBBox,
     signedArea,
@@ -146,7 +147,6 @@ const bboxOverlap = (a: BBox, b: BBox): boolean =>
 /** A placement or fixture footprint with its vertical interval. */
 interface Item {
     id: string;
-    ring: Ring;
     poly: PolygonWithHoles[];
     bbox: BBox;
     bottom: number;
@@ -159,12 +159,10 @@ function makeItem(
     elevation: number,
     height: number,
 ): Item {
-    const ring = ensureCW(corners);
     return {
         id,
-        ring,
-        poly: [{ outer: ring, holes: [] }],
-        bbox: ringBBox(ring),
+        poly: [{ outer: corners, holes: [] }],
+        bbox: ringBBox(corners),
         bottom: elevation,
         top: elevation + height,
     };
@@ -229,42 +227,99 @@ function windowZone(d: DerivedOpening, wall: DerivedWall): Ring {
     ]);
 }
 
-function wallConflicts(
-    items: Item[],
-    geom: DerivedPlan,
-    out: PlacementConflict[],
-): void {
-    const walls = Object.keys(geom.walls)
+/** A wall as the conflict check sees it: full outline plus its openings' cuts. */
+interface SolidWall {
+    wall: DerivedWall;
+    bbox: BBox;
+    outline: PolygonWithHoles[];
+    openings: Array<{ cut: PolygonWithHoles[]; sill: number; head: number }>;
+}
+
+function solidWalls(doc: PlanDocument, geom: DerivedPlan): SolidWall[] {
+    return Object.keys(geom.walls)
         .sort(cmp)
         .map((id) => {
             const wall = geom.walls[id]!;
-            return { wall, bbox: ringBBox(wall.outline) };
+            const openings = wall.openings.flatMap(({ id: openingId }) => {
+                const o = doc.openings[openingId];
+                const d = geom.openings[openingId];
+                if (!o || !d) return [];
+                return [
+                    {
+                        cut: [{ outer: d.cut, holes: [] }],
+                        sill: o.sillHeight,
+                        head: o.sillHeight + o.height,
+                    },
+                ];
+            });
+            return {
+                wall,
+                bbox: ringBBox(wall.outline),
+                outline: [{ outer: wall.outline, holes: [] }],
+                openings,
+            };
         });
+}
+
+/**
+ * Area (mm²) of `item` that stands in solid wall. An opening exempts its
+ * span of the wall only where the item's height range lies within the
+ * opening's, so a cabinet under a window sill still counts as in the wall.
+ */
+function solidOverlapArea(item: Item, sw: SolidWall): number {
+    const inWall = intersection(item.poly, sw.outline);
+    let total = 0;
+    for (const p of inWall) total += area(p);
+    if (total <= MIN_OVERLAP_AREA) return total;
+    for (const o of sw.openings) {
+        if (item.bottom < o.sill || item.top > o.head) continue;
+        total -= intersectionArea(inWall, o.cut);
+    }
+    return total;
+}
+
+function wallConflicts(
+    items: Item[],
+    doc: PlanDocument,
+    geom: DerivedPlan,
+    out: PlacementConflict[],
+): void {
+    const walls = solidWalls(doc, geom);
     for (const item of items) {
-        for (const { wall, bbox } of walls) {
-            if (!bboxOverlap(item.bbox, bbox)) continue;
-            // Walls are full height except half walls, which a raised item clears.
-            if (wall.kind === 'half' && item.bottom >= wall.height) continue;
-            const a = intersectionArea(item.poly, wall.pocheParts);
+        for (const sw of walls) {
+            if (!bboxOverlap(item.bbox, sw.bbox)) continue;
+            // A half wall is cleared by an item raised to its top.
+            if (sw.wall.kind === 'half' && item.bottom >= sw.wall.height) {
+                continue;
+            }
+            const a = solidOverlapArea(item, sw);
             if (a > MIN_OVERLAP_AREA) {
-                out.push(conflict('overlaps_wall', item.id, wall.id, a));
+                out.push(conflict('overlaps_wall', item.id, sw.wall.id, a));
             }
         }
     }
 }
 
+/** Sort-and-sweep on `bbox.min.x`; the smaller id is reported as `entityId`. */
 function itemConflicts(items: Item[], out: PlacementConflict[]): void {
-    for (let i = 0; i < items.length; i += 1) {
-        const a = items[i]!;
-        for (let j = i + 1; j < items.length; j += 1) {
-            const b = items[j]!;
+    const byX = [...items].sort(
+        (a, b) => a.bbox.min.x - b.bbox.min.x || cmp(a.id, b.id),
+    );
+    for (let i = 0; i < byX.length; i += 1) {
+        const a = byX[i]!;
+        for (let j = i + 1; j < byX.length; j += 1) {
+            const b = byX[j]!;
+            if (b.bbox.min.x >= a.bbox.max.x) break;
             if (!bboxOverlap(a.bbox, b.bbox)) continue;
             if (verticalOverlap(a, b.bottom, b.top) <= MIN_VERTICAL_OVERLAP) {
                 continue;
             }
-            const area = intersectionArea(a.poly, b.poly);
-            if (area > MIN_OVERLAP_AREA) {
-                out.push(conflict('overlaps_item', a.id, b.id, area));
+            const overlap = intersectionArea(a.poly, b.poly);
+            if (overlap > MIN_OVERLAP_AREA) {
+                const [first, second] = cmp(a.id, b.id) < 0 ? [a, b] : [b, a];
+                out.push(
+                    conflict('overlaps_item', first.id, second.id, overlap),
+                );
             }
         }
     }
@@ -355,7 +410,7 @@ export function computePlacementConflicts(
 ): PlacementConflict[] {
     const items = collectItems(doc, footprints);
     const out: PlacementConflict[] = [];
-    wallConflicts(items, geom, out);
+    wallConflicts(items, doc, geom, out);
     itemConflicts(items, out);
     doorConflicts(items, doc, geom, out);
     windowConflicts(items, doc, geom, out);

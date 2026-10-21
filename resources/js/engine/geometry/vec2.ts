@@ -115,8 +115,17 @@ export function sideOf(a: Vec2, b: Vec2, c: Vec2): -1 | 0 | 1 {
     return o < 0 ? 1 : -1;
 }
 
-/** Front vector of a placement/fixture rotated `deg` clockwise: `(−sin θ, cos θ)` (04 §2.1-9). */
+/**
+ * Front vector of a placement/fixture rotated `deg` clockwise: `(−sin θ, cos θ)`
+ * (04 §2.1-9). Exact at quarter turns (0/90/180/270), so axis-aligned
+ * footprints carry no trigonometric noise.
+ */
 export function frontVector(deg: number): Vec2 {
+    const d = normDeg(deg);
+    if (d === 0) return { x: 0, y: 1 };
+    if (d === 90) return { x: -1, y: 0 };
+    if (d === 180) return { x: 0, y: -1 };
+    if (d === 270) return { x: 1, y: 0 };
     return rot({ x: 0, y: 1 }, (deg * Math.PI) / 180);
 }
 

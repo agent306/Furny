@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { signedArea } from '../../geometry/polygon';
+import { intersectionArea } from '../../geometry/clip';
+import { pointInPolygon, signedArea } from '../../geometry/polygon';
 import { sideOf, type Vec2 } from '../../geometry/vec2';
 import {
     CONFLICT_KINDS,
@@ -7,17 +8,22 @@ import {
     doorSwingSectors,
     type PlacementConflict,
 } from '../conflicts';
+import { mulberry32 } from '../../testing/random';
 import { derivePlanGeometry } from '../derive';
 import { FIXTURE_LIBRARY } from '../fixtures';
-import type { FootprintProvider, FootprintSize } from '../footprint';
+import {
+    placementFootprint,
+    type FootprintProvider,
+    type FootprintSize,
+} from '../footprint';
 import type {
     Fixture,
     FurniturePlacement,
     Opening,
     PlanDocument,
 } from '../schema';
-import { makeRectPlan } from '../testing/fixtures';
-import { buildHdb3Room } from '../testing/referencePlans';
+import { emptyPlan, makeRectPlan } from '../testing/fixtures';
+import { buildBrochure2Bhk, buildHdb3Room } from '../testing/referencePlans';
 
 // makeRectPlan(5000, 4000, 230): top wall w1 runs (0,0)->(5000,0) with its
 // normal pointing up the screen, so the room lies on its right (-n) side.
@@ -31,6 +37,19 @@ const SIZES: Record<string, FootprintSize> = {
     wallCabinet: { width: 1800, depth: 350, height: 700 },
     sofa: { width: 2000, depth: 900, height: 850 },
     small: { width: 50, depth: 50, height: 750 },
+    cabinet: { width: 800, depth: 600, height: 900 },
+    wallCab: { width: 800, depth: 350, height: 700 },
+    inWindow: { width: 800, depth: 350, height: 800 },
+    doorFit: { width: 800, depth: 600, height: 750 },
+    tallDoor: { width: 800, depth: 600, height: 2200 },
+    slab: { width: 3000, depth: 900, height: 750 },
+    strip2500: { width: 2500, depth: 1, height: 750 },
+    strip2501: { width: 2501, depth: 1, height: 750 },
+    stripTall2500: { width: 2500, depth: 1, height: 1000 },
+    stripTall2501: { width: 2501, depth: 1, height: 1000 },
+    h900: { width: 800, depth: 600, height: 900 },
+    h901: { width: 800, depth: 600, height: 901 },
+    pair: { width: 700, depth: 600, height: 750 },
 };
 const provider: FootprintProvider = (id) => SIZES[id] ?? null;
 
@@ -97,6 +116,13 @@ function open(doc: PlanDocument, patch: Partial<Opening>): string {
     return id;
 }
 
+function placementRing(doc: PlanDocument, id: string): Vec2[] {
+    return placementFootprint(
+        doc.placements[id]!,
+        provider(doc.placements[id]!.designId)!,
+    ).corners;
+}
+
 function run(doc: PlanDocument): PlacementConflict[] {
     return computePlacementConflicts(doc, derivePlanGeometry(doc), provider);
 }
@@ -141,11 +167,85 @@ describe('wall overlap', () => {
         ]);
     });
 
-    it('lets a placement stand in a door opening that cuts the wall', () => {
+    it('lets an item that fits under the door head stand in a door opening', () => {
         const doc = makeRectPlan(5000, 4000, 230);
-        open(doc, { type: 'sliding' });
-        place(doc, 'small', 2500, -85);
+        const door = open(doc, { type: 'sliding' }); // x 2050..2950, 0..2100
+        const id = place(doc, 'doorFit', 2500, -85); // x 2100..2900, 200 mm into the wall
         expect(run(doc)).toEqual([]);
+        delete doc.openings[door];
+        expect(run(doc).map((c) => [c.kind, c.entityId, c.otherId])).toEqual([
+            ['overlaps_wall', id, TOP],
+        ]);
+    });
+
+    it('counts the part of an item outside the opening span as solid', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        open(doc, { type: 'sliding' }); // x 2050..2950
+        const id = place(doc, 'doorFit', 2800, -85); // x 2400..3200: 250 mm beyond the jamb
+        const result = run(doc);
+        expect(result.map((c) => [c.kind, c.entityId, c.otherId])).toEqual([
+            ['overlaps_wall', id, TOP],
+        ]);
+        expect(result[0]!.params.areaMm2).toBe(250 * 200);
+    });
+
+    it('treats the opening as solid for an item taller than the door head', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        open(doc, { type: 'sliding' }); // head at 2100
+        place(doc, 'tallDoor', 2500, -85); // 0..2200
+        expect(kinds(run(doc))).toEqual(['overlaps_wall']);
+    });
+
+    it('flags a floor cabinet pushed into the wall under a window sill', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        open(doc, {
+            kind: 'window',
+            type: 'casement',
+            width: 1500,
+            height: 1200,
+            sillHeight: 900,
+        });
+        const id = place(doc, 'cabinet', 2500, -85); // 0..900, sill at 900
+        expect(run(doc).map((c) => [c.kind, c.entityId, c.otherId])).toEqual([
+            ['overlaps_wall', id, TOP],
+        ]);
+    });
+
+    it('flags a wall cabinet that reaches above the window head', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        open(doc, {
+            kind: 'window',
+            type: 'casement',
+            width: 1500,
+            height: 1200,
+            sillHeight: 900,
+        });
+        const id = place(doc, 'wallCab', 2500, -85, { elevation: 1500 }); // 1500..2200 vs 900..2100
+        expect(
+            run(doc).filter((c) => c.kind === 'overlaps_wall'),
+        ).toMatchObject([{ entityId: id, otherId: TOP }]);
+    });
+
+    it('lets an item whose height range lies within the window range through', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        open(doc, {
+            kind: 'window',
+            type: 'casement',
+            width: 1500,
+            height: 1200,
+            sillHeight: 900,
+        });
+        place(doc, 'inWindow', 2500, -85, { elevation: 1000 }); // 1000..1800
+        expect(run(doc).filter((c) => c.kind === 'overlaps_wall')).toEqual([]);
+    });
+
+    it('lists every wall an item overlaps at a corner in wall-id order', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        const id = place(doc, 'wide', 300, 0); // x -300..900, y 0..600
+        expect(run(doc).map((c) => [c.kind, c.entityId, c.otherId])).toEqual([
+            ['overlaps_wall', id, 'w_0000000001'],
+            ['overlaps_wall', id, 'w_0000000004'],
+        ]);
     });
 
     it('checks fixtures too', () => {
@@ -164,8 +264,20 @@ describe('wall overlap', () => {
         doc.walls[TOP]!.kind = 'half';
         doc.walls[TOP]!.height = 1000;
         expect(kinds(run(doc))).toEqual([]);
-        doc.placements[id]!.elevation = 900;
+        doc.placements[id]!.elevation = 999;
         expect(kinds(run(doc))).toEqual(['overlaps_wall']);
+        doc.placements[id]!.elevation = 1000; // exactly at the wall top
+        expect(kinds(run(doc))).toEqual([]);
+    });
+
+    it('draws the line at exactly 2500 mm2 (2500 passes, 2501 conflicts)', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        const id = place(doc, 'strip2500', 2500, -1); // 2500 x 1 inside the wall
+        expect(run(doc)).toEqual([]);
+        doc.placements[id]!.designId = 'strip2501';
+        const result = run(doc);
+        expect(kinds(result)).toEqual(['overlaps_wall']);
+        expect(result[0]!.params.areaMm2).toBe(2501);
     });
 });
 
@@ -199,6 +311,28 @@ describe('item overlap', () => {
         expect(run(doc)).toEqual([]);
         doc.placements[other]!.y = 2396; // 4 mm x 900 mm = 3600 mm2
         expect(kinds(run(doc))).toEqual(['overlaps_item']);
+    });
+
+    it('draws the line at exactly 2500 mm2 (2500 passes, 2501 conflicts)', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        place(doc, 'slab', 2500, 1500); // x 1000..4000, y 1500..2400
+        const strip = place(doc, 'strip2500', 2500, 2399); // inside the slab
+        expect(run(doc)).toEqual([]);
+        doc.placements[strip]!.designId = 'strip2501';
+        expect(kinds(run(doc))).toEqual(['overlaps_item']);
+    });
+
+    it('orders the partners of one item by id even when the sweep meets them in another order', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        // sweep order by left edge: x_...1 (500), x_...3 (1000), x_...2 (2600)
+        const big = { x: 2500, y: 2000, width: 4000, depth: 2000 };
+        fix(doc, { id: 'x_0000000001', ...big });
+        fix(doc, { id: 'x_0000000002', x: 3000, y: 2000, width: 800 });
+        fix(doc, { id: 'x_0000000003', x: 1400, y: 2000, width: 800 });
+        expect(run(doc).map((c) => [c.kind, c.entityId, c.otherId])).toEqual([
+            ['overlaps_item', 'x_0000000001', 'x_0000000002'],
+            ['overlaps_item', 'x_0000000001', 'x_0000000003'],
+        ]);
     });
 
     it('ignores items whose vertical intervals are disjoint (wall cabinet above a counter)', () => {
@@ -296,6 +430,38 @@ describe('door swing', () => {
         expect(kinds(run(doc2))).toEqual(['blocks_door']);
     });
 
+    it.each([
+        ['right leaf', 2750],
+        ['left leaf', 2250],
+    ])(
+        'reports the larger leaf of a double door (%s dominates)',
+        (_label, x) => {
+            const doc = makeRectPlan(5000, 4000, 230);
+            const door = open(doc, { type: 'double_swing' }); // leaves 2050..2500 and 2500..2950
+            const id = place(doc, 'pair', x, 300);
+            const geom = derivePlanGeometry(doc);
+            const sectors = doorSwingSectors(doc, geom);
+            const ring = placementRing(doc, id);
+            const areas = sectors.map((s) =>
+                intersectionArea(
+                    [{ outer: ring, holes: [] }],
+                    [{ outer: s.polygon, holes: [] }],
+                ),
+            );
+            expect(Math.min(...areas)).toBeGreaterThan(2500);
+            expect(Math.max(...areas) - Math.min(...areas)).toBeGreaterThan(
+                5000,
+            );
+            const result = run(doc);
+            expect(result.map((c) => [c.kind, c.entityId, c.otherId])).toEqual([
+                ['blocks_door', id, door],
+            ]);
+            expect(result[0]!.params.areaMm2).toBe(
+                Math.round(Math.max(...areas)),
+            );
+        },
+    );
+
     it('does not flag sliding doors', () => {
         const doc = makeRectPlan(5000, 4000, 230);
         open(doc, { type: 'sliding' });
@@ -347,6 +513,49 @@ describe('window', () => {
         window(doc);
         place(doc, 'tall', 2500, 115 + 290);
         expect(kinds(run(doc))).toEqual(['blocks_window']);
+    });
+
+    it('does not count touching vertical ranges (item top at the sill)', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        window(doc); // sill 900
+        const id = place(doc, 'h900', 2500, 115);
+        expect(run(doc)).toEqual([]);
+        doc.placements[id]!.designId = 'h901';
+        expect(kinds(run(doc))).toEqual(['blocks_window']);
+    });
+
+    it('draws the line at exactly 2500 mm2 of the clear zone', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        open(doc, {
+            kind: 'window',
+            type: 'casement',
+            width: 3000, // x 1000..4000; the clear zone reaches y = 415
+            height: 1200,
+            sillHeight: 900,
+        });
+        // a strip 1 mm deep that sticks 1 mm into the zone: area = width
+        const id = place(doc, 'stripTall2500', 2500, 414);
+        expect(run(doc)).toEqual([]);
+        doc.placements[id]!.designId = 'stripTall2501';
+        expect(kinds(run(doc))).toEqual(['blocks_window']);
+    });
+
+    it('raises blocks_window for a french window as well', () => {
+        const doc = makeRectPlan(5000, 4000, 230);
+        const win = open(doc, {
+            kind: 'window',
+            type: 'french_window',
+            offset: 2500,
+            width: 1200,
+            height: 2100,
+            sillHeight: 0,
+            hinge: 'start',
+            swing: 'left', // swings outside; the room side stays clear of sectors
+        });
+        const id = place(doc, 'wide', 2500, 115);
+        expect(run(doc).map((c) => [c.kind, c.entityId, c.otherId])).toEqual([
+            ['blocks_window', id, win],
+        ]);
     });
 
     it('ignores an item beside the window', () => {
@@ -472,15 +681,110 @@ describe('doorSwingSectors', () => {
             expect(s.polygon).toHaveLength(18);
             expect(signedArea(s.polygon)).toBeGreaterThan(0);
         }
-        expect(at(sectors[0]!.polygon[0]!, 2050, -115)).toBe(true);
-        expect(at(sectors[1]!.polygon[0]!, 2950, -115)).toBe(true);
-        for (const s of sectors) {
-            for (const p of s.polygon.slice(1)) {
+        // leaf 1 hinges at u0 and sweeps toward the middle; leaf 2 mirrors it
+        const pinned = [
+            { hinge: [2050, -115], closed: [2500, -115], open: [2050, -565] },
+            { hinge: [2950, -115], closed: [2500, -115], open: [2950, -565] },
+        ] as const;
+        sectors.forEach((s, i) => {
+            const leaf = pinned[i]!;
+            const poly = s.polygon;
+            expect(at(poly[0]!, leaf.hinge[0], leaf.hinge[1])).toBe(true);
+            const ends = [poly[1]!, poly[17]!];
+            expect(
+                ends.some((p) => at(p, leaf.closed[0], leaf.closed[1])),
+            ).toBe(true);
+            expect(ends.some((p) => at(p, leaf.open[0], leaf.open[1]))).toBe(
+                true,
+            );
+            // the leaf stays within its own half of the opening
+            const [lo, hi] = i === 0 ? [2050, 2500] : [2500, 2950];
+            for (const p of poly) {
+                expect(p.x).toBeGreaterThanOrEqual(lo - 1e-6);
+                expect(p.x).toBeLessThanOrEqual(hi + 1e-6);
+            }
+            for (const p of poly.slice(1)) {
                 expect(
-                    Math.hypot(p.x - s.polygon[0]!.x, p.y - s.polygon[0]!.y),
+                    Math.hypot(p.x - poly[0]!.x, p.y - poly[0]!.y),
                 ).toBeCloseTo(450, 6);
             }
-        }
+        });
+    });
+
+    describe('on a wall at 30 degrees', () => {
+        // wall (0,0)->(4330,2500): length 5000, d = (cos30, sin30), n = (d.y, -d.x)
+        const L = Math.hypot(4330, 2500);
+        const d = { x: 4330 / L, y: 2500 / L };
+        const n = { x: d.y, y: -d.x };
+        const wallDoc = (opening: Partial<Opening>): PlanDocument => {
+            const doc = emptyPlan();
+            doc.nodes['n_0000000001'] = { id: 'n_0000000001', x: 0, y: 0 };
+            doc.nodes['n_0000000002'] = {
+                id: 'n_0000000002',
+                x: 4330,
+                y: 2500,
+            };
+            doc.walls[TOP] = {
+                id: TOP,
+                a: 'n_0000000001',
+                b: 'n_0000000002',
+                thickness: 230,
+                height: 2600,
+                kind: 'exterior',
+                justification: 'center',
+                material: 'brick',
+                colorHex: null,
+            };
+            open(doc, opening);
+            return doc;
+        };
+        const point = (u: number, across: number): Vec2 => ({
+            x: u * d.x + across * n.x,
+            y: u * d.y + across * n.y,
+        });
+        const close = (p: Vec2, q: Vec2): void => {
+            expect(p.x).toBeCloseTo(q.x, 6);
+            expect(p.y).toBeCloseTo(q.y, 6);
+        };
+        const u0 = 2500 - 450;
+        const u1 = 2500 + 450;
+
+        it.each([
+            ['start', 'left', u0, 1],
+            ['start', 'right', u0, -1],
+            ['end', 'left', u1, 1],
+            ['end', 'right', u1, -1],
+        ] as const)(
+            'hinge %s swing %s sweeps from the wall to the normal',
+            (hinge, swing, hingeU, sign) => {
+                const doc = wallDoc({
+                    offset: 2500,
+                    hinge,
+                    swing,
+                });
+                const polygon = sectorsOf(doc)[0]!.polygon;
+                const toward = hinge === 'start' ? 1 : -1;
+                const centre = point(hingeU, sign * 115);
+                close(polygon[0]!, centre);
+                const closedEnd = point(hingeU + toward * 900, sign * 115);
+                const openEnd = point(hingeU, sign * (115 + 900));
+                const ends = [polygon[1]!, polygon[17]!];
+                expect(
+                    ends.some(
+                        (p) =>
+                            Math.hypot(p.x - closedEnd.x, p.y - closedEnd.y) <
+                            1e-6,
+                    ),
+                ).toBe(true);
+                expect(
+                    ends.some(
+                        (p) =>
+                            Math.hypot(p.x - openEnd.x, p.y - openEnd.y) < 1e-6,
+                    ),
+                ).toBe(true);
+                expect(signedArea(polygon)).toBeGreaterThan(0);
+            },
+        );
     });
 
     it('gives a french window two half-width leaves (04 5.9-3)', () => {
@@ -528,26 +832,26 @@ describe('doorSwingSectors', () => {
     });
 });
 
-describe('HDB reference plan', () => {
-    it('has one sector per swing door, each on the side the door opens into', () => {
-        const doc = buildHdb3Room();
-        const geom = derivePlanGeometry(doc);
-        const swingDoors = Object.values(doc.openings)
-            .filter(
-                (o) => o.type === 'single_swing' || o.type === 'main_entrance',
-            )
-            .map((o) => o.id)
-            .sort();
-        expect(swingDoors).toHaveLength(8);
+describe.each([
+    ['HDB 3-room', buildHdb3Room, 8],
+    ['brochure 2BHK', buildBrochure2Bhk, 7],
+])('%s reference plan door swings', (_name, build, doorCount) => {
+    const doc = build();
+    const geom = derivePlanGeometry(doc);
+    const swingDoors = Object.values(doc.openings)
+        .filter((o) => o.type === 'single_swing' || o.type === 'main_entrance')
+        .map((o) => o.id)
+        .sort();
 
+    it('has one sector per swing door, on the side the door opens into', () => {
+        expect(swingDoors).toHaveLength(doorCount);
         const sectors = doorSwingSectors(doc, geom);
         expect(sectors.map((s) => s.openingId)).toEqual(swingDoors);
 
         for (const sector of sectors) {
             const opening = doc.openings[sector.openingId]!;
             const derived = geom.openings[sector.openingId]!;
-            const wall = geom.walls[opening.wallId]!;
-            const [a, b] = wall.centerline;
+            const [a, b] = geom.walls[opening.wallId]!.centerline;
             expect(sector.polygon).toHaveLength(18);
             expect(signedArea(sector.polygon)).toBeGreaterThan(0);
             // swing 'left' is the +normal half-plane (04 2.1-3)
@@ -557,47 +861,59 @@ describe('HDB reference plan', () => {
         }
     });
 
-    it('opens into the room on the swing side whenever there is one', () => {
-        const doc = buildHdb3Room();
-        const geom = derivePlanGeometry(doc);
-        let checked = 0;
+    it('opens every swing door into a room, with the whole sector inside it', () => {
         for (const sector of doorSwingSectors(doc, geom)) {
             const opening = doc.openings[sector.openingId]!;
             const derived = geom.openings[sector.openingId]!;
             const wall = geom.walls[opening.wallId]!;
             const key =
                 derived.swingSign === 1 ? wall.leftRoomKey : wall.rightRoomKey;
-            if (key === null) continue;
-            const room = geom.rooms[geom.roomIndexByFaceKey[key]!]!;
-            const hinge = sector.polygon[0]!;
-            const swept = sector.polygon.slice(1);
-            const mid = swept[Math.floor(swept.length / 2)]!;
-            const probe = {
-                x: (hinge.x + mid.x) / 2,
-                y: (hinge.y + mid.y) / 2,
-            };
-            expect(
-                pointInside(probe, room.polygon),
-                `${sector.openingId} probe ${probe.x},${probe.y}`,
-            ).toBe(true);
-            checked += 1;
+            expect(key, `${sector.openingId} swings outside`).not.toBeNull();
+            const room = geom.rooms[geom.roomIndexByFaceKey[key!]!]!;
+            for (const p of sector.polygon) {
+                expect(
+                    pointInPolygon(
+                        p,
+                        { outer: room.polygon, holes: room.holes },
+                        1,
+                    ),
+                    `${sector.openingId} point ${p.x},${p.y}`,
+                ).not.toBe('outside');
+            }
         }
-        // the main entrance (swing left, hinge start) opens to the outside, which has no room
-        expect(checked).toBe(7);
+    });
+
+    it('raises no conflict for an empty plan', () => {
+        expect(computePlacementConflicts(doc, geom, () => null)).toEqual([]);
     });
 });
 
-function pointInside(pt: Vec2, ring: Vec2[]): boolean {
-    let inside = false;
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-        const pi = ring[i]!;
-        const pj = ring[j]!;
-        if (
-            pi.y > pt.y !== pj.y > pt.y &&
-            pt.x < ((pj.x - pi.x) * (pt.y - pi.y)) / (pj.y - pi.y) + pi.x
-        ) {
-            inside = !inside;
+describe('scale', () => {
+    it('handles 1000 random placements in the HDB plan quickly and deterministically', () => {
+        const doc = buildHdb3Room();
+        const geom = derivePlanGeometry(doc);
+        const random = mulberry32(2026);
+        const designs = Object.keys(SIZES);
+        for (let i = 0; i < 1000; i += 1) {
+            place(
+                doc,
+                designs[Math.floor(random() * designs.length)]!,
+                Math.round(random() * 11000),
+                Math.round(random() * 8000),
+                {
+                    id: `f_${String(i + 1).padStart(10, '0')}`,
+                    rotation: Math.floor(random() * 4) * 90,
+                    elevation: Math.floor(random() * 3) * 700,
+                },
+            );
         }
-    }
-    return inside;
-}
+        const started = performance.now();
+        const first = computePlacementConflicts(doc, geom, provider);
+        const elapsed = performance.now() - started;
+        expect(first.length).toBeGreaterThan(100);
+        expect(new Set(first.map((c) => c.kind)).size).toBe(4);
+        expect(computePlacementConflicts(doc, geom, provider)).toEqual(first);
+        // generous bound: about 20x the measured time on CI hardware
+        expect(elapsed).toBeLessThan(2000);
+    });
+});

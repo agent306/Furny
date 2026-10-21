@@ -142,6 +142,15 @@ describe('frontVector / rotationFromFront (04 2.1-9)', () => {
         expect(rotationFromFront(v(1, 0))).toBe(270);
     });
 
+    it('is exact at quarter turns', () => {
+        expect(frontVector(0)).toEqual({ x: 0, y: 1 });
+        expect(frontVector(90)).toEqual({ x: -1, y: 0 });
+        expect(frontVector(180)).toEqual({ x: 0, y: -1 });
+        expect(frontVector(270)).toEqual({ x: 1, y: 0 });
+        expect(frontVector(360)).toEqual({ x: 0, y: 1 });
+        expect(frontVector(-90)).toEqual({ x: 1, y: 0 });
+    });
+
     it('rotationFromFront inverts frontVector for 0..359', () => {
         for (let d = 0; d < 360; d++) {
             const back = rotationFromFront(frontVector(d));

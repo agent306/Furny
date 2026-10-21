@@ -96,11 +96,11 @@ describe('placementFootprint', () => {
             [1300, 1000],
         ],
     ] as const)(
-        'rotates the corners clockwise by %i degrees',
+        'rotates the corners clockwise by %i degrees (exactly)',
         (rotation, corners, center) => {
             const fp = placementFootprint(placement({ rotation }), SIZE);
-            corners.forEach((c, i) => expectPoint(fp.corners[i]!, [...c]));
-            expectPoint(fp.center, [...center]);
+            expect(fp.corners).toEqual(corners.map(([x, y]) => ({ x, y })));
+            expect(fp.center).toEqual({ x: center[0], y: center[1] });
         },
     );
 
