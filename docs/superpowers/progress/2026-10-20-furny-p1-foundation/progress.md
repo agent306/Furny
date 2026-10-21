@@ -228,3 +228,5 @@ Carry P7: register an account.deletion_steps step that cancels submitted-then-re
 Task 35: minor (deferred): RestoreDeletedAccount checks outside a lock (re-read with lockForUpdate in the transaction); guardActiveOrders outside the transaction; AnonymiseUser gate only at route; media files deleted inside the transaction (a later rollback leaves rows without files).
 Note: browser test RecoveryPagesTest hit net::ERR_NO_BUFFER_SPACE once (Windows socket exhaustion; passes on rerun).
 Task 35: complete (commits 57c2d49..fcea159, review clean)
+Task 36: dispatched (base f78701a, sonnet ae6268ac750d3db35); STOPPED mid-implementation at user request. Partial uncommitted work (bootstrap/app.php, routes/customer.php, tests/Feature/Customer/) saved in `git stash` "P1 T36 partial (stopped by user request 2026-10-22)" — next session may pop it or start Task 36 fresh.
+STOP: user requested stop (2026-10-22). Resume P1 at Task 36 (brief + carries committed).
