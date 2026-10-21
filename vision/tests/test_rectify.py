@@ -24,31 +24,7 @@ from app.utils.geometry import (
     seg_angle_deg,
 )
 from app.utils.images import encode_jpeg, encode_png, encode_webp, resize_long_edge
-
-CANVAS = (1600, 1300)  # width, height
-CORNERS = np.array([(180, 150), (1450, 210), (1400, 1180), (140, 1100)], dtype=np.float32)
-
-
-def grid_drawing(w: int = 1200, h: int = 900) -> np.ndarray:
-    """White page with a black 4 px grid of rectangles."""
-    page = np.full((h, w, 3), 255, np.uint8)
-    cv2.rectangle(page, (30, 30), (w - 31, h - 31), (0, 0, 0), 4)
-    for x in range(30, w - 30, 235):
-        cv2.line(page, (x, 30), (x, h - 31), (0, 0, 0), 4)
-    for y in range(30, h - 30, 215):
-        cv2.line(page, (30, y), (w - 31, y), (0, 0, 0), 4)
-    return page
-
-
-def photo_of(
-    page: np.ndarray, corners: np.ndarray = CORNERS, canvas: tuple[int, int] = CANVAS, grey: int = 128
-):
-    h, w = page.shape[:2]
-    src = np.array([(0, 0), (w - 1, 0), (w - 1, h - 1), (0, h - 1)], dtype=np.float32)
-    m = cv2.getPerspectiveTransform(src, corners)
-    return cv2.warpPerspective(
-        page, m, canvas, flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT, borderValue=(grey, grey, grey)
-    )
+from tests.support.synth import CANVAS, CORNERS, grid_drawing, photo_of
 
 
 def test_photo_quad_detected_and_rectified() -> None:

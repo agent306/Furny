@@ -8,7 +8,7 @@ from app.api.errors import VisionError
 from app.pipeline.context import PipelineContext
 from app.pipeline.normalize import NormalizedPage, estimate_skew_deg, normalize
 from app.schemas.meta import SourceKind
-from tests.test_rectify import CORNERS, grid_drawing, photo_of
+from tests.support.synth import CORNERS, grid_drawing, photo_of
 
 
 class _NoIO:
