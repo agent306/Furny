@@ -286,7 +286,7 @@ describe('a callback that cannot be used', function (): void {
         $response->assertRedirect(match ($intent) {
             'login' => route('login'),
             'invitation' => $url,
-            default => route('customer.dashboard'),
+            default => route('customer.account.security'),
         });
         $page = match ($intent) {
             'invitation' => $url,
@@ -508,7 +508,7 @@ describe('intent login', function (): void {
             expect(googleSessionIsRegistered($current))->toBeTrue();
             googleAnswers(googleProfile(id: '444', email: 'asha@example.com'));
 
-            ($this->callback)('link', as: $user)->assertRedirect(route('customer.dashboard'));
+            ($this->callback)('link', as: $user)->assertRedirect(route('customer.account.security'));
 
             $this->assertAuthenticatedAs($user);
             expect($user->refresh()->google_id)->toBe('444')
@@ -810,7 +810,7 @@ describe('intent link', function (): void {
         $user = User::factory()->create(['email' => 'asha@example.com']);
         googleAnswers(googleProfile(id: '444', email: 'Asha@example.com'));
 
-        ($this->callback)('link', as: $user)->assertRedirect(route('customer.dashboard'));
+        ($this->callback)('link', as: $user)->assertRedirect(route('customer.account.security'));
 
         expect($user->refresh()->google_id)->toBe('444');
         $audit = Activity::query()->where('event', 'auth.google_linked')->sole();
@@ -830,7 +830,7 @@ describe('intent link', function (): void {
         $user = User::factory()->create(['email' => 'asha@example.com', 'google_id' => '444']);
         googleAnswers(googleProfile(id: '444'));
 
-        ($this->callback)('link', as: $user)->assertRedirect(route('customer.dashboard'));
+        ($this->callback)('link', as: $user)->assertRedirect(route('customer.account.security'));
 
         expect($user->refresh()->google_id)->toBe('444')
             ->and(Activity::query()->where('event', 'auth.google_linked')->count())->toBe(0);
@@ -841,7 +841,7 @@ describe('intent link', function (): void {
         $user = User::factory()->create(['email' => 'asha@example.com']);
         googleAnswers(googleProfile(id: '444'));
 
-        ($this->callback)('link', as: $user)->assertRedirect(route('customer.dashboard'));
+        ($this->callback)('link', as: $user)->assertRedirect(route('customer.account.security'));
 
         expect($user->refresh()->google_id)->toBeNull()
             ->and(($this->flashOf)('customer.dashboard'))->toBe(trans_icu('auth.errors.google_in_use'));
@@ -874,7 +874,7 @@ describe('intent link', function (): void {
         $user = User::factory()->phoneOnly()->create();
         googleAnswers(googleProfile(id: '444', email: 'Maya@Example.com'));
 
-        ($this->callback)('link', as: $user)->assertRedirect(route('customer.dashboard'));
+        ($this->callback)('link', as: $user)->assertRedirect(route('customer.account.security'));
 
         expect($user->refresh()->email)->toBe('maya@example.com')
             ->and($user->email_verified_at)->not->toBeNull()
@@ -895,11 +895,11 @@ describe('intent link', function (): void {
             ->and(($this->flashOf)('customer.dashboard'))->toBe(trans_icu('auth.errors.email_unavailable'));
     })->with(['an active user' => 'customer', 'a user scheduled for deletion' => 'pendingDeletion']);
 
-    it('sends staff back to their dashboard', function (): void {
+    it('sends staff back to their security page', function (): void {
         $staff = User::factory()->support()->create(['email' => 'ravi@example.com']);
         googleAnswers(googleProfile(id: '444', email: 'ravi@example.com'));
 
-        ($this->callback)('link', as: $staff)->assertRedirect(route('admin.dashboard'));
+        ($this->callback)('link', as: $staff)->assertRedirect(route('admin.account.security'));
 
         expect($staff->refresh()->google_id)->toBe('444');
     });
@@ -911,7 +911,7 @@ describe('intent link', function (): void {
 
         $this->actingAs($other)->withSession(['oauth.intent' => 'link', 'oauth.user' => $starter->getKey()])
             ->get(route('auth.google.callback'))
-            ->assertRedirect(route('customer.dashboard'));
+            ->assertRedirect(route('customer.account.security'));
 
         expect($other->refresh()->google_id)->toBeNull()
             ->and($this->get(route('customer.dashboard'), InertiaRequest::headers())->json('flash.error'))->toBe(trans_icu('auth.errors.oauth_state_invalid'));
@@ -931,7 +931,7 @@ describe('intent link', function (): void {
 
         $this->actingAs($user)->withSession(['oauth.intent' => 'link', 'oauth.user' => $user->getKey()])
             ->get(route('auth.google.callback', ['error' => 'access_denied']))
-            ->assertRedirect(route('customer.dashboard'));
+            ->assertRedirect(route('customer.account.security'));
 
         expect($this->get(route('customer.dashboard'), InertiaRequest::headers())->json('flash.error'))->toBe(trans_icu('auth.errors.oauth_cancelled'));
     });
@@ -982,7 +982,7 @@ describe('intent link', function (): void {
             $user = User::factory()->create(['email' => 'asha@example.com']);
             googleIsNotAsked();
 
-            ($this->callback)('link', $this->aged, as: $user)->assertRedirect(route('customer.dashboard'));
+            ($this->callback)('link', $this->aged, as: $user)->assertRedirect(route('customer.account.security'));
 
             expect($user->refresh()->google_id)->toBeNull()
                 ->and($this->get(route('customer.dashboard'), InertiaRequest::headers())->json('flash.error'))->toBe(trans_icu('auth.errors.recent_auth_required'));
@@ -1182,7 +1182,7 @@ describe('intent reauthenticate', function (): void {
         googleAnswers(googleProfile(id: 'another-google-id'));
 
         ($this->callback)('reauthenticate', ['auth.login_at' => now()->subHours(3)->getTimestamp()], as: $user)
-            ->assertRedirect(route('customer.dashboard'));
+            ->assertRedirect(route('customer.account.security'));
 
         expect(session(RecentAuthentication::CONFIRMED_KEY))->toBeNull()
             ->and(($this->flashOf)('customer.dashboard'))->toBe(trans_icu('auth.errors.google_email_mismatch'));
@@ -1205,7 +1205,7 @@ describe('intent reauthenticate', function (): void {
 
         $this->actingAs($other)->withSession(['oauth.intent' => 'reauthenticate', 'oauth.user' => $starter->getKey()])
             ->get(route('auth.google.callback'))
-            ->assertRedirect(route('customer.dashboard'));
+            ->assertRedirect(route('customer.account.security'));
 
         expect(session(RecentAuthentication::CONFIRMED_KEY))->toBeNull();
     });

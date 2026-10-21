@@ -24,7 +24,6 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Laravel\Socialite\AbstractUser;
@@ -413,11 +412,9 @@ final class GoogleController extends Controller
         return $path === null ? route('login') : url()->to($path);
     }
 
-    /** The security page of the user's app; the dashboard until that page exists. */
+    /** The security page of the user's app (Task 34). */
     private function securityPage(User $user): string
     {
-        $name = $user->isStaff() ? 'admin.account.security' : 'customer.account.security';
-
-        return route(Route::has($name) ? $name : ($user->isStaff() ? 'admin.dashboard' : 'customer.dashboard'));
+        return route($user->isStaff() ? 'admin.account.security' : 'customer.account.security');
     }
 }

@@ -272,7 +272,12 @@ function chooseAppearance(value: unknown): void {
             </div>
         </FormSection>
 
+        <!-- Above the phone tab bar of the customer app (h-16 and the safe-area inset). -->
         <StickyActionBar
+            :class="
+                audience === 'customer' &&
+                'max-md:bottom-[calc(4rem+env(safe-area-inset-bottom))]'
+            "
             :dirty="form.isDirty"
             :processing="form.processing"
             :form="FORM_ID"
