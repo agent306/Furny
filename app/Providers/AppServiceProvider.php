@@ -47,19 +47,27 @@ final class AppServiceProvider extends ServiceProvider
         $this->configurePulseUsers();
     }
 
+    /** Set once the CSP warning has been given in this PHP process (boot runs again for every request under php-fpm workers). */
+    private static bool $cspWarningGiven = false;
+
     /**
      * config/security.php drops AWS/Reverb origins that are not plain origins (they would be pasted into the
-     * Content-Security-Policy); it cannot log, so the warning is given here, once per process.
+     * Content-Security-Policy); it cannot log, so the warning is given here, at most once per PHP process.
+     * Under php-fpm that is once per worker, not once per request.
      */
     private function warnWhenCspOriginsAreRejected(): void
     {
         $variables = (array) config('security.csp.rejected', []);
 
-        if ($variables !== []) {
-            Log::warning('Ignored environment values that are not plain origins; the CSP does not include them.', [
-                'variables' => array_values($variables),
-            ]);
+        if ($variables === [] || self::$cspWarningGiven) {
+            return;
         }
+
+        self::$cspWarningGiven = true;
+
+        Log::warning('Ignored environment values that are not plain origins; the CSP does not include them.', [
+            'variables' => array_values($variables),
+        ]);
     }
 
     /** Behind Traefik the app is always reached over HTTPS in production (13 §12.8). */

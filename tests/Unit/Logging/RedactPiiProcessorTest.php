@@ -72,7 +72,8 @@ describe('sensitive keys are matched by whole words, not substrings', function (
         expect(redact('x', [$key => 'v'])->context[$key])->toBe('[redacted]');
     })->with([
         'code', 'codes', 'otp', 'otp_code', 'verification_code', 'recovery_codes', 'promo_code', 'two-factor-code', 'accessToken',
-        'apiKey', 'apikey', 'API_KEY', 'api-key', 'X-Api-Key', 'password', 'passwords', 'new_password', 'currentPassword',
+        'apiKey', 'apikey', 'API_KEY', 'api-key', 'X-Api-Key',
+        'accesstoken', 'authtoken', 'apitoken', 'csrftoken', 'sessionid', 'clientsecret', 'secretkey', 'apisecret', 'xsrf_token', 'passwd', 'userpassword', 'Cookies', 'password', 'passwords', 'new_password', 'currentPassword',
         'token', 'remember_token', 'secret', 'client_secret', 'authorization', 'cookie', 'set-cookie', 'session', 'session_id', 'sessionId',
     ]);
 
@@ -80,7 +81,7 @@ describe('sensitive keys are matched by whole words, not substrings', function (
         expect(redact('x', [$key => 'v'])->context[$key])->toBe('v');
     })->with([
         'status_code', 'http_code', 'statusCode', 'country_code', 'error_code', 'response_code', 'exit_code', 'currency_code',
-        'postal_code', 'zip_code', 'language_code', 'encoded', 'decoder', 'keyboard', 'tokenizer', 'orderNumber', 'count', 'key',
+        'postal_code', 'zip_code', 'language_code', 'encoded', 'decoder', 'keyboard', 'footprint', 'hotpot', 'orderNumber', 'count', 'key',
     ]);
 });
 

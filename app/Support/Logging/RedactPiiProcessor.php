@@ -37,8 +37,15 @@ final class RedactPiiProcessor implements ProcessorInterface
 
     private const int MAX_DEPTH = 6;
 
-    /** Words that make a key sensitive wherever they sit in it (`new_password`, `accessToken`, `X-Api-Key`). */
-    private const array SENSITIVE_WORDS = ['password', 'passwd', 'token', 'secret', 'otp', 'authorization', 'cookie', 'session', 'apikey'];
+    /**
+     * Secret words (13 §16 rule 2): a key containing one anywhere is sensitive, spelled however the caller
+     * joins the words (`accesstoken`, `clientSecret`, `X-Api-Key`, `sessionid`). Compared on the key with
+     * everything but letters and digits removed.
+     */
+    private const array SECRET_SUBSTRINGS = ['password', 'passwd', 'token', 'secret', 'authorization', 'cookie', 'session', 'apikey'];
+
+    /** Short or ambiguous words: sensitive only as a whole word of the key (`otp_code`, but not `footprint`). */
+    private const array SECRET_WORDS = ['otp'];
 
     /** `code` is sensitive (`otp_code`, `recovery_codes`) unless a word before it says what kind of code it is. */
     private const array HARMLESS_CODE_QUALIFIERS = [
@@ -62,20 +69,25 @@ final class RedactPiiProcessor implements ProcessorInterface
         return preg_replace_callback(self::PHONE_OR_TIMESTAMP, self::maskPhone(...), $text) ?? $text;
     }
 
-    /** True when a context key names a secret. Matching is by whole words: `status_code` is fine, `otp_code` is not. */
+    /**
+     * True when a context key names a secret. `token`, `secret`, `password` and the like match anywhere in
+     * the key; `otp` and `code` only as whole words, so `status_code` is fine and `otp_code` is not.
+     */
     public static function isSensitiveKey(string $key): bool
     {
         $snake = strtolower((string) preg_replace('/(?<=[a-z0-9])(?=[A-Z])/', '_', $key));
+        $flat = (string) preg_replace('/[^a-z0-9]/', '', $snake);
+
+        foreach (self::SECRET_SUBSTRINGS as $secret) {
+            if (str_contains($flat, $secret)) {
+                return true;
+            }
+        }
+
         $words = array_values(array_filter(preg_split('/[^a-z0-9]+/', $snake) ?: []));
 
         foreach ($words as $index => $word) {
-            $singular = rtrim($word, 's');
-
-            if (in_array($word, self::SENSITIVE_WORDS, true) || in_array($singular, self::SENSITIVE_WORDS, true)) {
-                return true;
-            }
-
-            if ($word === 'api' && ($words[$index + 1] ?? null) === 'key') {
+            if (in_array($word, self::SECRET_WORDS, true) || in_array(rtrim($word, 's'), self::SECRET_WORDS, true)) {
                 return true;
             }
 

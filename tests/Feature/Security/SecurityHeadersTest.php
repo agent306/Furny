@@ -325,6 +325,13 @@ describe('origins from the environment cannot inject CSP directives', function (
         'reverb host, directive' => ['REVERB_HOST', 'ws.example.com; script-src *', 'reverb_host'],
         'reverb host, wildcard' => ['REVERB_HOST', '*.example.com', 'reverb_host'],
         'reverb host, scheme' => ['REVERB_HOST', 'https://ws.example.com', 'reverb_host'],
+        'reverb host, trailing newline' => ['REVERB_HOST', "ws.example.com\n", 'reverb_host'],
+        'reverb host, leading newline' => ['REVERB_HOST', "\nws.example.com", 'reverb_host'],
+        'reverb host, newline inside' => ['REVERB_HOST', "ws.example.com\nscript-src *", 'reverb_host'],
+        'reverb port, trailing newline' => ['REVERB_PORT', "8080\n", 'reverb_port'],
+        'private url, trailing newline' => ['AWS_URL', "https://files.example.com\n", 's3_private_origin'],
+        'private url, newline after host' => ['AWS_URL', "https://files.example.com\nscript-src *", 's3_private_origin'],
+        'public url, trailing newline' => ['AWS_PUBLIC_URL', "https://pub.example.com\n", 's3_public_origin'],
         'reverb host, space' => ['REVERB_HOST', 'ws.example.com *', 'reverb_host'],
         'reverb port, text' => ['REVERB_PORT', '443; script-src *', 'reverb_port'],
         'reverb port, out of range' => ['REVERB_PORT', '70000', 'reverb_port'],
@@ -361,10 +368,21 @@ describe('origins from the environment cannot inject CSP directives', function (
         expect($csp)->not->toContain('*')->not->toContain('wss://')->and(substr_count($csp, 'script-src'))->toBe(1);
     });
 
-    it('warns once at boot, naming the variables but not their values', function (): void {
+    /** The warning is given once per PHP process; each test starts from a process that has not given it. */
+    function resetCspWarning(): void
+    {
+        (new ReflectionProperty(AppServiceProvider::class, 'cspWarningGiven'))->setValue(null, false);
+    }
+
+    beforeEach(fn () => resetCspWarning());
+    afterEach(fn () => resetCspWarning());
+
+    it('warns once per process, naming the variables but not their values', function (): void {
         config(['security.csp.rejected' => ['AWS_URL', 'REVERB_HOST']]);
         Log::spy();
 
+        // Boot runs again for every request in a php-fpm worker.
+        (new AppServiceProvider($this->app))->boot();
         (new AppServiceProvider($this->app))->boot();
 
         Log::shouldHaveReceived('warning')->once()->withArgs(

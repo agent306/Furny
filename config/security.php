@@ -45,10 +45,10 @@ foreach ($candidates as $key => [$variable, $url, $hostPrefix]) {
     if (
         ! is_array($parts)
         || ! in_array($parts['scheme'] ?? '', ['http', 'https'], true)
-        || preg_match('/^[A-Za-z0-9.-]+$/', $host) !== 1
+        || preg_match('/\A[A-Za-z0-9.-]+\z/', $host) !== 1
         || isset($parts['user']) || isset($parts['pass'])
         || preg_match('/[\s;,*]/', $url) === 1
-        || preg_match('~^https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:[/?#]|$)~', $url) !== 1
+        || preg_match('~\Ahttps?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:[/?#]|\z)~', $url) !== 1
     ) {
         $rejected[] = $variable;
 
@@ -61,7 +61,7 @@ foreach ($candidates as $key => [$variable, $url, $hostPrefix]) {
 $reverbHost = env('REVERB_HOST');
 $reverbPort = env('REVERB_PORT');
 
-if (! is_string($reverbHost) || preg_match('/^[A-Za-z0-9.-]+$/', $reverbHost) !== 1) {
+if (! is_string($reverbHost) || preg_match('/\A[A-Za-z0-9.-]+\z/', $reverbHost) !== 1) {
     if (is_string($reverbHost) && trim($reverbHost) !== '') {
         $rejected[] = 'REVERB_HOST';
     }
@@ -69,7 +69,7 @@ if (! is_string($reverbHost) || preg_match('/^[A-Za-z0-9.-]+$/', $reverbHost) !=
     $reverbHost = null;
 }
 
-if (is_string($reverbPort) && preg_match('/^[0-9]{1,5}$/', $reverbPort) === 1 && (int) $reverbPort >= 1 && (int) $reverbPort <= 65535) {
+if (is_string($reverbPort) && preg_match('/\A[0-9]{1,5}\z/', $reverbPort) === 1 && (int) $reverbPort >= 1 && (int) $reverbPort <= 65535) {
     $reverbPort = (int) $reverbPort;
 } else {
     if (is_string($reverbPort) && trim($reverbPort) !== '') {
