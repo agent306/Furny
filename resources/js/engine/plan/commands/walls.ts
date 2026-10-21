@@ -509,7 +509,7 @@ const wallCount = (d: Graph, nodeId: string): number =>
  * `mergeCollinearWalls` accepts is merged, so removing the branch of a T
  * leaves one straight wall.
  */
-function removeWalls(
+export function removeWalls(
     d: Doc,
     wallIds: readonly string[],
     extraNodes: readonly string[],
