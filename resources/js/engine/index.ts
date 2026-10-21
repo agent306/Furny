@@ -632,6 +632,9 @@ export type {
     NestSheetSpec,
 } from './bom/nesting/guillotine';
 export { BOM_ISSUE_CODES, nestSheets } from './bom/nesting';
+export { estimateFurniture } from './bom/estimate';
+export { LABOUR_KEYS_ORDER, displayUnitPrice, priceBom } from './bom/pricing';
+export type { PriceBreakdown, PriceLine, PriceOptions } from './bom/pricing';
 export type {
     Bom,
     BomMaterial,
