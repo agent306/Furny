@@ -6,7 +6,7 @@ import { bomOptionsFor, computeBom } from '../bom';
 import type { CutListRow } from '../types';
 
 /**
- * 08 §10.2 without nesting (Task 43 adds it): the wardrobe fixture against
+ * 08 §10.2 without nesting (`bom.nesting.test.ts` covers it): the wardrobe fixture against
  * the seed catalog.
  */
 const catalog = seedCatalog();

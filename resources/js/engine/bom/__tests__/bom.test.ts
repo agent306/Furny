@@ -419,10 +419,14 @@ describe('computeBom: materials, finishing, hardware, issues (08 §3.5–§3.9)'
         ]);
     });
 
-    it('throws for nesting until Task 43 wires it', () => {
-        expect(() =>
-            computeBom(model([]), catalog, { ...OFF, nesting: true }),
-        ).toThrow('nesting not implemented');
+    it('nests an empty model into no sheets', () => {
+        const bom = computeBom(model([]), catalog, { ...OFF, nesting: true });
+        expect(bom.nesting).toEqual({
+            sheets: [],
+            kerf: 4,
+            trim: 10,
+            unplaced: [],
+        });
     });
 
     it('applies the catalog pre-mill allowance to cut sizes', () => {

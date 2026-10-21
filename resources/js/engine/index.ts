@@ -621,6 +621,17 @@ export {
     rowKeyOfIdentity,
 } from './bom/rowKey';
 export { bomOptionsFor, computeBom, mergeIssues } from './bom/bom';
+export { NEST_PASSES, nestMaterial } from './bom/nesting/guillotine';
+export type {
+    NestCut,
+    NestItem,
+    NestMaterialResult,
+    NestOptions,
+    NestPlacement,
+    NestRotation,
+    NestSheetSpec,
+} from './bom/nesting/guillotine';
+export { BOM_ISSUE_CODES, nestSheets } from './bom/nesting';
 export type {
     Bom,
     BomMaterial,

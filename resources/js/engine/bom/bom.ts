@@ -1,7 +1,8 @@
 /**
  * `computeBom` (08 §3): the bill of materials of a furniture model — cut list
  * rows, materials and sheet estimates, edge banding, finishing, operations
- * and hardware. Pure and deterministic; nesting (§3.9) arrives with Task 43.
+ * and hardware, plus the optional sheet nesting (§3.9). Pure and
+ * deterministic.
  */
 import { MATERIAL_ROLES, type CatalogSnapshot } from '../catalog/snapshot';
 import { cmpId } from '../compare';
@@ -14,6 +15,7 @@ import { ENGINE_VERSION } from '../version';
 import { cutSize } from './cutSizes';
 import { edgeBandLengths } from './edgeBanding';
 import { ceilDivBig, product, toSafeNumber } from './intMath';
+import { nestSheets } from './nesting';
 import { rowIdentity, rowKeyOfIdentity } from './rowKey';
 import type {
     Bom,
@@ -21,6 +23,7 @@ import type {
     BomOperations,
     ComputeBomOptions,
     CutListRow,
+    NestingResult,
 } from './types';
 
 /** Row names list at most this many unique part names, then `+{n} more`. */
@@ -123,10 +126,13 @@ function cutListRows(
     return rows.sort(compareRows);
 }
 
-/** 08 §3.5 without nesting: net area and the sheet estimate per material. */
+const round4 = (x: number): number => Math.round(x * 10000) / 10000;
+
+/** 08 §3.5: net area, the sheet estimate and, with `nesting`, the nested sheets per material. */
 function materialTotals(
     parts: readonly Part[],
     catalog: CatalogSnapshot,
+    nesting: NestingResult | null,
 ): BomMaterial[] {
     const idx = indexCatalog(catalog);
     const groups = groupBy(parts, (p) => p.materialCode);
@@ -145,14 +151,38 @@ function materialTotals(
                   product(material.sheetLengthMm, material.sheetWidthMm, 1000),
               )
             : 0;
+        // Glass (and an unknown material) is not nested: null, not 0.
+        let sheetsNested: number | null = null;
+        let utilization: number | null = null;
+        if (nesting && material && material.boardType !== 'glass') {
+            const sheets = nesting.sheets.filter(
+                (s) => s.materialCode === code,
+            );
+            const placed = sheets.reduce(
+                (sum, s) =>
+                    sum +
+                    s.placements.reduce((a, p) => a + p.length * p.width, 0),
+                0,
+            );
+            sheetsNested = sheets.length;
+            utilization =
+                sheets.length === 0
+                    ? 0
+                    : round4(
+                          placed /
+                              (sheets.length *
+                                  material.sheetLengthMm *
+                                  material.sheetWidthMm),
+                      );
+        }
         return {
             materialCode: code,
             partCount: group.reduce((sum, p) => sum + p.qty, 0),
             netAreaMm2: toSafeNumber(netArea),
             sheetsEstimated,
-            sheetsNested: null,
-            sheetsBilled: sheetsEstimated,
-            utilization: null,
+            sheetsNested,
+            sheetsBilled: sheetsNested ?? sheetsEstimated,
+            utilization,
         };
     });
 }
@@ -230,24 +260,60 @@ export function mergeIssues(
     return out;
 }
 
+/** 08 §3.9: one error per instance that fits no sheet, deduplicated per part by `mergeIssues`. */
+function nestingIssues(
+    nesting: NestingResult,
+    parts: readonly Part[],
+): Issue[] {
+    const material = new Map(parts.map((p) => [p.key, p.materialCode]));
+    return nesting.unplaced.map((instance) => {
+        const partKey = instance.replace(/#\d+$/, '');
+        return {
+            code: 'bom.part_exceeds_sheet',
+            severity: 'error',
+            messageKey: 'engine.bom.issue.part_exceeds_sheet',
+            params: { partKey, materialCode: material.get(partKey) ?? '' },
+            entityIds: [partKey],
+        };
+    });
+}
+
 /** The bill of materials of `model` against `catalog` (08 §3). */
 export function computeBom(
     model: FurnitureModel,
     catalog: CatalogSnapshot,
     options: ComputeBomOptions,
 ): Bom {
-    if (options.nesting) throw new Error('nesting not implemented');
     const { parts } = model;
+    const cutList = cutListRows(parts, catalog);
+    const { pricing } = catalog;
+    const nesting = options.nesting
+        ? nestSheets(
+              cutList,
+              new Map(parts.map((p) => [p.key, p.qty])),
+              catalog,
+              {
+                  kerf: Math.ceil(pricing.kerfMm),
+                  trim: pricing.sheetTrimMm,
+                  allowRotation:
+                      options.allowRotation ??
+                      pricing.nestingAllowRotationDefault,
+              },
+          )
+        : null;
     return {
         engineVersion: ENGINE_VERSION,
         catalogVersion: catalog.version,
-        cutList: cutListRows(parts, catalog),
-        materials: materialTotals(parts, catalog),
+        cutList,
+        materials: materialTotals(parts, catalog, nesting),
         edgeBanding: edgeBandLengths(parts, catalog),
         hardware: hardwareTotals(model),
         finishing: finishingTotals(parts, options.finishByRole),
         operations: operationTotals(parts),
-        nesting: null,
-        issues: mergeIssues(model.issues, []),
+        nesting,
+        issues: mergeIssues(
+            model.issues,
+            nesting ? nestingIssues(nesting, parts) : [],
+        ),
     };
 }
