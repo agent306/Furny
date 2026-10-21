@@ -67,7 +67,7 @@ it('leaves harmless values and non-string objects alone', function (): void {
         ->and($record->context['exception'])->toBe($exception);
 });
 
-describe('sensitive keys are matched by whole words, not substrings', function (): void {
+describe('sensitive keys are matched by substring for secret words and by whole word for code and otp words', function (): void {
     it('redacts :key', function (string $key): void {
         expect(redact('x', [$key => 'v'])->context[$key])->toBe('[redacted]');
     })->with([

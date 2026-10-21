@@ -3,8 +3,15 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\PlainNotFoundController;
+use App\Http\Middleware\EnforceAbsoluteSessionLifetime;
+use App\Http\Middleware\EnsureContactVerified;
+use App\Http\Middleware\EnsureCustomerOnboarded;
+use App\Http\Middleware\EnsureTwoFactorEnrolled;
+use App\Http\Middleware\EnsureUserIsActive;
+use App\Http\Middleware\EnsureUserType;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\RequireRecentAuthentication;
 use App\Http\Middleware\SecurityHeaders;
 use App\Support\Http\ErrorPage;
 use App\Support\Http\RateLimitedResponse;
@@ -21,9 +28,28 @@ $app = Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
         then: function (): void {
-            // Task 23 replaces these placeholder groups with the full customer and staff groups (13 §1).
-            Route::middleware(['web', 'auth'])->name('customer.')->group(base_path('routes/customer.php'));
-            Route::middleware(['web', 'auth'])->prefix('admin')->name('admin.')->group(base_path('routes/admin.php'));
+            // The route groups of 13 §1. Every route file registers names relative to its group.
+            Route::middleware(['web', 'auth', 'active', 'customer', 'onboarded'])
+                ->name('customer.')
+                ->group(base_path('routes/customer.php'));
+
+            Route::middleware(['web', 'auth', 'active', 'staff', '2fa.enrolled', 'session.absolute'])
+                ->prefix('admin')
+                ->name('admin.')
+                ->group(base_path('routes/admin.php'));
+
+            // The editor's JSON endpoints: session authentication and CSRF protection like the pages.
+            Route::middleware(['web', 'auth', 'active', 'throttle:api'])
+                ->prefix('api')
+                ->name('api.')
+                ->group(base_path('routes/api.php'));
+
+            // Stateless: no `web` group, so no session, no cookie and no CSRF token. Each webhook verifies its
+            // own signature (13 §14).
+            Route::middleware('throttle:webhooks')
+                ->prefix('webhooks')
+                ->name('webhooks.')
+                ->group(base_path('routes/webhooks.php'));
 
             // Missing assets and API paths get a bare 404: no session, no cookie, no Inertia page.
             // Registered last, so no real route with a dot in its path is ever shadowed.
@@ -53,6 +79,17 @@ $app = Application::configure(basePath: dirname(__DIR__))
 
         // Signature-verified webhooks (13 §14) and the browser's CSP reports carry no CSRF token (13 §12.3).
         $middleware->preventRequestForgery(except: ['csp-report', 'webhooks/*']);
+
+        $middleware->alias([
+            'active' => EnsureUserIsActive::class,
+            'customer' => EnsureUserType::class.':customer',
+            'staff' => EnsureUserType::class.':staff',
+            'onboarded' => EnsureCustomerOnboarded::class,
+            'verified.contact' => EnsureContactVerified::class,
+            '2fa.enrolled' => EnsureTwoFactorEnrolled::class,
+            'session.absolute' => EnforceAbsoluteSessionLifetime::class,
+            'recent.auth' => RequireRecentAuthentication::class,
+        ]);
 
         $middleware->web(append: [
             HandleAppearance::class,

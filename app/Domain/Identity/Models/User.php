@@ -7,6 +7,7 @@ namespace App\Domain\Identity\Models;
 use App\Domain\Ai\Models\AiCreditLedgerEntry;
 use App\Domain\Identity\Enums\LengthUnit;
 use App\Domain\Identity\Enums\OwnerGate;
+use App\Domain\Identity\Enums\StaffRole;
 use App\Domain\Identity\Enums\UnitSystem;
 use App\Domain\Identity\Enums\UserType;
 use App\Domain\Orders\Models\Order;
@@ -198,6 +199,15 @@ final class User extends Authenticatable implements HasLocalePreference, HasMedi
     public function hasVerifiedContact(): bool
     {
         return $this->email_verified_at !== null || $this->phone_verified_at !== null;
+    }
+
+    /** Owners and admins must have a confirmed TOTP to use the admin area (13 S4, §5.10); read from the roles each time. */
+    public function requiresTwoFactor(): bool
+    {
+        return $this->isStaff() && $this->hasAnyRole(array_map(
+            static fn (StaffRole $role): string => $role->value,
+            array_filter(StaffRole::cases(), static fn (StaffRole $role): bool => $role->requiresTwoFactor()),
+        ));
     }
 
     public function hasPassword(): bool

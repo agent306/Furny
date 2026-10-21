@@ -1,0 +1,75 @@
+<?php
+
+declare(strict_types=1);
+
+/*
+|--------------------------------------------------------------------------
+| Route access map (13 §20.1)
+|--------------------------------------------------------------------------
+|
+| Every named route of the app maps to who may use it. `RouteCoverageTest` fails for a route that is missing
+| here, and for an entry whose route is gone, so every task that adds a route adds its entry.
+|
+|   audience    guest     only for signed-out visitors (signed-in users are redirected away)
+|               customer  customers only (staff are sent to the admin dashboard, guests to login)
+|               staff     staff only (customers get 403, guests go to login)
+|               any       any signed-in user
+|               public    everybody
+|               webhook   stateless, authenticated by its signature (13 §14)
+|   permission  a `PermissionName` value the route requires of staff, or null
+|   gate        an `OwnerGate` value the route requires of staff, or null
+|
+| Vendor dashboards (horizon, pulse, telescope), the framework's health check, Livewire and the dev tools are
+| gated elsewhere and are not listed (tests/Support/Routing/RouteInventory.php).
+*/
+
+$entry = static fn (string $audience, ?string $permission = null, ?string $gate = null): array => [
+    'audience' => $audience,
+    'permission' => $permission,
+    'gate' => $gate,
+];
+
+return [
+    // Public pages and machine endpoints (14 §2).
+    'welcome' => $entry('public'),
+    'legal.terms' => $entry('public'),
+    'legal.privacy' => $entry('public'),
+    'manifest' => $entry('public'),
+    'csp.report' => $entry('public'),
+    'fallback' => $entry('public'),
+    'unmatched.plain' => $entry('public'),
+
+    // Fortify, signed-out (13 §2).
+    'login' => $entry('guest'),
+    'login.store' => $entry('guest'),
+    'register' => $entry('guest'),
+    'register.store' => $entry('guest'),
+    'password.request' => $entry('guest'),
+    'password.email' => $entry('guest'),
+    'password.reset' => $entry('guest'),
+    'password.update' => $entry('guest'),
+    'two-factor.login' => $entry('guest'),
+    'two-factor.login.store' => $entry('guest'),
+
+    // Fortify, signed-in (13 §2). Customers are kept out of `two-factor.*` by a later middleware (13 §5.10).
+    'logout' => $entry('any'),
+    'verification.notice' => $entry('any'),
+    'verification.verify' => $entry('any'),
+    'verification.send' => $entry('any'),
+    'password.confirm' => $entry('any'),
+    'password.confirm.store' => $entry('any'),
+    'password.confirmation' => $entry('any'),
+    'two-factor.enable' => $entry('any'),
+    'two-factor.confirm' => $entry('any'),
+    'two-factor.disable' => $entry('any'),
+    'two-factor.qr-code' => $entry('any'),
+    'two-factor.secret-key' => $entry('any'),
+    'two-factor.recovery-codes' => $entry('any'),
+    'two-factor.regenerate-recovery-codes' => $entry('any'),
+
+    // Customer app (10 §2).
+    'customer.dashboard' => $entry('customer'),
+
+    // Admin app (11 §2).
+    'admin.dashboard' => $entry('staff'),
+];
