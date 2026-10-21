@@ -240,3 +240,134 @@ def test_preprocess_peak_memory_is_bounded() -> None:
     result = json.loads(proc.stdout)
     assert result["kind"] == "architectural_line_drawing"
     assert result["peak_delta"] < 1_000_000_000, result
+
+
+# --- Task 16b: adaptive dark mask (R3), t_thin under upscaling (R5), bold strokes and the region (R4) ---
+
+
+def test_dark_threshold_follows_grey_walls() -> None:
+    """Ruling R3: brochure walls drawn mid-grey (V 130) are dark; a fixed V < 90 would miss them."""
+    grey = (130, 130, 130)
+    fills = [
+        ([(300, 300), (1000, 300), (1000, 1200), (300, 1200)], (180, 200, 240)),
+        ([(1000, 300), (1700, 300), (1700, 1200), (1000, 1200)], (240, 200, 180)),
+    ]
+    img = render_plan(SIZE, plan_walls(grey), fills=fills, dims=DIMS, texts=[SText("LIVING", (500, 700))])
+    pre = preprocess(page_of(img), make_ctx())
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    assert 130 <= binarize.dark_threshold(hsv[..., 2]) <= 170
+    wall_px = render_plan(SIZE, plan_walls(grey)).max(axis=2) < 200
+    assert (pre.dark > 0)[wall_px].mean() >= 0.95
+    assert (pre.thick > 0)[wall_px].mean() >= 0.90
+    fill_px = (img == (180, 200, 240)).all(axis=2)
+    assert (pre.dark > 0)[fill_px].mean() == 0.0
+
+
+def test_dark_threshold_is_clamped() -> None:
+    black_ink = np.full((100, 100), 255, np.uint8)
+    black_ink[40:60, :] = 0
+    assert binarize.dark_threshold(black_ink) == 90.0  # Otsu of pure black would be 0
+    pale = np.full((100, 100), 255, np.uint8)
+    pale[:30, :] = 200
+    pale[30:60, :] = 240
+    assert binarize.dark_threshold(pale) == 170.0
+    assert binarize.dark_threshold(np.full((10, 10), 255, np.uint8)) == 90.0  # paper only
+
+
+def test_coloured_hatch_is_not_dark() -> None:
+    """Saturated hatching stays out of `dark` whatever its brightness; near-black tinted strokes (navy
+    outlines, S ~ 120 at V ~ 40) are dark, which the plain 06 `S < 60` test rejected."""
+    img = np.full((400, 600, 3), 255, np.uint8)
+    for x in range(0, 600, 12):
+        cv2.line(img, (x, 0), (x + 200, 200), (0, 0, 200), 3)  # red hatch, V 200
+        cv2.line(img, (x, 200), (x + 200, 400), (120, 40, 0), 3)  # dark blue hatch, V 120, chroma 120
+    img[180:220, 100:500] = (40, 33, 21)  # navy band, chroma 19
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    dark = binarize.dark_mask(hsv) > 0
+    assert hsv[200, 300, 1] > 60  # the old S test would have rejected the navy band
+    assert dark[185:215, 105:495].all()
+    hatch = (img == (0, 0, 200)).all(axis=2) | (img == (120, 40, 0)).all(axis=2)
+    assert hatch.sum() > 10000
+    assert not dark[hatch].any()
+
+
+def _upscaled_page(scale: float) -> NormalizedPage:
+    src = render_plan((540, 380), rectangle(60, 60, 480, 320, t=6), line_px=2)
+    for y in range(80, 310, 12):  # 2 px line work (furniture, hatch) dominates the stroke widths
+        cv2.line(src, (80, y), (460, y), (0, 0, 0), 2)
+    img = cv2.resize(src, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    page = page_of(img)
+    image = page.page_image.model_copy(update={"resample_factor": scale})
+    return NormalizedPage(img, image, page.transform, page.source_kind, page.is_photo)
+
+
+def test_t_thin_survives_upscaling() -> None:
+    """Ruling R5: a 3.7x upscaled source draws its 2 px lines as ~12 px of ink (cubic blur + Sauvola). The
+    6 px search range is in source pixels, so t_thin is that width; a fixed 6 px range cuts the lines off
+    and reports anti-aliasing debris."""
+    pre = preprocess(_upscaled_page(3.7), make_ctx())
+    column = pre.ink[:, 1000] > 0
+    edges = np.flatnonzero(np.diff(column.astype(np.int8)))
+    runs = edges[1::2] - edges[0::2]
+    line_width = float(np.median(runs))  # the line work's ink width across
+    assert line_width == pytest.approx(12, abs=1)
+    assert abs(pre.t_thin - line_width) <= 1.5
+    fixed = stroke_width_mode(pre.ink)  # the range not scaled (upscale 1)
+    assert fixed <= 6.0
+    assert abs(fixed - line_width) > 3.0
+    assert stroke_width_mode(pre.ink, upscale=3.7) == pre.t_thin
+    assert stroke_width_mode(pre.ink, upscale=0.5) == fixed  # downscaled pages keep the plain range
+
+
+def test_bold_strokes_keep_long_bold_lines_only() -> None:
+    ink = np.zeros((600, 800), np.uint8)
+    cv2.line(ink, (50, 100), (750, 100), 255, 7)  # bold, long
+    cv2.line(ink, (50, 300), (750, 300), 255, 3)  # thin
+    ink[450:480, 100:130] = 255  # bold but short (a glyph)
+    bold = binarize.bold_strokes(ink, t_thin=3.75, min_len=0.04 * 800)
+    assert bold[95:106, 60:740].mean() > 200
+    assert not bold[290:311].any()
+    assert not bold[440:490].any()
+
+
+def _outline_plan() -> np.ndarray:
+    """A plan drawn like the HDB reference: 7 px bold outline strokes, two black column blocks, 3 px line
+    work (so t_thin ~ 3.75 and the bold strokes are neither thin nor wide enough for `thick`)."""
+    walls = rectangle(300, 300, 1700, 1200, t=7)
+    walls += [SWall((300, 300), (300, 360), 40), SWall((1700, 1140), (1700, 1200), 40)]
+    return render_plan(SIZE, walls, dims=DIMS, line_px=3)
+
+
+def test_region_follows_a_bold_outline_not_one_column() -> None:
+    """Ruling R4: the outline strokes are not in `thick` (only the two columns are); the region still covers
+    the whole outline, not one column."""
+    pre = preprocess(page_of(_outline_plan()), make_ctx())
+    assert pre.t_thin == pytest.approx(3.75)
+    assert not pre.thick[700:800, 1690:1710].any()  # the outline is not thick ...
+    assert pre.thick[280:380, 280:320].any()  # ... the columns are
+    r = pre.region
+    assert r.x < 300 and r.y < 300 and r.x + r.w > 1700 and r.y + r.h > 1200
+    # Discriminating: the thick mask alone, without bold strokes or ink links (the 06 §7.6 rule), is one
+    # column.
+    old = detect_plan_region(pre.thick, np.zeros_like(pre.ink), make_ctx())
+    assert old.w < 400 and old.h < 400
+
+
+def test_region_joins_pieces_linked_by_ink_and_drops_an_unlinked_drawing() -> None:
+    """The main plan's walls are split by a 300 px window (> 0.05 x long edge) whose thin frame lines join
+    them; a separate drawing 200 px below, with more wall pixels than either half, shares no ink with it."""
+    size = (2000, 1900)
+    halves = [*rectangle(200, 150, 800, 900, t=16), *rectangle(1100, 150, 1800, 900, t=16)]
+    other = rectangle(300, 1100, 1500, 1500, t=16)
+    frame = [SWall((800, 150 + dy), (1100, 150 + dy), 2, style="single") for dy in (-4, 4)]
+    frame += [SWall((800, 900 + dy), (1100, 900 + dy), 2, style="single") for dy in (-4, 4)]
+    img = render_plan(size, [*halves, *frame, *other])
+    ctx = make_ctx()
+    pre = preprocess(page_of(img), ctx)
+    r = pre.region
+    assert r.x < 200 and r.x + r.w > 1800
+    assert r.y + r.h < 1100  # the drawing below is excluded
+    assert [(w.code, w.params) for w in ctx.warnings] == [("plan_region_ambiguous", {"components": 2})]
+    # Discriminating: without the frame lines the halves are two drawings and the one below is the largest.
+    bare = preprocess(page_of(render_plan(size, [*halves, *other])), make_ctx()).region
+    assert bare.y + bare.h > 1500
