@@ -81,6 +81,14 @@ export interface HistoryEntry {
      * entry it receives with every `merge` event.
      */
     meta: unknown;
+    /**
+     * Opaque state the pipeline returned for the run that produced this entry
+     * (`PipelineOutput.runState`). A `replace` merge hands it back to the
+     * pipeline when it re-runs the command, so the re-run can repeat what the
+     * first run chose (the plan pipeline replays the ids it issued). The bus
+     * never inspects it; absent when the pipeline returned none.
+     */
+    runState?: unknown;
 }
 
 export type ExecuteResult<R> =
@@ -203,17 +211,25 @@ export interface PipelineOutput<D> {
     result: unknown;
     warnings: EngineMessage[];
     deletedIds: string[];
+    /**
+     * Opaque state to store on the history entry this run creates or replaces
+     * (`HistoryEntry.runState`); `undefined` keeps what the entry has.
+     */
+    runState?: unknown;
 }
 
 /**
  * Runs one command on one document without touching any bus state. The bus
- * has already parsed `params` with the command's `paramsSchema`.
+ * has already parsed `params` with the command's `paramsSchema`. `runState`
+ * is the `runState` of the entry being re-run by a `replace` merge, and
+ * `undefined` for a first run.
  */
 export type Pipeline<D, C> = (
     doc: D,
     def: AnyCommandDef<D, C>,
     params: unknown,
     ctx: C,
+    runState?: unknown,
 ) => Result<PipelineOutput<D>>;
 
 export interface CommandBusConfig<

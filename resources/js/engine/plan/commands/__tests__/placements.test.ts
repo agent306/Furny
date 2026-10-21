@@ -403,6 +403,10 @@ describe('movePlacement', () => {
             expectRefusedUntouched(bus, move({ x: 2_000_000 }), 'out_of_range')
                 .params,
         ).toMatchObject({ field: 'x' });
+        expect(
+            expectRefusedUntouched(bus, move({ y: -2_000_000 }), 'out_of_range')
+                .params,
+        ).toMatchObject({ field: 'y' });
     });
 
     it('requires the attachment in the params', () => {

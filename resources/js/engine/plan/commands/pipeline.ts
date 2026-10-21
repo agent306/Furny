@@ -105,6 +105,49 @@ export interface PlanCommandContext {
     newId(prefix: 'n' | 'w' | 'o' | 'r' | 'f' | 'x' | 'd' | 't'): string;
 }
 
+/**
+ * What the plan pipeline keeps on a history entry (`HistoryEntry.runState`):
+ * the ids `ctx.newId` issued while the entry's command ran, per prefix, in
+ * issue order.
+ */
+export interface PlanRunState {
+    ids: Readonly<Record<string, readonly string[]>>;
+}
+
+/**
+ * A `newId` that replays `state` before it draws fresh ids (controller ruling,
+ * ledgered for the spec 19 reconciliation). A `replace` merge re-runs the
+ * command on the document the drag started from, so without this every step
+ * would issue new ids for the entities it creates (a split node and wall, a
+ * RoomMeta) and the editor's selection would point at ids that vanish
+ * mid-drag. A re-run that asks for a prefix gets that prefix's next recorded
+ * id; further ids are drawn from `draw` and appended, so later re-runs replay
+ * them too. `state()` is the record to keep (the old one plus what was added),
+ * `undefined` while no id was ever issued.
+ */
+function replayingNewId(
+    draw: PlanCommandContext['newId'],
+    previous: PlanRunState | undefined,
+): { newId: PlanCommandContext['newId']; state(): PlanRunState | undefined } {
+    const ids: Record<string, string[]> = {};
+    for (const [prefix, list] of Object.entries(previous?.ids ?? {})) {
+        ids[prefix] = [...list];
+    }
+    const used: Record<string, number> = {};
+    return {
+        newId(prefix) {
+            const list = (ids[prefix] ??= []);
+            const at = (used[prefix] ??= 0);
+            used[prefix] = at + 1;
+            if (at < list.length) return list[at]!;
+            const id = draw(prefix);
+            list.push(id);
+            return id;
+        },
+        state: () => (Object.keys(ids).length === 0 ? undefined : { ids }),
+    };
+}
+
 /** Every entity id touched by `patches` (`'*'` stays as it is). */
 function changedIdsOf(patches: Patches): Set<string> {
     const ids = new Set<string>();
@@ -128,8 +171,14 @@ export function executePlanCommand(
     doc: PlanDocument,
     def: AnyCommandDef<PlanDocument, PlanCommandContext>,
     params: unknown,
-    ctx: PlanCommandContext,
+    baseCtx: PlanCommandContext,
+    runState?: unknown,
 ): Result<PipelineOutput<PlanDocument>> {
+    const replay = replayingNewId(
+        baseCtx.newId,
+        runState as PlanRunState | undefined,
+    );
+    const ctx: PlanCommandContext = { ...baseCtx, newId: replay.newId };
     const invalid = def.validate(doc, params, ctx);
     if (invalid !== null) return { ok: false, error: invalid };
 
@@ -163,6 +212,7 @@ export function executePlanCommand(
                 },
             };
         }
+        const runStateOut = replay.state();
 
         let doc2 = doc1;
         let p2: Patches = [];
@@ -207,6 +257,7 @@ export function executePlanCommand(
                 result: out.result,
                 warnings: out.warnings,
                 deletedIds: out.deletedIds,
+                ...(runStateOut === undefined ? {} : { runState: runStateOut }),
             },
         };
     } catch (error) {
@@ -222,4 +273,5 @@ export const planPipeline: Pipeline<PlanDocument, PlanCommandContext> = (
     def,
     params,
     ctx,
-) => executePlanCommand(doc, def, params, ctx);
+    runState,
+) => executePlanCommand(doc, def, params, ctx, runState);

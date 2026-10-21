@@ -14,6 +14,14 @@ import type { EngineMessage } from '../types';
 import type { EndpointRef } from './helpers';
 import { planCommandMessage, type PlanCommandErrorCode } from './pipeline';
 
+/** A planner's result: the values to write, or the refusal. */
+export type Planned<T> = T | { error: EngineMessage };
+
+/** Whether a planner refused. */
+export const hasError = <T extends object>(
+    v: Planned<T>,
+): v is { error: EngineMessage } => 'error' in v;
+
 /** `roundMm` without a negative zero. */
 export const mm = (v: number): number => roundMm(v) + 0;
 

@@ -36,22 +36,18 @@ import { definePlanCommand } from './define';
 import { pushDeleted } from './helpers';
 import { storedRotation } from './postprocess';
 import {
+    type Planned,
     checkCollectionCapacity,
     checkCoord,
     checkIds,
     checkRange,
     has,
+    hasError,
     message,
     mm,
     notFound,
     uniqueSorted,
 } from './validators';
-
-type Planned<T> = T | { error: EngineMessage };
-
-const hasError = <T extends object>(
-    v: Planned<T>,
-): v is { error: EngineMessage } => 'error' in v;
 
 const CORNER_KEYS = [
     'back_left',

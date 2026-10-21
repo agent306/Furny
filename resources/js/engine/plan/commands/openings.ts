@@ -56,10 +56,12 @@ import { definePlanCommand } from './define';
 import { nextOpeningLabel, overlaps, pushDeleted } from './helpers';
 import type { PlanCommandContext, PlanDefaults } from './pipeline';
 import {
+    type Planned,
     checkIds,
     checkOpeningCapacity,
     checkRange,
     has,
+    hasError,
     message,
     mm,
     notFound,
@@ -68,7 +70,6 @@ import {
 
 type Doc = Pick<PlanDocument, 'nodes' | 'walls' | 'openings'>;
 type Kind = Opening['kind'];
-type Planned<T> = T | { error: EngineMessage };
 
 /** `[min, max]` characters of an opening label; `null` is no label. */
 const LABEL_RANGE = [1, 16] as const;
@@ -181,10 +182,6 @@ function defaultsOf(
 }
 
 // ---- shared checks ----------------------------------------------------------------------------
-
-const hasError = <T extends object>(
-    v: Planned<T>,
-): v is { error: EngineMessage } => 'error' in v;
 
 /** `type_mismatch` unless `type` belongs to `kind`. */
 function checkTypeOfKind(

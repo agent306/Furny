@@ -40,7 +40,7 @@ import { WALL_HEIGHT_RANGE, WALL_THICKNESS_RANGE } from '../limits';
 import { WALL_KINDS, WALL_MATERIALS } from '../schema';
 import type { PlanDocument, Wall } from '../schema';
 import type { EngineMessage } from '../types';
-import { definePlanCommand } from './define';
+import { PointParamSchema, definePlanCommand } from './define';
 import {
     deleteWall,
     fitOffset,
@@ -72,10 +72,9 @@ type Graph = Pick<PlanDocument, 'nodes' | 'walls'>;
 
 // ---- params schemas -------------------------------------------------------------------------
 
-const PointSchema = z.object({ x: z.number(), y: z.number() });
 const EndpointRefSchema = z.union([
     z.object({ nodeId: z.string() }),
-    z.object({ point: PointSchema }),
+    z.object({ point: PointParamSchema }),
 ]);
 
 /** The optional properties of a new wall. */

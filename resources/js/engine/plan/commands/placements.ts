@@ -38,11 +38,13 @@ import { pushDeleted } from './helpers';
 import type { PlanCommandContext } from './pipeline';
 import { storedRotation } from './postprocess';
 import {
+    type Planned,
     checkCollectionCapacity,
-    checkIds,
     checkCoord,
+    checkIds,
     checkRange,
     has,
+    hasError,
     message,
     mm,
     notFound,
@@ -50,11 +52,6 @@ import {
 } from './validators';
 
 type Attachment = FurniturePlacement['wallAttachment'];
-type Planned<T> = T | { error: EngineMessage };
-
-const hasError = <T extends object>(
-    v: Planned<T>,
-): v is { error: EngineMessage } => 'error' in v;
 
 // ---- params schemas -------------------------------------------------------------------------
 

@@ -70,7 +70,7 @@ import {
 } from '../../geometry/vec2';
 import type { PlanDocument, Wall } from '../schema';
 import type { EngineMessage } from '../types';
-import { definePlanCommand } from './define';
+import { PointParamSchema, definePlanCommand } from './define';
 import {
     mergeNodeInto,
     reclampOpenings,
@@ -87,11 +87,9 @@ type Ids = Pick<PlanCommandContext, 'newId'>;
 
 // ---- params schemas -------------------------------------------------------------------------
 
-const PointSchema = z.object({ x: z.number(), y: z.number() });
-
 const MoveNodeSchema = z.object({
     nodeId: z.string(),
-    to: PointSchema,
+    to: PointParamSchema,
     finalize: z.boolean(),
 });
 type MoveNodeParams = z.infer<typeof MoveNodeSchema>;

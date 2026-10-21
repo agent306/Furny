@@ -15,6 +15,10 @@
  *   `attachedTo` is set and post-processing then overwrites them. A
  *   `setDimension` that gives neither `a` nor `b` is not judged on length, so
  *   an old dimension can still be moved or detached.
+ * - Contract carried to P4 (the plan editor, 05): an attached `addDimension`
+ *   must still send `a` and `b` at least 10 mm apart, as placeholders that
+ *   post-processing overwrites with the wall face. An editor that sends
+ *   `a = b` is refused with `dimension_too_short`.
  * - `setDimension { attachedTo: undefined }` leaves the attachment alone,
  *   `null` detaches it (the points stay where they were).
  * - Label text is trimmed and counted in code points.
@@ -30,34 +34,30 @@ import {
 } from '../limits';
 import type { DimensionAnnotation, PlanDocument, TextLabel } from '../schema';
 import type { EngineMessage } from '../types';
-import { definePlanCommand } from './define';
+import { PointParamSchema, definePlanCommand } from './define';
 import { pushDeleted } from './helpers';
 import { storedRotation } from './postprocess';
 import {
+    type Planned,
     checkIds,
     checkPoint,
     checkRange,
     has,
+    hasError,
     message,
     mm,
     notFound,
     uniqueSorted,
 } from './validators';
 
-type Planned<T> = T | { error: EngineMessage };
 type Point = { x: number; y: number };
 type Attachment = DimensionAnnotation['attachedTo'];
-
-const hasError = <T extends object>(
-    v: Planned<T>,
-): v is { error: EngineMessage } => 'error' in v;
 
 /** The default font size of a new label, mm. */
 const DEFAULT_FONT_SIZE = 250;
 
 // ---- params schemas -------------------------------------------------------------------------
 
-const PointSchema = z.object({ x: z.number(), y: z.number() });
 const AttachmentSchema = z.object({
     kind: z.literal('wall'),
     wallId: z.string(),
@@ -65,8 +65,8 @@ const AttachmentSchema = z.object({
 });
 
 const AddDimensionSchema = z.object({
-    a: PointSchema,
-    b: PointSchema,
+    a: PointParamSchema,
+    b: PointParamSchema,
     offset: z.number(),
     attachedTo: AttachmentSchema.nullable(),
 });
@@ -74,8 +74,8 @@ type AddDimensionParams = z.infer<typeof AddDimensionSchema>;
 
 const SetDimensionSchema = z.object({
     dimensionId: z.string(),
-    a: PointSchema.optional(),
-    b: PointSchema.optional(),
+    a: PointParamSchema.optional(),
+    b: PointParamSchema.optional(),
     offset: z.number().optional(),
     attachedTo: AttachmentSchema.nullable().optional(),
 });
@@ -87,7 +87,7 @@ const DeleteDimensionsSchema = z.object({
 type DeleteDimensionsParams = z.infer<typeof DeleteDimensionsSchema>;
 
 const AddLabelSchema = z.object({
-    position: PointSchema,
+    position: PointParamSchema,
     text: z.string(),
     fontSize: z.number().optional(),
     rotation: z.number().optional(),
@@ -97,7 +97,7 @@ type AddLabelParams = z.infer<typeof AddLabelSchema>;
 const SetLabelSchema = z.object({
     labelId: z.string(),
     props: z.object({
-        position: PointSchema.optional(),
+        position: PointParamSchema.optional(),
         text: z.string().optional(),
         fontSize: z.number().optional(),
         rotation: z.number().optional(),

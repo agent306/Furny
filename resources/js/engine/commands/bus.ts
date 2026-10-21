@@ -393,7 +393,11 @@ export function createCommandBus<
             mergeKey !== null &&
             top.mergeKey === mergeKey;
         /** `top` with new patches; `meta` stays the entry's existing object. */
-        const merged = (patches: Patches, inversePatches: Patches) =>
+        const merged = (
+            patches: Patches,
+            inversePatches: Patches,
+            runState?: unknown,
+        ) =>
             makeEntry({
                 ...top!,
                 patches,
@@ -402,6 +406,7 @@ export function createCommandBus<
                 labelParams: def.labelParams?.(p) ?? {},
                 lastParams: p,
                 at: now(),
+                ...(runState === undefined ? {} : { runState }),
             });
 
         // 04 §6.2-3 `replace`: re-run on the state before the merged sequence.
@@ -412,7 +417,7 @@ export function createCommandBus<
                 mergeBase.doc === doc
                     ? mergeBase.base
                     : patchDoc(doc, top.inversePatches);
-            const run = pipeline(base, def, p, getContext(base));
+            const run = pipeline(base, def, p, getContext(base), top.runState);
             if (!run.ok) return refused(run.error);
             const out = run.value;
             // doc -> base -> new doc, so ids touched by the old drag count too
@@ -421,7 +426,7 @@ export function createCommandBus<
             const entry =
                 out.patches.length === 0
                     ? null
-                    : merged(out.patches, out.inversePatches);
+                    : merged(out.patches, out.inversePatches, out.runState);
             commitMerge(out.doc, entry, patches, changedIds);
             mergeBase =
                 entry === null || !cacheMergeBase
@@ -467,6 +472,9 @@ export function createCommandBus<
                       lastParams: p,
                       at: now(),
                       meta: opts.meta ?? null,
+                      ...(out.runState === undefined
+                          ? {}
+                          : { runState: out.runState }),
                   });
         commitChange(out, entry, wantHistory, changedIds);
         return resultOf(out, changedIds);

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { CommandDef } from '../../commands/types';
 import type { PlanDocument } from '../schema';
 import type { PlanCommandContext } from './pipeline';
@@ -11,3 +12,6 @@ export function definePlanCommand<P, R = void>(
 ): CommandDef<PlanDocument, P, PlanCommandContext, R> {
     return def;
 }
+
+/** A point in a command's params; rounded to whole millimetres by the command. */
+export const PointParamSchema = z.object({ x: z.number(), y: z.number() });

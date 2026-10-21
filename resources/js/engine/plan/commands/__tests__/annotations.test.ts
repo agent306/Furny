@@ -157,6 +157,31 @@ describe('addDimension', () => {
         expect(dimOf(bus, result.dimensionId).a).toEqual({ x: 0, y: 200 });
     });
 
+    it('follows its wall when moveWall moves it, whichever way the dimension was made', () => {
+        const { w, bus } = wallBus();
+        const { result } = ok(
+            bus.execute('addDimension', {
+                ...FREE,
+                attachedTo: { kind: 'wall', wallId: w, face: 'right' },
+            }),
+        );
+        const start = bus.getDoc();
+        ok(
+            bus.execute('moveWall', {
+                wallId: w,
+                distance: 300,
+                finalize: true,
+            }),
+        );
+        // the wall normal is (0, -1): the wall is now at y = -300, its right face at y = -185
+        expect(dimOf(bus, result.dimensionId)).toMatchObject({
+            a: { x: 0, y: -185 },
+            b: { x: 5000, y: -185 },
+            offset: 400,
+        });
+        expectUndoRestores(bus, start);
+    });
+
     it('refuses a dimension shorter than 10 mm: 9 is dimension_too_short, 10 passes', () => {
         const { bus } = wallBus();
         const error = expectRefusedUntouched(
@@ -381,6 +406,40 @@ describe('setDimension', () => {
         );
         expect(error.params).toEqual({ length: 5, min: 10 });
         ok(bus.execute('setDimension', { dimensionId: id, offset: 1 }));
+    });
+
+    it('still moves or detaches an old dimension whose points are shorter than 10 mm', () => {
+        const { g, w } = oneWall();
+        const attached = g.dimension(w, 'left'); // points (0,0)-(1,1), 1.4 mm apart
+        const free = g.ids('d');
+        g.doc.annotations.dimensions[free] = {
+            id: free,
+            a: { x: 0, y: 0 },
+            b: { x: 4, y: 0 },
+            offset: 100,
+            attachedTo: null,
+        };
+        const bus = busOf(g);
+        const start = bus.getDoc();
+        ok(bus.execute('setDimension', { dimensionId: free, offset: 700 }));
+        expect(dimOf(bus, free)).toMatchObject({
+            offset: 700,
+            b: { x: 4, y: 0 },
+        });
+        ok(bus.execute('setDimension', { dimensionId: attached, offset: 800 }));
+        expect(dimOf(bus, attached)).toMatchObject({
+            offset: 800,
+            a: { x: 0, y: -115 },
+        });
+        ok(
+            bus.execute('setDimension', {
+                dimensionId: attached,
+                attachedTo: null,
+            }),
+        );
+        expect(dimOf(bus, attached).attachedTo).toBeNull();
+        for (let i = 0; i < 3; i += 1) expect(bus.undo()).toBe(true);
+        expect(bus.getDoc()).toEqual(start);
     });
 
     it('refuses an unknown dimension, a missing wall and an offset out of range', () => {

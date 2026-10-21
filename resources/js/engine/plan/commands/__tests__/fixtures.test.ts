@@ -183,6 +183,7 @@ describe('addFixture', () => {
         const base = { libraryKey: 'chair', x: 0, y: 0 };
         const cases: Array<[Record<string, number>, string, number, number]> = [
             [{ x: 1_000_001 }, 'x', -1_000_000, 1_000_000],
+            [{ y: -1_000_001 }, 'y', -1_000_000, 1_000_000],
             [{ width: 49 }, 'width', 50, 20_000],
             [{ width: 20_001 }, 'width', 50, 20_000],
             [{ depth: 49 }, 'depth', 50, 20_000],
@@ -378,6 +379,25 @@ describe('setFixtureProps', () => {
             }
         },
     );
+
+    it('turns the footprint about the kept corner when a rotation comes with the resize', () => {
+        const { id, bus } = fixtureBus();
+        const start = bus.getDoc();
+        const kept = fixtureFootprint(fixtureOf(bus, id)).corners[0];
+        ok(
+            bus.execute('setFixtureProps', {
+                fixtureIds: [id],
+                props: { width: 1000, rotation: 90 },
+                keep: 'back_left',
+            }),
+        );
+        const after = fixtureOf(bus, id);
+        expect(after).toMatchObject({ width: 1000, rotation: 90 });
+        const corner = fixtureFootprint(after).corners[0];
+        expect(Math.abs(corner.x - kept.x)).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(corner.y - kept.y)).toBeLessThanOrEqual(0.5);
+        expectUndoRestores(bus, start);
+    });
 
     it('keeps x, y for keep center and when keep is not given', () => {
         for (const keep of ['center', undefined] as const) {

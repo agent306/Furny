@@ -19,21 +19,20 @@ import { CommandAbort } from '../../commands/types';
 import { ROOM_NAME_RANGE } from '../limits';
 import { FLOOR_FINISHES, type PlanDocument, type RoomMeta } from '../schema';
 import { ROOM_TYPES } from '../roomTypes';
-import type { EngineMessage } from '../types';
-import { definePlanCommand } from './define';
+import { PointParamSchema, definePlanCommand } from './define';
 import { pushDeleted } from './helpers';
 import type { PlanCommandContext } from './pipeline';
-import { checkPoint, checkRange, has, mm, notFound } from './validators';
-
-type Planned<T> = T | { error: EngineMessage };
-
-const hasError = <T extends object>(
-    v: Planned<T>,
-): v is { error: EngineMessage } => 'error' in v;
+import {
+    type Planned,
+    checkPoint,
+    checkRange,
+    has,
+    hasError,
+    mm,
+    notFound,
+} from './validators';
 
 // ---- params schemas -------------------------------------------------------------------------
-
-const PointSchema = z.object({ x: z.number(), y: z.number() });
 
 const SetRoomMetaSchema = z.object({
     faceKey: z.string(),
@@ -46,7 +45,7 @@ const SetRoomMetaSchema = z.object({
             .regex(/^#[0-9a-fA-F]{6}$/)
             .nullable()
             .optional(),
-        labelOffset: PointSchema.nullable().optional(),
+        labelOffset: PointParamSchema.nullable().optional(),
         showArea: z.boolean().optional(),
     }),
 });
