@@ -6,7 +6,15 @@
   "convention": "Each opening lies on one truth wall ('wall'), over [u0, u1] source px along it from the wall's node a toward b. 'hinge' is the jamb the leaf turns on (start = u0) and 'swing' the side it opens to (left = +n with n = (d.y, -d.x), d = the wall's a->b direction; 04 §2.1). kind: door (a swing arc, or a bi-fold's folded leaves), window (frame lines in the wall's place), opening (a gap with no symbol). A door's interval is the leaf's span, hinge jamb to the closing jamb the arc lands on; a window's is the frame's span.",
   "window_rule": "A window is a stretch of a wall where at least two thin frame lines run along it beside (or in place of) the wall's own line work: a frame rectangle or slider tracks. A bold stroke with one thin line beside it is a wall with its inner face, as the wall truth reads X8, X9 and X4 (method.judgement_calls of the wall truth); the top wall and the bay are single bold strokes with no window drawn.",
   "profile_check": "Every opening was read on 5-6x crops with a 10 px source grid (leaf, arc ends, jambs) and, for windows, on perpendicular ink profiles every 6-12 px along the wall (median of 3 columns, gray < 225, < 240 for the faint toilet-3 window); the readings are in each opening's 'method'.",
-  "ignore": "An opening marked ignore is ambiguous in the drawing: the metric neither counts it as missed nor counts a detection on it as false."
+  "ignore": "An opening marked ignore is ambiguous in the drawing: the metric neither counts it as missed nor counts a detection on it as false.",
+  "judgement_calls": [
+   "Window rule: only stretches with at least two thin frame lines beside or in place of the wall's line work are windows (G1-G4). A bold stroke with one thin line beside it is read as a wall with its inner face, as the wall truth reads X8, X9 and X4; so the top wall, the bay and X4b (bold plus thin between the black piers) carry no window, and the kitchen's X9 stretch with a thin outer line at x 145 (y 463-548) is no window either.",
+   "G1, the living/balcony slider, is scored as kind window: it is drawn with the window symbol (frame boxes and tracks), though it is used as a sliding door.",
+   "G5, the balcony edge B2 (bold stroke plus a thin band 912-917), is drawn like a window frame but is a railing: ignored (neither counted missed nor a detection on it counted false).",
+   "X6 (bedroom 3 over the 600 recess, faces 798.5 / 807.5) is a double-line wall, not an opening.",
+   "Door intervals span the leaf, hinge jamb to closing jamb: D1 and D2 (toilets) leave the 22-25 px above their hinges undrawn but outside the door; D6 (bedroom 3) starts below its 10 px nib under I8; D7 (entrance) ends at the hinge (y 778), above the corner stub.",
+   "D8 (store) is a bi-fold: one V of two leaves hinged at the upper jamb, folded toward -x."
+  ]
  },
  "openings": [
   {"id": "D1", "kind": "door", "type": "single_swing", "wall": "I3", "u0": 29.5, "u1": 90.0, "hinge": "start", "swing": "right",

@@ -18,6 +18,7 @@ from tests.support.reference import (
     IMAGES,
     REFERENCE_DIR,
     ChainResult,
+    bounded_faces,
     load_openings_truth,
     load_truth,
     opening_metrics,
@@ -28,10 +29,12 @@ from tests.support.reference import (
 pytestmark = pytest.mark.reference
 
 STEMS = sorted(IMAGES)
-TARGET = {"hdb-3room": (0.75, 0.85), "brochure-2bhk": (0.70, 0.80)}  # recall, precision (the brief's)
 HINGE_SWING_MIN = 0.8
-# Task 17 as committed (recall, precision): the targets above are not reached (task-17-report.md).
-OPENING_FLOOR = {"hdb-3room": (0.416, 0.625), "brochure-2bhk": (0.375, 1.0)}
+# Regression floors (recall, precision): the values Task 17 reached with rulings R17-a and R17-b. The
+# brief's targets (HDB 0.75 / 0.85, brochure 0.70 / 0.80) moved to the Task 33/34 evaluation of the
+# AI-assisted path (controller ruling on Task 17's NEEDS_CONTEXT): the heuristic path is the fallback.
+OPENING_FLOOR = {"hdb-3room": (0.5, 0.666), "brochure-2bhk": (0.625, 1.0)}
+FACES_FLOOR = {"hdb-3room": 6, "brochure-2bhk": 4}  # bounded faces may not drop below Task 17's
 
 
 @pytest.fixture(scope="module")
@@ -132,14 +135,8 @@ def test_openings_do_not_regress(stem: str, chains: dict[str, ChainResult]) -> N
 
 
 @pytest.mark.parametrize("stem", STEMS)
-@pytest.mark.xfail(
-    strict=True, reason="Task 17 targets not reached; design rulings requested (task-17-report.md)"
-)
-def test_openings_reach_the_targets(stem: str, chains: dict[str, ChainResult]) -> None:
-    r = chains[stem]
-    m = opening_metrics(load_openings_truth(stem, r.page), r.graph, r.openings)
-    recall, precision = TARGET[stem]
-    assert m.recall >= recall and m.precision >= precision, m
+def test_faces_do_not_drop(stem: str, chains: dict[str, ChainResult]) -> None:
+    assert len(bounded_faces(chains[stem].graph)) >= FACES_FLOOR[stem]
 
 
 @pytest.mark.parametrize("stem", STEMS)

@@ -7,7 +7,15 @@
   "symbols": "Walls are slate (about RGB 85 102 109) with dark outlines. Doors: quarter arcs (thin grey), the entrance's threshold drawn as a light band across the wall; the deck's folding doors as two pairs of slanted leaves stacked at its jambs. Windows: a white break in the wall with two thin frame lines (the large ones), or a neutral grey panel (about RGB 127 129 128) between black end lines inside the wall's outline.",
   "profile_check": "Every opening was read on 6-10x crops with a 10 px source grid and on RGB samples across the wall (the grey panels); the readings are in each opening's 'method'.",
   "ignore": "An opening marked ignore is ambiguous in the drawing: the metric neither counts it as missed nor counts a detection on it as false.",
-  "not_listed": "The kitchen's open side toward the living room (x 152, y 215-245) is a passage, but no truth wall spans it (W24 ends at b13, W25 starts at b22): it has no host wall and is not scored."
+  "not_listed": "The kitchen's open side toward the living room (x 152, y 215-245) is a passage, but no truth wall spans it (W24 ends at b13, W25 starts at b22): it has no host wall and is not scored.",
+  "judgement_calls": [
+   "Grey panels (G6-G11, neutral grey about RGB 127 129 128 inside the slate wall, between black end lines) are read as fixed windows by their place in the bedroom facades and the bedroom/deck walls; G7 and G8 run 6.5 px past b20 / b21 where the deck wall abuts them.",
+   "G11 (grey panel between the right toilet and the living room) is ignored: the window symbol, but a toilet window into the living room is not plausible (a duct or niche panel?).",
+   "The kitchen's open side toward the living room (x 152, y 215-245) is a passage with no traced host wall (W24 ends at b13, W25 starts at b22): not scored (method.not_listed).",
+   "D6, the deck's folding doors, is one bi-fold opening with leaves stacked at both jambs: its hinge is not scored.",
+   "D1 and D3 (bedrooms) draw no leaf line: the open leaf lies along the face of the wall below (W20 / W18); the hinge is read from the arc's centre.",
+   "G3 (left toilet window): its frame lines lie under the two size labels beside it and are erased by the text mask; kept, as the drawing shows it."
+  ]
  },
  "openings": [
   {"id": "D1", "kind": "door", "type": "single_swing", "wall": "W23", "u0": 19.0, "u1": 45.5, "hinge": "end", "swing": "right",

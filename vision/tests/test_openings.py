@@ -348,3 +348,68 @@ def test_gaps_stay_clear_of_crossing_walls() -> None:
     frames = {w.id: om._frame(w) for w in graph.walls}
     cands = [("W1", 0.0, 60.0, True), ("W1", 0.0, 20.0, True), ("W1", 250.0, 300.0, True)]
     assert om._off_junctions(graph, frames, cands) == [("W1", 9.0, 60.0, True), ("W1", 250.0, 300.0, True)]
+
+
+# --- rulings R17-a and R17-b -------------------------------------------------------------------------------
+
+
+def door_across_an_unbroken_wall(arc: bool = True) -> np.ndarray:
+    """The top wall drawn on across a door (the HDB entrance's bold stroke): the leaf stands on the wall's
+    lower face at x 400, 90 px into the room; its arc closes on the face at x 490."""
+    img = render_plan(SIZE, room())
+    hinge = (400, 507)
+    cv2.line(img, hinge, (400, 507 + 90), (0, 0, 0), 2)
+    if arc:
+        cv2.ellipse(img, hinge, (90, 90), 0, 0, 90, (0, 0, 0), 2)
+    return img
+
+
+def test_leaf_and_arc_make_a_door_across_an_unbroken_wall() -> None:
+    """Ruling R17-a: a leaf with its swing arc whose hinge is on a wall's line is a door of that wall, even
+    where the wall is drawn on across it."""
+    r, _, ops = openings_on_top(door_across_an_unbroken_wall())
+    assert r.graph.gaps == []  # precondition: no gap to classify
+    (o,) = ops
+    assert (o.kind, o.type, o.hinge, o.swing) == ("door", "single_swing", "start", "right")
+    assert o.u0 == pytest.approx(300, abs=6) and o.u1 == pytest.approx(390, abs=8)
+
+
+def test_leaf_without_an_arc_is_no_door() -> None:
+    _, _, ops = openings_on_top(door_across_an_unbroken_wall(arc=False))
+    assert ops == []
+
+
+def grey_wall_room(panel: bool = True) -> np.ndarray:
+    """A colour brochure's walls: slate grey (RGB 109 102 85) with, in the top wall over x 400 .. 460, a
+    neutral grey panel (RGB 128 128 128) between black end lines."""
+    slate = (85, 102, 109)  # BGR
+    pts = [(100, 500), (900, 500), (900, 1100), (100, 1100)]
+    img = render_plan(SIZE, [SWall(pts[i], pts[(i + 1) % 4], 20, color=slate) for i in range(4)])
+    if panel:
+        img[490:511, 400:461] = (128, 128, 128)
+        img[490:511, 399:401] = img[490:511, 460:462] = (0, 0, 0)
+    return img
+
+
+@pytest.mark.parametrize("kind", ["colored_brochure", "architectural_line_drawing"])
+def test_grey_panel_in_a_grey_wall_is_a_window_of_a_colour_plan(kind: str) -> None:
+    """Ruling R17-b: a lighter grey panel inside a grey-filled wall is a window on a colour brochure plan,
+    nothing on a line drawing. The panel is solid ink like the wall: there is no break to find."""
+    r = run(grey_wall_room())
+    pre = dataclasses.replace(r.pre, drawing_kind=kind)
+    wall = top_wall(r.graph)
+    ops = [
+        as_drawn(o, wall) for o in find_openings(r.graph, pre, r.segments, r.pre.ink) if o.wall_id == wall.id
+    ]
+    if kind == "architectural_line_drawing":
+        assert ops == []
+        return
+    (o,) = ops
+    assert (o.kind, o.type) == ("window", "fixed")
+    assert o.u0 == pytest.approx(300, abs=6) and o.u1 == pytest.approx(360, abs=6)
+
+
+def test_uniform_grey_wall_has_no_panel() -> None:
+    r = run(grey_wall_room(panel=False))
+    pre = dataclasses.replace(r.pre, drawing_kind="colored_brochure")
+    assert find_openings(r.graph, pre, r.segments, r.pre.ink) == []

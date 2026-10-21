@@ -48,7 +48,7 @@ import cv2
 import numpy as np
 
 from app.pipeline.binarize import Preprocessed
-from app.pipeline.opening_evidence import FrameLine, frame_lines, ink_at
+from app.pipeline.opening_evidence import DoorLeaf, FrameLine, door_leaves, frame_lines, ink_at
 from app.schemas.candidates import OpeningCandidate, Segment, WallCandidate, WallGraph
 
 __all__ = ["find_openings"]
@@ -83,6 +83,13 @@ BIFOLD_DEPTH = 0.15  # ... into a V whose fold is at least 0.15 g off the wall l
 SOLID_GAP = (1.5, 18.0)  # breaks of a solid wall line 1.5 t .. 18 t long (the gap limits, ruling R-a) ...
 SOLID_FLANK = 0.5  # ... between solid stretches of at least 0.5 t beyond the junctions at its ends
 SOLID_BAND = 0.25  # solid ink read on the centre line and 0.25 t to either side
+LEAF_MIN_LEN_FRAC = 0.03  # door leaves are read on thin segments at least 0.03 L long (as wall faces are)
+LEAF_DOOR_DEG = 10.0  # a leaf door's leaf is perpendicular to its wall, its arc closing along it ...
+LEAF_DOOR_REACH_FRAC = 0.012  # ... its hinge within 0.75 t + 2 px + 0.012 L of the wall's line
+PANEL_WALL_GREY = (50.0, 170.0)  # grey poche: a wall's median centre-line grey ...
+PANEL_LIGHTER = 20.0  # ... a window panel this much lighter ...
+PANEL_PAPER = 200.0  # ... and darker than paper ...
+PANEL_BAND = 0.15  # ... read on the centre line and 0.15 t to either side
 LINE_DEG = 3.0  # graph walls meeting at a node within 3 degrees continue one wall line
 LABEL_HIDDEN = 0.5  # a gap is no passage when removed label ink runs along half of it
 _THIN_CLEAR = 5  # solid strokes dilated by this (px) are removed from the arcs' thin ink
@@ -161,6 +168,7 @@ def find_openings(
     thin = np.array([(*s.p0, *s.p1) for s in segments if s.is_thin], np.float64).reshape(-1, 4)
     frames = {w.id: _frame(w) for w in graph.walls}
     order = {w.id: k for k, w in enumerate(graph.walls)}
+    L = float(pre.region.long_side)
     found: list[tuple[int, float, str, _Found]] = []
     for wall_id, u0, u1, is_gap in _candidates(graph, pre.thick, frames):
         f = frames[wall_id]
@@ -171,6 +179,13 @@ def find_openings(
             op = dataclasses.replace(
                 op, u0=max(0.0, op.u0), u1=min(f.length, op.u1)
             )  # a door's span may overrun
+            found.append((order[wall_id], op.u0, wall_id, op))
+    extra = _leaf_doors(graph, frames, door_leaves(segments, thin_ink, pre.t_thin, LEAF_MIN_LEN_FRAC * L), L)
+    if pre.drawing_kind == "colored_brochure":
+        extra += _grey_panels(graph, frames, pre.gray)
+    for wall_id, op in extra:
+        mine = [o for _, _, w, o in found if w == wall_id]
+        if all(min(o.u1, op.u1) - max(o.u0, op.u0) <= 0.5 * min(o.u1 - o.u0, op.u1 - op.u0) for o in mine):
             found.append((order[wall_id], op.u0, wall_id, op))
     found.sort(key=lambda x: (x[0], x[1]))
     return [
@@ -567,3 +582,100 @@ def _overlap(x: FrameLine, y: FrameLine) -> float:
 
 def _union(x: FrameLine, y: FrameLine) -> float:
     return x.covered + y.covered - _overlap(x, y)
+
+
+# --- symbols away from gaps (rulings R17-a, R17-b) --------------------------------------------------------
+
+
+def _leaf_doors(
+    graph: WallGraph, frames: dict[str, _Frame | None], leaves: dict[str, DoorLeaf], L: float
+) -> list[tuple[str, _Found]]:
+    """Doors drawn across a wall the drawing does not break (ruling R17-a; the HDB entrance's bold outer
+    stroke runs on across it): an open leaf with its swing arc (``door_leaves``) whose hinge lies on a
+    graph wall's line (within ``0.75 t`` + 2 px + ``0.012 L``: the hinge sits on the face of a wall often
+    drawn thinner than it is), the leaf perpendicular to that wall and the arc closing along it (within 10
+    degrees), is a door over ``[hinge, hinge +- leaf length]`` on the wall holding most of that span (at
+    least half). A wall that runs along a leaf (a leaf paired into a wall piece) hosts none."""
+    sin_tol, cos_tol = math.sin(math.radians(LEAF_DOOR_DEG)), math.cos(math.radians(LEAF_DOOR_DEG))
+    out: list[tuple[str, _Found]] = []
+    for lf in leaves.values():
+        best: tuple[float, str, float, float, float, _Frame] | None = None
+        for w in graph.walls:
+            f = frames[w.id]
+            if f is None or abs(float(f.d @ lf.leaf)) > sin_tol or abs(float(f.d @ lf.toward)) < cos_tol:
+                continue
+            if _along_a_leaf(f, leaves):
+                continue
+            rel = lf.hinge - f.a
+            u, across = float(rel @ f.d), float(rel @ f.n)
+            if abs(across) > 0.75 * f.t + 2.0 + LEAF_DOOR_REACH_FRAC * L or not -f.t <= u <= f.length + f.t:
+                continue
+            sign = 1.0 if float(lf.toward @ f.d) > 0 else -1.0
+            u0, u1 = sorted((u, u + sign * lf.length))
+            cover = min(u1, f.length) - max(u0, 0.0)
+            if cover >= 0.5 * lf.length and (best is None or cover > best[0]):
+                best = (cover, w.id, u0, u1, sign, f)
+        if best is None:
+            continue
+        _, wall_id, u0, u1, sign, f = best
+        swing: Swing = "left" if float(lf.leaf @ f.n) > 0 else "right"
+        hinge: Hinge = "start" if sign > 0 else "end"
+        out.append(
+            (wall_id, _Found(max(0.0, u0), min(f.length, u1), "door", "single_swing", hinge, swing, 1.0))
+        )
+    return out
+
+
+def _along_a_leaf(f: _Frame, leaves: dict[str, DoorLeaf]) -> bool:
+    """The wall runs along a leaf (parallel within 10 degrees, within ``t`` of it, over half its length)."""
+    cos_tol = math.cos(math.radians(LEAF_DOOR_DEG))
+    for lf in leaves.values():
+        if abs(float(f.d @ lf.leaf)) < cos_tol:
+            continue
+        a, b = lf.hinge - f.a, lf.hinge + lf.leaf * lf.length - f.a
+        if max(abs(float(a @ f.n)), abs(float(b @ f.n))) > f.t:
+            continue
+        s0, s1 = sorted((float(a @ f.d), float(b @ f.d)))
+        if min(s1, f.length) - max(s0, 0.0) >= 0.5 * f.length:
+            return True
+    return False
+
+
+def _grey_panels(
+    graph: WallGraph, frames: dict[str, _Frame | None], gray: np.ndarray
+) -> list[tuple[str, _Found]]:
+    """Windows drawn as a lighter grey panel inside a grey-filled wall (ruling R17-b; colour brochure plans
+    only): on a wall whose centre line reads a median grey of 50 .. 170 (grey poche; black poche and
+    unfilled walls have no such panel), a stretch ``1.5 t .. 18 t`` long at least 20 grey levels lighter
+    than that median and darker than paper (< 200) is a ``fixed`` window. The grey is the mean of the
+    centre line and the lines 0.15 t to either side."""
+    out: list[tuple[str, _Found]] = []
+    for w in graph.walls:
+        f = frames[w.id]
+        if f is None or f.length < 3.0 * f.t:
+            continue
+        u = np.arange(0.0, f.length, 1.0)
+        vals = np.mean(
+            [
+                _gray_at(gray, f.a[None, :] + u[:, None] * f.d[None, :] + (f.n * k * f.t)[None, :])
+                for k in (-PANEL_BAND, 0.0, PANEL_BAND)
+            ],
+            axis=0,
+        )
+        med = float(np.median(vals))
+        if not PANEL_WALL_GREY[0] <= med <= PANEL_WALL_GREY[1]:
+            continue
+        on = (vals >= med + PANEL_LIGHTER) & (vals < PANEL_PAPER)
+        edges = np.diff(np.concatenate(([0], on.astype(np.int8), [0])))
+        for s0, s1 in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1), strict=True):
+            u0, u1 = float(u[s0]), float(u[s1 - 1])
+            if SOLID_GAP[0] * f.t <= u1 - u0 <= SOLID_GAP[1] * f.t:
+                out.append((w.id, _Found(u0, u1, "window", "fixed", "start", "left", 1.0)))
+    return out
+
+
+def _gray_at(gray: np.ndarray, pts: np.ndarray) -> np.ndarray:
+    h, w = gray.shape[:2]
+    x = np.clip(np.rint(pts[:, 0]).astype(np.intp), 0, w - 1)
+    y = np.clip(np.rint(pts[:, 1]).astype(np.intp), 0, h - 1)
+    return np.asarray(gray[y, x], np.float64)

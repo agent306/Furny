@@ -16,7 +16,7 @@ import numpy as np
 
 from app.schemas.candidates import Segment
 
-__all__ = ["FrameLine", "door_arc", "door_leaves", "frame_lines", "ink_at"]
+__all__ = ["DoorLeaf", "FrameLine", "door_arc", "door_leaves", "frame_lines", "ink_at"]
 
 ARC_RADIUS = (0.85, 1.15)  # a door swing: a thin arc of radius 0.85 .. 1.15 g about a jamb ...
 ARC_STEP_DEG = 1.0  # ... sampled every degree, 3 degrees clear of the closed and the open leaf ...
@@ -231,17 +231,31 @@ def frame_lines(
     return out
 
 
-def door_leaves(segments: Sequence[Segment], ink: np.ndarray, t_thin: float, min_length: float) -> set[str]:
-    """Ids of the thin segments (at least ``min_length`` long) that are open door leaves: a door swing arc
-    (``door_arc``) of radius about the segment's length turns about one of its ends, from the segment to
-    the perpendicular through that end, on either side. A leaf drawn beside a wall's face is no face: it
-    would pair with the face into a wall (the HDB toilet-3 door, Task 17). ``ink`` is the thin ink (solid
-    strokes removed), in the segments' coordinates."""
+@dataclass(frozen=True, slots=True)
+class DoorLeaf:
+    """An open door leaf: its ``hinge`` end, unit direction ``leaf`` to its tip, unit direction ``toward``
+    the closed leaf (the arc turns from ``toward`` to ``leaf``) and ``length`` (the door's width)."""
+
+    hinge: np.ndarray
+    leaf: np.ndarray
+    toward: np.ndarray
+    length: float
+
+
+def door_leaves(
+    segments: Sequence[Segment], ink: np.ndarray, t_thin: float, min_length: float
+) -> dict[str, DoorLeaf]:
+    """The thin segments (at least ``min_length`` long) that are open door leaves, by id: a door swing arc
+    (``door_arc``) of radius about the segment's length turns about one of its ends, from the
+    perpendicular through that end to the segment, on either side. A leaf drawn beside a wall's face is no
+    face: it would pair with the face into a wall (the HDB toilet-3 door, Task 17); and a leaf with its arc
+    is a door wherever its wall is drawn (ruling R17-a). ``ink`` is the thin ink (solid strokes removed),
+    in the segments' coordinates."""
     cand = [s for s in segments if s.is_thin and s.length >= min_length]
+    out: dict[str, DoorLeaf] = {}
     if not cand:
-        return set()
+        return out
     near = cv2.dilate((ink > 0).astype(np.uint8), np.ones((5, 5), np.uint8))
-    out: set[str] = set()
     ang = np.radians(np.array(LEAF_PROBE_DEG))
     for s in cand:
         a, b = np.asarray(s.p0, np.float64), np.asarray(s.p1, np.float64)
@@ -256,7 +270,7 @@ def door_leaves(segments: Sequence[Segment], ink: np.ndarray, t_thin: float, min
                 if np.count_nonzero(ink_at(near, probe)) < 2:
                     continue
                 if door_arc(ink, hinge, toward, leaf, length, LEAF_HINGE_THIN * t_thin):
-                    out.add(s.id)
+                    out[s.id] = DoorLeaf(hinge, leaf, toward, length)
                     break
             if s.id in out:
                 break

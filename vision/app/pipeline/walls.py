@@ -1336,7 +1336,7 @@ def extract_walls(
     # an arc, and the whole page, so an exterior door's swing past the region's margin stays whole.
     arc_ink = ink.copy()
     arc_ink[ys, xs][cv2.dilate(filled, np.ones((5, 5), np.uint8)) > 0] = 0
-    leaves = door_leaves(cands, arc_ink, pre.t_thin, DOUBLE_MIN_LEN_FRAC * L)
+    leaves = set(door_leaves(cands, arc_ink, pre.t_thin, DOUBLE_MIN_LEN_FRAC * L))
     poll()
     double = double_mask(cands, ink[ys, xs], crop, L, pre.t_thin, poll, envelope, dim_ends, leaves)
     poll()
