@@ -33,9 +33,18 @@ import {
     type SnapNodeItem,
     type SnapWallItem,
 } from './snapIndex';
+import { ALIGNMENT_RADIUS_PX, snapTolerance, z, type Box } from './snapShared';
 
 export { gridStepFor, rawStepFor } from './grid';
+export { snapFootprint } from './snapFootprint';
+export type { FootprintSnapInput, FootprintSnapResult } from './snapFootprint';
 export { buildSnapIndex } from './snapIndex';
+export { OPENING_SNAP_REASONS, snapOpeningPosition } from './snapOpening';
+export type {
+    OpeningSnapInput,
+    OpeningSnapReason,
+    OpeningSnapResult,
+} from './snapOpening';
 export type {
     SnapFaceItem,
     SnapFootprintItem,
@@ -45,11 +54,6 @@ export type {
     SnapNodeItem,
     SnapWallItem,
 } from './snapIndex';
-
-/** Normalises `-0` so equal results compare equal and serialise alike. */
-const z = (n: number): number => (n === 0 ? 0 : n);
-
-type Box = readonly [number, number, number, number];
 
 export const SNAP_KINDS = [
     'endpoint',
@@ -172,14 +176,11 @@ export function defaultSnapSettings(system: UnitSystem): SnapSettings {
 // snapPoint (04 §5.4, §5.5)
 // ---------------------------------------------------------------------------
 
-const TOL_PX = { mouse: 8, pen: 8, touch: 16 } as const;
 /** Angle snapping needs the cursor at least this far (px) from the origin. */
 const ANGLE_MIN_PX = 20;
 /** Extension lines reach this far (mm) beyond a wall end, at least. */
 const EXTENSION_REACH_MM = 600;
 const EXTENSION_REACH_PX = 60;
-/** Alignment lines come from nodes within this many px of the cursor. */
-const ALIGNMENT_RADIUS_PX = 400;
 /** A later candidate must be closer by more than this (mm) to win a tie. */
 const TIE_EPS = 1e-6;
 const SIN_ANGLE_TOL = Math.sin(ANGLE_TOL);
@@ -805,7 +806,7 @@ export function snapPoint(input: SnapInput, index: SnapIndex): SnapResult {
         return emptyResult(rawPoint(cursor, zoom), origin);
     }
 
-    const tol = TOL_PX[input.pointerType] / zoom;
+    const tol = snapTolerance(input.pointerType, zoom);
     let lock: Lock | null = null;
     let c = cursor;
     if (modifiers.shift && origin !== null) {

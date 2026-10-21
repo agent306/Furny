@@ -4,9 +4,7 @@
 import { roundMm } from '../geometry/tolerance';
 import type { Vec2 } from '../geometry/vec2';
 import type { UnitSystem } from '../units/types';
-
-/** Normalises `-0` so equal results compare equal and serialise alike. */
-const z = (n: number): number => (n === 0 ? 0 : n);
+import { z } from './snapShared';
 
 const RAW_STEPS = [1, 5, 10, 50, 100] as const;
 /** Positions finer than this many screen px are meaningless (§5.3). */

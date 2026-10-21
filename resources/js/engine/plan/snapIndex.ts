@@ -14,6 +14,7 @@ import {
     type FootprintProvider,
 } from './footprint';
 import type { PlanDocument } from './schema';
+import type { Box } from './snapShared';
 
 export interface SnapNodeItem {
     id: string;
@@ -73,8 +74,6 @@ export interface SnapIndex {
     /** Incident valid walls of every node, sorted by wall id. */
     wallsAtNode: ReadonlyMap<string, readonly string[]>;
 }
-
-type Box = readonly [number, number, number, number];
 
 function buildClass<T>(
     items: T[],

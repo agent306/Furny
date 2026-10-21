@@ -231,10 +231,18 @@ export {
     buildSnapIndex,
     defaultSnapSettings,
     gridStepFor,
+    OPENING_SNAP_REASONS,
     rawStepFor,
+    snapFootprint,
+    snapOpeningPosition,
     snapPoint,
 } from './plan/snapping';
 export type {
+    FootprintSnapInput,
+    FootprintSnapResult,
+    OpeningSnapInput,
+    OpeningSnapReason,
+    OpeningSnapResult,
     SnapFaceItem,
     SnapFootprintItem,
     SnapGuide,
