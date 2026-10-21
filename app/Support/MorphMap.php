@@ -10,6 +10,9 @@ use App\Domain\Identity\Models\NotificationPreference;
 use App\Domain\Identity\Models\OtpCode;
 use App\Domain\Identity\Models\StaffInvitation;
 use App\Domain\Identity\Models\User;
+use App\Domain\Projects\Models\Plan;
+use App\Domain\Projects\Models\PlanRevision;
+use App\Domain\Projects\Models\Project;
 use App\Domain\Settings\Models\AppSetting;
 use App\Domain\Settings\Models\BusinessProfile;
 use App\Domain\Shared\Models\UploadIntent;
@@ -33,5 +36,8 @@ final class MorphMap
         'notification_delivery' => NotificationDelivery::class,
         'app_setting' => AppSetting::class,
         'business_profile' => BusinessProfile::class,
+        'project' => Project::class,
+        'plan' => Plan::class,
+        'plan_revision' => PlanRevision::class,
     ];
 }

@@ -12,6 +12,14 @@ export type UnitSystem = 'metric' | 'imperial';
 export type UserType = 'customer' | 'staff';
 }
 }
+namespace Projects {
+namespace Enums {
+export type PlanRevisionReason = 'manual_checkpoint' | 'import_accepted' | 'before_restore' | 'staff_edit' | 'auto_daily';
+export type PlanSource = 'drawn' | 'imported' | 'traced' | 'duplicated';
+export type ProjectStatus = 'active' | 'archived';
+export type PropertyType = 'apartment' | 'independent_house' | 'villa' | 'office' | 'other';
+}
+}
 namespace Shared {
 namespace Enums {
 export type NotificationChannel = 'database' | 'mail' | 'whatsapp' | 'sms' | 'webpush';
