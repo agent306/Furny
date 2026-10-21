@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 use App\Domain\Identity\Otp\ArrayOtpDelivery;
 use App\Domain\Identity\Otp\OtpDelivery;
+use App\Support\Uploads\UploadPresigner;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Symfony\Component\Process\Process;
+use Tests\Support\Uploads\FakeUploadPresigner;
 use Tests\TestCase;
 
 /*
@@ -22,6 +24,8 @@ pest()->extend(TestCase::class)->use(LazilyRefreshDatabase::class)->beforeEach(f
     config(['auth.login_timebox_microseconds' => 0]);
     // Codes are kept in memory, where the tests read them (a singleton, so the test and the action share it).
     $this->app->singleton(OtpDelivery::class, ArrayOtpDelivery::class);
+    // A faked `s3` disk cannot sign upload URLs: the Feature suite presigns with a stand-in that records what it was asked.
+    $this->app->singleton(UploadPresigner::class, FakeUploadPresigner::class);
 })->in('Feature');
 pest()->extend(TestCase::class)->use(RefreshDatabase::class)->in('Browser');
 pest()->extend(TestCase::class)->in('Unit');

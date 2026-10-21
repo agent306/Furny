@@ -115,4 +115,10 @@ return [
     'admin.staff.deactivate' => $entry('staff', 'staff.manage'),
     'admin.staff.activate' => $entry('staff', 'staff.manage'),
     'admin.staff.two-factor.reset' => $entry('staff', 'staff.manage'),
+
+    // Browser uploads (13 §11): any signed-in user; what an upload may be used for is decided by its purpose (13 §11.1),
+    // and an intent is the presigning user's alone.
+    'api.uploads.presign' => $entry('any'),
+    'api.uploads.confirm' => $entry('any'),
+    'api.uploads.show' => $entry('any'),
 ];

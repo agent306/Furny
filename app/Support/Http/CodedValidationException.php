@@ -18,12 +18,30 @@ final class CodedValidationException extends ValidationException
 
     public string $errorCode = 'validation_failed';
 
+    /**
+     * Fields added to the JSON body of a machine client (`uploadId` of `upload_invalid`): they say which record a
+     * refusal is about. Forms ignore them.
+     *
+     * @var array<string, mixed>
+     */
+    public array $context = [];
+
     public static function make(string $code, string $message, string $field = self::NO_FIELD): self
     {
         $exception = self::withMessages([$field => $message, 'code' => $code]);
         $exception->errorCode = $code;
 
         return $exception;
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    public function withContext(array $context): self
+    {
+        $this->context = $context;
+
+        return $this;
     }
 
     /**

@@ -457,5 +457,18 @@
     "units.errors.out_of_range": "Must be between {min} and {max}.",
     "units.errors.too_large": "Must be at most {max}.",
     "units.errors.too_small": "Must be at least {min}.",
-    "units.errors.unsupported": "Feet and inches are not supported yet. Enter a length like 2400, 240cm or 2.4m."
+    "units.errors.unsupported": "Feet and inches are not supported yet. Enter a length like 2400, 240cm or 2.4m.",
+    "uploads.errors.dwg_not_supported": "DWG files can't be opened. In your CAD program use *Save as → DXF* or *Print → PDF*, then upload that file.",
+    "uploads.errors.file_too_large": "This file is empty or larger than the limit of {max}.",
+    "uploads.errors.invalid_target": "This upload doesn't belong to anything we can find.",
+    "uploads.errors.unsupported_type": "This file type isn't supported. Please upload a JPG, PNG, WebP, HEIC, PDF or DXF.",
+    "uploads.errors.upload_corrupt": "We couldn't read this file. Please try another one.",
+    "uploads.errors.upload_expired": "This upload took too long. Please start it again.",
+    "uploads.errors.upload_image_too_large": "This image has too many pixels. Please use one of up to 40 megapixels and 12,000 pixels a side.",
+    "uploads.errors.upload_invalid": "This upload can't be used. Please upload the file again.",
+    "uploads.errors.upload_missing": "The upload hasn't arrived yet. Please wait a moment and try again.",
+    "uploads.errors.upload_processing_failed": "We couldn't process this file. Please try again.",
+    "uploads.errors.upload_size_mismatch": "The upload didn't arrive in full. Please try again.",
+    "uploads.errors.upload_type_mismatch": "This file isn't the type it claims to be.",
+    "uploads.errors.upload_type_not_allowed": "This file type isn't accepted here."
 }

@@ -161,6 +161,24 @@ defaultLengthUnit: string,
 }
 }
 namespace Shared {
+namespace Data {
+export type PresignTargetData = {
+type: string,
+id: string,
+};
+export type PresignUploadData = {
+purpose: App.Domain.Shared.Enums.UploadPurpose,
+filename: string,
+size: number,
+contentType: string,
+target: App.Domain.Shared.Data.PresignTargetData | null,
+};
+export type UploadIntentStatusData = {
+status: App.Domain.Shared.Enums.UploadStatus,
+reasonCode: string | null,
+previewUrl: string | null,
+};
+}
 namespace Enums {
 export type NotificationChannel = 'database' | 'mail' | 'whatsapp' | 'sms' | 'webpush';
 export type UploadPurpose = 'blueprint_source' | 'message_attachment' | 'production_photo' | 'issue_photo' | 'delivery_photo' | 'avatar' | 'business_logo' | 'material_texture' | 'finish_texture' | 'hardware_image' | 'plan_thumbnail' | 'project_cover' | 'furniture_thumbnail' | 'preset_thumbnail';

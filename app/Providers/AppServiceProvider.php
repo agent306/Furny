@@ -9,12 +9,17 @@ use App\Domain\Identity\Otp\LogOtpDelivery;
 use App\Domain\Identity\Otp\OtpDelivery;
 use App\Support\MorphMap;
 use App\Support\Settings\Settings;
+use App\Support\Uploads\HeicConverter;
+use App\Support\Uploads\S3UploadPresigner;
+use App\Support\Uploads\UploadPresigner;
+use App\Support\Uploads\VisionHeicConverter;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
@@ -31,6 +36,11 @@ final class AppServiceProvider extends ServiceProvider
 
         // Until the WhatsApp and SMS channels exist the codes are only logged (masked); the Feature suite binds the array one.
         $this->app->bind(OtpDelivery::class, LogOtpDelivery::class);
+
+        // Browser uploads go to the private `s3` disk with a signed type and length, and HEIC photos are decoded by the
+        // vision service (13 §11). The Feature suite binds stand-ins.
+        $this->app->bind(UploadPresigner::class, static fn (): UploadPresigner => new S3UploadPresigner(Storage::disk('s3')));
+        $this->app->bind(HeicConverter::class, VisionHeicConverter::class);
 
         // Telescope is kept out of package discovery (composer.json) and runs only where the
         // dev dependency is installed and TELESCOPE_ENABLED is on (17 §5.11 item 10).
@@ -57,7 +67,7 @@ final class AppServiceProvider extends ServiceProvider
     /** A malformed id is a 404 before any query (14 §1.6): ULID parameters are matched by shape. */
     private function constrainRouteParameters(): void
     {
-        foreach (['user', 'invitation'] as $parameter) {
+        foreach (['user', 'invitation', 'upload'] as $parameter) {
             Route::pattern($parameter, '[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}');
         }
     }

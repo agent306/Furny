@@ -156,7 +156,7 @@ $app = Application::configure(basePath: dirname(__DIR__))
         // A domain refusal with a machine code (`staff.last_owner`): JSON clients get `{code, message, errors}`; forms get
         // the errors bag with the code under `code` (14 §1.8, §1.9).
         $exceptions->render(static fn (CodedValidationException $exception, Request $request) => ErrorPage::wantsMachineResponse($request)
-            ? response()->json(['code' => $exception->errorCode, 'message' => collect($exception->fieldErrors())->flatten()->first(), 'errors' => $exception->fieldErrors()], 422)
+            ? response()->json([...$exception->context, 'code' => $exception->errorCode, 'message' => collect($exception->fieldErrors())->flatten()->first(), 'errors' => $exception->fieldErrors()], 422)
             : null);
 
         // The link of a staff invitation with a bad signature is a page about the invitation, not a bare 403.
