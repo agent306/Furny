@@ -1,0 +1,700 @@
+{
+  "schemaVersion": 1,
+  "meta": {
+    "defaultWallHeight": 2600,
+    "defaultWallThickness": 115,
+    "floorThickness": 150,
+    "northAngle": null,
+    "createdWith": "editor"
+  },
+  "nodes": {
+    "n_bhk0000001": {
+      "id": "n_bhk0000001",
+      "x": 0,
+      "y": 0
+    },
+    "n_bhk0000002": {
+      "id": "n_bhk0000002",
+      "x": 3220,
+      "y": 0
+    },
+    "n_bhk0000003": {
+      "id": "n_bhk0000003",
+      "x": 6410,
+      "y": 0
+    },
+    "n_bhk0000004": {
+      "id": "n_bhk0000004",
+      "x": 9630,
+      "y": 0
+    },
+    "n_bhk0000005": {
+      "id": "n_bhk0000005",
+      "x": 9630,
+      "y": 3525
+    },
+    "n_bhk0000006": {
+      "id": "n_bhk0000006",
+      "x": 8010,
+      "y": 3525
+    },
+    "n_bhk0000007": {
+      "id": "n_bhk0000007",
+      "x": 6410,
+      "y": 3525
+    },
+    "n_bhk0000008": {
+      "id": "n_bhk0000008",
+      "x": 8010,
+      "y": 5880
+    },
+    "n_bhk0000009": {
+      "id": "n_bhk0000009",
+      "x": 6410,
+      "y": 5880
+    },
+    "n_bhk0000010": {
+      "id": "n_bhk0000010",
+      "x": 6410,
+      "y": 8120
+    },
+    "n_bhk0000011": {
+      "id": "n_bhk0000011",
+      "x": 3220,
+      "y": 8120
+    },
+    "n_bhk0000012": {
+      "id": "n_bhk0000012",
+      "x": 0,
+      "y": 8120
+    },
+    "n_bhk0000013": {
+      "id": "n_bhk0000013",
+      "x": 0,
+      "y": 5170
+    },
+    "n_bhk0000014": {
+      "id": "n_bhk0000014",
+      "x": 0,
+      "y": 3525
+    },
+    "n_bhk0000015": {
+      "id": "n_bhk0000015",
+      "x": 3220,
+      "y": 3525
+    },
+    "n_bhk0000016": {
+      "id": "n_bhk0000016",
+      "x": 3220,
+      "y": 1390
+    },
+    "n_bhk0000017": {
+      "id": "n_bhk0000017",
+      "x": 6410,
+      "y": 1390
+    },
+    "n_bhk0000018": {
+      "id": "n_bhk0000018",
+      "x": 2580,
+      "y": 3525
+    },
+    "n_bhk0000019": {
+      "id": "n_bhk0000019",
+      "x": 2580,
+      "y": 5170
+    },
+    "n_bhk0000020": {
+      "id": "n_bhk0000020",
+      "x": 3220,
+      "y": 5170
+    }
+  },
+  "walls": {
+    "w_bhk0000001": {
+      "id": "w_bhk0000001",
+      "a": "n_bhk0000001",
+      "b": "n_bhk0000002",
+      "thickness": 230,
+      "height": 2600,
+      "kind": "exterior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000002": {
+      "id": "w_bhk0000002",
+      "a": "n_bhk0000003",
+      "b": "n_bhk0000004",
+      "thickness": 230,
+      "height": 2600,
+      "kind": "exterior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000003": {
+      "id": "w_bhk0000003",
+      "a": "n_bhk0000004",
+      "b": "n_bhk0000005",
+      "thickness": 230,
+      "height": 2600,
+      "kind": "exterior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000004": {
+      "id": "w_bhk0000004",
+      "a": "n_bhk0000005",
+      "b": "n_bhk0000006",
+      "thickness": 230,
+      "height": 2600,
+      "kind": "exterior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000005": {
+      "id": "w_bhk0000005",
+      "a": "n_bhk0000006",
+      "b": "n_bhk0000008",
+      "thickness": 230,
+      "height": 2600,
+      "kind": "exterior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000006": {
+      "id": "w_bhk0000006",
+      "a": "n_bhk0000008",
+      "b": "n_bhk0000009",
+      "thickness": 230,
+      "height": 2600,
+      "kind": "exterior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000007": {
+      "id": "w_bhk0000007",
+      "a": "n_bhk0000009",
+      "b": "n_bhk0000010",
+      "thickness": 230,
+      "height": 2600,
+      "kind": "exterior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000008": {
+      "id": "w_bhk0000008",
+      "a": "n_bhk0000010",
+      "b": "n_bhk0000011",
+      "thickness": 230,
+      "height": 2600,
+      "kind": "exterior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000009": {
+      "id": "w_bhk0000009",
+      "a": "n_bhk0000011",
+      "b": "n_bhk0000012",
+      "thickness": 230,
+      "height": 2600,
+      "kind": "exterior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000010": {
+      "id": "w_bhk0000010",
+      "a": "n_bhk0000012",
+      "b": "n_bhk0000013",
+      "thickness": 230,
+      "height": 2600,
+      "kind": "exterior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000011": {
+      "id": "w_bhk0000011",
+      "a": "n_bhk0000013",
+      "b": "n_bhk0000014",
+      "thickness": 230,
+      "height": 2600,
+      "kind": "exterior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000012": {
+      "id": "w_bhk0000012",
+      "a": "n_bhk0000014",
+      "b": "n_bhk0000001",
+      "thickness": 230,
+      "height": 2600,
+      "kind": "exterior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000013": {
+      "id": "w_bhk0000013",
+      "a": "n_bhk0000002",
+      "b": "n_bhk0000003",
+      "thickness": 115,
+      "height": 1000,
+      "kind": "half",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000014": {
+      "id": "w_bhk0000014",
+      "a": "n_bhk0000002",
+      "b": "n_bhk0000016",
+      "thickness": 115,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000015": {
+      "id": "w_bhk0000015",
+      "a": "n_bhk0000016",
+      "b": "n_bhk0000015",
+      "thickness": 115,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000016": {
+      "id": "w_bhk0000016",
+      "a": "n_bhk0000003",
+      "b": "n_bhk0000017",
+      "thickness": 115,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000017": {
+      "id": "w_bhk0000017",
+      "a": "n_bhk0000017",
+      "b": "n_bhk0000007",
+      "thickness": 115,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000018": {
+      "id": "w_bhk0000018",
+      "a": "n_bhk0000016",
+      "b": "n_bhk0000017",
+      "thickness": 115,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000019": {
+      "id": "w_bhk0000019",
+      "a": "n_bhk0000014",
+      "b": "n_bhk0000018",
+      "thickness": 115,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000020": {
+      "id": "w_bhk0000020",
+      "a": "n_bhk0000018",
+      "b": "n_bhk0000015",
+      "thickness": 115,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000021": {
+      "id": "w_bhk0000021",
+      "a": "n_bhk0000007",
+      "b": "n_bhk0000006",
+      "thickness": 230,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000022": {
+      "id": "w_bhk0000022",
+      "a": "n_bhk0000007",
+      "b": "n_bhk0000009",
+      "thickness": 115,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000023": {
+      "id": "w_bhk0000023",
+      "a": "n_bhk0000015",
+      "b": "n_bhk0000020",
+      "thickness": 115,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000024": {
+      "id": "w_bhk0000024",
+      "a": "n_bhk0000020",
+      "b": "n_bhk0000011",
+      "thickness": 115,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000025": {
+      "id": "w_bhk0000025",
+      "a": "n_bhk0000018",
+      "b": "n_bhk0000019",
+      "thickness": 115,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000026": {
+      "id": "w_bhk0000026",
+      "a": "n_bhk0000013",
+      "b": "n_bhk0000019",
+      "thickness": 115,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    },
+    "w_bhk0000027": {
+      "id": "w_bhk0000027",
+      "a": "n_bhk0000019",
+      "b": "n_bhk0000020",
+      "thickness": 115,
+      "height": 2600,
+      "kind": "interior",
+      "justification": "center",
+      "material": "brick",
+      "colorHex": null
+    }
+  },
+  "openings": {
+    "o_bhk0000001": {
+      "id": "o_bhk0000001",
+      "wallId": "w_bhk0000008",
+      "kind": "door",
+      "type": "main_entrance",
+      "offset": 1600,
+      "width": 1000,
+      "height": 2100,
+      "sillHeight": 0,
+      "hinge": "start",
+      "swing": "left",
+      "label": null
+    },
+    "o_bhk0000002": {
+      "id": "o_bhk0000002",
+      "wallId": "w_bhk0000015",
+      "kind": "door",
+      "type": "single_swing",
+      "offset": 1500,
+      "width": 800,
+      "height": 2100,
+      "sillHeight": 0,
+      "hinge": "start",
+      "swing": "left",
+      "label": null
+    },
+    "o_bhk0000003": {
+      "id": "o_bhk0000003",
+      "wallId": "w_bhk0000017",
+      "kind": "door",
+      "type": "single_swing",
+      "offset": 1500,
+      "width": 800,
+      "height": 2100,
+      "sillHeight": 0,
+      "hinge": "start",
+      "swing": "left",
+      "label": null
+    },
+    "o_bhk0000004": {
+      "id": "o_bhk0000004",
+      "wallId": "w_bhk0000019",
+      "kind": "door",
+      "type": "single_swing",
+      "offset": 1900,
+      "width": 700,
+      "height": 2100,
+      "sillHeight": 0,
+      "hinge": "start",
+      "swing": "left",
+      "label": null
+    },
+    "o_bhk0000005": {
+      "id": "o_bhk0000005",
+      "wallId": "w_bhk0000022",
+      "kind": "door",
+      "type": "single_swing",
+      "offset": 1200,
+      "width": 700,
+      "height": 2100,
+      "sillHeight": 0,
+      "hinge": "start",
+      "swing": "left",
+      "label": null
+    },
+    "o_bhk0000006": {
+      "id": "o_bhk0000006",
+      "wallId": "w_bhk0000018",
+      "kind": "door",
+      "type": "single_swing",
+      "offset": 1595,
+      "width": 900,
+      "height": 2100,
+      "sillHeight": 0,
+      "hinge": "start",
+      "swing": "left",
+      "label": null
+    },
+    "o_bhk0000007": {
+      "id": "o_bhk0000007",
+      "wallId": "w_bhk0000027",
+      "kind": "door",
+      "type": "single_swing",
+      "offset": 320,
+      "width": 500,
+      "height": 2100,
+      "sillHeight": 0,
+      "hinge": "start",
+      "swing": "left",
+      "label": null
+    },
+    "o_bhk0000008": {
+      "id": "o_bhk0000008",
+      "wallId": "w_bhk0000024",
+      "kind": "opening",
+      "type": "opening",
+      "offset": 1000,
+      "width": 900,
+      "height": 2100,
+      "sillHeight": 0,
+      "hinge": "start",
+      "swing": "left",
+      "label": null
+    },
+    "o_bhk0000009": {
+      "id": "o_bhk0000009",
+      "wallId": "w_bhk0000001",
+      "kind": "window",
+      "type": "casement",
+      "offset": 1610,
+      "width": 1500,
+      "height": 1200,
+      "sillHeight": 900,
+      "hinge": "start",
+      "swing": "left",
+      "label": null
+    },
+    "o_bhk0000010": {
+      "id": "o_bhk0000010",
+      "wallId": "w_bhk0000003",
+      "kind": "window",
+      "type": "casement",
+      "offset": 1765,
+      "width": 1500,
+      "height": 1200,
+      "sillHeight": 900,
+      "hinge": "start",
+      "swing": "left",
+      "label": null
+    },
+    "o_bhk0000011": {
+      "id": "o_bhk0000011",
+      "wallId": "w_bhk0000010",
+      "kind": "window",
+      "type": "casement",
+      "offset": 1475,
+      "width": 1200,
+      "height": 1200,
+      "sillHeight": 900,
+      "hinge": "start",
+      "swing": "left",
+      "label": null
+    },
+    "o_bhk0000012": {
+      "id": "o_bhk0000012",
+      "wallId": "w_bhk0000011",
+      "kind": "window",
+      "type": "ventilator",
+      "offset": 820,
+      "width": 600,
+      "height": 600,
+      "sillHeight": 1500,
+      "hinge": "start",
+      "swing": "left",
+      "label": null
+    },
+    "o_bhk0000013": {
+      "id": "o_bhk0000013",
+      "wallId": "w_bhk0000005",
+      "kind": "window",
+      "type": "ventilator",
+      "offset": 1175,
+      "width": 600,
+      "height": 600,
+      "sillHeight": 1500,
+      "hinge": "start",
+      "swing": "left",
+      "label": null
+    }
+  },
+  "rooms": {
+    "r_bhk0000001": {
+      "id": "r_bhk0000001",
+      "anchor": {
+        "x": 1600,
+        "y": 1800
+      },
+      "name": "Bedroom 1",
+      "type": "bedroom",
+      "floorFinish": "wood",
+      "floorColorHex": null,
+      "labelOffset": null,
+      "showArea": true
+    },
+    "r_bhk0000002": {
+      "id": "r_bhk0000002",
+      "anchor": {
+        "x": 4800,
+        "y": 700
+      },
+      "name": "Deck",
+      "type": "deck",
+      "floorFinish": "tile",
+      "floorColorHex": null,
+      "labelOffset": null,
+      "showArea": true
+    },
+    "r_bhk0000003": {
+      "id": "r_bhk0000003",
+      "anchor": {
+        "x": 8000,
+        "y": 1800
+      },
+      "name": "Bedroom 2",
+      "type": "bedroom",
+      "floorFinish": "wood",
+      "floorColorHex": null,
+      "labelOffset": null,
+      "showArea": true
+    },
+    "r_bhk0000004": {
+      "id": "r_bhk0000004",
+      "anchor": {
+        "x": 1300,
+        "y": 4350
+      },
+      "name": "Toilet 1",
+      "type": "toilet",
+      "floorFinish": "tile",
+      "floorColorHex": null,
+      "labelOffset": null,
+      "showArea": true
+    },
+    "r_bhk0000005": {
+      "id": "r_bhk0000005",
+      "anchor": {
+        "x": 2900,
+        "y": 4350
+      },
+      "name": "W/M",
+      "type": "utility",
+      "floorFinish": "tile",
+      "floorColorHex": null,
+      "labelOffset": null,
+      "showArea": true
+    },
+    "r_bhk0000006": {
+      "id": "r_bhk0000006",
+      "anchor": {
+        "x": 1600,
+        "y": 6650
+      },
+      "name": "Kitchen",
+      "type": "kitchen",
+      "floorFinish": "tile",
+      "floorColorHex": null,
+      "labelOffset": null,
+      "showArea": true
+    },
+    "r_bhk0000007": {
+      "id": "r_bhk0000007",
+      "anchor": {
+        "x": 4800,
+        "y": 4800
+      },
+      "name": "Living/Dining",
+      "type": "living",
+      "floorFinish": "tile",
+      "floorColorHex": null,
+      "labelOffset": null,
+      "showArea": true
+    },
+    "r_bhk0000008": {
+      "id": "r_bhk0000008",
+      "anchor": {
+        "x": 7200,
+        "y": 4700
+      },
+      "name": "Toilet 2",
+      "type": "toilet",
+      "floorFinish": "tile",
+      "floorColorHex": null,
+      "labelOffset": null,
+      "showArea": true
+    }
+  },
+  "placements": {},
+  "fixtures": {},
+  "annotations": {
+    "dimensions": {},
+    "labels": {}
+  },
+  "background": null,
+  "view": {
+    "mode2d": null,
+    "mode3d": null,
+    "lastMode": "2d"
+  }
+}
