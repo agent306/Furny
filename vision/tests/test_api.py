@@ -92,6 +92,17 @@ def test_healthz_no_auth(make_client: Callable[..., TestClient]) -> None:
     assert client.app.state.ocr_loaded is True  # type: ignore[attr-defined]
 
 
+def test_default_ocr_factory_is_the_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    class StubEngine:
+        pass
+
+    monkeypatch.setattr("app.main.OcrEngine", StubEngine)
+    with TestClient(create_app(Settings(vision_service_token=TOKEN))) as client:
+        _wait_loaded(client)
+        assert client.get("/healthz").status_code == 200
+        assert isinstance(client.app.state.ocr, StubEngine)  # type: ignore[attr-defined]
+
+
 def test_healthz_503_until_ocr_loaded(make_client: Callable[..., TestClient]) -> None:
     release = threading.Event()
     try:

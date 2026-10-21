@@ -1,7 +1,8 @@
 """Room-name dictionary and fuzzy matching (06 section 7.8).
 
 ``ROOM_NAMES`` mirrors the TypeScript ``resources/js/engine/plan/roomNames.ts`` key for key (04 section 2);
-change both together. Matching: uppercase, punctuation stripped (``/`` kept), multiword phrases first.
+change both together. Matching: uppercase, hyphens read as spaces, other punctuation stripped (``/`` kept),
+multiword phrases first.
 """
 
 import re
@@ -74,8 +75,8 @@ _SPACES = re.compile(r"\s+")
 
 
 def _words(text: str) -> list[str]:
-    """Uppercase, strip punctuation except ``/``, split on whitespace."""
-    return _SPACES.sub(" ", _STRIP.sub("", text.upper())).split()
+    """Uppercase, hyphens to spaces, strip other punctuation except ``/``, split on whitespace."""
+    return _SPACES.sub(" ", _STRIP.sub("", text.upper().replace("-", " "))).split()
 
 
 # Longest phrases first (multiword before single word); each entry keeps the original dictionary key.

@@ -19,6 +19,7 @@ from app.api import health
 from app.api.errors import install_exception_handlers, unexpected_error_response
 from app.config import Settings, get_settings
 from app.logging import RedactionFilter, configure_logging, request_id_var
+from app.ocr.engine import OcrEngine
 from app.utils.http import HttpIO
 
 logger = logging.getLogger("furny.vision.app")
@@ -109,7 +110,9 @@ async def _load_ocr(app: FastAPI, factory: Callable[[], Any]) -> None:
 
 
 def create_app(settings: Settings | None = None, *, ocr_factory: Callable[[], Any] | None = None) -> FastAPI:
+    """`ocr_factory` builds the OCR engine in a worker thread at startup; the default is `OcrEngine`."""
     settings = settings or get_settings()
+    ocr_factory = ocr_factory if ocr_factory is not None else OcrEngine
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -119,17 +122,12 @@ def create_app(settings: Settings | None = None, *, ocr_factory: Callable[[], An
         # Created here (inside the running loop) so every uvicorn worker process owns its own.
         app.state.heavy_sem = asyncio.Semaphore(1)
         app.state.light_sem = asyncio.Semaphore(2)
-        loader: asyncio.Task[None] | None = None
-        if ocr_factory is not None:
-            loader = asyncio.create_task(_load_ocr(app, ocr_factory))
-        else:
-            logger.warning("no ocr factory configured; /healthz stays 503")
+        loader = asyncio.create_task(_load_ocr(app, ocr_factory))
         try:
             yield
         finally:
-            if loader is not None:
-                loader.cancel()
-                await asyncio.gather(loader, return_exceptions=True)
+            loader.cancel()
+            await asyncio.gather(loader, return_exceptions=True)
 
     # Interactive docs and the OpenAPI schema would be unauthenticated endpoints.
     app = FastAPI(

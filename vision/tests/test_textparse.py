@@ -134,6 +134,14 @@ def test_room_names() -> None:
     assert title_case_name("MASTER BEDROOM") == "Master Bedroom"
 
 
+def test_hyphens_read_as_spaces() -> None:
+    # The TypeScript mirror splits on hyphens too: "WALK IN" must find the "WALK-IN" key and vice versa.
+    for text in ("WALK IN", "WALK-IN", "Walk-in", "WALK-IN CLOSET"):
+        assert match_room_name(text) == ("WALK-IN", "dress"), text
+    assert parse_token("WALK IN").room_type == "dress"
+    assert match_room_name("MASTER-BEDROOM") == ("MASTER BEDROOM", "master_bedroom")
+
+
 def test_opening_tags() -> None:
     for tag in ("D1", "SD2", "W12", "FD3", "V1"):
         assert parse_token(tag) == ParsedText("opening_tag", tag=tag)
