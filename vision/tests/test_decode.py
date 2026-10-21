@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pypdf
 import pytest
 from PIL import Image
 
@@ -20,6 +21,8 @@ from app.pipeline.decode import (
     sniff_kind,
     sniff_mime,
 )
+from app.pipeline.pdf import pdf_page_count, render_dpi
+from tests.support.pdfgen import PageSpec, make_pdf
 
 
 class _NoIO:
@@ -334,3 +337,22 @@ def test_guards_reject_over_decode_limit(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(decode, "MAX_DECODE_PIXELS", 100_000)
     with raises_code("image_too_large", 413):
         apply_pixel_guards(blank(400, 300), make_ctx())
+
+
+# --- PDF render rule and encryption (06 §7.2; the rest of the PDF tests are in test_pdf.py) -----
+
+
+def test_render_dpi_rule() -> None:
+    assert render_dpi(595.3, 841.9) == 300
+    assert render_dpi(2384, 3370) == pytest.approx(6000 / (3370 / 72), abs=0.1)
+    assert render_dpi(2384, 3370) == pytest.approx(128.2, abs=0.1)
+    assert render_dpi(14400, 14400) == 72
+
+
+def test_encrypted_pdf() -> None:
+    writer = pypdf.PdfWriter(clone_from=io.BytesIO(make_pdf([PageSpec(200, 100)])))
+    writer.encrypt("pw", algorithm="RC4-128")
+    buf = io.BytesIO()
+    writer.write(buf)
+    with raises_code("pdf_encrypted", 422):
+        pdf_page_count(buf.getvalue())
