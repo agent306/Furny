@@ -1,0 +1,11 @@
+# Generated (16 §14)
+resources/js/actions/
+resources/js/routes/
+resources/js/wayfinder/
+resources/js/lang/generated/
+resources/js/types/generated.d.ts
+engine-cli/dist/
+
+# Vendored shadcn-vue components and mail views (starter-kit convention)
+resources/js/components/ui/
+resources/views/mail/

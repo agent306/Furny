@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+        <testsuite name="Browser">
+            <directory>tests/Browser</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>app</directory>
+        </include>
+    </source>
+    <!-- Testing environment (16 §2). Not forced: CI overrides the DB/Redis connection values. -->
+    <php>
+        <env name="APP_ENV" value="testing"/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <env name="BCRYPT_ROUNDS" value="4"/>
+        <env name="DB_CONNECTION" value="pgsql"/>
+        <env name="DB_URL" value=""/>
+        <env name="DB_HOST" value="127.0.0.1"/>
+        <env name="DB_DATABASE" value="furny_test"/>
+        <env name="DB_USERNAME" value="furny"/>
+        <env name="DB_PASSWORD" value="furny"/>
+        <env name="CACHE_STORE" value="array"/>
+        <env name="SESSION_DRIVER" value="array"/>
+        <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="MAIL_MAILER" value="array"/>
+        <env name="BROADCAST_CONNECTION" value="log"/>
+        <env name="FILESYSTEM_DISK" value="s3"/>
+        <env name="PULSE_ENABLED" value="false"/>
+        <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="REDIS_DB" value="14"/>
+        <env name="REDIS_CACHE_DB" value="15"/>
+        <env name="REDIS_SESSION_DB" value="13"/>
+        <env name="VISION_SERVICE_URL" value="http://vision.test"/>
+        <env name="VISION_SERVICE_TOKEN" value="test-vision-token-0123456789abcdef0123"/>
+        <env name="GOTENBERG_URL" value="http://gotenberg.test"/>
+        <env name="HEALTH_CHECK_TOKEN" value="test-health-token"/>
+        <env name="TURNSTILE_SITE_KEY" value=""/>
+        <env name="TURNSTILE_SECRET_KEY" value=""/>
+        <env name="FEATURE_WHATSAPP" value="true"/>
+        <env name="FEATURE_SMS" value="true"/>
+        <env name="FEATURE_WEB_PUSH" value="true"/>
+        <env name="FEATURE_GOOGLE_LOGIN" value="true"/>
+        <!-- Test-only VAPID key pair (P-256, base64url); never used outside the test suite. -->
+        <env name="VAPID_PUBLIC_KEY" value="BMEjqHfWBAeuuMOrB86qmN8hl2KI8VAnH6jWl8piEDBwL0oTThii5zjKyVzs1PNRhD4eAgZu2eazFvHPs8b6-FE"/>
+        <env name="VAPID_PRIVATE_KEY" value="qt5Ek3I2Jp5hQb8d8vX_-egAwbcuv-QcWqglxShoCK0"/>
+        <env name="ENGINE_NODE_BINARY" value="node"/>
+        <env name="UPLOADS_TESTING_LOCAL" value="true"/>
+    </php>
+</phpunit>

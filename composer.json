@@ -1,0 +1,132 @@
+{
+    "$schema": "https://getcomposer.org/schema.json",
+    "name": "furny/app",
+    "type": "project",
+    "description": "Custom-furniture design, quoting and production web application.",
+    "license": "proprietary",
+    "require": {
+        "php": "^8.4",
+        "ext-bcmath": "*",
+        "ext-exif": "*",
+        "ext-fileinfo": "*",
+        "ext-gd": "*",
+        "ext-intl": "*",
+        "ext-pcntl": "*",
+        "ext-pdo_pgsql": "*",
+        "ext-posix": "*",
+        "ext-redis": "*",
+        "ext-sodium": "*",
+        "ext-zip": "*",
+        "brick/money": "^0.15",
+        "giggsey/libphonenumber-for-php-lite": "^9.0",
+        "inertiajs/inertia-laravel": "^3.5",
+        "laravel-notification-channels/twilio": "^4.2",
+        "laravel-notification-channels/webpush": "^13.0",
+        "laravel/fortify": "^1.37",
+        "laravel/framework": "^13.38",
+        "laravel/horizon": "^5.50",
+        "laravel/pulse": "^1.8",
+        "laravel/reverb": "^1.12",
+        "laravel/socialite": "^5.31",
+        "laravel/tinker": "^3.0",
+        "laravel/wayfinder": "0.1.23",
+        "league/flysystem-aws-s3-v3": "^3.0",
+        "resend/resend-php": "^1.17",
+        "spatie/laravel-activitylog": "^5.1",
+        "spatie/laravel-data": "^4.23",
+        "spatie/laravel-medialibrary": "^11.23",
+        "spatie/laravel-model-states": "^2.14",
+        "spatie/laravel-pdf": "^2.14",
+        "spatie/laravel-permission": "^8.3",
+        "spatie/laravel-typescript-transformer": "^3.3",
+        "symfony/http-client": "^7.3",
+        "symfony/postmark-mailer": "^7.3",
+        "twilio/sdk": "^8.0"
+    },
+    "require-dev": {
+        "fakerphp/faker": "^1.24",
+        "larastan/larastan": "^3.13",
+        "laravel/boost": "^2.10",
+        "laravel/pail": "^1.2.5",
+        "laravel/pint": "^1.32",
+        "laravel/telescope": "^5.26",
+        "mockery/mockery": "^1.6",
+        "pestphp/pest": "^5.3",
+        "pestphp/pest-plugin-browser": "^5.1",
+        "pestphp/pest-plugin-laravel": "^5.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "setup": [
+            "composer install",
+            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\"",
+            "@php artisan key:generate",
+            "@php artisan migrate --force",
+            "yarn install",
+            "yarn build"
+        ],
+        "dev": [
+            "Composer\\Config::disableProcessTimeout",
+            "yarn concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74,#86efac,#fde047\" \"php artisan serve --port=8000\" \"php artisan horizon\" \"php artisan reverb:start --debug\" \"php artisan schedule:work\" \"php artisan pail --timeout=0\" \"yarn dev\" --names=server,horizon,reverb,schedule,logs,vite --kill-others"
+        ],
+        "lint": [
+            "pint --parallel"
+        ],
+        "lint:check": [
+            "pint --parallel --test"
+        ],
+        "types:check": [
+            "phpstan analyse --no-progress --memory-limit=1G"
+        ],
+        "test": [
+            "@php artisan config:clear --ansi",
+            "@lint:check",
+            "@types:check",
+            "pest tests/Unit tests/Feature"
+        ],
+        "post-autoload-dump": [
+            "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+            "@php artisan package:discover --ansi"
+        ],
+        "post-update-cmd": [
+            "@php artisan vendor:publish --tag=laravel-assets --ansi --force"
+        ],
+        "post-root-package-install": [
+            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
+        ],
+        "post-create-project-cmd": [
+            "@php artisan key:generate --ansi"
+        ],
+        "pre-package-uninstall": [
+            "Illuminate\\Foundation\\ComposerScripts::prePackageUninstall"
+        ]
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": [
+                "laravel/telescope"
+            ]
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "php-http/discovery": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

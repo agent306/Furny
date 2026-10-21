@@ -1,0 +1,237 @@
+# CI per 17 §10.2 (required status checks: php, frontend, vision, browser).
+# The `deploy` job is added with the deployment milestone (P1-D15).
+# Steps whose artefact does not exist yet are guarded by a probe and switch on
+# automatically once the owning task adds the artefact (preflight C4).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  PHP_EXTENSIONS: pdo_pgsql, redis, gd, exif, intl, bcmath, pcntl, posix, zip, fileinfo, sodium
+
+jobs:
+  php:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env: { POSTGRES_DB: furny_test, POSTGRES_USER: furny, POSTGRES_PASSWORD: secret }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U furny -d furny_test" --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      APP_ENV: testing
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: furny_test
+      DB_USERNAME: furny
+      DB_PASSWORD: secret
+      REDIS_HOST: 127.0.0.1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: "8.4", extensions: "${{ env.PHP_EXTENSIONS }}", coverage: pcov, tools: "composer:v2" }
+      - run: corepack enable                       # before setup-node so its yarn cache detection uses the pinned yarn 4
+      - uses: actions/setup-node@v5
+        with: { node-version: "22", cache: yarn }
+      - name: Composer cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache/files
+          key: composer-${{ hashFiles('composer.lock') }}
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: yarn install --immutable
+      - run: yarn build:engine-cli
+      - run: cp .env.example .env && php artisan key:generate
+      - name: Probe artefacts added by later tasks
+        id: probe
+        run: |
+          has_file() { if test -f "$1"; then echo true; else echo false; fi; }
+          has_command() { if php artisan list --raw | grep -qE "^$1( |$)"; then echo true; else echo false; fi; }
+          {
+            echo "audit_gate=$(has_file .github/scripts/audit-gate.sh)"        # P1 Task 40
+            echo "i18n_export=$(has_command i18n:export)"                      # P1 Task 3
+            echo "seed_snapshot=$(has_command testing:seed-catalog-snapshot)"  # unowned (roadmap note, C4)
+            echo "coverage_gate=$(has_file tests/Support/coverage-gate.php)"   # unowned (roadmap note, C4)
+          } >> "$GITHUB_OUTPUT"
+      - name: Pint
+        run: vendor/bin/pint --test
+      - name: Larastan
+        run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+      - name: Composer audit (13 §19)
+        if: steps.probe.outputs.audit_gate == 'true'
+        run: bash .github/scripts/audit-gate.sh composer   # composer audit --locked --format=json, filtered by security/audit-allowlist.json (16 §14)
+      - name: Generated TS types are current
+        run: php artisan typescript:transform && git diff --exit-code -- resources/js/types/generated.d.ts
+      - name: Generated i18n JSON is current (master §6.6)
+        if: steps.probe.outputs.i18n_export == 'true'
+        run: php artisan i18n:export && git diff --exit-code -- resources/js/lang/generated
+      - name: Seed catalog snapshot fixture is current (16 §5.2)
+        if: steps.probe.outputs.seed_snapshot == 'true'
+        run: php artisan testing:seed-catalog-snapshot --check
+      - name: Pest (unit + feature, with coverage)
+        # paratest (--parallel) accepts a single path, so the two suites are selected by name.
+        run: vendor/bin/pest --testsuite=Unit,Feature --parallel --ci --coverage-clover=build/coverage/php.xml
+      - name: PHP coverage gate (16 §15)
+        if: steps.probe.outputs.coverage_gate == 'true'
+        run: php tests/Support/coverage-gate.php build/coverage/php.xml
+
+  frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2          # Wayfinder's Vite plugin runs artisan during the build
+        with: { php-version: "8.4", extensions: "${{ env.PHP_EXTENSIONS }}", coverage: none, tools: "composer:v2" }
+      - run: corepack enable
+      - uses: actions/setup-node@v5
+        with: { node-version: "22", cache: yarn }
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: yarn install --immutable
+      - run: cp .env.example .env && php artisan key:generate
+      - name: Probe artefacts added by later tasks
+        id: probe
+        run: |
+          has_file() { if test -f "$1"; then echo true; else echo false; fi; }
+          has_script() { if node -e "process.exit(require('./package.json').scripts?.['$1'] ? 0 : 1)"; then echo true; else echo false; fi; }
+          {
+            echo "audit_gate=$(has_file .github/scripts/audit-gate.sh)"       # P1 Task 40
+            echo "bench_check=$(has_script bench:check)"                      # P2 (engine benches)
+            echo "bundle_size=$(has_file scripts/check-bundle-size.mjs)"      # unowned (roadmap note, C4)
+          } >> "$GITHUB_OUTPUT"
+      - name: Wayfinder helpers (needed by vue-tsc/Vitest before the build generates them)
+        run: php artisan wayfinder:generate --with-form
+      - name: ESLint
+        run: yarn eslint . --max-warnings=0
+      - name: Prettier
+        run: yarn prettier --check resources/ engine-cli/
+      - name: vue-tsc
+        run: yarn vue-tsc --noEmit
+      - name: yarn audit (13 §19)
+        if: steps.probe.outputs.audit_gate == 'true'
+        run: bash .github/scripts/audit-gate.sh yarn       # yarn npm audit --environment production --severity high --json, filtered by the allowlist
+      - name: Vitest (with coverage thresholds, 16 §15)
+        run: yarn vitest run --coverage
+      - name: Vitest bench thresholds (16 §10)
+        if: steps.probe.outputs.bench_check == 'true'
+        run: yarn bench:check
+      - name: Build (app + engine CLI)
+        run: yarn build
+      - name: Bundle size budgets (05 §16.1, 16 §10)
+        if: steps.probe.outputs.bundle_size == 'true'
+        run: node scripts/check-bundle-size.mjs
+      - name: Engine CLI smoke test
+        run: echo '{}' | node engine-cli/dist/cli.mjs version | grep -q '"ok":true'
+
+  vision:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: vision
+    steps:
+      - uses: actions/checkout@v5
+      - name: Probe for the vision service (P1-D15; P3 removes this guard)
+        id: probe
+        working-directory: .
+        run: |
+          if test -f vision/pyproject.toml; then echo "present=true"; else echo "present=false"; fi >> "$GITHUB_OUTPUT"
+          if test -f .github/scripts/audit-gate.sh; then echo "audit_gate=true"; else echo "audit_gate=false"; fi >> "$GITHUB_OUTPUT"
+      - run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0
+        if: steps.probe.outputs.present == 'true'
+        working-directory: .
+      - uses: astral-sh/setup-uv@v6
+        if: steps.probe.outputs.present == 'true'
+        with: { enable-cache: true }
+      - run: corepack enable
+        if: steps.probe.outputs.present == 'true'
+        working-directory: .
+      - uses: actions/setup-node@v5                # contract tests validate output with the engine CLI (03)
+        if: steps.probe.outputs.present == 'true'
+        with: { node-version: "22", cache: yarn }
+      - run: yarn install --immutable && yarn build:engine-cli
+        if: steps.probe.outputs.present == 'true'
+        working-directory: .
+      - run: uv python install 3.12
+        if: steps.probe.outputs.present == 'true'
+      - run: uv sync --frozen
+        if: steps.probe.outputs.present == 'true'
+      - name: requirements.txt is current
+        if: steps.probe.outputs.present == 'true'
+        run: uv export --no-header --no-dev --no-emit-project --frozen -o /tmp/requirements.txt && diff -u requirements.txt /tmp/requirements.txt
+      - run: uv run ruff check .
+        if: steps.probe.outputs.present == 'true'
+      - run: uv run ruff format --check .
+        if: steps.probe.outputs.present == 'true'
+      - run: uv run mypy --strict app
+        if: steps.probe.outputs.present == 'true'
+      - run: uv run pytest -q -m "not live" --cov=app --cov-fail-under=85
+        if: steps.probe.outputs.present == 'true'
+        env:
+          ENGINE_CLI: ${{ github.workspace }}/engine-cli/dist/cli.mjs
+      - name: Accuracy targets (06 §16.3)
+        if: steps.probe.outputs.present == 'true'
+        run: |
+          uv run python scripts/evaluate.py --fixtures tests/fixtures/reference --provider none --fail-under
+          uv run python scripts/evaluate.py --fixtures tests/fixtures/reference --provider replay --fail-under
+      - name: pip-audit (13 §19)
+        if: steps.probe.outputs.present == 'true' && steps.probe.outputs.audit_gate == 'true'
+        run: bash ../.github/scripts/audit-gate.sh pip   # uvx pip-audit -r requirements.txt --format json, filtered by the allowlist
+
+  browser:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env: { POSTGRES_DB: furny_test, POSTGRES_USER: furny, POSTGRES_PASSWORD: secret }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U furny -d furny_test" --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+    env:
+      APP_ENV: testing
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_DATABASE: furny_test
+      DB_USERNAME: furny
+      DB_PASSWORD: secret
+      REDIS_HOST: 127.0.0.1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: "8.4", extensions: "${{ env.PHP_EXTENSIONS }}", coverage: none, tools: "composer:v2" }
+      - run: corepack enable                       # before setup-node so its yarn cache detection uses the pinned yarn 4
+      - uses: actions/setup-node@v5
+        with: { node-version: "22", cache: yarn }
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: yarn install --immutable
+      - run: cp .env.example .env && php artisan key:generate
+      - run: yarn build
+      - run: yarn playwright install --with-deps chromium
+      - name: Pest browser tests (journeys, 16 §8)
+        run: vendor/bin/pest tests/Browser --ci
+      - name: Playwright suite (3D smoke, accessibility, performance traces; 16 §9–§11)
+        if: hashFiles('playwright.config.ts') != ''   # unowned (roadmap note, C4)
+        run: yarn playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: browser-screenshots, path: tests/Browser/screenshots, if-no-files-found: ignore }
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: playwright-report, path: build/playwright, if-no-files-found: ignore }

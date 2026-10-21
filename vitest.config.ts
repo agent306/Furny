@@ -1,0 +1,47 @@
+import { fileURLToPath } from 'node:url';
+import vue from '@vitejs/plugin-vue';
+import { defineConfig } from 'vitest/config';
+
+// Standalone on purpose: the app's vite.config.ts loads the Laravel, Inertia
+// and Wayfinder plugins (the latter runs artisan), which tests must not need.
+const ENGINE_TESTS = [
+    'resources/js/engine/**/*.test.ts',
+    'engine-cli/src/**/*.test.ts',
+];
+
+export default defineConfig({
+    plugins: [vue()],
+    resolve: {
+        alias: {
+            '@': fileURLToPath(new URL('./resources/js', import.meta.url)),
+        },
+    },
+    test: {
+        coverage: {
+            provider: 'v8',
+            include: ['resources/js/**', 'engine-cli/src/**'],
+            reportsDirectory: 'build/coverage/js',
+        },
+        projects: [
+            {
+                extends: true,
+                test: {
+                    name: 'engine',
+                    environment: 'node',
+                    include: ENGINE_TESTS,
+                    exclude: ['**/node_modules/**', '**/__perf__/**'],
+                },
+            },
+            {
+                extends: true,
+                test: {
+                    name: 'app',
+                    environment: 'happy-dom',
+                    include: ['resources/js/**/*.test.ts'],
+                    exclude: ['**/node_modules/**', ...ENGINE_TESTS],
+                    setupFiles: ['resources/js/test/setup.ts'],
+                },
+            },
+        ],
+    },
+});
