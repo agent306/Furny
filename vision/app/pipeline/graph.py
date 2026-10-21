@@ -2,19 +2,25 @@
 
 ``build_wall_graph`` turns raw wall centre lines into a snapped graph:
 
-1. raw walls are validated, zero-length ones dropped, collinear overlapping detections fused;
+1. raw walls are validated, zero-length ones dropped, collinear overlapping detections fused (collinear
+   walls whose facing ends are within ``r`` of each other fuse too, the gap becoming an opening);
 2. endpoints within ``r`` are clustered (union-find over a KD tree) into nodes;
 3. free ends are extended up to ``r + t`` along their direction onto another wall's centre line (L/T
    closure) and the clustering is redone;
-4. a wall is split at every node lying on its centre line within ``r`` (T junction);
-5. walls on the same node pair are merged and short walls that do not join two otherwise unconnected
-   parts are pruned;
+4. a wall is split at every node lying on its centre line within ``r`` (T junction) and at every point
+   where it properly crosses another wall (X junction);
+5. walls on the same node pair are merged and short *dangling* walls (a free end, cascading) are pruned;
 6. nodes are placed (axis-aligned walls keep right angles, diagonals meet at a least-squares
    intersection), ids ``N1..``/``W1..`` follow a stable geometric order and opening intervals are
    re-based onto each final wall.
 
-Everything is a deterministic function of the *set* of raw walls: they are sorted canonically first and
-every float sum uses ``math.fsum``, so ids and coordinates never depend on input order.
+Determinism: the result is a function of the *set* of raw walls. They are sorted canonically first and
+every float sum uses ``math.fsum``, so ids, node sets, topology and coordinates do not depend on input
+order; swapping a wall's ``p0``/``p1`` (with its openings re-measured) keeps ids and nodes exactly and
+moves opening values by float rounding only (ulp level).
+
+Cost: spatial grids / KD trees / sorted windows replace all-pairs loops, endpoints are collapsed on a
+grid so stacked points stay cheap, and more than ``MAX_RAW_WALLS`` raw walls raise ``TooComplexError``.
 """
 
 import itertools
@@ -29,27 +35,61 @@ from scipy.spatial import cKDTree
 from app.schemas.candidates import GapCandidate, RawWall, WallCandidate, WallGraph, WallSource
 from app.utils.geometry import Pt, project_param
 
-__all__ = ["EVIDENCE", "build_wall_graph"]
+__all__ = ["EVIDENCE", "MAX_RAW_WALLS", "TooComplexError", "build_wall_graph"]
 
 EVIDENCE: dict[WallSource, float] = {"filled": 1.0, "vector": 1.0, "double_line": 0.85, "single_line": 0.5}
 
+MAX_RAW_WALLS = 20_000
+
 _SOURCE_RANK: dict[WallSource, int] = {"filled": 0, "vector": 1, "double_line": 2, "single_line": 3}
-_AXIS_TOL_DEG = 3.0  # 06 8.1 step 7: within 3 deg of an image axis counts as axis-aligned
+_AXIS_TOL_DEG = 3.0  # 06 8.1 step 7: within 3 deg of an axis (relative to theta0) counts as axis-aligned
 _COLLINEAR_SIN = math.sin(math.radians(3.0))  # double detections: at most 3 deg apart
 _PARALLEL_SIN = math.sin(math.radians(15.0))  # a free end cannot extend onto a wall this close to parallel
-_LS_MIN_DET = math.sin(math.radians(10.0)) ** 2  # least-squares intersection needs lines > 10 deg apart
+_CROSS_SIN = math.sin(math.radians(3.0))  # walls closer to parallel than this are not a crossing
+_LS_MIN_DET = math.sin(math.radians(10.0)) ** 2  # least squares needs lines more than 10 deg apart
+_TRUST = 2.0  # a placed coordinate or intersection further than _TRUST * r from the centroid is not trusted
 _MIN_OPENING_PX = 1.0  # a clipped opening interval shorter than this is a sliver, not an opening
 _ZERO = 1e-9
 _DEADLINE_EVERY = 128
+_SAMPLE_BLOCK = 256
+_HUB_DEGREE = 16  # nodes with more walls than this widen the crossing-free zone around them
+_MAX_CANDIDATE_PAIRS = 50_000_000  # KD-tree crossing candidates beyond this make the plan "too complex"
+
+
+class TooComplexError(ValueError):
+    """The input is too large or too dense to snap; the orchestrator maps it to the ``too_complex`` error."""
+
+    code = "too_complex"
+
 
 Seg = tuple[Pt, Pt]
 Check = Callable[[], None] | None
 
 
 @dataclass(frozen=True, slots=True)
+class _Frame:
+    """The plan's axis frame, rotated by ``theta0`` (``u`` along ``theta0``, ``v`` along ``theta0 + 90``)."""
+
+    c: float
+    s: float
+
+    @staticmethod
+    def of(theta0_deg: float) -> "_Frame":
+        rad = math.radians(theta0_deg)
+        return _Frame(math.cos(rad), math.sin(rad))
+
+    def to_local(self, x: float, y: float) -> Pt:
+        return (x * self.c + y * self.s, -x * self.s + y * self.c)
+
+    def to_world(self, u: float, v: float) -> Pt:
+        return (u * self.c - v * self.s, u * self.s + v * self.c)
+
+
+@dataclass(frozen=True, slots=True)
 class _Line:
-    """Infinite support line of one wall: ``pos`` is x of a vertical / y of a horizontal wall, otherwise
-    the line is ``nx * x + ny * y = c`` with unit normal ``(nx, ny)``."""
+    """Infinite support line of one wall in the rotated frame: ``pos`` is ``u`` of a "v" wall (along
+    ``theta0 + 90``) / ``v`` of an "h" wall (along ``theta0``), otherwise the line is
+    ``nx * u + ny * v = c`` with unit normal ``(nx, ny)``."""
 
     kind: str  # "v", "h" or "d"
     pos: float
@@ -96,33 +136,36 @@ def _require_finite(values: tuple[float, ...], what: str) -> None:
         raise ValueError(f"{what} must be finite, got {values!r}")
 
 
-def _make_line(p0: Pt, p1: Pt) -> _Line:
-    dx, dy = p1[0] - p0[0], p1[1] - p0[1]
-    length = math.hypot(dx, dy)
-    angle = math.degrees(math.atan2(dy, dx)) % 180.0
+def _make_line(p0: Pt, p1: Pt, frame: _Frame) -> _Line:
+    u0, v0 = frame.to_local(*p0)
+    u1, v1 = frame.to_local(*p1)
+    du, dv = u1 - u0, v1 - v0
+    length = math.hypot(du, dv)
+    angle = math.degrees(math.atan2(dv, du)) % 180.0
     if min(angle, 180.0 - angle) <= _AXIS_TOL_DEG:
-        return _Line("h", (p0[1] + p1[1]) / 2.0, 0.0, 1.0, 0.0)
+        return _Line("h", (v0 + v1) / 2.0, 0.0, 1.0, 0.0)
     if abs(angle - 90.0) <= _AXIS_TOL_DEG:
-        return _Line("v", (p0[0] + p1[0]) / 2.0, 1.0, 0.0, 0.0)
-    nx, ny = -dy / length, dx / length
-    mx, my = (p0[0] + p1[0]) / 2.0, (p0[1] + p1[1]) / 2.0
-    return _Line("d", 0.0, nx, ny, nx * mx + ny * my)
+        return _Line("v", (u0 + u1) / 2.0, 1.0, 0.0, 0.0)
+    nu, nv = -dv / length, du / length
+    return _Line("d", 0.0, nu, nv, nu * (u0 + u1) / 2.0 + nv * (v0 + v1) / 2.0)
 
 
 def _canonical(p0: Pt, p1: Pt) -> tuple[Pt, Pt]:
     return (p0, p1) if p0 <= p1 else (p1, p0)
 
 
-def _make_wall(p0: Pt, p1: Pt, thickness: float, source: WallSource, openings: list[Seg]) -> _Wall:
+def _make_wall(
+    p0: Pt, p1: Pt, thickness: float, source: WallSource, openings: list[Seg], frame: _Frame
+) -> _Wall:
     p0, p1 = _canonical(p0, p1)
-    return _Wall(p0, p1, thickness, source, openings, _make_line(p0, p1))
+    return _Wall(p0, p1, thickness, source, openings, _make_line(p0, p1, frame))
 
 
 def _wall_key(w: _Wall) -> tuple[object, ...]:
     return (w.p0, w.p1, w.thickness, _SOURCE_RANK[w.source], tuple(sorted(w.openings)))
 
 
-def _ingest(raw: list[RawWall], check: Check) -> list[_Wall]:
+def _ingest(raw: list[RawWall], frame: _Frame, check: Check) -> list[_Wall]:
     walls: list[_Wall] = []
     for k, rw in enumerate(raw):
         _tick(check, k)
@@ -143,7 +186,7 @@ def _ingest(raw: list[RawWall], check: Check) -> list[_Wall]:
                 openings.append(
                     ((rw.p0[0] + ux * lo, rw.p0[1] + uy * lo), (rw.p0[0] + ux * hi, rw.p0[1] + uy * hi))
                 )
-        walls.append(_make_wall(rw.p0, rw.p1, rw.thickness_px, rw.source, openings))
+        walls.append(_make_wall(rw.p0, rw.p1, rw.thickness_px, rw.source, openings, frame))
     walls.sort(key=_wall_key)
     return walls
 
@@ -174,76 +217,96 @@ class _SegIndex:
         return [np.unique(self.owner[h]) for h in hits]
 
 
-def _cluster(points: np.ndarray, r: float) -> list[int]:
-    """Single-linkage clusters of points at distance <= r; labels are numbered by first appearance."""
-    n = len(points)
-    parent = list(range(n))
+_CELL_KEEP = 8  # points kept per grid cell for the cross-cell neighbour search
 
-    def find(i: int) -> int:
+
+class _UnionFind:
+    """Union-find whose roots are always the smallest member index (order independent)."""
+
+    def __init__(self, n: int) -> None:
+        self.parent = list(range(n))
+
+    def find(self, i: int) -> int:
+        parent = self.parent
         while parent[i] != i:
             parent[i] = parent[parent[i]]
             i = parent[i]
         return i
 
+    def union(self, i: int, j: int) -> bool:
+        ri, rj = self.find(i), self.find(j)
+        if ri == rj:
+            return False
+        self.parent[max(ri, rj)] = min(ri, rj)
+        return True
+
+
+def _extremes(pts: np.ndarray) -> list[int]:
+    """Indices of the (up to 8) points extreme along x, y, x + y and x - y: a cell's proximity hull."""
+    keys = (pts[:, 0], pts[:, 1], pts[:, 0] + pts[:, 1], pts[:, 0] - pts[:, 1])
+    picked = {int(np.argmin(k)) for k in keys} | {int(np.argmax(k)) for k in keys}
+    return sorted(picked)
+
+
+def _cluster(points: np.ndarray, r: float, check: Check = None) -> list[int]:
+    """Single-linkage clusters of points at distance <= r; labels are numbered by first appearance.
+
+    Points sharing a grid cell of side ``r / 2`` are within ``r`` of each other, so they are united
+    directly and only up to ``_CELL_KEEP`` extreme points per cell enter the KD-tree neighbour search. That
+    keeps stacked points linear in time and memory; the result is exact for cells of at most
+    ``_CELL_KEEP`` points and accurate to a fraction of a pixel for the rest.
+    """
+    n = len(points)
+    uf = _UnionFind(n)
     if n > 1:
-        for i, j in cKDTree(points).query_pairs(r, output_type="ndarray").tolist():
-            ri, rj = find(i), find(j)
-            if ri != rj:
-                parent[max(ri, rj)] = min(ri, rj)
+        cell = np.floor(points / (r / 2.0)).astype(np.int64)
+        order = np.lexsort((cell[:, 1], cell[:, 0]))  # stable: ties stay in index order
+        sc = cell[order]
+        first_of_group = np.ones(n, bool)
+        first_of_group[1:] = (sc[1:] != sc[:-1]).any(axis=1)
+        starts = np.flatnonzero(first_of_group)
+        stops = np.append(starts[1:], n)
+        kept: list[int] = []
+        for g, (a, b) in enumerate(zip(starts.tolist(), stops.tolist(), strict=True)):
+            _tick(check, g)
+            members = order[a:b]
+            head = int(members[0])
+            for m in members[1:].tolist():
+                uf.union(head, m)
+            if b - a <= _CELL_KEEP:
+                kept.extend(members.tolist())
+            else:
+                kept.extend(int(members[i]) for i in _extremes(points[members]))
+        kept_arr = np.array(kept, np.intp)
+        pairs = cKDTree(points[kept_arr]).query_pairs(r, output_type="ndarray")
+        for count, (i, j) in enumerate(kept_arr[pairs].tolist()):
+            _tick(check, count)
+            uf.union(i, j)
     labels: dict[int, int] = {}
-    return [labels.setdefault(find(i), len(labels)) for i in range(n)]
+    return [labels.setdefault(uf.find(i), len(labels)) for i in range(n)]
 
 
 # --- step 1: collinear overlapping detections ---------------------------------------------------------------
 
-
 _BUCKET_DEG = 3.0
 _PAIR_CHUNK = 200_000
+_BLOCK = 256
 
 
-def _window_pairs(
-    p0: np.ndarray, p1: np.ndarray, length: np.ndarray, margin: float, check: Check
-) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Candidate wall pairs that may be collinear: same or adjacent 3-degree direction bucket and close
-    offset across the bucket's direction (a sorted window per wall), in chunks of bounded size."""
-    angle = np.degrees(np.arctan2(p1[:, 1] - p0[:, 1], p1[:, 0] - p0[:, 0])) % 180.0
-    n_buckets = round(180.0 / _BUCKET_DEG)
-    bucket = np.minimum((angle // _BUCKET_DEG).astype(np.intp), n_buckets - 1)
-    mid = (p0 + p1) / 2.0
-    out: list[tuple[np.ndarray, np.ndarray]] = []
-    for b in np.unique(bucket).tolist():
-        _tick(check, b)
-        members = np.flatnonzero(bucket == b)
-        partners = np.flatnonzero((bucket == b) | (bucket == (b + 1) % n_buckets))
-        theta = math.radians((b + 0.5) * _BUCKET_DEG)
-        rho = mid[:, 1] * math.cos(theta) - mid[:, 0] * math.sin(theta)
-        partners = partners[np.argsort(rho[partners], kind="stable")]
-        rho_sorted = rho[partners]
-        half = 2.0 * margin + 0.04 * (length[members] + float(length[partners].max()))
-        lo = np.searchsorted(rho_sorted, rho[members] - half, side="left")
-        hi = np.searchsorted(rho_sorted, rho[members] + half, side="right")
-        counts = hi - lo
-        ends = np.cumsum(counts)
-        start = 0
-        while start < len(members):
-            base = int(ends[start - 1]) if start else 0
-            stop = max(int(np.searchsorted(ends, base + _PAIR_CHUNK, side="right")), start + 1)
-            stop = min(stop, len(members))
-            cnt = counts[start:stop]
-            total = int(cnt.sum())
-            if total:
-                ii = np.repeat(members[start:stop], cnt)
-                first = np.cumsum(cnt) - cnt
-                pos = np.repeat(lo[start:stop], cnt) + np.arange(total) - np.repeat(first, cnt)
-                jj = partners[pos]
-                keep = (bucket[jj] != b) | (jj > ii)
-                out.append((ii[keep], jj[keep]))
-            start = stop
-    return out
+def _merge_overlaps(
+    walls: list[_Wall], r: float, t_median: float, frame: _Frame, check: Check
+) -> list[_Wall]:
+    """Fuse walls lying on one line that overlap along it (double detections of one wall), or whose
+    facing ends are within ``r`` of each other (the gap becomes an opening interval).
 
-
-def _merge_overlaps(walls: list[_Wall], r: float, check: Check) -> list[_Wall]:
-    """Fuse walls lying on one line and overlapping along it (double detections of one wall)."""
+    Candidates are collinear pairs: direction within 3 degrees, both ends of the shorter within
+    ``max(1, 0.5 * max thickness)`` of the longer's line (``0.5 * t_median`` across a gap) and overlap of at
+    least ``min(r, 0.5 * shorter)`` or a gap of at most ``r``. A gap next to a wall that is not collinear
+    with the pair (a junction) is not bridged. Pairs come from sorted offset windows inside 3-degree
+    direction buckets and are united as found; walls already in one component are skipped, so
+    stacked duplicates cost linear time and memory. A component only fuses the members that are collinear
+    with its longest wall (no chain drift); the others stay as they are.
+    """
     n = len(walls)
     if n < 2:
         return walls
@@ -253,76 +316,148 @@ def _merge_overlaps(walls: list[_Wall], r: float, check: Check) -> list[_Wall]:
     length = np.hypot(*(p1 - p0).T)
     unit = (p1 - p0) / length[:, None]
     margin = max(1.0, 0.5 * float(thick.max()))
-    found_i: list[np.ndarray] = []
-    found_j: list[np.ndarray] = []
-    for i, j in _window_pairs(p0, p1, length, margin, check):
+    gap_tol = 0.5 * t_median
+    uf = _UnionFind(n)
+    end_tree: list[cKDTree] = []
+
+    def junction_between(a: int, b: int) -> bool:
+        """True if a non-collinear wall has an end near the gap between walls a and b."""
+        if not end_tree:
+            end_tree.append(cKDTree(np.concatenate([p0, p1])))
+        best = min(
+            ((p, q) for p in (p0[a], p1[a]) for q in (p0[b], p1[b])),
+            key=lambda pq: float(np.hypot(*(pq[0] - pq[1]))),
+        )
+        centre = (best[0] + best[1]) / 2.0
+        reach = float(np.hypot(*(best[0] - best[1]))) / 2.0 + r
+        for h in end_tree[0].query_ball_point(centre, reach):
+            k = h % n
+            if k not in (a, b) and abs(unit[k][0] * unit[a][1] - unit[k][1] * unit[a][0]) > _COLLINEAR_SIN:
+                return True
+        return False
+
+    def unite(i: np.ndarray, j: np.ndarray) -> bool:
         swap = (length[i] < length[j]) | ((length[i] == length[j]) & (i > j))
         a, b = np.where(swap, j, i), np.where(swap, i, j)  # a: the longer wall, the line b must lie on
         ua, ub = unit[a], unit[b]
         ok = np.abs(ua[:, 0] * ub[:, 1] - ua[:, 1] * ub[:, 0]) <= _COLLINEAR_SIN
         rel0, rel1 = p0[b] - p0[a], p1[b] - p0[a]
         t0, t1 = (rel0 * ua).sum(axis=1), (rel1 * ua).sum(axis=1)
-        n0 = ua[:, 0] * rel0[:, 1] - ua[:, 1] * rel0[:, 0]
-        n1 = ua[:, 0] * rel1[:, 1] - ua[:, 1] * rel1[:, 0]
+        n0 = np.abs(ua[:, 0] * rel0[:, 1] - ua[:, 1] * rel0[:, 0])
+        n1 = np.abs(ua[:, 0] * rel1[:, 1] - ua[:, 1] * rel1[:, 0])
         tol = np.maximum(1.0, 0.5 * np.maximum(thick[a], thick[b]))
-        ok &= (np.abs(n0) <= tol) & (np.abs(n1) <= tol)
         overlap = np.minimum(np.maximum(t0, t1), length[a]) - np.maximum(np.minimum(t0, t1), 0.0)
-        ok &= overlap >= np.minimum(r, 0.5 * length[b])
-        found_i.append(i[ok])
-        found_j.append(j[ok])
-    if not found_i or not any(len(x) for x in found_i):
-        return walls
-    i, j = np.concatenate(found_i), np.concatenate(found_j)
+        overlapping = ok & (n0 <= tol) & (n1 <= tol) & (overlap >= np.minimum(r, 0.5 * length[b]))
+        gapped = ok & ~overlapping & (n0 <= gap_tol) & (n1 <= gap_tol) & (overlap >= -r)
+        for k in np.flatnonzero(gapped).tolist():
+            if junction_between(int(a[k]), int(b[k])):
+                gapped[k] = False
+        united = False
+        for x, y in zip(i[overlapping | gapped].tolist(), j[overlapping | gapped].tolist(), strict=True):
+            united |= uf.union(x, y)
+        return united
 
-    parent = list(range(n))
+    angle = np.degrees(np.arctan2(p1[:, 1] - p0[:, 1], p1[:, 0] - p0[:, 0])) % 180.0
+    n_buckets = round(180.0 / _BUCKET_DEG)
+    bucket = np.minimum((angle // _BUCKET_DEG).astype(np.intp), n_buckets - 1)
+    mid = (p0 + p1) / 2.0
+    roots = np.arange(n)
+    dirty = False
+    work = 0
+    for bk in np.unique(bucket).tolist():
+        members = np.flatnonzero(bucket == bk)
+        partners = np.flatnonzero((bucket == bk) | (bucket == (bk + 1) % n_buckets))
+        theta = math.radians((bk + 0.5) * _BUCKET_DEG)
+        rho = mid[:, 1] * math.cos(theta) - mid[:, 0] * math.sin(theta)
+        partners = partners[np.argsort(rho[partners], kind="stable")]
+        rho_sorted = rho[partners]
+        half = 2.0 * margin + 0.04 * (length[members] + float(length[partners].max()))
+        lo = np.searchsorted(rho_sorted, rho[members] - half, side="left")
+        hi = np.searchsorted(rho_sorted, rho[members] + half, side="right")
+        s = 0
+        while s < len(members):
+            _tick(check, work)
+            work += 1
+            if dirty:
+                roots = np.array([uf.find(k) for k in range(n)], np.intp)
+                dirty = False
+            root_sorted = roots[partners]
+            change = np.concatenate(([0], np.cumsum(root_sorted[1:] != root_sorted[:-1])))
+            e = min(s + _BLOCK, len(members))
+            m, lw, hw = members[s:e], lo[s:e], hi[s:e]
+            nonempty = hw > lw
+            lc, hc = np.minimum(lw, len(partners) - 1), np.maximum(hw - 1, 0)
+            # Windows whose partners all share the member's component cannot unite anything new.
+            same = nonempty & (change[hc] == change[lc]) & (root_sorted[lc] == roots[m])
+            cnt = np.where(nonempty & ~same, hw - lw, 0)
+            take = min(max(int(np.searchsorted(np.cumsum(cnt), _PAIR_CHUNK, side="right")), 1), len(m))
+            c = cnt[:take]
+            total = int(c.sum())
+            if total:
+                ii = np.repeat(m[:take], c)
+                pos = np.repeat(lw[:take], c) + np.arange(total) - np.repeat(np.cumsum(c) - c, c)
+                jj = partners[pos]
+                keep = ((bucket[jj] != bk) | (jj > ii)) & (roots[ii] != roots[jj])
+                if keep.any():
+                    dirty |= unite(ii[keep], jj[keep])
+            s += take
 
-    def find(x: int) -> int:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    for x, y in zip(i.tolist(), j.tolist(), strict=True):
-        rx, ry = find(x), find(y)
-        if rx != ry:
-            parent[max(rx, ry)] = min(rx, ry)
     groups: dict[int, list[int]] = defaultdict(list)
     for k in range(n):
-        groups[find(k)].append(k)
-
+        groups[uf.find(k)].append(k)
     out: list[_Wall] = []
-    for count, members in enumerate(groups.values()):  # dict order = ascending first member: canonical
+    for count, members_list in enumerate(groups.values()):  # ascending first member: canonical
         _tick(check, count)
-        if len(members) == 1:
-            out.append(walls[members[0]])
+        if len(members_list) == 1:
+            out.append(walls[members_list[0]])
             continue
-        base = min(members, key=lambda k: (-length[k], k))
-        o = walls[base].p0
-        ux, uy = float(unit[base][0]), float(unit[base][1])
-        nx, ny = -uy, ux
-        s_all: list[float] = []
-        offs, weights, thick_w = [], [], []
-        openings: list[Seg] = []
-        for k in members:
-            w = walls[k]
-            for p in (w.p0, w.p1):
-                s_all.append((p[0] - o[0]) * ux + (p[1] - o[1]) * uy)
-            mid = ((w.p0[0] + w.p1[0]) / 2.0, (w.p0[1] + w.p1[1]) / 2.0)
-            offs.append(float(length[k]) * ((mid[0] - o[0]) * nx + (mid[1] - o[1]) * ny))
-            weights.append(float(length[k]))
-            thick_w.append(float(length[k]) * w.thickness)
-            openings.extend(w.openings)
-        total = math.fsum(weights)
-        off = math.fsum(offs) / total
-        smin, smax = min(s_all), max(s_all)
-        source = min((walls[k].source for k in members), key=lambda s: _SOURCE_RANK[s])
+        mem = np.array(members_list, np.intp)
+        base = min(members_list, key=lambda k: (-length[k], k))
+        ub, o = unit[base], p0[base]
+        nb = np.array((-ub[1], ub[0]))
+        rel0, rel1 = p0[mem] - o, p1[mem] - o
+        tol = np.maximum(1.0, 0.5 * np.maximum(thick[base], thick[mem]))
+        valid = (
+            (np.abs(ub[0] * unit[mem, 1] - ub[1] * unit[mem, 0]) <= _COLLINEAR_SIN)
+            & (np.abs(rel0 @ nb) <= tol)
+            & (np.abs(rel1 @ nb) <= tol)
+        ) | (mem == base)
+        out.extend(walls[k] for k in mem[~valid].tolist())
+        vm = mem[valid]
+        if len(vm) == 1:
+            out.append(walls[base])
+            continue
+        r0, r1 = rel0[valid], rel1[valid]
+        s0, s1 = r0 @ ub, r1 @ ub
+        w = length[vm].tolist()
+        total_w = math.fsum(w)
+        off = (
+            math.fsum(wi * oi for wi, oi in zip(w, (((r0 + r1) / 2.0) @ nb).tolist(), strict=True)) / total_w
+        )
+        thickness = math.fsum(wi * ti for wi, ti in zip(w, thick[vm].tolist(), strict=True)) / total_w
+        lo_s, hi_s = np.minimum(s0, s1), np.maximum(s0, s1)
+        openings: list[Seg] = [seg for k in vm.tolist() for seg in walls[k].openings]
+        covered_to = None
+        for idx in np.lexsort((hi_s, lo_s)).tolist():
+            if covered_to is not None and lo_s[idx] - covered_to >= _MIN_OPENING_PX:
+                t0, t1 = covered_to, float(lo_s[idx])
+                openings.append(
+                    (
+                        (float(o[0] + ub[0] * t0 + nb[0] * off), float(o[1] + ub[1] * t0 + nb[1] * off)),
+                        (float(o[0] + ub[0] * t1 + nb[0] * off), float(o[1] + ub[1] * t1 + nb[1] * off)),
+                    )
+                )
+            covered_to = float(hi_s[idx]) if covered_to is None else max(covered_to, float(hi_s[idx]))
+        smin, smax = float(lo_s.min()), float(hi_s.max())
+        source = min((walls[k].source for k in vm.tolist()), key=lambda src: _SOURCE_RANK[src])
         out.append(
             _make_wall(
-                (o[0] + ux * smin + nx * off, o[1] + uy * smin + ny * off),
-                (o[0] + ux * smax + nx * off, o[1] + uy * smax + ny * off),
-                math.fsum(thick_w) / total,
+                (float(o[0] + ub[0] * smin + nb[0] * off), float(o[1] + ub[1] * smin + nb[1] * off)),
+                (float(o[0] + ub[0] * smax + nb[0] * off), float(o[1] + ub[1] * smax + nb[1] * off)),
+                thickness,
                 source,
                 openings,
+                frame,
             )
         )
     out.sort(key=_wall_key)
@@ -332,13 +467,15 @@ def _merge_overlaps(walls: list[_Wall], r: float, check: Check) -> list[_Wall]:
 # --- node placement -----------------------------------------------------------------------------------------
 
 
-def _place_nodes(edges: list[_Edge], node_pts: dict[int, list[Pt]], r: float) -> dict[int, Pt]:
-    """Position of every node touched by ``edges`` (06 8.1 step 9).
+def _place_nodes(edges: list[_Edge], node_pts: dict[int, list[Pt]], r: float, frame: _Frame) -> dict[int, Pt]:
+    """Position of every node touched by ``edges`` (06 8.1 step 9), computed in the ``theta0`` frame.
 
-    x is the mean ``x`` of the incident vertical walls, y the mean ``y`` of the incident horizontal ones;
-    a coordinate no axis wall fixes comes from the least-squares intersection of the incident diagonal
-    centre lines (given the fixed coordinate, if any), and otherwise from the centroid of the clustered
-    endpoints. A least-squares solution further than ``2 r`` from the centroid is not trusted.
+    ``u`` is the mean position of the incident "v" walls, ``v`` that of the incident "h" walls (a value
+    further than ``2 r`` from the centroid of the clustered endpoints is not trusted, so a long tilted
+    wall never drags its end far). A coordinate no axis wall fixes comes from the least-squares
+    intersection of the incident diagonal centre lines (given the fixed coordinate, if any) and otherwise
+    from the centroid; a least-squares solution further than ``2 r`` from the centroid, or from lines
+    within 10 degrees of parallel, falls back to the centroid.
     """
     incident: dict[int, dict[int, _Line]] = defaultdict(dict)
     for e in edges:
@@ -347,36 +484,41 @@ def _place_nodes(edges: list[_Edge], node_pts: dict[int, list[Pt]], r: float) ->
     placed: dict[int, Pt] = {}
     for node, lines in incident.items():
         pts = node_pts[node]
-        cx = math.fsum(p[0] for p in pts) / len(pts)
-        cy = math.fsum(p[1] for p in pts) / len(pts)
-        xs = [ln.pos for ln in lines.values() if ln.kind == "v"]
-        ys = [ln.pos for ln in lines.values() if ln.kind == "h"]
+        cu, cv = frame.to_local(
+            math.fsum(p[0] for p in pts) / len(pts), math.fsum(p[1] for p in pts) / len(pts)
+        )
+        us = [ln.pos for ln in lines.values() if ln.kind == "v"]
+        vs = [ln.pos for ln in lines.values() if ln.kind == "h"]
         diags = [ln for ln in lines.values() if ln.kind == "d"]
-        x = math.fsum(xs) / len(xs) if xs else None
-        y = math.fsum(ys) / len(ys) if ys else None
-        if x is not None and y is not None:
-            placed[node] = (x, y)
-        elif x is not None:
-            placed[node] = (x, _solve_free(diags, 1, x, cy, r))
-        elif y is not None:
-            placed[node] = (_solve_free(diags, 0, y, cx, r), y)
+        u = math.fsum(us) / len(us) if us else None
+        v = math.fsum(vs) / len(vs) if vs else None
+        if u is not None and abs(u - cu) > _TRUST * r:
+            u = None
+        if v is not None and abs(v - cv) > _TRUST * r:
+            v = None
+        if u is not None and v is not None:
+            placed[node] = frame.to_world(u, v)
+        elif u is not None:
+            placed[node] = frame.to_world(u, _solve_free(diags, 1, u, cv, r))
+        elif v is not None:
+            placed[node] = frame.to_world(_solve_free(diags, 0, v, cu, r), v)
         else:
-            placed[node] = _intersect(diags, (cx, cy), r)
+            placed[node] = frame.to_world(*_intersect(diags, (cu, cv), r))
     return placed
 
 
 def _solve_free(diags: list[_Line], axis: int, fixed: float, fallback: float, r: float) -> float:
-    """The free coordinate (``axis`` 1: y given x, 0: x given y) minimising the squared distance to the
+    """The free coordinate (``axis`` 1: v given u, 0: u given v) minimising the squared distance to the
     diagonal lines, or ``fallback`` when there are none or the solution is not trusted."""
-    num = den = 0.0
     nums, dens = [], []
     for ln in diags:
         n_free, n_fixed = (ln.ny, ln.nx) if axis == 1 else (ln.nx, ln.ny)
         nums.append(n_free * (ln.c - n_fixed * fixed))
         dens.append(n_free * n_free)
-    if nums:
-        num, den = math.fsum(nums), math.fsum(dens)
-    if den < _LS_MIN_DET * 0.1 or abs(num / den - fallback) > 2.0 * r:
+    if not nums:
+        return fallback
+    num, den = math.fsum(nums), math.fsum(dens)
+    if den < _LS_MIN_DET or abs(num / den - fallback) > _TRUST * r:
         return fallback
     return num / den
 
@@ -393,16 +535,18 @@ def _intersect(diags: list[_Line], centroid: Pt, r: float) -> Pt:
     if det < _LS_MIN_DET * len(diags) * len(diags) / 4.0:
         return centroid
     x, y = (a11 * b0 - a01 * b1) / det, (a00 * b1 - a01 * b0) / det
-    return (x, y) if math.hypot(x - centroid[0], y - centroid[1]) <= 2.0 * r else centroid
+    return (x, y) if math.hypot(x - centroid[0], y - centroid[1]) <= _TRUST * r else centroid
 
 
 # --- steps 2-4: clustering, extension, T split --------------------------------------------------------------
 
 
-def _build_edges(walls: list[_Wall], ends: np.ndarray, r: float) -> tuple[list[_Edge], dict[int, list[Pt]]]:
+def _build_edges(
+    walls: list[_Wall], ends: np.ndarray, r: float, check: Check
+) -> tuple[list[_Edge], dict[int, list[Pt]]]:
     """Cluster all endpoints and make one edge per wall whose two ends land in different nodes."""
     flat = ends.reshape(-1, 2)
-    labels = _cluster(flat, r)
+    labels = _cluster(flat, r, check)
     edges: list[_Edge] = []
     node_pts: dict[int, list[Pt]] = defaultdict(list)
     for wi, w in enumerate(walls):
@@ -421,14 +565,15 @@ def _edge_arrays(edges: list[_Edge], placed: dict[int, Pt]) -> tuple[np.ndarray,
     return pa, pb
 
 
-def _direction(line: _Line, frm: Pt, to: Pt) -> Pt:
+def _direction(line: _Line, frm: Pt, to: Pt, frame: _Frame) -> Pt:
     """Unit direction of a wall's line from ``frm`` towards ``to`` (exactly axis-parallel for axis walls)."""
     if line.kind == "h":
-        return (1.0, 0.0) if to[0] >= frm[0] else (-1.0, 0.0)
-    if line.kind == "v":
-        return (0.0, 1.0) if to[1] >= frm[1] else (0.0, -1.0)
-    dx, dy = -line.ny, line.nx
-    return (dx, dy) if (to[0] - frm[0]) * dx + (to[1] - frm[1]) * dy >= 0 else (-dx, -dy)
+        d = (frame.c, frame.s)
+    elif line.kind == "v":
+        d = (-frame.s, frame.c)
+    else:
+        d = frame.to_world(-line.ny, line.nx)
+    return d if (to[0] - frm[0]) * d[0] + (to[1] - frm[1]) * d[1] >= 0 else (-d[0], -d[1])
 
 
 def _extend_free_ends(
@@ -438,6 +583,7 @@ def _extend_free_ends(
     r: float,
     reach: float,
     step: float,
+    frame: _Frame,
     check: Check,
 ) -> bool:
     """Move free ends onto the nearest other centre line ahead of them within ``reach``; True if any moved."""
@@ -448,7 +594,7 @@ def _extend_free_ends(
     free = [(k, end) for k, e in enumerate(edges) for end in (0, 1) if degree[e.a if end == 0 else e.b] == 1]
     if not free:
         return False
-    placed = _place_nodes(edges, node_pts, r)
+    placed = _place_nodes(edges, node_pts, r, frame)
     pa, pb = _edge_arrays(edges, placed)
     index = _SegIndex(pa, pb, step)
     tips = np.array([placed[edges[k].a if end == 0 else edges[k].b] for k, end in free], np.float64)
@@ -458,7 +604,7 @@ def _extend_free_ends(
         e = edges[k]
         tip = placed[e.a if end == 0 else e.b]
         other = placed[e.b if end == 0 else e.a]
-        dx, dy = _direction(e.line, other, tip)
+        dx, dy = _direction(e.line, other, tip, frame)
         best: tuple[float, int, Pt] | None = None
         for j in cands.tolist():
             if j == k:
@@ -483,10 +629,10 @@ def _extend_free_ends(
 
 
 def _split_t_junctions(
-    edges: list[_Edge], node_pts: dict[int, list[Pt]], r: float, step: float, check: Check
+    edges: list[_Edge], node_pts: dict[int, list[Pt]], r: float, step: float, frame: _Frame, check: Check
 ) -> list[_Edge]:
     """Split every wall at the nodes lying on its centre line within ``r`` (06 8.1 step 9, third bullet)."""
-    placed = _place_nodes(edges, node_pts, r)
+    placed = _place_nodes(edges, node_pts, r, frame)
     pa, pb = _edge_arrays(edges, placed)
     node_ids = sorted(placed)
     pts = np.array([placed[q] for q in node_ids], np.float64).reshape(-1, 2)
@@ -523,6 +669,102 @@ def _split_t_junctions(
     return out
 
 
+def _split_crossings(
+    edges: list[_Edge], node_pts: dict[int, list[Pt]], r: float, step: float, frame: _Frame, check: Check
+) -> list[_Edge]:
+    """Split two walls that properly cross (neither end on the other) at a shared node.
+
+    A crossing only counts when it lies inside both walls and further than ``r`` from the four ends
+    (nearer ones are L/T junctions). Crossing points within ``r`` of each other share one node.
+    """
+    placed = _place_nodes(edges, node_pts, r, frame)
+    pa, pb = _edge_arrays(edges, placed)
+    vec = pb - pa
+    length = np.hypot(vec[:, 0], vec[:, 1])
+    long_edges = np.flatnonzero(length > 2.0 * r)
+    if len(long_edges) < 2:
+        return edges
+    unit = vec[long_edges] / length[long_edges, None]
+    # Walls meeting at a node do not cross each other there; at a hub of many walls the crossings near the
+    # node are ignored (the trim grows with its degree), so a fan of walls is not one big candidate set.
+    degree: dict[int, int] = defaultdict(int)
+    for e in edges:
+        degree[e.a] += 1
+        degree[e.b] += 1
+    deg_a = np.array([degree[edges[k].a] for k in long_edges], np.float64)
+    deg_b = np.array([degree[edges[k].b] for k in long_edges], np.float64)
+    cap = 0.45 * length[long_edges]
+    trim_a = np.minimum(cap, r * np.maximum(1.0, deg_a / _HUB_DEGREE))
+    trim_b = np.minimum(cap, r * np.maximum(1.0, deg_b / _HUB_DEGREE))
+    index = _SegIndex(pa[long_edges] + unit * trim_a[:, None], pb[long_edges] - unit * trim_b[:, None], step)
+    if index.tree.count_neighbors(index.tree, step) > _MAX_CANDIDATE_PAIRS:
+        raise TooComplexError("too many walls cross or touch in one place")
+    n_edges = len(edges)
+    found: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+    data = index.tree.data
+    for block, start in enumerate(range(0, len(data), _SAMPLE_BLOCK)):
+        _tick(check, block)
+        stop = min(start + _SAMPLE_BLOCK, len(data))
+        hits = index.tree.query_ball_point(data[start:stop], step)
+        counts = np.fromiter((len(h) for h in hits), np.intp, stop - start)
+        if not counts.any():
+            continue
+        oi = long_edges[np.repeat(index.owner[start:stop], counts)]
+        oj = long_edges[
+            index.owner[np.fromiter(itertools.chain.from_iterable(hits), np.intp, int(counts.sum()))]
+        ]
+        keep = oi < oj
+        uniq = np.unique(oi[keep].astype(np.int64) * n_edges + oj[keep])
+        i, j = uniq // n_edges, uniq % n_edges
+        d1, d2 = vec[i], vec[j]
+        denom = d1[:, 0] * d2[:, 1] - d1[:, 1] * d2[:, 0]
+        ok = np.abs(denom) > _CROSS_SIN * length[i] * length[j]
+        diff = pa[j] - pa[i]
+        safe = np.where(ok, denom, 1.0)
+        t = (diff[:, 0] * d2[:, 1] - diff[:, 1] * d2[:, 0]) / safe
+        u = (diff[:, 0] * d1[:, 1] - diff[:, 1] * d1[:, 0]) / safe
+        ok &= (t > 0.0) & (t < 1.0) & (u > 0.0) & (u < 1.0)
+        cross_pt = pa[i] + t[:, None] * d1
+        for end_pts in (pa[i], pb[i], pa[j], pb[j]):
+            ok &= np.hypot(*(cross_pt - end_pts).T) > r
+        if ok.any():
+            found.append((i[ok], j[ok], cross_pt[ok]))
+    if not found:
+        return edges
+    i, j = np.concatenate([f[0] for f in found]), np.concatenate([f[1] for f in found])
+    cross_pt = np.concatenate([f[2] for f in found])
+    order = np.lexsort((j, i))  # a pair seen in several blocks appears twice; the order is canonical
+    i, j, cross_pt = i[order], j[order], cross_pt[order]
+    first = np.ones(len(i), bool)
+    first[1:] = (i[1:] != i[:-1]) | (j[1:] != j[:-1])
+    i, j, cross_pt = i[first], j[first], cross_pt[first]
+    labels = _cluster(cross_pt, r, check)
+    first_new = max(placed) + 1
+    members: dict[int, list[Pt]] = defaultdict(list)
+    on_edge: dict[int, set[int]] = defaultdict(set)
+    for k, (a, b, lab) in enumerate(zip(i.tolist(), j.tolist(), labels, strict=True)):
+        members[lab].append((float(cross_pt[k, 0]), float(cross_pt[k, 1])))
+        on_edge[a].add(lab)
+        on_edge[b].add(lab)
+    centre: dict[int, Pt] = {}
+    for lab, pts in members.items():
+        node_pts[first_new + lab] = pts
+        centre[lab] = (math.fsum(p[0] for p in pts) / len(pts), math.fsum(p[1] for p in pts) / len(pts))
+    out: list[_Edge] = []
+    for k, e in enumerate(edges):
+        _tick(check, k)
+        if k not in on_edge:
+            out.append(e)
+            continue
+        a_pt, b_pt = (float(pa[k, 0]), float(pa[k, 1])), (float(pb[k, 0]), float(pb[k, 1]))
+        cuts = sorted((project_param(centre[lab], a_pt, b_pt), lab) for lab in on_edge[k])
+        chain = [e.a, *(first_new + lab for _, lab in cuts), e.b]
+        for a, b in itertools.pairwise(chain):
+            if a != b:
+                out.append(_Edge(a, b, e.line, e.thickness, e.source, e.openings, e.wi))
+    return out
+
+
 # --- step 5: duplicates and short walls ---------------------------------------------------------------------
 
 
@@ -543,68 +785,36 @@ def _dedupe(edges: list[_Edge]) -> list[_Edge]:
 
 
 def _prune_short(edges: list[_Edge], placed: dict[int, Pt], min_len: float, check: Check) -> list[_Edge]:
-    """Drop walls shorter than ``min_len`` that do not connect two otherwise unconnected parts."""
-    alive = [True] * len(edges)
+    """Drop dangling walls (a free end) shorter than ``min_len``, cascading along chains of them.
+
+    A short wall with both ends attached stays, whether it bridges two parts or lies on a cycle.
+    """
     degree: dict[int, int] = defaultdict(int)
-    adjacency: dict[int, set[int]] = defaultdict(set)
+    adjacency: dict[int, list[int]] = defaultdict(list)
     for k, e in enumerate(edges):
         degree[e.a] += 1
         degree[e.b] += 1
-        adjacency[e.a].add(k)
-        adjacency[e.b].add(k)
+        adjacency[e.a].append(k)
+        adjacency[e.b].append(k)
 
-    def length(k: int) -> float:
+    def is_short(k: int) -> bool:
         e = edges[k]
-        return math.hypot(placed[e.a][0] - placed[e.b][0], placed[e.a][1] - placed[e.b][1])
+        return math.hypot(placed[e.a][0] - placed[e.b][0], placed[e.a][1] - placed[e.b][1]) < min_len
 
-    short = sorted((k for k in range(len(edges)) if length(k) < min_len), key=lambda k: (length(k), k))
-
-    def remove(k: int) -> None:
-        alive[k] = False
-        for node in (edges[k].a, edges[k].b):
-            degree[node] -= 1
-            adjacency[node].discard(k)
-
-    def other_end_reachable(k: int) -> bool:
-        """True if the two ends of edge ``k`` stay connected without it (it lies on a cycle)."""
-        goal = edges[k].b
-        seen = {edges[k].a}
-        stack = [edges[k].a]
-        steps = 0
-        while stack:
-            steps += 1
-            _tick(check, steps)
-            node = stack.pop()
-            for m in adjacency[node]:
-                if m == k:
-                    continue
-                nxt = edges[m].b if edges[m].a == node else edges[m].a
-                if nxt == goal:
-                    return True
-                if nxt not in seen:
-                    seen.add(nxt)
-                    stack.append(nxt)
-        return False
-
-    verified_bridges: set[int] = set()
-    while True:
-        progressed = False
-        for k in short:
-            if alive[k] and (degree[edges[k].a] == 1 or degree[edges[k].b] == 1):
-                remove(k)  # dangling: it joins nothing
-                progressed = True
-        if progressed:
+    alive = [True] * len(edges)
+    stack = [k for k, e in enumerate(edges) if (degree[e.a] == 1 or degree[e.b] == 1) and is_short(k)]
+    work = 0
+    while stack:
+        work += 1
+        _tick(check, work)
+        k = stack.pop()
+        e = edges[k]
+        if not alive[k] or not (degree[e.a] == 1 or degree[e.b] == 1):
             continue
-        for k in short:
-            if not alive[k] or k in verified_bridges:
-                continue
-            if other_end_reachable(k):
-                remove(k)
-                progressed = True
-                break
-            verified_bridges.add(k)  # removing other walls can never reconnect a bridge
-        if not progressed:
-            break
+        alive[k] = False
+        for node in (e.a, e.b):
+            degree[node] -= 1
+            stack.extend(m for m in adjacency[node] if alive[m] and degree[node] == 1 and is_short(m))
     kept = [e for k, e in enumerate(edges) if alive[k]]
     if len(kept) == len(edges):
         return kept
@@ -720,32 +930,40 @@ def build_wall_graph(
     r: float,
     t_median: float,
     L: float,
+    theta0_deg: float = 0.0,
     check_deadline: Callable[[], None] | None = None,
 ) -> WallGraph:
     """Snap raw wall centre lines into a graph of nodes and walls (06 8.1 steps 9-10).
 
     ``r`` is the snap radius (``max(1.0 * t_median, 0.006 L)`` in the pipeline), ``t_median`` the median
-    wall thickness and ``L`` the plan-region long side, all in pixels. Free ends extend up to
-    ``r + t_median``; walls shorter than ``max(2 t_median, 0.01 L)`` are removed unless they bridge two
-    otherwise unconnected parts. Raises ``ValueError`` for non-finite input. ``check_deadline`` is polled
-    inside the long loops and may raise to abort.
+    wall thickness and ``L`` the plan-region long side, all in pixels. ``theta0_deg`` is the plan's dominant
+    orientation: walls within 3 degrees of ``theta0 + k * 90`` are axis-aligned and snap to right angles in
+    that frame (compared modulo 90, so 89 equals -1); ids still follow the image-frame ``(y, x)`` order.
+    Free ends extend up to ``r + t_median``; walls shorter than ``max(2 t_median, 0.01 L)`` are removed
+    only when they dangle (have a free end). Raises ``ValueError`` for non-finite input and
+    ``TooComplexError`` (a ``ValueError``) for more than ``MAX_RAW_WALLS`` walls or implausibly dense
+    crossings. ``check_deadline`` is polled inside the long loops and may raise to abort.
     """
-    _require_finite((r, t_median, L), "r, t_median and L")
+    if len(raw) > MAX_RAW_WALLS:
+        raise TooComplexError(f"{len(raw)} raw walls exceed the limit of {MAX_RAW_WALLS}")
+    _require_finite((r, t_median, L, theta0_deg), "r, t_median, L and theta0_deg")
     if r <= 0 or t_median <= 0 or L <= 0:
         raise ValueError(f"r, t_median and L must be positive, got {(r, t_median, L)!r}")
+    frame = _Frame.of(theta0_deg % 90.0)
     step = r + t_median
-    walls = _merge_overlaps(_ingest(raw, check_deadline), r, check_deadline)
+    walls = _merge_overlaps(_ingest(raw, frame, check_deadline), r, t_median, frame, check_deadline)
     if not walls:
         return WallGraph(nodes={}, walls=[], gaps=[])
     ends = np.array([[w.p0, w.p1] for w in walls], np.float64)
 
-    edges, node_pts = _build_edges(walls, ends, r)
+    edges, node_pts = _build_edges(walls, ends, r, check_deadline)
     if not edges:
         return WallGraph(nodes={}, walls=[], gaps=[])
-    if _extend_free_ends(ends, edges, node_pts, r, r + t_median, step, check_deadline):
-        edges, node_pts = _build_edges(walls, ends, r)
-    edges = _split_t_junctions(edges, node_pts, r, step, check_deadline)
+    if _extend_free_ends(ends, edges, node_pts, r, r + t_median, step, frame, check_deadline):
+        edges, node_pts = _build_edges(walls, ends, r, check_deadline)
+    edges = _split_t_junctions(edges, node_pts, r, step, frame, check_deadline)
+    edges = _split_crossings(edges, node_pts, r, step, frame, check_deadline)
     edges = _dedupe(edges)
-    placed = _place_nodes(edges, node_pts, r)
+    placed = _place_nodes(edges, node_pts, r, frame)
     edges = _prune_short(edges, placed, max(2.0 * t_median, 0.01 * L), check_deadline)
-    return _assemble(edges, _place_nodes(edges, node_pts, r), check_deadline)
+    return _assemble(edges, _place_nodes(edges, node_pts, r, frame), check_deadline)

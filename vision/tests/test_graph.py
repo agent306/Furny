@@ -3,23 +3,50 @@
 import math
 import random
 import time
+import tracemalloc
+from collections.abc import Callable, Iterable
+from typing import Any
 
+import numpy as np
 import pytest
 
-from app.pipeline.graph import EVIDENCE, build_wall_graph
-from app.schemas.candidates import RawWall, WallGraph
+from app.pipeline import graph as graphmod
+from app.pipeline.graph import (
+    EVIDENCE,
+    MAX_RAW_WALLS,
+    TooComplexError,
+    build_wall_graph,
+)
+from app.schemas.candidates import RawWall, WallCandidate, WallGraph, WallSource
+from app.utils.geometry import Pt
+
+Snapshot = tuple[list[tuple[str, Pt]], list[tuple[Any, ...]], list[tuple[str, float, float]]]
 
 R = 8.0
 T = 12.0
 L = 1000.0
 
 
-def raw(p0, p1, t=T, source="filled", openings=()):  # type: ignore[no-untyped-def]
+def raw(
+    p0: Pt,
+    p1: Pt,
+    t: float = T,
+    source: WallSource = "filled",
+    openings: Iterable[tuple[float, float]] = (),
+) -> RawWall:
     return RawWall(p0, p1, t, source, tuple(openings))
 
 
-def build(walls, *, r=R, t=T, long_side=L):  # type: ignore[no-untyped-def]
-    return build_wall_graph(walls, r=r, t_median=t, L=long_side)
+def build(
+    walls: list[RawWall],
+    *,
+    r: float = R,
+    t: float = T,
+    long_side: float = L,
+    theta0: float = 0.0,
+    check: Callable[[], None] | None = None,
+) -> WallGraph:
+    return build_wall_graph(walls, r=r, t_median=t, L=long_side, theta0_deg=theta0, check_deadline=check)
 
 
 # Endpoint jitter (dx, dy) of the eight rectangle endpoints; every corner pair stays within r = 8.
@@ -35,9 +62,11 @@ JITTER = [
 ]
 
 
-def rect_walls(w=1000.0, h=600.0, jitter=None, t=T):  # type: ignore[no-untyped-def]
+def rect_walls(
+    w: float = 1000.0, h: float = 600.0, jitter: list[Pt] | None = None, t: float = T
+) -> list[RawWall]:
     corners = [(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)]
-    out = []
+    out: list[RawWall] = []
     for i in range(4):
         a, b = corners[i], corners[(i + 1) % 4]
         ja = jitter[2 * i] if jitter else (0.0, 0.0)
@@ -52,13 +81,13 @@ def node_at(g: WallGraph, x: float, y: float, tol: float = 1e-6) -> str:
     return hits[0]
 
 
-def wall_between(g: WallGraph, n1: str, n2: str):  # type: ignore[no-untyped-def]
+def wall_between(g: WallGraph, n1: str, n2: str) -> WallCandidate:
     hits = [w for w in g.walls if {w.a_node, w.b_node} == {n1, n2}]
     assert len(hits) == 1
     return hits[0]
 
 
-def snapshot(g: WallGraph):  # type: ignore[no-untyped-def]
+def snapshot(g: WallGraph) -> Snapshot:
     return (
         sorted(g.nodes.items()),
         [
@@ -223,28 +252,45 @@ def test_short_wall_removed_unless_bridging() -> None:
         assert len(g.nodes) == 2
         assert g.walls[0].free_ends == 2
 
-    # A 15 px wall joining two otherwise separate parts is kept.
-    left, right = raw((0.0, 0.0), (300.0, 0.0)), raw((315.0, 0.0), (600.0, 0.0))
-    assert len(build([left, right], r=6.0).walls) == 2  # the 15 px gap alone is no wall
-    g = build([left, right, raw((300.0, 0.0), (315.0, 0.0))], r=6.0)
+    # A 15 px wall joining two otherwise separate parts is kept (a jog: the two long walls are 15 px apart).
+    left, right = raw((0.0, 0.0), (300.0, 0.0)), raw((300.0, 15.0), (600.0, 15.0))
+    jog = raw((300.0, 0.0), (300.0, 15.0))
+    assert len(build([left, right], r=6.0).walls) == 2
+    g = build([left, right, jog], r=6.0)
     assert len(g.walls) == 3
     short = [w for w in g.walls if math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]) < 24]
     assert len(short) == 1
     assert short[0].free_ends == 0
 
 
-def test_short_wall_inside_a_cycle_is_removed() -> None:
-    # Rectangle whose left wall is split by a tiny 15 px wall: it does not join separate parts.
+def test_dangling_short_walls_are_removed_in_a_cascade() -> None:
+    # Two short walls in a row hang off a long one; the outer one dangles first, then the inner one.
+    long_wall = raw((0.0, 0.0), (500.0, 0.0))
+    chain = [raw((250.0, 0.0), (250.0, 14.0)), raw((250.0, 14.0), (264.0, 14.0))]
+    g = build([long_wall, *chain])
+    assert len(g.walls) == 1
+    assert len(g.nodes) == 2
+
+
+def test_short_wall_threshold_is_two_t_or_one_percent_of_long_side() -> None:
+    stub = [raw((0.0, 0.0), (500.0, 0.0)), raw((250.0, 0.0), (250.0, 30.0))]
+    assert len(build(stub, t=12.0, long_side=1000.0).walls) == 3  # 30 px >= max(24, 10)
+    assert len(build(stub, t=12.0, long_side=4000.0).walls) == 1  # 30 px < max(24, 40): L governs
+    assert len(build(stub, t=16.0, long_side=1000.0).walls) == 1  # 30 px < 2 t = 32: t governs
+
+
+def test_short_wall_on_a_cycle_is_kept() -> None:
+    # A 21 px chamfer closes the top-left corner of a rectangle: short, but both ends are attached.
     walls = [
-        raw((0.0, 0.0), (500.0, 0.0)),
+        raw((15.0, 0.0), (500.0, 0.0)),
         raw((500.0, 0.0), (500.0, 300.0)),
         raw((500.0, 300.0), (0.0, 300.0)),
         raw((0.0, 300.0), (0.0, 15.0)),
-        raw((0.0, 15.0), (0.0, 0.0)),
+        raw((0.0, 15.0), (15.0, 0.0)),
     ]
     g = build(walls, r=6.0, t=12.0)
-    assert len(g.walls) == 4  # the 15 px piece is gone; the left wall's top end is now free
-    assert sorted(w.free_ends for w in g.walls) == [0, 0, 1, 1]
+    assert len(g.walls) == 5
+    assert all(w.free_ends == 0 for w in g.walls)
 
 
 def test_isolated_tiny_wall_is_removed() -> None:
@@ -308,13 +354,13 @@ def test_ids_follow_geometric_order() -> None:
 @pytest.mark.parametrize(
     ("source", "evidence"), [("filled", 1.0), ("vector", 1.0), ("double_line", 0.85), ("single_line", 0.5)]
 )
-def test_evidence(source: str, evidence: float) -> None:
-    g = build([raw((0.0, 0.0), (500.0, 0.0), source=source)])  # type: ignore[arg-type]
+def test_evidence(source: WallSource, evidence: float) -> None:
+    g = build([raw((0.0, 0.0), (500.0, 0.0), source=source)])
     assert g.walls[0].evidence == evidence
     assert EVIDENCE == {"filled": 1.0, "vector": 1.0, "double_line": 0.85, "single_line": 0.5}
 
 
-# --- diagonal walls --------------------------------------------------------------------------------------
+# --- diagonal walls --------------------------------------------------------------------------------
 
 
 def test_diagonal_wall_between_two_axis_walls() -> None:
@@ -369,24 +415,16 @@ def test_axis_wall_end_and_diagonal_keep_axis_coordinate() -> None:
     assert corner[0][1] == pytest.approx(203.0 + slope * (50.0 - 52.0), abs=1e-6)
 
 
-def test_nearly_parallel_diagonals_fall_back_to_centroid() -> None:
-    walls = [raw((0.0, 0.0), (300.0, 100.0)), raw((302.0, 101.0), (600.0, 202.0))]
-    g = build(walls, r=8.0)
-    assert len(g.nodes) == 3
-    mid = [p for p in g.nodes.values() if 100 < p[0] < 500]
-    assert len(mid) == 1
-    assert math.hypot(mid[0][0] - 301.0, mid[0][1] - 100.5) < 1e-6
+def test_near_axis_tolerance_is_three_degrees() -> None:
+    def tilt(deg: float) -> WallCandidate:
+        w = build([raw((0.0, 0.0), (500.0, 500.0 * math.tan(math.radians(deg))))]).walls[0]
+        return w
+
+    assert tilt(2.8).a[1] == tilt(2.8).b[1]  # snapped flat
+    assert tilt(3.3).a[1] != tilt(3.3).b[1]  # kept as a diagonal
 
 
-def test_near_axis_tolerance() -> None:
-    # 2 degrees off the x axis is "horizontal" (snapped flat); 5 degrees is a diagonal (kept slanted).
-    flat = build([raw((0.0, 0.0), (500.0, 17.0))])
-    assert flat.walls[0].a[1] == flat.walls[0].b[1]
-    slanted = build([raw((0.0, 0.0), (500.0, 44.0))])
-    assert slanted.walls[0].a[1] != slanted.walls[0].b[1]
-
-
-# --- opening bookkeeping ---------------------------------------------------------------------------------
+# --- opening bookkeeping ---------------------------------------------------------------------------
 
 
 def test_openings_rebased_when_wall_is_split() -> None:
@@ -446,7 +484,7 @@ def test_openings_split_at_t_junction_on_vertical_wall_and_reversed_stem() -> No
     assert lower.openings_px == ((0.0, 100.0),)
 
 
-# --- robustness ------------------------------------------------------------------------------------------
+# --- robustness ------------------------------------------------------------------------------------
 
 
 def test_zero_length_and_self_merging_walls_are_dropped() -> None:
@@ -536,3 +574,517 @@ def test_perf_two_thousand_walls() -> None:
     assert len(g.nodes) >= 32 * 32
     assert len(g.walls) >= 1984
     assert all(w.free_ends <= 2 for w in g.walls)
+
+
+# --- placement rules (06 8.1 step 9) ---------------------------------------------------------------
+
+
+def test_node_x_is_the_mean_of_all_incident_vertical_walls() -> None:
+    # Two collinear verticals at x = 100 and x = 104 (4 px apart: separate walls for t = 6) meet a horizontal.
+    walls = [
+        raw((100.0, 0.0), (100.0, 200.0), t=6.0),
+        raw((104.0, 200.0), (104.0, 400.0), t=6.0),
+        raw((0.0, 200.0), (101.0, 200.0), t=6.0),
+    ]
+    g = build(walls, t=6.0)
+    junction = node_at(g, 102.0, 200.0)
+    assert len(g.nodes) == 4
+    assert g.nodes[junction] == (102.0, 200.0)
+
+
+def test_node_y_is_the_mean_of_all_incident_horizontal_walls() -> None:
+    walls = [
+        raw((0.0, 100.0), (200.0, 100.0), t=6.0),
+        raw((200.0, 106.0), (400.0, 106.0), t=6.0),
+        raw((200.0, 0.0), (200.0, 101.0), t=6.0),
+    ]
+    g = build(walls, t=6.0)
+    node_at(g, 200.0, 103.0)
+
+
+def test_long_tilted_wall_end_is_not_dragged_by_the_axis_snap() -> None:
+    # 1.15 degrees off vertical: an axis wall, but its mean x is 30 px from each end (> 2 r).
+    g = build([raw((0.0, 0.0), (60.0, 3000.0))], long_side=3000.0)
+    assert sorted(g.nodes.values()) == [(0.0, 0.0), (60.0, 3000.0)]
+    # A slightly tilted wall (within 2 r) still snaps to right angles.
+    g = build([raw((0.0, 0.0), (6.0, 3000.0))], long_side=3000.0)
+    assert g.walls[0].a[0] == g.walls[0].b[0] == 3.0
+    # The same holds for a horizontal wall.
+    g = build([raw((0.0, 0.0), (3000.0, 60.0))], long_side=3000.0)
+    assert sorted(g.nodes.values()) == [(0.0, 0.0), (3000.0, 60.0)]
+    g = build([raw((0.0, 0.0), (3000.0, 6.0))], long_side=3000.0)
+    assert g.walls[0].a[1] == g.walls[0].b[1] == 3.0
+
+
+def _node_near(g: WallGraph, x: float, y: float, tol: float) -> Pt:
+    hits = [p for p in g.nodes.values() if math.hypot(p[0] - x, p[1] - y) <= tol]
+    assert len(hits) == 1, g.nodes
+    return hits[0]
+
+
+def _line_intersection(p: Pt, a_deg: float, q: Pt, b_deg: float) -> Pt:
+    da, db = (
+        (math.cos(math.radians(a_deg)), math.sin(math.radians(a_deg))),
+        (
+            math.cos(math.radians(b_deg)),
+            math.sin(math.radians(b_deg)),
+        ),
+    )
+    det = da[0] * -db[1] + db[0] * da[1]
+    t = ((q[0] - p[0]) * -db[1] + db[0] * (q[1] - p[1])) / det
+    return (p[0] + t * da[0], p[1] + t * da[1])
+
+
+def _far(g: WallGraph, near: Pt, tol: float) -> list[Pt]:
+    return [p for p in g.nodes.values() if math.hypot(p[0] - near[0], p[1] - near[1]) > tol]
+
+
+def test_axis_wall_and_shallow_diagonal_with_near_intersection_use_the_centroid() -> None:
+    # A 6 degree diagonal is within 10 degrees of the horizontal wall: the intersection (x ~ 308.8, within
+    # 2 r of the centroid) is ill-conditioned and not used, the free coordinate comes from the centroid.
+    a = math.radians(6.0)
+    d0 = (304.0, -0.5)
+    walls = [raw((0.0, 0.0), (300.0, 0.0)), raw(d0, (d0[0] + 300 * math.cos(a), d0[1] + 300 * math.sin(a)))]
+    g = build(walls)
+    assert (302.0, 0.0) in g.nodes.values()  # u: centroid of (300, 0), (304, -0.5) is 302; v: the wall's y
+
+
+def test_axis_wall_and_diagonal_with_far_intersection_use_the_centroid() -> None:
+    # 12 degrees: well-conditioned, but the lines meet 25 px from the centroid (> 2 r): not trusted.
+    a = math.radians(12.0)
+    d0 = (304.0, -5.0)
+    walls = [raw((0.0, 0.0), (300.0, 0.0)), raw(d0, (d0[0] + 300 * math.cos(a), d0[1] + 300 * math.sin(a)))]
+    g = build(walls)
+    meet_x = d0[0] - d0[1] / math.tan(a)
+    assert math.hypot(meet_x - 302.0, 2.5) > 2 * R
+    assert (302.0, 0.0) in g.nodes.values()
+    assert not any(abs(p[0] - meet_x) < 1.0 for p in g.nodes.values())
+
+
+def test_diagonal_pair_nearly_parallel_with_near_intersection_uses_the_centroid() -> None:
+    # 5 degrees apart: the least-squares point (~ (9.8, 6.8)) is within 2 r but ill-conditioned.
+    p, q = (0.0, 0.0), (4.0, 2.0)
+    w1 = raw(p, (200.0 * math.cos(math.radians(35)), 200.0 * math.sin(math.radians(35))))
+    w2 = raw(q, (q[0] - 150.0 * math.cos(math.radians(40)), q[1] - 150.0 * math.sin(math.radians(40))))
+    meet = _line_intersection(p, 35.0, q, 40.0)
+    assert 1.0 < math.hypot(meet[0] - 2.0, meet[1] - 1.0) < 2 * R
+    g = build([w1, w2])
+    assert (2.0, 1.0) in g.nodes.values()
+
+
+def test_diagonal_pair_12_degrees_apart_with_far_intersection_uses_the_centroid() -> None:
+    p, q = (0.0, 0.0), (5.0, -3.0)
+    w1 = raw(p, (200.0 * math.cos(math.radians(35)), 200.0 * math.sin(math.radians(35))))
+    w2 = raw(q, (q[0] - 150.0 * math.cos(math.radians(47)), q[1] - 150.0 * math.sin(math.radians(47))))
+    meet = _line_intersection(p, 35.0, q, 47.0)
+    centroid = (2.5, -1.5)
+    assert math.hypot(meet[0] - centroid[0], meet[1] - centroid[1]) > 2 * R
+    g = build([w1, w2])
+    assert _node_near(g, *centroid, 1e-9) == centroid
+    assert not _far(g, centroid, 1e9) and all(
+        math.hypot(n[0] - meet[0], n[1] - meet[1]) > 5 for n in g.nodes.values()
+    )
+
+
+# --- plan orientation (theta0) ---------------------------------------------------------------------
+
+
+def _rotate(p: Pt, deg: float) -> Pt:
+    c, s = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    return (p[0] * c - p[1] * s, p[0] * s + p[1] * c)
+
+
+def _rotated_plan(deg: float) -> list[RawWall]:
+    base = [
+        *rect_walls(jitter=JITTER),
+        raw((503.0, 4.0), (497.0, 596.0), openings=[(100.0, 180.0)]),
+        raw((0.0, 300.0), (500.0, 300.0)),
+    ]
+    return [
+        RawWall(_rotate(w.p0, deg), _rotate(w.p1, deg), w.thickness_px, w.source, w.openings_px) for w in base
+    ]
+
+
+def test_theta0_rotated_plan_equals_the_unrotated_graph_rotated() -> None:
+    ref = build(_rotated_plan(0.0))
+    got = build(_rotated_plan(7.0), theta0=7.0)
+    assert len(ref.walls) == len(got.walls) == 10
+    assert sorted(ref.nodes) == sorted(got.nodes)
+    for name, p in ref.nodes.items():
+        q = _rotate(p, 7.0)
+        assert got.nodes[name] == (pytest.approx(q[0], abs=1e-6), pytest.approx(q[1], abs=1e-6))
+
+    # Node ids agree; wall ids follow the image-frame order, which rotating permutes: match by node pair.
+    def by_pair(g: WallGraph) -> dict[tuple[str, str], WallCandidate]:
+        return {(w.a_node, w.b_node): w for w in g.walls}
+
+    ref_walls, got_walls = by_pair(ref), by_pair(got)
+    assert sorted(ref_walls) == sorted(got_walls)
+    for pair, rw in ref_walls.items():
+        assert got_walls[pair].free_ends == rw.free_ends
+        flat = [v for iv in got_walls[pair].openings_px for v in iv]
+        assert flat == pytest.approx([v for iv in rw.openings_px for v in iv], abs=1e-6)
+    # Without theta0 the same plan is all diagonal: nothing snaps to right angles.
+    skew = build(_rotated_plan(7.0))
+    assert skew.nodes != got.nodes
+
+
+def test_theta0_is_compared_modulo_90() -> None:
+    plan = _rotated_plan(-1.0)
+    a = build(plan, theta0=89.0)
+    assert a == build(plan, theta0=-1.0)
+    assert a == build(plan, theta0=179.0)
+    for w in a.walls:
+        angle = math.degrees(math.atan2(w.b[1] - w.a[1], w.b[0] - w.a[0])) % 90.0
+        assert angle == pytest.approx(89.0, abs=1e-6)  # every wall is exactly on the rotated axes
+
+
+def test_theta0_must_be_finite() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        build([raw((0.0, 0.0), (500.0, 0.0))], theta0=math.nan)
+
+
+# --- crossings -------------------------------------------------------------------------------------
+
+
+def test_plus_crossing_of_two_through_walls_is_split() -> None:
+    g = build([raw((0.0, 100.0), (400.0, 100.0)), raw((200.0, 0.0), (200.0, 300.0))])
+    assert len(g.nodes) == 5
+    assert len(g.walls) == 4
+    centre = node_at(g, 200.0, 100.0)
+    assert all(centre in (w.a_node, w.b_node) for w in g.walls)
+    assert sorted(w.free_ends for w in g.walls) == [1, 1, 1, 1]
+
+
+def test_x_crossing_of_two_diagonals_is_split() -> None:
+    g = build([raw((0.0, 0.0), (400.0, 400.0)), raw((400.0, 0.0), (0.0, 400.0))])
+    assert len(g.nodes) == 5
+    assert len(g.walls) == 4
+    centre = node_at(g, 200.0, 200.0, tol=1e-6)
+    assert all(centre in (w.a_node, w.b_node) for w in g.walls)
+
+
+def test_crossing_with_an_offset_and_a_third_wall_shares_one_node() -> None:
+    walls = [
+        raw((0.0, 100.0), (400.0, 100.0)),
+        raw((203.0, 0.0), (197.0, 300.0)),
+        raw((0.0, 104.0), (400.0, 98.0)),  # nearly the same horizontal, 4 px off: no merge across t / 2
+    ]
+    g = build(walls, t=6.0)
+    around = [p for p in g.nodes.values() if math.hypot(p[0] - 200.0, p[1] - 101.0) < 12.0]
+    assert len(around) == 1
+
+
+def test_overshooting_end_is_trimmed_to_a_t_junction() -> None:
+    # The vertical wall pokes 12 px (> r) through the horizontal one: the stub is pruned, leaving a T.
+    g = build([raw((0.0, 100.0), (500.0, 100.0)), raw((250.0, 0.0), (250.0, 112.0))])
+    assert len(g.walls) == 3
+    assert max(p[1] for p in g.nodes.values()) == 100.0
+    assert sum(w.free_ends for w in g.walls) == 3
+
+
+def test_end_poking_through_within_r_is_only_a_t_junction() -> None:
+    g = build([raw((0.0, 100.0), (500.0, 100.0)), raw((250.0, 0.0), (250.0, 105.0))])
+    assert len(g.walls) == 3 and len(g.nodes) == 4  # no extra crossing node 5 px from the end
+
+
+def test_extension_never_trims_an_end_that_pokes_through() -> None:
+    # r = 20 makes reach 32: a 28 px stub past the wall is real wall (>= 2 t), not something to pull back.
+    walls = [raw((0.0, 100.0), (800.0, 100.0)), raw((400.0, 0.0), (400.0, 128.0))]
+    g = build(walls, r=20.0, t=12.0)
+    assert len(g.walls) == 4
+    assert max(p[1] for p in g.nodes.values()) == 128.0
+    assert sorted(w.free_ends for w in g.walls) == [1, 1, 1, 1]
+
+
+def test_parallel_walls_do_not_cross() -> None:
+    g = build([raw((0.0, 0.0), (500.0, 0.0)), raw((0.0, 40.0), (500.0, 40.0))])
+    assert len(g.walls) == 2 and len(g.nodes) == 4
+
+
+# --- gaps within r ---------------------------------------------------------------------------------
+
+
+def test_collinear_walls_with_a_gap_within_r_merge_into_one_wall_with_an_opening() -> None:
+    walls = [raw((0.0, 0.0), (400.0, 0.0), t=6.0), raw((415.0, 0.0), (800.0, 0.0), t=6.0)]
+    g = build_wall_graph(walls, r=18.0, t_median=6.0, L=3000.0)
+    assert len(g.walls) == 1 and len(g.nodes) == 2
+    w = g.walls[0]
+    assert w.free_ends == 2
+    assert len(w.openings_px) == 1
+    assert w.openings_px[0] == (pytest.approx(400.0, abs=1e-6), pytest.approx(415.0, abs=1e-6))
+    assert [(x.wall_id, x.u0, x.u1) for x in g.gaps] == [("W1", w.openings_px[0][0], w.openings_px[0][1])]
+
+
+def test_gap_merge_needs_collinearity_within_half_a_thickness() -> None:
+    walls = [raw((0.0, 0.0), (400.0, 0.0), t=6.0), raw((415.0, 4.0), (800.0, 4.0), t=6.0)]  # 4 px off > t / 2
+    g = build_wall_graph(walls, r=18.0, t_median=6.0, L=3000.0)
+    assert len(g.walls) == 2 and len(g.nodes) == 3  # snapped together at a node instead
+    assert not g.gaps
+
+
+def test_gap_offset_limit_uses_t_median_even_for_thicker_walls() -> None:
+    walls = [raw((0.0, 0.0), (400.0, 0.0), t=12.0), raw((415.0, 4.0), (800.0, 4.0), t=12.0)]
+    g = build_wall_graph(walls, r=18.0, t_median=6.0, L=3000.0)  # 4 px off > t_median / 2 = 3
+    assert not g.gaps and len(g.walls) == 2
+
+
+def test_gap_longer_than_r_stays_open() -> None:
+    walls = [raw((0.0, 0.0), (400.0, 0.0), t=6.0), raw((420.0, 0.0), (800.0, 0.0), t=6.0)]
+    g = build_wall_graph(walls, r=18.0, t_median=6.0, L=3000.0)
+    assert len(g.walls) == 2 and not g.gaps
+
+
+def test_overlapping_facing_ends_merge_without_an_opening() -> None:
+    walls = [raw((0.0, 0.0), (410.0, 0.0), t=6.0), raw((400.0, 0.0), (800.0, 0.0), t=6.0)]
+    g = build_wall_graph(walls, r=18.0, t_median=6.0, L=3000.0)
+    assert len(g.walls) == 1 and not g.gaps and not g.walls[0].openings_px
+
+
+def test_sub_pixel_gap_merges_without_an_opening() -> None:
+    walls = [raw((0.0, 0.0), (400.0, 0.0), t=6.0), raw((400.6, 0.0), (800.0, 0.0), t=6.0)]
+    g = build_wall_graph(walls, r=18.0, t_median=6.0, L=3000.0)
+    assert len(g.walls) == 1 and not g.gaps
+
+
+def test_gap_beside_a_junction_is_not_bridged() -> None:
+    # A wall T-joins in the gap: the two collinear halves are the two sides of a junction, not a door.
+    walls = [
+        raw((0.0, 0.0), (300.0, 0.0), t=6.0),
+        raw((312.0, 0.0), (600.0, 0.0), t=6.0),
+        raw((306.0, 3.0), (306.0, 300.0), t=6.0),
+    ]
+    g = build_wall_graph(walls, r=18.0, t_median=6.0, L=3000.0)
+    assert not g.gaps
+    assert len(g.walls) == 3
+
+
+def test_three_collinear_pieces_chain_their_gaps() -> None:
+    walls = [
+        raw((0.0, 0.0), (200.0, 0.0), t=6.0),
+        raw((210.0, 0.0), (400.0, 0.0), t=6.0),
+        raw((415.0, 0.0), (600.0, 0.0), t=6.0),
+    ]
+    g = build_wall_graph(walls, r=18.0, t_median=6.0, L=3000.0)
+    assert len(g.walls) == 1
+    assert [(round(a, 6), round(b, 6)) for a, b in g.walls[0].openings_px] == [(200.0, 210.0), (400.0, 415.0)]
+
+
+# --- surviving-mutant pins -------------------------------------------------------------------------
+
+
+def test_extension_takes_the_nearest_hit() -> None:
+    walls = [
+        raw((0.0, 100.0), (500.0, 100.0)),
+        raw((0.0, 110.0), (500.0, 110.0)),
+        raw((250.0, 0.0), (250.0, 90.0)),  # reach r + t = 20: both walls are in range, 10 and 20 px ahead
+    ]
+    g = build(walls)
+    node_at(g, 250.0, 100.0)
+    assert not any(p == (250.0, 110.0) for p in g.nodes.values())
+
+
+def test_extension_hit_may_lie_slightly_beyond_the_target_end_only() -> None:
+    target = raw((0.0, 100.0), (100.0, 100.0))
+    near = build([target, raw((106.0, 40.0), (106.0, 90.0))])  # 6 px past the end (<= r): L closure
+    assert [w.free_ends for w in near.walls if w.a[0] == w.b[0]] == [1]
+    far = build([target, raw((125.0, 40.0), (125.0, 90.0))])  # 25 px past: the end stays where it is
+    stem = next(w for w in far.walls if w.a[0] == w.b[0])
+    assert stem.b == (125.0, 90.0) and stem.free_ends == 2
+
+
+def test_t_split_distance_bound_is_r() -> None:
+    # The diagonal's end is 12 px from the horizontal wall (> r) and too shallow to extend onto it.
+    a = math.radians(10.0)
+    walls = [
+        raw((0.0, 0.0), (500.0, 0.0)),
+        raw((250.0, 12.0), (250.0 + 400 * math.cos(a), 12.0 + 400 * math.sin(a))),
+    ]
+    g = build(walls)
+    assert len(g.walls) == 2
+    near = [
+        raw((0.0, 0.0), (500.0, 0.0)),
+        raw((250.0, 7.0), (250.0 + 400 * math.cos(a), 7.0 + 400 * math.sin(a))),
+    ]
+    assert len(build(near).walls) == 3  # 7 px <= r: split and joined
+
+
+def test_dedupe_unions_the_openings_of_walls_on_one_node_pair() -> None:
+    walls = [
+        raw((0.0, 0.0), (400.0, 0.0), t=6.0, openings=[(50.0, 100.0)]),
+        raw((0.0, 4.0), (400.0, 4.0), t=6.0, openings=[(200.0, 260.0)]),
+        raw((0.0, 0.0), (0.0, 300.0), t=6.0),
+        raw((400.0, 0.0), (400.0, 300.0), t=6.0),
+    ]
+    g = build(walls, t=6.0)
+    top = next(w for w in g.walls if w.a[1] == w.b[1])
+    assert [(round(a), round(b)) for a, b in top.openings_px] == [(50, 100), (200, 260)]
+
+
+def test_merged_thickness_and_position_are_weighted_by_length() -> None:
+    walls = [raw((0.0, 0.0), (600.0, 0.0), t=6.0), raw((100.0, 2.0), (300.0, 2.0), t=12.0)]
+    g = build(walls)
+    assert len(g.walls) == 1
+    assert g.walls[0].thickness_px == pytest.approx((600 * 6.0 + 200 * 12.0) / 800)
+    assert g.walls[0].a[1] == g.walls[0].b[1] == pytest.approx(200 * 2.0 / 800)
+
+
+def test_collinear_angle_limit_is_three_degrees() -> None:
+    base = raw((0.0, 0.0), (600.0, 0.0))
+
+    def short(deg: float) -> RawWall:  # a 60 px wall starting on the long one, tilted by deg
+        a = math.radians(deg)
+        return raw((100.0, 0.0), (100.0 + 60.0 * math.cos(a), 60.0 * math.sin(a)), t=12.0)
+
+    assert len(build([base, short(2.0)]).walls) == 1  # fused
+    assert len(build([base, short(5.0)]).walls) == 3  # T-joined, not fused
+
+
+def test_opening_slivers_are_dropped_and_one_pixel_is_kept() -> None:
+    g = build([raw((0.0, 0.0), (500.0, 0.0), openings=[(100.0, 100.9), (200.0, 201.0)])])
+    assert g.walls[0].openings_px == ((200.0, 201.0),)
+    split = build(
+        [raw((0.0, 0.0), (1000.0, 0.0), openings=[(499.5, 560.0)]), raw((500.0, 0.0), (500.0, 400.0))]
+    )
+    right = next(w for w in split.walls if w.a == (500.0, 0.0) and w.b == (1000.0, 0.0))
+    left = next(w for w in split.walls if w.b == (500.0, 0.0))
+    assert left.openings_px == ()  # 0.5 px cut off
+    assert right.openings_px == ((0.0, 60.0),)
+
+
+def test_opening_intervals_adjacent_after_a_split_stay_separate() -> None:
+    g = build([raw((0.0, 0.0), (1000.0, 0.0), openings=[(300.0, 700.0)]), raw((500.0, 0.0), (500.0, 400.0))])
+    assert sorted(x.u1 - x.u0 for x in g.gaps) == [200.0, 200.0]
+
+
+# --- chaining and scale ----------------------------------------------------------------------------
+
+
+def fan(n: int, span: float = math.pi) -> list[RawWall]:
+    return [
+        raw(
+            (500.0, 500.0),
+            (500.0 + 400.0 * math.cos(span * i / n), 500.0 + 400.0 * math.sin(span * i / n)),
+        )
+        for i in range(n)
+    ]
+
+
+def test_overlap_merge_does_not_chain_across_a_fan() -> None:
+    frame = graphmod._Frame.of(0.0)
+    walls = graphmod._ingest(fan(2000), frame, None)
+    merged = graphmod._merge_overlaps(walls, 8.0, 12.0, frame, None)
+    # Neighbouring spokes chain through the pair test, but only those collinear with the seed fuse.
+    assert len(merged) > 1000
+
+
+def test_fan_of_well_separated_spokes_survives_the_whole_pipeline() -> None:
+    g = build(fan(100), long_side=1000.0)  # far ends 12.6 px apart: separate nodes
+    assert len(g.walls) == 100
+    assert len(g.nodes) == 101
+
+
+def test_slow_drift_chain_is_not_one_wall() -> None:
+    # Ten overlapping 500 px pieces each rotated 1.5 degrees more than the last (15 degrees in total).
+    pieces = []
+    x, y = 0.0, 0.0
+    for k in range(10):
+        a = math.radians(1.5 * k)
+        pieces.append(raw((x, y), (x + 500.0 * math.cos(a), y + 500.0 * math.sin(a))))
+        x, y = x + 250.0 * math.cos(a), y + 250.0 * math.sin(a)
+    g = build(pieces, long_side=5000.0)
+    assert len(g.walls) > 1
+
+
+def stacked_walls(n: int, seed: int = 0) -> list[RawWall]:
+    rng = random.Random(seed)
+    return [
+        raw(
+            (100.0 + rng.uniform(-3, 3), 100.0 + rng.uniform(-3, 3)),
+            (900.0 + rng.uniform(-3, 3), 100.0 + rng.uniform(-3, 3)),
+        )
+        for _ in range(n)
+    ]
+
+
+def _timed(fn: Callable[[], Any]) -> tuple[Any, float, float]:
+    """Result, seconds and peak traced memory (MB) of one call."""
+    started = time.perf_counter()
+    out = fn()
+    seconds = time.perf_counter() - started
+    tracemalloc.start()
+    try:
+        fn()
+        peak = tracemalloc.get_traced_memory()[1] / 1e6
+    finally:
+        tracemalloc.stop()
+    return out, seconds, peak
+
+
+def test_ten_thousand_stacked_endpoints_are_cheap() -> None:
+    pts = np.random.default_rng(0).uniform(-3, 3, (20_000, 2)) + 500.0
+    labels, seconds, peak = _timed(lambda: graphmod._cluster(pts, 8.0))
+    assert set(labels) == {0}
+    assert seconds < 3.0 and peak < 300.0, (seconds, peak)
+    g, seconds, peak = _timed(lambda: build(stacked_walls(10_000), long_side=1000.0))
+    assert len(g.walls) == 1 and len(g.nodes) == 2
+    assert seconds < 3.0 and peak < 300.0, (seconds, peak)
+
+
+def test_ten_thousand_identical_walls_are_cheap() -> None:
+    walls = [raw((100.0, 100.0), (900.0, 100.0)) for _ in range(MAX_RAW_WALLS)]
+    g, seconds, peak = _timed(lambda: build(walls, long_side=1000.0))
+    assert len(g.walls) == 1
+    assert seconds < 3.0 and peak < 300.0, (seconds, peak)
+
+
+def test_stacked_perpendicular_stubs_around_one_corner_are_cheap() -> None:
+    rng = random.Random(3)
+    walls = [raw((0.0, 0.0), (800.0, 0.0)), raw((0.0, 0.0), (0.0, 600.0))]
+    for _ in range(800):  # short stubs whose ends are all stacked on the corner
+        walls.append(
+            raw((rng.uniform(-3, 3), rng.uniform(-3, 3)), (rng.uniform(-3, 3) + 30, rng.uniform(-3, 3) + 30))
+        )
+    g, seconds, peak = _timed(lambda: build(walls, long_side=1000.0))
+    assert len(g.walls) >= 2
+    assert seconds < 3.0 and peak < 300.0, (seconds, peak)
+
+
+def test_too_many_raw_walls_raise_too_complex() -> None:
+    walls = [raw((0.0, float(i)), (10.0, float(i))) for i in range(MAX_RAW_WALLS + 1)]
+    with pytest.raises(TooComplexError) as info:
+        build(walls)
+    assert isinstance(info.value, ValueError)
+    assert info.value.code == "too_complex"
+
+
+class DeadlineError(Exception):
+    pass
+
+
+def _expire() -> None:
+    raise DeadlineError
+
+
+def test_deadline_aborts_the_endpoint_clustering_stage() -> None:
+    pts = np.random.default_rng(1).uniform(0, 1000, (5000, 2))
+    with pytest.raises(DeadlineError):
+        graphmod._cluster(pts, 8.0, _expire)
+
+
+def test_deadline_aborts_the_overlap_merge_stage() -> None:
+    frame = graphmod._Frame.of(0.0)
+    walls = graphmod._ingest(stacked_walls(500), frame, None)
+    with pytest.raises(DeadlineError):
+        graphmod._merge_overlaps(walls, 8.0, 12.0, frame, _expire)
+
+
+def test_deadline_is_polled_repeatedly_while_stages_run() -> None:
+    calls = 0
+
+    def count() -> None:
+        nonlocal calls
+        calls += 1
+
+    build(stacked_walls(3000), long_side=1000.0, check=count)
+    assert calls >= 3
