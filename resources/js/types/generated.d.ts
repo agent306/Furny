@@ -1,3 +1,22 @@
+declare namespace App {
+namespace Domain {
+namespace Identity {
+namespace Enums {
+export type LengthUnit = 'mm' | 'cm' | 'm' | 'ftin' | 'in';
+export type OtpChannel = 'whatsapp' | 'sms';
+export type OtpPurpose = 'login' | 'verify_phone';
+export type StaffRole = 'owner' | 'admin' | 'estimator' | 'production' | 'support';
+export type UnitSystem = 'metric' | 'imperial';
+export type UserType = 'customer' | 'staff';
+}
+}
+namespace Shared {
+namespace Enums {
+export type NotificationChannel = 'database' | 'mail' | 'whatsapp' | 'sms' | 'webpush';
+}
+}
+}
+}
 declare namespace Illuminate {
 export type CursorPaginator<TKey, TValue> = {
 data: TKey extends string ? Record<TKey, TValue> : TValue[],
