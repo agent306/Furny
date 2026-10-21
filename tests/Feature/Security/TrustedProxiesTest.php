@@ -47,3 +47,22 @@ it('does not trust CF-Connecting-IP', function (): void {
 
     expect($response->json('ip'))->toBe('10.0.0.5');
 });
+
+it('takes the nearest address that is not a trusted proxy from a multi-value X-Forwarded-For', function (string $header, string $expected): void {
+    $response = $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.5'])->getJson('/_ip', ['X-Forwarded-For' => $header]);
+
+    expect($response->json('ip'))->toBe($expected);
+})->with([
+    'client, then a second trusted proxy' => ['203.0.113.9, 10.0.0.7', '203.0.113.9'],
+    'client, two trusted proxies' => ['203.0.113.9, 172.18.0.3, 10.0.0.7', '203.0.113.9'],
+    'a client-supplied value ahead of the real one is ignored' => ['1.2.3.4, 203.0.113.9', '203.0.113.9'],
+    'spoofed value and a proxy behind the real client' => ['1.2.3.4, 203.0.113.9, 10.0.0.7', '203.0.113.9'],
+    'every hop trusted falls back to the left-most' => ['10.0.0.9, 10.0.0.7', '10.0.0.9'],
+]);
+
+it('ignores a multi-value X-Forwarded-For from an untrusted peer', function (): void {
+    $response = $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.7'])
+        ->getJson('/_ip', ['X-Forwarded-For' => '203.0.113.9, 10.0.0.7']);
+
+    expect($response->json('ip'))->toBe('198.51.100.7');
+});

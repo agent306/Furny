@@ -7,6 +7,7 @@ namespace App\Support\Http;
 use App\Support\Settings\Settings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use Laravel\Fortify\Fortify;
 use libphonenumber\NumberParseException;
 use libphonenumber\PhoneNumberFormat;
@@ -25,32 +26,42 @@ final class RateLimitKey
         return match ($kind) {
             'ip' => 'ip:'.self::ip($request),
             'user' => self::user($request),
-            'email' => 'email:'.self::hash(self::email($request->input(Fortify::username()))),
-            'email_ip' => 'email_ip:'.self::hash(self::email($request->input(Fortify::username()))).'|'.self::ip($request),
-            'phone' => 'phone:'.self::hash(self::phone($request->input('phone'))),
+            'email' => self::identifier($request, 'email', self::email($request->input(Fortify::username()))),
+            'email_ip' => self::identifier($request, 'email_ip', self::email($request->input(Fortify::username())), '|'.self::ip($request)),
+            'phone' => self::identifier($request, 'phone', self::phone($request->input('phone'))),
             'session_login_id' => self::sessionLoginId($request),
             'user_doc' => self::userDocument($request),
-            default => throw new \InvalidArgumentException("Unknown rate limit key kind [{$kind}]."),
+            default => throw new InvalidArgumentException("Unknown rate limit key kind [{$kind}]."),
         };
     }
 
-    /** Lower-cased, trimmed, Unicode-folded (full-width letters and the like). */
-    public static function email(mixed $value): string
+    /**
+     * A hashed identifier, or the visitor's IP when there is none: an empty or unparseable value must not put
+     * every such request into one shared bucket, nor let garbage create fresh buckets.
+     */
+    private static function identifier(Request $request, string $kind, ?string $value, string $suffix = ''): string
     {
-        if (! is_string($value)) {
-            return '';
-        }
-
-        $value = Normalizer::normalize($value, Normalizer::FORM_KC);
-
-        return mb_strtolower(trim($value === false ? '' : $value));
+        return $value === null ? 'guest:'.self::ip($request) : $kind.':'.self::hash($value).$suffix;
     }
 
-    /** E.164 when the number parses (the business country is the default region), else its digits. */
-    public static function phone(mixed $value): string
+    /** Lower-cased, trimmed, Unicode-folded (full-width letters and the like); null when it is not an address. */
+    public static function email(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $folded = Normalizer::normalize($value, Normalizer::FORM_KC);
+        $email = mb_strtolower(trim($folded === false ? '' : $folded));
+
+        return filter_var($email, FILTER_VALIDATE_EMAIL, FILTER_FLAG_EMAIL_UNICODE) === false ? null : $email;
+    }
+
+    /** E.164 (the business country is the default region); null when the number does not parse. */
+    public static function phone(mixed $value): ?string
     {
         if (! is_string($value) || trim($value) === '') {
-            return '';
+            return null;
         }
 
         try {
@@ -58,7 +69,7 @@ final class RateLimitKey
 
             return $util->format($util->parse($value, self::defaultRegion()), PhoneNumberFormat::E164);
         } catch (NumberParseException) {
-            return '+'.(preg_replace('/\D+/', '', $value) ?? '');
+            return null;
         }
     }
 
@@ -69,9 +80,17 @@ final class RateLimitKey
         return is_string($country) && preg_match('/^[A-Za-z]{2}$/', $country) === 1 ? strtoupper($country) : 'IN';
     }
 
+    /** IPv4 as it is; IPv6 as its /64, since one subscriber holds a whole /64 and could otherwise rotate addresses. */
     private static function ip(Request $request): string
     {
-        return $request->ip() ?? 'unknown';
+        $ip = $request->ip() ?? 'unknown';
+        $packed = filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) === false ? false : inet_pton($ip);
+
+        if ($packed === false) {
+            return $ip;
+        }
+
+        return (inet_ntop(substr($packed, 0, 8).str_repeat("\0", 8)) ?: $ip).'/64';
     }
 
     private static function user(Request $request): string

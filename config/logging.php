@@ -157,6 +157,10 @@ return [
             'tap' => [TapRedaction::class],
         ],
 
+        // Not tapped, on purpose: the emergency logger (used only when logging itself fails) is built by Laravel
+        // from this path alone, and Log::stack([...]) builds an ad hoc logger without a tap. Log::stack still
+        // writes through its children's handlers, whose formatters are masking (TapRedaction); the processor
+        // (key redaction, truncation) does not run for it.
         'emergency' => [
             'path' => storage_path('logs/laravel.log'),
         ],

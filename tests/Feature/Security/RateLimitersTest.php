@@ -147,11 +147,49 @@ describe('keys are normalised so variants cannot bypass a limit', function (): v
             ->and($a[1]->key)->toBe($b[1]->key);
     });
 
-    it('treats an array or missing email as an empty one instead of failing', function (mixed $email): void {
-        $limits = limitsFor('login', limiterRequest('login', null, ['email' => $email]));
+    it('counts an empty or unparseable :name identifier per IP instead of in one shared bucket', function (string $name, mixed $value, string $field): void {
+        $limits = limitsFor($name, limiterRequest($name, null, [$field => $value], ip: '198.51.100.4'));
+        $other = limitsFor($name, limiterRequest($name, null, [$field => $value], ip: '198.51.100.5'));
 
-        expect($limits)->toHaveCount(2);
-    })->with([[['x@example.com']], [null], [123]]);
+        foreach ($limits as $index => $limit) {
+            expect($limit->key)->toContain('198.51.100.4')->and($limit->key)->not->toBe($other[$index]->key);
+        }
+    })->with([
+        'login, array' => ['login', ['x@example.com'], 'email'],
+        'login, missing' => ['login', null, 'email'],
+        'login, number' => ['login', 123, 'email'],
+        'login, blank' => ['login', '   ', 'email'],
+        'login, not an email' => ['login', 'not-an-email', 'email'],
+        'password-reset, not an email' => ['password-reset', 'a b c', 'email'],
+        'otp-send, missing' => ['otp-send', null, 'phone'],
+        'otp-send, letters' => ['otp-send', 'call me', 'phone'],
+        'otp-cooldown, array' => ['otp-cooldown', ['+919876543210'], 'phone'],
+        'otp-verify, punctuation' => ['otp-verify', '+-() ', 'phone'],
+    ]);
+
+    it('keeps real email addresses and phones apart from the guest bucket', function (): void {
+        $email = limitsFor('password-reset', limiterRequest('password-reset', null, ['email' => 'a@example.com'], ip: '198.51.100.4'));
+        $phone = limitsFor('otp-cooldown', limiterRequest('otp-cooldown', null, ['phone' => '+919876543210'], ip: '198.51.100.4'));
+
+        expect($email[0]->key)->not->toContain('guest:')->and($phone[0]->key)->not->toContain('guest:');
+    });
+
+    it('uses one key for every address of an IPv6 /64 and keeps IPv4 exact', function (): void {
+        $key = fn (string $ip) => limitsFor('oauth', limiterRequest('oauth', null, ip: $ip))[0]->key;
+
+        expect($key('2001:db8:abcd:12::1'))->toBe($key('2001:db8:abcd:12:ffff:ffff:ffff:ffff'))
+            ->and($key('2001:db8:abcd:12::1'))->not->toBe($key('2001:db8:abcd:13::1'))
+            ->and($key('203.0.113.9'))->toContain('203.0.113.9')->not->toBe($key('203.0.113.10'));
+    });
+
+    it('applies the /64 to the login limiter\'s IP part as well', function (): void {
+        $keys = fn (string $ip) => array_map(
+            fn (Limit $l) => $l->key,
+            limitsFor('login', limiterRequest('login', null, ['email' => 'a@example.com'], ip: $ip)),
+        );
+
+        expect($keys('2001:db8::1'))->toBe($keys('2001:db8::2'));
+    });
 
     it('reduces phone numbers to E.164', function (string $name): void {
         $variants = ['+919876543210', '+91 98765 43210', '+91-98765-43210', '098765 43210', '(+91) 98765 43210', ' 9876543210 '];

@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Providers\AppServiceProvider;
+use Illuminate\Contracts\Foundation\MaintenanceMode;
 use Illuminate\Foundation\Vite as ViteService;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Testing\TestResponse;
@@ -291,5 +294,173 @@ describe('config/security.php', function (): void {
             'reverb_host' => null,
             'report_only' => false,
         ]);
+    });
+});
+
+describe('origins from the environment cannot inject CSP directives', function (): void {
+    it('drops :name = :value', function (string $variable, string $value, string $key): void {
+        $config = evaluateConfigFile('security', [
+            'AWS_URL' => false,
+            'AWS_ENDPOINT' => false,
+            'AWS_PUBLIC_URL' => false,
+            'REVERB_HOST' => false,
+            'REVERB_PORT' => false,
+            $variable => $value,
+        ])['csp'];
+
+        expect($config[$key])->toBeNull()
+            ->and($config['rejected'])->toBe([$variable]);
+    })->with([
+        'private url, directive' => ['AWS_URL', ';script-src *', 's3_private_origin'],
+        'private url, trailing wildcard source' => ['AWS_URL', 'https://files.example.com *', 's3_private_origin'],
+        'private url, wildcard host' => ['AWS_URL', 'https://*', 's3_private_origin'],
+        'private url, wildcard subdomain' => ['AWS_URL', 'https://*.example.com', 's3_private_origin'],
+        'private url, scheme' => ['AWS_URL', 'javascript://files.example.com', 's3_private_origin'],
+        'private url, data scheme' => ['AWS_URL', 'data:text/html,x', 's3_private_origin'],
+        'private url, semicolon in host' => ['AWS_URL', 'https://files.example.com;script-src', 's3_private_origin'],
+        'private url, port' => ['AWS_URL', 'https://files.example.com:80a', 's3_private_origin'],
+        'endpoint fallback' => ['AWS_ENDPOINT', "https://files.example.com\nscript-src *", 's3_private_origin'],
+        'public url' => ['AWS_PUBLIC_URL', 'https://pub.example.com; script-src *', 's3_public_origin'],
+        'public url, wildcard' => ['AWS_PUBLIC_URL', 'https://*', 's3_public_origin'],
+        'reverb host, directive' => ['REVERB_HOST', 'ws.example.com; script-src *', 'reverb_host'],
+        'reverb host, wildcard' => ['REVERB_HOST', '*.example.com', 'reverb_host'],
+        'reverb host, scheme' => ['REVERB_HOST', 'https://ws.example.com', 'reverb_host'],
+        'reverb host, space' => ['REVERB_HOST', 'ws.example.com *', 'reverb_host'],
+        'reverb port, text' => ['REVERB_PORT', '443; script-src *', 'reverb_port'],
+        'reverb port, out of range' => ['REVERB_PORT', '70000', 'reverb_port'],
+    ]);
+
+    it('keeps valid origins and rejects nothing', function (): void {
+        $config = evaluateConfigFile('security', [
+            'AWS_URL' => 'https://files.example.com',
+            'AWS_ENDPOINT' => false,
+            'AWS_PUBLIC_URL' => 'http://localhost:9000/furny-public',
+            'REVERB_HOST' => 'ws-1.example.com',
+            'REVERB_PORT' => '8080',
+        ])['csp'];
+
+        expect($config)->toMatchArray([
+            's3_private_origin' => 'https://files.example.com',
+            's3_public_origin' => 'http://localhost:9000',
+            'reverb_host' => 'ws-1.example.com',
+            'reverb_port' => 8080,
+            'rejected' => [],
+        ]);
+    });
+
+    it('puts nothing of a rejected value into the policy', function (): void {
+        config([
+            'security.csp.s3_private_origin' => null,
+            'security.csp.s3_public_origin' => null,
+            'security.csp.reverb_host' => null,
+            'security.csp.reverb_port' => null,
+        ]);
+
+        $csp = cspHeader($this->get('/'));
+
+        expect($csp)->not->toContain('*')->not->toContain('wss://')->and(substr_count($csp, 'script-src'))->toBe(1);
+    });
+
+    it('warns once at boot, naming the variables but not their values', function (): void {
+        config(['security.csp.rejected' => ['AWS_URL', 'REVERB_HOST']]);
+        Log::spy();
+
+        (new AppServiceProvider($this->app))->boot();
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(
+            fn (string $message, array $context) => str_contains($message, 'CSP') && $context === ['variables' => ['AWS_URL', 'REVERB_HOST']],
+        );
+    });
+
+    it('stays quiet when nothing was rejected', function (): void {
+        config(['security.csp.rejected' => []]);
+        Log::spy();
+
+        (new AppServiceProvider($this->app))->boot();
+
+        Log::shouldNotHaveReceived('warning');
+    });
+});
+
+describe('dashboards get a relaxed script policy', function (): void {
+    it('allows inline scripts and styles on :path, without nonce or strict-dynamic', function (string $path): void {
+        $response = $this->get($path);
+
+        expect(cspDirective($response, 'script-src'))->toContain("'unsafe-inline'")->toContain("'self'")
+            ->not->toContain('nonce-')->not->toContain('strict-dynamic')
+            ->and(cspDirective($response, 'style-src'))->toContain("'unsafe-inline'")
+            ->and(cspDirective($response, 'frame-ancestors'))->toBe("frame-ancestors 'none'")
+            ->and(cspDirective($response, 'object-src'))->toBe("object-src 'none'")
+            ->and(cspDirective($response, 'base-uri'))->toBe("base-uri 'self'")
+            ->and(cspDirective($response, 'default-src'))->toBe("default-src 'self'");
+    })->with(['/horizon', '/horizon/dashboard', '/horizon/api/stats', '/pulse', '/pulse/anything', '/telescope', '/telescope/requests']);
+
+    it('leaves :path with the strict nonce policy', function (string $path): void {
+        $response = $this->get($path);
+        $nonce = cspNonce($response);
+
+        expect($nonce)->not->toBe('')
+            ->and(cspDirective($response, 'script-src'))->toBe("script-src 'self' 'nonce-{$nonce}' 'strict-dynamic' https://challenges.cloudflare.com");
+    })->with(['/', '/terms', '/horizons', '/horizon-x', '/pulsed', '/admin', '/telescoped', '/definitely-missing', '/x/horizon']);
+
+    it('also relaxes the report-only header', function (): void {
+        config(['security.csp.report_only' => true]);
+
+        expect(cspDirective($this->get('/horizon'), 'script-src'))->toContain("'unsafe-inline'")->not->toContain('nonce-');
+    });
+
+    it('follows the configured dashboard paths', function (): void {
+        config(['pulse.path' => 'ops/pulse', 'telescope.path' => 'ops/telescope', 'horizon.path' => 'ops/horizon']);
+
+        foreach (['/ops/pulse', '/ops/telescope/requests', '/ops/horizon'] as $path) {
+            expect(cspDirective($this->get($path), 'script-src'))->toContain("'unsafe-inline'");
+        }
+
+        expect(cspDirective($this->get('/pulse'), 'script-src'))->toContain('nonce-');
+    });
+});
+
+describe('maintenance mode', function (): void {
+    beforeEach(function (): void {
+        // A fake driver, as in MaintenanceModeTest: nothing is written to storage/framework/down.
+        $this->app->instance(MaintenanceMode::class, new class implements MaintenanceMode
+        {
+            public function activate(array $payload): void {}
+
+            public function deactivate(): void {}
+
+            public function active(): bool
+            {
+                return true;
+            }
+
+            public function data(): array
+            {
+                return ['except' => [], 'redirect' => null, 'retry' => null, 'refresh' => null, 'secret' => null, 'status' => 503, 'template' => null];
+            }
+        });
+    });
+
+    it('sends the security headers on the 503', function (): void {
+        $this->get('/')->assertStatus(503)
+            ->assertHeader('X-Frame-Options', 'DENY')
+            ->assertHeader('X-Content-Type-Options', 'nosniff')
+            ->assertHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+            ->assertHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)')
+            ->assertHeader('Cross-Origin-Opener-Policy', 'same-origin')
+            ->assertHeader('X-Robots-Tag', 'noindex, nofollow');
+    });
+
+    it('sends the CSP on the 503 page too, with a nonce for its HTML', function (): void {
+        $response = $this->get('/')->assertStatus(503);
+
+        expect(cspNonce($response))->not->toBe('')
+            ->and(cspDirective($response, 'frame-ancestors'))->toBe("frame-ancestors 'none'");
+    });
+
+    it('sends HSTS on the 503 in production over HTTPS', function (): void {
+        $this->app['env'] = 'production';
+
+        $this->get('https://localhost/')->assertStatus(503)->assertHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     });
 });

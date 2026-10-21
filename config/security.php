@@ -11,38 +11,90 @@ declare(strict_types=1);
 | are derived once here with parse_url and read by App\Http\Middleware\SecurityHeaders.
 */
 
-// scheme://host[:port] of a URL, or null when it has no host. Used for CSP source lists.
-$privateUrl = (string) (env('AWS_URL') ?: env('AWS_ENDPOINT'));
-$privateParts = parse_url($privateUrl) ?: [];
-$publicParts = parse_url((string) env('AWS_PUBLIC_URL')) ?: [];
+// The origins end up verbatim in the Content-Security-Policy header, so an environment value is used only when
+// it is a plain origin: http(s), a host of letters, digits, dots and hyphens (no wildcard, no spaces, no `;`)
+// and a numeric port. Anything else is dropped and its variable is listed in `csp.rejected`; AppServiceProvider
+// logs one warning for those at boot (a config file cannot log).
+$rejected = [];
 
-// With virtual-hosted-style addressing and no explicit URL, presigned URLs go to `bucket.endpoint-host`.
-$privateHost = $privateParts['host'] ?? null;
+// With virtual-hosted-style addressing and no explicit AWS_URL, presigned URLs go to `bucket.endpoint-host`.
+$virtualHosted = ! env('AWS_URL')
+    && ! filter_var(env('AWS_USE_PATH_STYLE_ENDPOINT', true), FILTER_VALIDATE_BOOLEAN)
+    && env('AWS_BUCKET');
 
-if ($privateHost !== null && ! env('AWS_URL') && ! filter_var(env('AWS_USE_PATH_STYLE_ENDPOINT', true), FILTER_VALIDATE_BOOLEAN) && env('AWS_BUCKET')) {
-    $privateHost = env('AWS_BUCKET').'.'.$privateHost;
+// Presigned URLs go to AWS_URL, else AWS_ENDPOINT. Real AWS S3 has no endpoint, so AWS_URL must be set there.
+$candidates = [
+    's3_private_origin' => [
+        env('AWS_URL') ? 'AWS_URL' : 'AWS_ENDPOINT',
+        (string) (env('AWS_URL') ?: env('AWS_ENDPOINT')),
+        $virtualHosted ? (string) env('AWS_BUCKET').'.' : '',
+    ],
+    's3_public_origin' => ['AWS_PUBLIC_URL', (string) env('AWS_PUBLIC_URL'), ''],
+];
+$origins = ['s3_private_origin' => null, 's3_public_origin' => null];
+
+foreach ($candidates as $key => [$variable, $url, $hostPrefix]) {
+    if (trim($url) === '') {
+        continue;
+    }
+
+    $parts = parse_url($url);
+    $host = is_array($parts) ? $hostPrefix.($parts['host'] ?? '') : '';
+    $port = is_array($parts) ? ($parts['port'] ?? null) : null;
+
+    if (
+        ! is_array($parts)
+        || ! in_array($parts['scheme'] ?? '', ['http', 'https'], true)
+        || preg_match('/^[A-Za-z0-9.-]+$/', $host) !== 1
+        || isset($parts['user']) || isset($parts['pass'])
+        || preg_match('/[\s;,*]/', $url) === 1
+        || preg_match('~^https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:[/?#]|$)~', $url) !== 1
+    ) {
+        $rejected[] = $variable;
+
+        continue;
+    }
+
+    $origins[$key] = $parts['scheme'].'://'.$host.($port === null ? '' : ':'.$port);
 }
 
+$reverbHost = env('REVERB_HOST');
 $reverbPort = env('REVERB_PORT');
+
+if (! is_string($reverbHost) || preg_match('/^[A-Za-z0-9.-]+$/', $reverbHost) !== 1) {
+    if (is_string($reverbHost) && trim($reverbHost) !== '') {
+        $rejected[] = 'REVERB_HOST';
+    }
+
+    $reverbHost = null;
+}
+
+if (is_string($reverbPort) && preg_match('/^[0-9]{1,5}$/', $reverbPort) === 1 && (int) $reverbPort >= 1 && (int) $reverbPort <= 65535) {
+    $reverbPort = (int) $reverbPort;
+} else {
+    if (is_string($reverbPort) && trim($reverbPort) !== '') {
+        $rejected[] = 'REVERB_PORT';
+    }
+
+    $reverbPort = null;
+}
 
 return [
 
     'csp' => [
-        // Scheme and host (with a non-default port) of presigned URLs: AWS_URL, else AWS_ENDPOINT.
-        's3_private_origin' => $privateHost === null
-            ? null
-            : ($privateParts['scheme'] ?? 'https').'://'.$privateHost.(isset($privateParts['port']) ? ':'.$privateParts['port'] : ''),
+        's3_private_origin' => $origins['s3_private_origin'],
 
         // Origin of the public bucket's URLs.
-        's3_public_origin' => isset($publicParts['host'])
-            ? ($publicParts['scheme'] ?? 'https').'://'.$publicParts['host'].(isset($publicParts['port']) ? ':'.$publicParts['port'] : '')
-            : null,
+        's3_public_origin' => $origins['s3_public_origin'],
 
-        'reverb_host' => env('REVERB_HOST') ?: null,
-        'reverb_port' => is_numeric($reverbPort) ? (int) $reverbPort : null,
+        'reverb_host' => $reverbHost,
+        'reverb_port' => $reverbPort,
 
         // Rollout switch (17 §6.1): report-only for the first 7 days after go-live, then enforce.
         'report_only' => filter_var(env('CSP_REPORT_ONLY', false), FILTER_VALIDATE_BOOLEAN),
+
+        // Environment variables whose value was dropped for not being a plain origin.
+        'rejected' => array_values(array_unique($rejected)),
     ],
 
     /*

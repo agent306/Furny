@@ -43,7 +43,23 @@ final class AppServiceProvider extends ServiceProvider
         Relation::enforceMorphMap(MorphMap::MAP);
         $this->warnWhenAppNameIsTooLongForSms();
         $this->configureTransport();
+        $this->warnWhenCspOriginsAreRejected();
         $this->configurePulseUsers();
+    }
+
+    /**
+     * config/security.php drops AWS/Reverb origins that are not plain origins (they would be pasted into the
+     * Content-Security-Policy); it cannot log, so the warning is given here, once per process.
+     */
+    private function warnWhenCspOriginsAreRejected(): void
+    {
+        $variables = (array) config('security.csp.rejected', []);
+
+        if ($variables !== []) {
+            Log::warning('Ignored environment values that are not plain origins; the CSP does not include them.', [
+                'variables' => array_values($variables),
+            ]);
+        }
     }
 
     /** Behind Traefik the app is always reached over HTTPS in production (13 §12.8). */

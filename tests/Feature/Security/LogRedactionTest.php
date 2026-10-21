@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Domain\Identity\Models\User;
+use App\Support\Logging\RedactingFormatter;
 use App\Support\Logging\TapRedaction;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Log;
 
 /** Points a file-backed channel at a temp file and returns the path. */
@@ -94,4 +97,100 @@ it('redacts the daily channel too', function (): void {
     $written = (string) file_get_contents(glob($dir.'/app-*.log')[0]);
 
     expect($written)->toContain('[redacted]')->not->toContain('sess-123');
+});
+
+describe('objects and exceptions are redacted where the record is formatted', function (): void {
+    /** Logs through the default stack and returns what reached the file. */
+    function writtenBy(Closure $log): string
+    {
+        config(['logging.default' => 'stack', 'logging.channels.stack.channels' => ['single']]);
+        $path = logFile('single');
+        forgetChannels();
+
+        $log();
+
+        return (string) file_get_contents($path);
+    }
+
+    it('masks an exception reported with an email and a phone in its message', function (): void {
+        $written = writtenBy(fn () => report(new RuntimeException('Login failed for bob@example.com and +91 98765 43210')));
+
+        expect($written)->toContain('Login failed for')->toContain('b*b@e******.com')->toContain('+91******3210')
+            ->and($written)->not->toContain('bob@example.com')->not->toContain('98765 43210');
+    });
+
+    it('masks a QueryException that carries bound values', function (): void {
+        $exception = new QueryException(
+            'pgsql',
+            'select * from users where email = ? and phone_e164 = ?',
+            ['bob@example.com', '+919876543210'],
+            new PDOException('SQLSTATE[23505]: Unique violation: Key (email)=(bob@example.com) already exists.'),
+        );
+
+        $written = writtenBy(fn () => report($exception));
+
+        expect($written)->toContain('SQLSTATE[23505]')
+            ->and($written)->not->toContain('bob@example.com')->not->toContain('9876543210');
+    });
+
+    it('masks the arguments in a stack trace', function (): void {
+        $previous = ini_set('zend.exception_ignore_args', '0');
+        $thrower = function (string $email, string $phone): never {
+            throw new LogicException('boom');
+        };
+
+        try {
+            $thrower('bob@example.com', '+919876543210');
+        } catch (LogicException $exception) {
+            // Caught here so the log call below sees a trace with the arguments in it.
+        } finally {
+            ini_set('zend.exception_ignore_args', (string) $previous);
+        }
+
+        expect($exception->getTraceAsString())->toContain('bob@example.com');
+
+        $written = writtenBy(fn () => report($exception));
+
+        expect($written)->toContain('boom')->toContain('b*b@e******.com')
+            ->and($written)->not->toContain('bob@example.com')->not->toContain('9876543210');
+    });
+
+    it('masks a model in the context', function (): void {
+        $user = User::factory()->make(['email' => 'bob@example.com', 'phone_e164' => '+919876543210']);
+
+        $written = writtenBy(fn () => Log::warning('Checkout failed', ['user' => $user]));
+
+        expect($written)->toContain('Checkout failed')
+            ->and($written)->not->toContain('bob@example.com')->not->toContain('9876543210');
+    });
+
+    it('masks an anonymous Stringable and an ArrayObject in the context', function (): void {
+        $stringable = new class implements Stringable
+        {
+            public function __toString(): string
+            {
+                return 'contact bob@example.com';
+            }
+        };
+
+        $written = writtenBy(fn () => Log::warning('Odd values', [
+            'stringable' => $stringable,
+            'bag' => new ArrayObject(['mail' => 'bob@example.com', 'phone' => '+91 98765 43210']),
+        ]));
+
+        expect($written)->toContain('Odd values')
+            ->and($written)->not->toContain('bob@example.com')->not->toContain('98765 43210');
+    });
+
+    it('wraps the formatter of a handler once, however many channels share it', function (): void {
+        config(['logging.default' => 'stack', 'logging.channels.stack.channels' => ['single']]);
+        logFile('single');
+        forgetChannels();
+
+        $handlers = Log::channel('stack')->getLogger()->getHandlers();
+        $formatter = $handlers[0]->getFormatter();
+
+        expect($formatter)->toBeInstanceOf(RedactingFormatter::class)
+            ->and($formatter->inner())->not->toBeInstanceOf(RedactingFormatter::class);
+    });
 });

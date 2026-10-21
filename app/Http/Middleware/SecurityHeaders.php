@@ -58,7 +58,7 @@ final class SecurityHeaders
         if ($this->isHtml($response)) {
             $headers->set(
                 config('security.csp.report_only') ? 'Content-Security-Policy-Report-Only' : 'Content-Security-Policy',
-                $this->policy($nonce),
+                $this->policy($nonce, $this->isDashboard($request)),
             );
         }
 
@@ -77,7 +77,24 @@ final class SecurityHeaders
         return $type === null || str_contains(strtolower($type), 'text/html');
     }
 
-    private function policy(string $nonce): string
+    /**
+     * Horizon, Pulse and Telescope ship inline scripts and styles of their own that cannot carry our nonce
+     * (ruling, log in 19), so they get a relaxed script policy at their configured paths.
+     */
+    private function isDashboard(Request $request): bool
+    {
+        foreach (['horizon.path' => 'horizon', 'pulse.path' => 'pulse', 'telescope.path' => 'telescope'] as $key => $default) {
+            $path = trim((string) config($key, $default), '/');
+
+            if ($path !== '' && $request->is($path, $path.'/*')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function policy(string $nonce, bool $relaxed): string
     {
         $storage = $this->origins('s3_private_origin', 's3_public_origin');
         $private = $this->origins('s3_private_origin');
@@ -86,7 +103,10 @@ final class SecurityHeaders
 
         $directives = [
             'default-src' => ["'self'"],
-            'script-src' => ["'self'", "'nonce-{$nonce}'", "'strict-dynamic'", self::TURNSTILE, ...$vite['http']],
+            // A nonce or strict-dynamic would make browsers ignore 'unsafe-inline', so the dashboards get neither.
+            'script-src' => $relaxed
+                ? ["'self'", "'unsafe-inline'", ...$vite['http']]
+                : ["'self'", "'nonce-{$nonce}'", "'strict-dynamic'", self::TURNSTILE, ...$vite['http']],
             'style-src' => ["'self'", "'unsafe-inline'", ...$vite['http']],
             'img-src' => ["'self'", 'data:', 'blob:', ...$storage],
             'media-src' => ["'self'", 'blob:', ...$private],

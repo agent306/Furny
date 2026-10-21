@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use Psr\Log\LoggerInterface;
 
@@ -109,7 +110,7 @@ it('drops the query string and fragment of the reported URLs', function (): void
 
     $report = $logged[0][1]['report'];
 
-    expect($report)->toContain('https://furny.test/reset-password/abc123')
+    expect($report)->toContain('https://furny.test/reset-password/[token]')
         ->and($report)->toContain('https://evil.example/x.js')
         ->and($report)->not->toContain('SECRET')
         ->and($report)->not->toContain('asha@example.com')
@@ -162,4 +163,54 @@ it('answers a throttled browser report with JSON too, though it asks for none', 
     }
 
     postReport(violation())->assertStatus(429)->assertJsonPath('code', 'rate_limited');
+});
+
+describe('token path segments', function (): void {
+    it('masks the token of :uri', function (string $uri, string $masked): void {
+        $logged = [];
+        captureSecurityLog($logged);
+
+        postReport(violation(['document-uri' => $uri, 'referrer' => $uri]))->assertNoContent();
+
+        $report = json_decode($logged[0][1]['report'], true, flags: JSON_THROW_ON_ERROR);
+
+        expect($report['document-uri'])->toBe($masked)
+            ->and($logged[0][1]['report'])->not->toContain('SECRETTOKEN');
+    })->with([
+        'password reset' => ['https://furny.test/reset-password/SECRETTOKEN?email=a@b.co', 'https://furny.test/reset-password/[token]'],
+        'email verification hash' => ['https://furny.test/email/verify/01J9Z8X7Q2M3N4P5R6S7T8V9WX/SECRETTOKEN?signature=x', 'https://furny.test/email/verify/01J9Z8X7Q2M3N4P5R6S7T8V9WX/[token]'],
+        'any long opaque segment' => ['https://furny.test/admin/catalog/imports/SECRETTOKENabcdefghijklmnopqrstuvwxyz0123', 'https://furny.test/admin/catalog/imports/[token]'],
+        'msg91 webhook token' => ['https://furny.test/webhooks/msg91/SECRETTOKEN0123456789abcdefghijklmnop', 'https://furny.test/webhooks/msg91/[token]'],
+    ]);
+
+    it('masks a token segment of a route the app defines later', function (): void {
+        Route::get('/_claim/{code}/{token}', fn () => 'x');
+        $logged = [];
+        captureSecurityLog($logged);
+
+        postReport(violation(['document-uri' => 'https://furny.test/_claim/ABC/SECRETTOKEN']))->assertNoContent();
+
+        $report = json_decode($logged[0][1]['report'], true, flags: JSON_THROW_ON_ERROR);
+
+        expect($report['document-uri'])->toBe('https://furny.test/_claim/ABC/[token]');
+    });
+
+    it('keeps ids, uuids and ordinary paths readable', function (): void {
+        $logged = [];
+        captureSecurityLog($logged);
+        $uri = 'https://furny.test/customer/projects/01J9Z8X7Q2M3N4P5R6S7T8V9WX/plans/01J9Z8X7Q2M3N4P5R6S7T8V9WY/media/123e4567-e89b-12d3-a456-426614174000';
+
+        postReport(violation(['document-uri' => $uri]))->assertNoContent();
+
+        expect(json_decode($logged[0][1]['report'], true, flags: JSON_THROW_ON_ERROR)['document-uri'])->toBe($uri);
+    });
+});
+
+it('refuses an oversized declared body without reading it', function (): void {
+    $logged = [];
+    captureSecurityLog($logged);
+
+    postReport('{"csp-report":{"blocked-uri":"inline"}}', ['CONTENT_LENGTH' => '5000000'])->assertNoContent();
+
+    expect(json_decode($logged[0][1]['report'], true, flags: JSON_THROW_ON_ERROR))->toBe(['unreadable' => 'too_large', 'bytes' => 5000000]);
 });
