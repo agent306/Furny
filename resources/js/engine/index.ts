@@ -113,3 +113,15 @@ export type {
     RawFace,
 } from './geometry/planarFaces';
 export { polylabel } from './geometry/polylabel';
+export { ROOM_TYPES } from './plan/roomTypes';
+export type { RoomType } from './plan/roomTypes';
+export { ROOM_NAMES, suggestRoomType } from './plan/roomNames';
+export { FIXTURE_KEYS, FIXTURE_LIBRARY } from './plan/fixtures';
+export type {
+    Fixture2DItem,
+    FixtureCategory,
+    FixtureDef,
+    FixtureKey,
+    FixtureMaterialKey,
+    FixturePrimitive,
+} from './plan/fixtures';
