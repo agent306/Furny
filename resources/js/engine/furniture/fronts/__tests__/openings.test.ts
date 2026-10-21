@@ -18,6 +18,7 @@ import {
     coverFor,
     frontCoverageIssues,
     frontRect,
+    openingsOf as memoOpenings,
     type OpeningRect,
 } from '../openings';
 
@@ -363,5 +364,27 @@ describe('frontCoverageIssues (07 §4.1, for validateFurniture)', () => {
         const before = JSON.stringify(doc);
         frontCoverageIssues(doc, layout);
         expect(JSON.stringify(doc)).toBe(before);
+    });
+});
+
+describe('openingsOf (computed once per generation)', () => {
+    it('returns the same openings for the same context, envelope and layout', () => {
+        const { ctx, env, layout } = runCarcass(wardrobeFixture(), catalog);
+        const first = memoOpenings(ctx, env, layout);
+        expect(memoOpenings(ctx, env, layout)).toBe(first);
+        expect(first).toEqual(computeOpenings(ctx, env, layout));
+    });
+
+    it('recomputes for another document, envelope or layout', () => {
+        const run = runCarcass(wardrobeFixture(), catalog);
+        const other = runCarcass(wardrobeFixture(), catalog);
+        const a = memoOpenings(run.ctx, run.env, run.layout);
+        const b = memoOpenings(run.ctx, run.env, other.layout);
+        expect(b).not.toBe(a);
+        const c = memoOpenings(run.ctx, other.env, other.layout);
+        expect(c).not.toBe(b);
+        expect(memoOpenings(run.ctx, other.env, other.layout)).toBe(c);
+        run.ctx.doc = { ...run.ctx.doc, carcass: null };
+        expect(memoOpenings(run.ctx, other.env, other.layout).size).toBe(0);
     });
 });

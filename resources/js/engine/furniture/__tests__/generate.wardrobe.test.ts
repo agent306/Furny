@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { seedCatalog } from '../../testing/seedCatalog';
 import { generateFurniture } from '../generate';
-import { wardrobeFixture } from '../testing/docs';
+import {
+    BOX_ROOT_ID,
+    boxDocument,
+    drawerTestBox,
+    flex,
+    leafSection,
+    splitSection,
+    wardrobeFixture,
+} from '../testing/docs';
 import type { Part } from '../types';
 
 /**
@@ -275,5 +283,31 @@ describe('generateFurniture: wardrobe fixture (07 §12.2)', () => {
         const before = structuredClone(doc);
         generateFurniture(doc, catalog);
         expect(doc).toEqual(before);
+    });
+});
+
+describe('generateFurniture: ordering beyond the wardrobe', () => {
+    it('sorts stacked drawer fronts top first (07 §12.3: y 480, 241, 1)', () => {
+        const drawers = generateFurniture(drawerTestBox(), catalog);
+        expect(drawers.fronts.map((f) => [f.id, f.rect.y])).toEqual([
+            [`section.${BOX_ROOT_ID}.drawer.1.front`, 480],
+            [`section.${BOX_ROOT_ID}.drawer.2.front`, 241],
+            [`section.${BOX_ROOT_ID}.drawer.3.front`, 1],
+        ]);
+    });
+
+    it('lists the sections in pre-order, not by id', () => {
+        const doc = boxDocument({
+            width: 1200,
+            height: 720,
+            depth: 560,
+            interior: splitSection(BOX_ROOT_ID, 'columns', [
+                [flex(), leafSection('s_0000000003')],
+                [flex(), leafSection('s_0000000002')],
+            ]),
+        });
+        expect(
+            generateFurniture(doc, catalog).sections.map((s) => s.id),
+        ).toEqual(['s_0000000003', 's_0000000002']);
     });
 });

@@ -7,7 +7,7 @@ import type { SectionLayout } from '../carcass/layout';
 import type { GenContext } from '../types';
 import { flapFront } from './flap';
 import { hingedLeaves } from './hinged';
-import { computeOpenings, type OpeningRect } from './openings';
+import { openingsOf, type OpeningRect } from './openings';
 import { slidingFront } from './sliding';
 
 /**
@@ -20,7 +20,7 @@ export function frontParts(
     env: Envelope,
     layout: SectionLayout,
 ): Map<string, OpeningRect> {
-    const openings = computeOpenings(ctx, env, layout);
+    const openings = openingsOf(ctx, env, layout);
     const extraSliding: string[] = [];
     let sliding = false;
     for (const front of ctx.doc.carcass?.fronts ?? []) {

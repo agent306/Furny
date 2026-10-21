@@ -25,8 +25,8 @@ import { furnitureIssue } from '../context';
 import { leafZ } from '../fronts/hinged';
 import { solidLeaf } from '../fronts/leaf';
 import {
-    computeOpenings,
     frontRect,
+    openingsOf,
     type OpeningRect,
     type Rect,
 } from '../fronts/openings';
@@ -532,7 +532,8 @@ function externalDrawerFront(
  * Parts and hardware are keyed `{keyPrefix}.{j}.…`, `j` = 1 for the top
  * drawer; the default prefix is `section.{S}.drawer` (`S` = the leaf id).
  *
- * External drawers take their opening from `computeOpenings`, which holds
+ * External drawers take their opening from `openingsOf` (the openings of
+ * the generation, computed once), which holds
  * every external drawer leaf of a carcass document; a document without a
  * carcass has none, so the table family (Task 38) needs its own opening.
  */
@@ -573,7 +574,7 @@ export function drawersFor(
             return slot;
         });
     } else {
-        const opening = computeOpenings(ctx, env, layout).get(sectionId);
+        const opening = openingsOf(ctx, env, layout).get(sectionId);
         if (!opening) {
             throw new Error(
                 `drawersFor: no opening for the external drawers of ${sectionId}`,

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { seedCatalog } from '../../testing/seedCatalog';
 import { generateFurniture } from '../generate';
 import type { ExtraHardware, ExtraPart, FurnitureDocument } from '../schema';
-import { wardrobeFixture } from '../testing/docs';
+import { assign, wardrobeFixture } from '../testing/docs';
 import type { FurnitureModel, Part } from '../types';
 
 const catalog = seedCatalog();
@@ -190,6 +190,119 @@ describe('part overrides (07 §3.14 step 1)', () => {
     });
 });
 
+describe('part overrides: fallbacks and glass fronts', () => {
+    it('falls back to the role default for an unknown override material', () => {
+        // Carcass in PB18-OAK; the carcass default material is PB18-WHITE.
+        const model = generate((d) => {
+            d.materials.carcass = assign('PB18-OAK');
+            d.overrides.parts[SIDE] = { materialCode: 'GONE' };
+        });
+        expect(partOf(model, SIDE)).toMatchObject({
+            materialCode: 'PB18-WHITE',
+            thickness: 18,
+            overridden: true,
+        });
+        expect(partOf(model, 'carcass.side.right').materialCode).toBe(
+            'PB18-OAK',
+        );
+    });
+
+    const GLASS_LEAF = 'front.fr_0000000001.leaf.1';
+    const glassDoor = (removed: string[]) =>
+        generate((d) => {
+            const front = d.carcass?.fronts[0];
+            if (front) front.glass = true;
+            for (const key of removed)
+                d.overrides.parts[key] = { removed: true };
+        });
+
+    it('keeps a glass door front while some of its parts remain, on a remaining part', () => {
+        const model = glassDoor([`${GLASS_LEAF}.stile.left`]);
+        const front = model.fronts.find((f) => f.id === GLASS_LEAF);
+        expect(front?.partKey).toBe(`${GLASS_LEAF}.glass`);
+        expect(model.fronts).toHaveLength(3);
+    });
+
+    it('keeps the front on its own part when another frame part is removed', () => {
+        const model = glassDoor([`${GLASS_LEAF}.rail.top`]);
+        expect(model.fronts.find((f) => f.id === GLASS_LEAF)?.partKey).toBe(
+            `${GLASS_LEAF}.stile.left`,
+        );
+    });
+
+    it('drops a glass door front when all its parts are removed', () => {
+        const model = glassDoor(
+            [
+                'glass',
+                'rail.bottom',
+                'rail.top',
+                'stile.left',
+                'stile.right',
+            ].map((s) => `${GLASS_LEAF}.${s}`),
+        );
+        expect(model.fronts.map((f) => f.id)).toEqual([
+            'front.fr_0000000002.leaf.1',
+            'front.fr_0000000002.leaf.2',
+        ]);
+    });
+});
+
+describe('overrides and the generation steps', () => {
+    it('generates the connectors before the overrides, so they can be overridden', () => {
+        const model = generate((d) => {
+            d.overrides.parts['carcass.top'] = { removed: true };
+            d.overrides.hardware['carcass.connectors.cam'] = { qtyDelta: 2 };
+        });
+        // The removed member's joints still count: 16 + 2.
+        expect(lineOf(model, 'carcass.connectors.cam')).toMatchObject({
+            qty: 18,
+            overridden: true,
+        });
+        expect(lineOf(model, 'carcass.connectors.dowel')?.qty).toBe(16);
+        expect(issuesOf(model, 'furniture.override_orphaned')).toEqual([]);
+    });
+
+    it('applies overrides before adding extras: an override of an extra key is orphaned', () => {
+        const model = generate((d) => {
+            d.overrides.extraParts.push(extraPart());
+            d.overrides.extraHardware.push({
+                id: 'h_0000000001',
+                code: 'LCK-CAM-20',
+                qty: 1,
+                note: null,
+            });
+            d.overrides.parts['extra.p_0000000001'] = { grain: 'width' };
+            d.overrides.hardware['extra.h_0000000001'] = { qtyDelta: 5 };
+        });
+        expect(partOf(model, 'extra.p_0000000001')).toMatchObject({
+            grain: 'length',
+            overridden: false,
+        });
+        expect(lineOf(model, 'extra.h_0000000001')).toMatchObject({
+            qty: 1,
+            overridden: false,
+        });
+        expect(
+            issuesOf(model, 'furniture.override_orphaned').map((i) => i.params),
+        ).toEqual([
+            { key: 'extra.p_0000000001' },
+            { key: 'extra.h_0000000001' },
+        ]);
+    });
+
+    it('reports no orphaned overrides when the envelope is too small, but still adds the extras', () => {
+        const model = generate((d) => {
+            d.dims.height = 150;
+            d.overrides.parts['carcass.top'] = { removed: true };
+            d.overrides.hardware['carcass.screws'] = { qtyDelta: 1 };
+            d.overrides.extraParts.push(extraPart());
+        });
+        expect(issuesOf(model, 'furniture.envelope_too_small')).toHaveLength(1);
+        expect(issuesOf(model, 'furniture.override_orphaned')).toEqual([]);
+        expect(model.parts.map((p) => p.key)).toEqual(['extra.p_0000000001']);
+    });
+});
+
 describe('hardware overrides (07 §3.14 step 2)', () => {
     it('drops a line whose qtyDelta takes it to zero', () => {
         const model = generate((d) => {
@@ -291,6 +404,16 @@ describe('extra parts (07 §3.14 step 3)', () => {
         expect(partOf(model, 'extra.p_0000000001').geometry).toEqual({
             kind: 'box',
             box: placement,
+        });
+    });
+
+    it('falls back to the role default for an unknown extra part material', () => {
+        const model = generate((d) => {
+            d.overrides.extraParts.push(extraPart({ materialCode: 'GONE' }));
+        });
+        expect(partOf(model, 'extra.p_0000000001')).toMatchObject({
+            materialCode: 'PB18-WHITE',
+            thickness: 18,
         });
     });
 

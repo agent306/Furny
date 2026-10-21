@@ -21,7 +21,9 @@ const num = (v: unknown): number | undefined =>
 /**
  * Whether a leg suits a plinth `height` (07 §6.6, 08 §2.3): within
  * `minHeightMm`..`maxHeightMm` when the specs give a range, else within
- * `adjustableMm` (default 0) of `heightMm`. Specs without either fit anything.
+ * `adjustableMm` (default 0) of `heightMm`. Specs with neither cannot be
+ * checked and count as not fitting (the conservative reading of §6.6, whose
+ * formula needs `heightMm`).
  */
 export function legFitsHeight(leg: CatalogHardware, height: number): boolean {
     const { specs } = leg;
@@ -31,7 +33,7 @@ export function legFitsHeight(leg: CatalogHardware, height: number): boolean {
         return height >= (min ?? -Infinity) && height <= (max ?? Infinity);
     }
     const nominal = num(specs.heightMm);
-    if (nominal === undefined) return true;
+    if (nominal === undefined) return false;
     return Math.abs(nominal - height) <= (num(specs.adjustableMm) ?? 0);
 }
 

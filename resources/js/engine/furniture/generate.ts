@@ -76,11 +76,11 @@ function leafContents(
 
 /**
  * Step 3, carcass family. Stops after the envelope when it is too small
- * (`furniture.envelope_too_small`, no parts).
+ * (`furniture.envelope_too_small`, no parts) and then returns false.
  */
-function generateCarcass(ctx: GenContext, root: Section): void {
+function generateCarcass(ctx: GenContext, root: Section): boolean {
     const env = computeEnvelope(ctx);
-    if (!env) return;
+    if (!env) return false;
     carcassPanels(ctx, env);
     const layout = layoutFromEnvelope(ctx, env);
     dividerParts(ctx, layout);
@@ -93,6 +93,7 @@ function generateCarcass(ctx: GenContext, root: Section): void {
     mountingHardware(ctx, env);
     connectorsForJoints(ctx, 'carcass');
     screwPacks(ctx, 'carcass');
+    return true;
 }
 
 /** Info `furniture.weight_estimate`: all parts x qty, 1 decimal (07 §6.1). */
@@ -127,13 +128,16 @@ export function generateFurniture(
     const ctx = createGenContext(doc, idx);
     // 2. Code check; unknown materials fall back to the role default in `ctx.mat`.
     ctx.issues.push(...codeIssues(doc, idx));
-    // 3. Carcass family (a family without its spec is reported by validateFurniture).
-    if (doc.family === 'carcass' && doc.carcass) {
-        generateCarcass(ctx, doc.carcass.interior);
+    // 3. Carcass family (a family without its spec is reported by
+    // validateFurniture and generates nothing).
+    let generated = true;
+    if (doc.family === 'carcass') {
+        generated =
+            doc.carcass !== null && generateCarcass(ctx, doc.carcass.interior);
     }
     // 4. Table family: `tableParts` (Task 38).
-    // 5. Overrides.
-    applyOverrides(ctx);
+    // 5. Overrides; without a model they would all be orphaned, so not reported.
+    applyOverrides(ctx, { reportOrphans: generated });
     // 6. Model-level rules.
     weightEstimate(ctx);
     modelRules(ctx);

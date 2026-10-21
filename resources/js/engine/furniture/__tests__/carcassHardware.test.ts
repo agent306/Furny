@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { seedCatalog } from '../../testing/seedCatalog';
+import { mutateCatalog, seedCatalog } from '../../testing/seedCatalog';
 import { createGenContext } from '../context';
 import { generateFurniture } from '../generate';
 import { makePart } from '../parts';
 import {
     cabinetLegs,
+    legFitsHeight,
     mountingHardware,
     screwPacks,
 } from '../rules/carcassHardware';
@@ -147,6 +148,51 @@ describe('cabinet legs (07 §6.6, §12.4)', () => {
         expect(at(726)).toBe(1);
     });
 
+    it('counts the leg columns over the carcass width Wc, not the overall width', () => {
+        // W 900 with a 100 mm countertop overhang on the left: Wc = 800 -> 4 legs (W would give 6).
+        const doc = legsBox(900);
+        if (doc.carcass) {
+            doc.carcass.countertop = {
+                enabled: true,
+                overhangFront: 0,
+                overhangLeft: 100,
+                overhangRight: 0,
+            };
+        }
+        expect(
+            lineOf(generateFurniture(doc, catalog), 'plinth.legs')?.qty,
+        ).toBe(4);
+    });
+
+    it('treats a leg with neither a height range nor heightMm as a mismatch', () => {
+        const bare = mutateCatalog(catalog, (draft) => {
+            const leg = draft.hardware.find((h) => h.code === 'LEG-CAB-ADJ');
+            if (leg) leg.specs = {};
+        });
+        const model = generateFurniture(legsBox(600, { setback: 0 }), bare);
+        expect(lineOf(model, 'plinth.legs')?.code).toBe('LEG-CAB-ADJ');
+        expect(
+            issuesOf(model.issues, 'furniture.leg_height_mismatch'),
+        ).toMatchObject([
+            { severity: 'warning', params: { code: 'LEG-CAB-ADJ' } },
+        ]);
+    });
+
+    it('legFitsHeight: range, nominal ± adjustable, and nothing to check', () => {
+        const leg = (specs: Record<string, unknown>) => {
+            const base = seedCatalog().hardware.find(
+                (h) => h.code === 'LEG-CAB-ADJ',
+            );
+            if (!base) throw new Error('no leg');
+            return { ...base, specs };
+        };
+        expect(legFitsHeight(leg({ minHeightMm: 95 }), 95)).toBe(true);
+        expect(legFitsHeight(leg({ maxHeightMm: 150 }), 151)).toBe(false);
+        expect(legFitsHeight(leg({ heightMm: 100 }), 100)).toBe(true);
+        expect(legFitsHeight(leg({ heightMm: 100 }), 101)).toBe(false);
+        expect(legFitsHeight(leg({}), 100)).toBe(false);
+    });
+
     it('adds no legs to a plinth base, a base without plinth, or a wall unit', () => {
         for (const doc of [
             legsBox(600, { type: 'plinth' }),
@@ -207,6 +253,36 @@ describe('mounting (07 §6.8)', () => {
             reasonKey: 'hardware.reason.wall_brackets',
         });
         expect(lineOf(model, 'carcass.anti_tip')).toBeUndefined();
+    });
+
+    it('counts the brackets over the carcass width Wc, not the overall width', () => {
+        // W 1100 with a 100 mm countertop overhang: Wc = 1000 -> 2 brackets (W would give 4).
+        const doc = mountedBox('wall', 1100);
+        if (doc.carcass) {
+            doc.carcass.countertop = {
+                enabled: true,
+                overhangFront: 0,
+                overhangLeft: 100,
+                overhangRight: 0,
+            };
+        }
+        const model = generateFurniture(doc, catalog);
+        expect(lineOf(model, 'carcass.wall_brackets')?.qty).toBe(2);
+    });
+
+    it('tests the overall height H for the anti-tip kit, not the carcass height', () => {
+        // H 1500 on a 100 mm plinth: Hc = 1400, but the unit stands 1500 high.
+        const doc = mountedBox('floor', 600, 1500);
+        if (doc.carcass) {
+            doc.carcass.plinth = {
+                type: 'plinth',
+                height: 100,
+                setback: 20,
+                legCode: null,
+            };
+        }
+        const model = generateFurniture(doc, catalog);
+        expect(lineOf(model, 'carcass.anti_tip')?.qty).toBe(1);
     });
 
     it('adds no anti-tip kit to a floor unit 1499 high, and one at 1500', () => {

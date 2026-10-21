@@ -36,8 +36,50 @@ const ONE_FACE_ROLES = new Set<MaterialRole>([
 const sortedKeys = (record: Record<string, unknown>): string[] =>
     Object.keys(record).sort(cmpId);
 
-function orphaned(ctx: GenContext, key: string): void {
-    ctx.issue('furniture.override_orphaned', 'info', { key }, [key]);
+/** How `applyOverrides` treats overrides whose key the model does not have. */
+export interface OverrideOptions {
+    /**
+     * Report them as info `furniture.override_orphaned` (default). Off when
+     * no model was generated (e.g. `furniture.envelope_too_small`): every
+     * override would be orphaned, which is noise, not news.
+     */
+    reportOrphans?: boolean;
+}
+
+type Orphan = (key: string) => void;
+
+const orphanReporter =
+    (ctx: GenContext, options: OverrideOptions): Orphan =>
+    (key) => {
+        if (options.reportOrphans === false) return;
+        ctx.issue('furniture.override_orphaned', 'info', { key }, [key]);
+    };
+
+/** The parts of model front `id`: the leaf (or drawer front) part and its frame parts. */
+const belongsTo = (id: string, partKey: string): boolean =>
+    partKey === id || partKey.startsWith(`${id}.`);
+
+/**
+ * The model fronts after part removals: a front goes when none of its parts
+ * remain (07 §3.14 "its fronts entry"); while some do, its `partKey` moves
+ * to the first remaining part (by key) if its own part was removed, e.g. the
+ * left stile of a glass door.
+ */
+function remainingFronts(ctx: GenContext, removed: ReadonlySet<string>) {
+    const out: GenContext['fronts'] = [];
+    for (const front of ctx.fronts) {
+        if (!removed.has(front.partKey)) {
+            out.push(front);
+            continue;
+        }
+        const rest = ctx.parts
+            .filter((p) => belongsTo(front.id, p.key))
+            .map((p) => p.key)
+            .sort(cmpId);
+        const partKey = rest[0];
+        if (partKey !== undefined) out.push({ ...front, partKey });
+    }
+    return out;
 }
 
 /**
@@ -102,14 +144,14 @@ function applyPartOverride(
     part.overridden = true;
 }
 
-function applyPartOverrides(ctx: GenContext): void {
+function applyPartOverrides(ctx: GenContext, orphaned: Orphan): void {
     const overrides = ctx.doc.overrides.parts;
     const removed = new Set<string>();
     for (const key of sortedKeys(overrides)) {
         const override = overrides[key];
         const part = ctx.parts.find((p) => p.key === key);
         if (!override || !part) {
-            orphaned(ctx, key);
+            orphaned(key);
             continue;
         }
         if (override.removed) removed.add(key);
@@ -117,7 +159,7 @@ function applyPartOverrides(ctx: GenContext): void {
     }
     if (removed.size === 0) return;
     ctx.parts = ctx.parts.filter((p) => !removed.has(p.key));
-    ctx.fronts = ctx.fronts.filter((f) => !removed.has(f.partKey));
+    ctx.fronts = remainingFronts(ctx, removed);
     for (const key of removed) ctx.edgeMap.delete(key);
 }
 
@@ -125,10 +167,11 @@ function applyHardwareOverride(
     ctx: GenContext,
     key: string,
     override: HardwareOverride,
+    orphaned: Orphan,
 ): void {
     const line = ctx.hardware.find((h) => h.key === key);
     if (!line) {
-        orphaned(ctx, key);
+        orphaned(key);
         return;
     }
     if (override.code !== undefined) line.code = override.code;
@@ -196,13 +239,20 @@ function extraHardware(extra: ExtraHardware): HardwareLine {
     };
 }
 
-/** Applies `ctx.doc.overrides` to the generated parts, fronts and hardware (07 §3.14). */
-export function applyOverrides(ctx: GenContext): void {
+/**
+ * Applies `ctx.doc.overrides` to the generated parts, fronts and hardware
+ * (07 §3.14). Extras come last, so overrides never apply to them.
+ */
+export function applyOverrides(
+    ctx: GenContext,
+    options: OverrideOptions = {},
+): void {
     const { overrides } = ctx.doc;
-    applyPartOverrides(ctx);
+    const orphaned = orphanReporter(ctx, options);
+    applyPartOverrides(ctx, orphaned);
     for (const key of sortedKeys(overrides.hardware)) {
         const override = overrides.hardware[key];
-        if (override) applyHardwareOverride(ctx, key, override);
+        if (override) applyHardwareOverride(ctx, key, override, orphaned);
     }
     for (const extra of overrides.extraParts) {
         ctx.parts.push(extraPart(ctx, extra));

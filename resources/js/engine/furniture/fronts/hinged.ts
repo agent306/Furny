@@ -59,8 +59,8 @@ export function checkLeafSize(
  * The leaves of a hinged front (07 §4.2): `n` = `leaves`, or for `'auto'`
  * `min(2, ceil(opening width / 600))`. More than 2 is an error and 2 are
  * made. Fewer than 1 cannot pass the schema (`leaves >= 1`); for callers
- * that bypass it, it is the same error (`hinged_leaves_unsupported`, whose
- * text asks for 1 or 2 leaves) and 1 is made. One leaf hinges on
+ * that bypass it, it is the same error (`hinged_leaves_unsupported`; its
+ * English text, Task 51, asks for 1 or 2 leaves) and 1 is made. One leaf hinges on
  * `hingeSide` (`auto` = right), two on the outer sides. Named `hingedLeaves`
  * to keep `hingedFront` for the template helper (preflight I3).
  */

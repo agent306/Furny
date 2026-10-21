@@ -274,6 +274,39 @@ export function computeOpenings(
     return result;
 }
 
+interface OpeningsMemo {
+    doc: FurnitureDocument;
+    env: Pick<Envelope, 'interior'>;
+    layout: SectionLayout;
+    openings: Map<string, OpeningRect>;
+}
+
+const openingsMemo = new WeakMap<GenContext, OpeningsMemo>();
+
+/**
+ * `computeOpenings`, computed once per generation: the front step and every
+ * external drawer leaf share the result while the context's document, the
+ * envelope and the layout stay the same. Read-only for callers.
+ */
+export function openingsOf(
+    ctx: GenContext,
+    env: Pick<Envelope, 'interior'>,
+    layout: SectionLayout,
+): Map<string, OpeningRect> {
+    const memo = openingsMemo.get(ctx);
+    if (
+        memo &&
+        memo.doc === ctx.doc &&
+        memo.env === env &&
+        memo.layout === layout
+    ) {
+        return memo.openings;
+    }
+    const openings = computeOpenings(ctx, env, layout);
+    openingsMemo.set(ctx, { doc: ctx.doc, env, layout, openings });
+    return openings;
+}
+
 /**
  * `furniture.front_not_rectangle` and `furniture.front_overlap` (07 §4.1) of
  * a laid-out document, as issues; pure (nothing is recorded anywhere), for

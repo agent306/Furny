@@ -57,14 +57,19 @@ describe('catalog drift against the wardrobe fixture', () => {
             );
         }).not.toThrow();
         if (!model) throw new Error('no model');
-        const missing = issuesOf(model, 'furniture.no_default_hardware');
-        expect(missing.length).toBeGreaterThan(0);
-        for (const issue of missing) {
-            expect(issue).toMatchObject({
+        expect(
+            issuesOf(model, 'furniture.no_default_hardware').map((i) => ({
+                severity: i.severity,
+                params: i.params,
+                entityIds: i.entityIds,
+            })),
+        ).toEqual(
+            ['fr_0000000001', 'fr_0000000002'].map((id) => ({
                 severity: 'warning',
                 params: { roleKey: 'hinge.full_overlay' },
-            });
-        }
+                entityIds: [`front.${id}.hinges`],
+            })),
+        );
         // Referenced only through hingeCode 'auto': not an unknown code.
         expect(issuesOf(model, 'furniture.unknown_code')).toEqual([]);
         expect(model.hardware.some((h) => h.code === 'HNG-FO-SC')).toBe(false);
