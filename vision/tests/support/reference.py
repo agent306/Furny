@@ -2,7 +2,7 @@
 the ground-truth wall list onto the page and score the extracted walls.
 
 Chain: decode -> normalize -> preprocess -> OCR (replayed from ``<stem>.ocr.json``) -> segments ->
-dimension lines -> walls -> wall graph -> openings.
+dimension lines -> walls -> wall graph -> openings -> room faces.
 
 **OCR replay.** Real RapidOCR takes seconds per page and its output may drift between onnxruntime builds,
 so the tokens are recorded once (``record_ocr``, the real OCR stage over the annotation region) and replayed:
@@ -34,16 +34,17 @@ from typing import Any
 
 import cv2
 import numpy as np
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Polygon
 from shapely.ops import polygonize, unary_union
 
 from app.pipeline.binarize import Preprocessed, preprocess
 from app.pipeline.decode import decode_raster
 from app.pipeline.dimensions import associate_dimension_texts, find_dimension_lines, find_dimension_spans
 from app.pipeline.normalize import NormalizedPage, normalize
-from app.pipeline.ocr_stage import OcrResult, text_mask
+from app.pipeline.ocr_stage import OcrResult, in_region, text_mask
 from app.pipeline.openings import find_openings
 from app.pipeline.region import annotation_region
+from app.pipeline.rooms import find_room_faces
 from app.pipeline.segments import detect_annotation_segments, detect_segments
 from app.pipeline.textparse import parse_token
 from app.pipeline.walls import WallExtraction, debug_walls_png, extract_walls, walls_to_graph
@@ -51,6 +52,7 @@ from app.schemas.candidates import (
     DimensionLine,
     DimensionSpan,
     OpeningCandidate,
+    RoomFace,
     Segment,
     TextToken,
     WallGraph,
@@ -164,6 +166,8 @@ class ChainResult:
     graph: WallGraph
     seconds: dict[str, float] = field(default_factory=dict)
     openings: list[OpeningCandidate] = field(default_factory=list)
+    rooms: list[RoomFace] = field(default_factory=list)
+    face_map: np.ndarray | None = None
 
 
 def run_chain(stem: str) -> ChainResult:
@@ -203,8 +207,12 @@ def run_chain(stem: str) -> ChainResult:
     lap("graph")
     openings = find_openings(graph, pre, segs, ocr.ink_notext)
     lap("openings")
+    rooms, face_map = find_room_faces(
+        ext.mask, graph, openings, in_region(ocr.tokens, pre.region), pre.region, ext.t_median
+    )
+    lap("rooms")
     times["total"] = sum(times.values())
-    return ChainResult(stem, page, pre, ocr, segs, dims, ext, graph, times, openings)
+    return ChainResult(stem, page, pre, ocr, segs, dims, ext, graph, times, openings, rooms, face_map)
 
 
 # --- truth and registration ---------------------------------------------------------------------------
@@ -783,6 +791,127 @@ def opening_metrics(
         n_truth=len(scored),
         n_detected=len(counted),
     )
+
+
+# --- rooms truth (Task 18) ------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TruthRoom:
+    """One traced room in normalized page px: an interior ``point``, a rough ``polygon``, the label as
+    printed (None: unlabelled) and, for a space open onto another without a door, the id of that room
+    (``opens_onto``)."""
+
+    id: str
+    point: tuple[float, float]
+    polygon: np.ndarray  # (k, 2)
+    label: str | None
+    opens_onto: str | None
+
+
+def load_rooms_truth(stem: str, page: NormalizedPage) -> list[TruthRoom]:
+    """``<stem>.drawing-rooms.json`` (source px) mapped through ``page.transform``."""
+    raw = json.loads((REFERENCE_DIR / f"{stem}.drawing-rooms.json").read_text())
+    m = np.asarray(page.transform, np.float64)
+    out = []
+    for r in raw["rooms"]:
+        (px, py), *_ = _apply(m, np.array([r["point"]], np.float64))
+        out.append(
+            TruthRoom(
+                r["id"], (float(px), float(py)), _apply(m, np.array(r["polygon"], np.float64)), r["label"],
+                r.get("opens_onto"),
+            )
+        )  # fmt: skip
+    return out
+
+
+@dataclass(frozen=True)
+class RoomMetrics:
+    matched: dict[str, str]  # truth room id -> face id
+    merged: dict[str, list[str]]  # face id -> the truth rooms (of several spaces) it holds
+    split: dict[str, list[str]]  # truth room id -> the faces covering it
+    open_in_host: list[str]  # open truth rooms sharing their host's face, as drawn
+    unmatched: list[str]  # truth room ids, neither matched nor open in their host
+    label_hits: list[str]  # matched rooms whose label token lies in their face
+    label_misses: list[str]
+    no_token: list[str]  # labelled rooms whose label has no OCR token inside the room
+
+    @property
+    def label_share(self) -> float:
+        n = len(self.label_hits) + len(self.label_misses)
+        return len(self.label_hits) / n if n else 1.0
+
+
+def _poly_contains(poly: np.ndarray, pt: tuple[float, float]) -> bool:
+    return cv2.pointPolygonTest(np.asarray(poly, np.float32).reshape(-1, 1, 2), pt, False) >= 0
+
+
+def label_token(room: TruthRoom, tokens: Sequence[TextToken]) -> TextToken | None:
+    """The room-name token naming ``room``'s label centred inside its traced polygon."""
+    if room.label is None:
+        return None
+    name = parse_token(room.label).room_name
+    for t in tokens:
+        c = ((t.box[0] + t.box[2]) / 2.0, (t.box[1] + t.box[3]) / 2.0)
+        if t.parsed.room_name is not None and t.parsed.room_name == name and _poly_contains(room.polygon, c):
+            return t
+    return None
+
+
+def room_metrics(
+    truth: list[TruthRoom], faces: Sequence[RoomFace], tokens: Sequence[TextToken]
+) -> RoomMetrics:
+    """A truth room is matched when exactly one face contains its interior point and that face holds no
+    other truth room's point, except the open rooms that open onto it (a kitchen open to the living room
+    shares its face, as drawn). Such an open room is reported as ``open_in_host``, neither matched nor
+    missed. A face holding the points of several spaces merges them; a truth room is split when two or more
+    faces each lie at least half inside its polygon."""
+    polys = {f.id: np.array(f.polygon_px, np.float64) for f in faces}
+    holders = {r.id: [f.id for f in faces if _poly_contains(polys[f.id], r.point)] for r in truth}
+    in_face: dict[str, list[str]] = {}
+    for r in truth:
+        for fid in holders[r.id]:
+            in_face.setdefault(fid, []).append(r.id)
+    by_id = {r.id: r for r in truth}
+    matched: dict[str, str] = {}
+    open_in_host: list[str] = []
+    for r in truth:
+        if len(holders[r.id]) != 1:
+            continue
+        fid = holders[r.id][0]
+        others = [o for o in in_face[fid] if o != r.id]
+        if all(by_id[o].opens_onto == r.id for o in others):
+            matched[r.id] = fid
+        elif r.opens_onto in others and all(
+            o == r.opens_onto or by_id[o].opens_onto == r.opens_onto for o in others
+        ):
+            open_in_host.append(r.id)
+    merged = {fid: ids for fid, ids in in_face.items() if len({by_id[i].opens_onto or i for i in ids}) > 1}
+    split: dict[str, list[str]] = {}
+    for r in truth:
+        covering = []
+        for f in faces:
+            mask_area = cv2.contourArea(np.asarray(polys[f.id], np.float32).reshape(-1, 1, 2))
+            inside = Polygon(polys[f.id]).buffer(0).intersection(Polygon(r.polygon).buffer(0)).area
+            if mask_area > 0 and inside >= 0.5 * mask_area:
+                covering.append(f.id)
+        if len(covering) > 1:
+            split[r.id] = covering
+    hits, misses, no_token = [], [], []
+    face_by_id = {f.id: f for f in faces}
+    for rid, fid in matched.items():
+        r = by_id[rid]
+        if r.label is None:
+            continue
+        tok = label_token(r, tokens)
+        if tok is None:
+            no_token.append(rid)
+        elif tok.id in face_by_id[fid].contains_text_ids:
+            hits.append(rid)
+        else:
+            misses.append(rid)
+    unmatched = [r.id for r in truth if r.id not in matched and r.id not in open_in_host]
+    return RoomMetrics(matched, merged, split, open_in_host, unmatched, hits, misses, no_token)
 
 
 # --- debug ----------------------------------------------------------------------------------------------

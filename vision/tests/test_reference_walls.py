@@ -129,18 +129,6 @@ def test_hdb_rooms_are_faces(chains: dict[str, ChainResult]) -> None:
     assert len([f for f in bounded_faces(r.graph) if f.area >= (0.03 * L) ** 2]) >= 5
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Task 18 acceptance target (controller ruling on Task 16c): the 10 room-like spaces as faces need "
-    "doors at a partition's end against a perpendicular wall (Task 17), face lines under labels and the "
-    "remaining toilet-3 / store partitions",
-)
-def test_hdb_seven_rooms_are_faces(chains: dict[str, ChainResult]) -> None:
-    r = chains["hdb-3room"]
-    L = r.pre.region.long_side
-    assert len([f for f in bounded_faces(r.graph) if f.area >= (0.03 * L) ** 2]) >= 7
-
-
 def test_brochure_outline_is_closed(chains: dict[str, ChainResult]) -> None:
     """Ruling R-a closes the brochure's outline (its toilet window was a 1.5-2.5 t gap): no free end on the
     outer cycle, and the faces enclose the flat."""

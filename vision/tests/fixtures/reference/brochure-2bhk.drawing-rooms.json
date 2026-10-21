@@ -1,0 +1,20 @@
+{
+ "source": "brochure-2bhk.png",
+ "units": "source_px",
+ "method": {
+   "traced": "Task 18. Source px of brochure-2bhk.png. Each room's polygon is the face of the verified wall truth (brochure-2bhk.drawing-walls.json) that holds its point, polygonized and simplified by 0.5 px. The kitchen and the living room share one truth face through the kitchen's open side (x 152, y 215-245, no truth wall: see the openings truth's not_listed note): the kitchen is its part left of x 152 and the living room the rest.",
+   "points": "Interior points lie on the room's floor colour away from lines, furniture outlines and labels (9 x 9 px window minimum: >= 199 on the bedroom, living, kitchen and toilet fills; 130 on the deck's wood-grain fill, median 148; wall poche reads 85-105 and line work under 80).",
+   "labels": "As printed: BEDROOM (2), DECK, LIVING/DINING, KITCHEN, TOILET (2); every label has a replayed OCR token inside its room.",
+   "open": "kitchen: open onto the living room through its 30 px side opening without a door. The deck opens to the living room through folding doors (a door, so not open).",
+   "not_rooms": "The OTS (x 247-341, y 236-311), the hatched 6'6\" x 7'0\" shaft right of the right toilet, the 5'8\" strip left of the left toilet and kitchen, and the corridor lie outside the flat's outline (no truth wall encloses them): a face there is neither matched nor counted against."
+ },
+ "rooms": [
+  {"id": "bedroom-left", "point": [128, 112], "label": "BEDROOM", "open": false, "polygon": [[152.0, 61.5], [56.0, 61.5], [56.0, 165.0], [152.0, 165.0]]},
+  {"id": "bedroom-right", "point": [318, 112], "label": "BEDROOM", "open": false, "polygon": [[247.0, 61.5], [247.0, 165.0], [341.0, 165.0], [341.0, 61.5]]},
+  {"id": "deck", "point": [232, 90], "label": "DECK", "open": false, "polygon": [[247.0, 77.5], [152.0, 77.5], [152.0, 116.5], [247.0, 116.5]]},
+  {"id": "living", "point": [225, 215], "label": "LIVING/DINING", "open": false, "polygon": [[247.0, 116.5], [152.0, 116.5], [152.0, 311.0], [247.0, 311.0]]},
+  {"id": "kitchen", "point": [135, 235], "label": "KITCHEN", "open": true, "opens_onto": "living", "polygon": [[76.0, 215.0], [76.0, 311.0], [152.0, 311.0], [152.0, 215.0]]},
+  {"id": "toilet-left", "point": [135, 180], "label": "TOILET", "open": false, "polygon": [[76.0, 165.0], [76.0, 215.0], [152.0, 215.0], [152.0, 165.0]]},
+  {"id": "toilet-right", "point": [262, 190], "label": "TOILET", "open": false, "polygon": [[298.0, 165.0], [247.0, 165.0], [247.0, 236.0], [298.0, 236.0]]}
+ ]
+}
