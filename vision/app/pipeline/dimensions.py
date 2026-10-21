@@ -7,6 +7,7 @@ shorter than its minimum length, and the spec's tick length range (0.005 L ... 0
 limit (`max(8 px, 0.008 L)`), so on raster pages the interior ticks are usually only visible in the ink.
 """
 
+import bisect
 import itertools
 import math
 from collections.abc import Callable, Sequence
@@ -40,6 +41,7 @@ THICK_FACTOR = 2.5  # a stroke wider than 2.5 line widths + 2 px is a wall, not 
 THICK_MARGIN_PX = 2.0
 ELONGATION = 3.0  # a stroke's long axis is at least 3x the short one (rms): a clear direction
 BLOB_LEN_FRAC = 0.012  # a blob is at most this long along the line (fraction of L)
+BLOB_MERGE_PX = 8.0  # blob marks closer than this (or 2 line widths + 4) are one mark
 BLOB_EXCESS_PX = 3  # a blob is at least this much thicker than the line
 NEAR_ROW_FRAC = 0.5  # a band row is "the line" when this share of it is a long horizontal run
 
@@ -131,11 +133,10 @@ def _segment_ticks(
 # --- ticks from the ink mask --------------------------------------------------------------------------
 
 
-def _band(ink: np.ndarray, line: Segment, radius: int) -> np.ndarray:
-    """The ink resampled into line coordinates: column `i` is `u = i - END_SLACK_PX` along the line from
+def _band(ink: np.ndarray, line: Segment, radius: int, slack: int) -> np.ndarray:
+    """The ink resampled into line coordinates: column `i` is `u = i - slack` along the line from
     `line.p0`, row `j` is `v = j - radius` along the normal. Nearest-neighbour, one pixel per unit."""
     ux, uy, length = _unit(line.p0, line.p1)
-    slack = int(END_SLACK_PX)
     matrix = np.array(
         [
             [ux, -uy, line.p0[0] - slack * ux + radius * uy],
@@ -149,47 +150,39 @@ def _band(ink: np.ndarray, line: Segment, radius: int) -> np.ndarray:
 
 
 class _Stroke:
-    """Moments and extent of one stroke (components touching the line, merged across it)."""
+    """Moments (n, sum u, sum v, sum uu, sum uv, sum vv) and extent of one stroke: the components touching
+    the line, merged across it."""
 
     def __init__(self) -> None:
-        self.n = 0.0
-        self.su = self.sv = self.suu = self.suv = self.svv = 0.0
+        self.m = np.zeros(6)
         self.top = 10**9  # smallest / largest band row
         self.bottom = -1
         self.members: list[int] = []
+        self.edge_u: list[float] = []  # u next to the line, one per side
 
-    def add(self, label: int, m: np.ndarray, top: int, bottom: int) -> None:
+    @property
+    def n(self) -> float:
+        return float(self.m[0])
+
+    def add(self, label: int, m: np.ndarray, top: int, bottom: int, edge_u: float) -> None:
         self.members.append(label)
-        self.n += m[0]
-        self.su, self.sv, self.suu, self.suv, self.svv = (
-            self.su + m[1],
-            self.sv + m[2],
-            self.suu + m[3],
-            self.suv + m[4],
-            self.svv + m[5],
-        )
+        self.edge_u.append(edge_u)
+        self.m += m
         self.top, self.bottom = min(self.top, top), max(self.bottom, bottom)
 
 
-def _axis_of(stroke: _Stroke, pixels: np.ndarray) -> tuple[float, float, float, float, float] | None:
-    """(du, dv, centre u, centre v, elongation) of the principal axis; None when it is unreliable.
-
-    Strokes of fewer than 6 pixels use the farthest pair of pixels instead of the covariance.
-    """
-    n = stroke.n
-    mu, mv = stroke.su / n, stroke.sv / n
+def _axis_of(m: np.ndarray, pixels: np.ndarray) -> tuple[float, float, float, float, float] | None:
+    """(du, dv, centre u, centre v, elongation) of the principal axis of the moments `m`; None when it
+    is unreliable. Strokes of fewer than 6 pixels use the farthest pair of pixels instead."""
+    n = m[0]
+    mu, mv = m[1] / n, m[2] / n
     if n < 6:
         d = pixels[:, None, :] - pixels[None, :, :]
         i, j = np.unravel_index(np.argmax((d**2).sum(axis=2)), (len(pixels), len(pixels)))
         vec = pixels[j] - pixels[i]
         norm = float(np.hypot(*vec))
         return (vec[0] / norm, vec[1] / norm, mu, mv, 99.0) if norm > 0 else None
-    cov = np.array(
-        [
-            [stroke.suu / n - mu * mu, stroke.suv / n - mu * mv],
-            [stroke.suv / n - mu * mv, stroke.svv / n - mv * mv],
-        ]
-    )
+    cov = np.array([[m[3] / n - mu * mu, m[4] / n - mu * mv], [m[4] / n - mu * mv, m[5] / n - mv * mv]])
     values, vectors = np.linalg.eigh(cov)
     if values[1] <= 1e-9:
         return None
@@ -207,7 +200,7 @@ def _ink_ticks(
     and the rest is split into 8-connected components. Components that touch the cleared line rows are
     strokes; the two halves of a stroke crossing the line are merged. Per stroke:
     - wider than 2.5 line widths + 2 px (area / length): a wall, no tick;
-    - angle 90 +- 10 degrees to the line: a tick of any length (bar ticks, extension lines ending at or
+    - angle 90 +- 10 degrees to the line: a tick of at least 0.005 L (bar ticks, extension lines ending at or
       crossing the line, extension lines running through an inner chain of a stacked dimension string);
     - angle 45 +- 15 or 135 +- 15 degrees, not reaching the band edge on either side and
       0.005 L ... 0.03 L long: a slash tick, of any width;
@@ -223,8 +216,11 @@ def _ink_ticks(
     hi = TICK_MAX_FRAC * long_side
     lo = TICK_MIN_FRAC * long_side
     radius = math.ceil(hi / 2) + BAND_MARGIN_PX
-    slack = int(END_SLACK_PX)
-    inked = _band(ink, line, radius) > 0
+    blob_max_len = BLOB_LEN_FRAC * long_side
+    slack = max(
+        int(END_SLACK_PX), math.ceil(blob_max_len)
+    )  # room for an arrowhead whose body is off the line
+    inked = _band(ink, line, radius, slack) > 0
     cols = inked.shape[1]
     run = min(math.ceil(hi) + 1, cols) | 1  # odd: OpenCV's even-sized kernels are off by one at run ends
     cleared = np.zeros_like(inked)
@@ -257,8 +253,17 @@ def _ink_ticks(
     bottom = top + height - 1
     centre_row = top + height / 2.0
     min_area = max(3.0, width)
-    touching_up = (centre_row < line_top) & (bottom >= line_top - 1) & (area >= min_area)  # smaller rows = -v
-    touching_down = (centre_row > line_bottom) & (top <= line_bottom + 1) & (area >= min_area)
+    # A stroke touches the line when it is inked in the row next to the line (the outermost cleared row);
+    # a glyph one empty row away is not connected to it in the original ink.
+    contact = np.zeros(count, bool)
+    for row, beyond in ((line_top, line_top - 1), (line_bottom, line_bottom + 1)):
+        if 0 <= beyond <= 2 * radius:
+            reach_cols = inked[row].copy()
+            reach_cols[1:] |= inked[row][:-1]
+            reach_cols[:-1] |= inked[row][1:]
+            contact[np.unique(labels[beyond][rest[beyond] & reach_cols])] = True
+    touching_up = (centre_row < line_top) & (bottom >= line_top - 1) & (area >= min_area) & contact
+    touching_down = (centre_row > line_bottom) & (top <= line_bottom + 1) & (area >= min_area) & contact
     touching_up[0] = touching_down[0] = False
     touching = touching_up | touching_down
     ys, xs = np.nonzero(rest)
@@ -284,25 +289,39 @@ def _ink_ticks(
     strokes: list[_Stroke] = []
     ups = [int(c) for c in np.flatnonzero(touching_up)]
     downs = [int(c) for c in np.flatnonzero(touching_down)]
-    paired: set[int] = set()
+    # Pair the halves of a stroke across the line, nearest first. A slanted stroke is shifted by the run
+    # it makes across the line (zone / tan(angle): 8 px for a 35 degree stroke on a 5 row zone).
+    window = 2.0 * zone + 6.0
+    by_u = sorted(downs, key=lambda d_: edge_u[d_])
+    keys = [float(edge_u[d_]) for d_ in by_u]
+    costs = []
+    for c in ups:
+        for d in by_u[
+            bisect.bisect_left(keys, edge_u[c] - window) : bisect.bisect_right(keys, edge_u[c] + window)
+        ]:
+            costs.append((abs(float(edge_u[d] - edge_u[c])), c, d))
+    costs.sort()
+    partner_of: dict[int, int] = {}
+    taken: set[int] = set()
+    for _, c, d in costs:
+        if c not in partner_of and d not in taken:
+            partner_of[c] = d
+            taken.add(d)
     for c in ups:
         stroke = _Stroke()
-        stroke.add(c, moments[c], int(top[c]), int(bottom[c]))
-        partner = [d for d in downs if d not in paired and abs(edge_u[d] - edge_u[c]) <= zone + 2]
-        if partner:
-            d = min(partner, key=lambda d_: abs(edge_u[d_] - edge_u[c]))
-            paired.add(d)
-            stroke.add(d, moments[d], int(top[d]), int(bottom[d]))
+        stroke.add(c, moments[c], int(top[c]), int(bottom[c]), float(edge_u[c]))
+        if c in partner_of:
+            d = partner_of[c]
+            stroke.add(d, moments[d], int(top[d]), int(bottom[d]), float(edge_u[d]))
         strokes.append(stroke)
     for d in downs:
-        if d not in paired:
+        if d not in taken:
             stroke = _Stroke()
-            stroke.add(d, moments[d], int(top[d]), int(bottom[d]))
+            stroke.add(d, moments[d], int(top[d]), int(bottom[d]), float(edge_u[d]))
             strokes.append(stroke)
 
     blob_max_area = (BLOB_AREA_FRAC * long_side) ** 2
-    blob_max_len = BLOB_LEN_FRAC * long_side
-    ticks: list[float] = []
+    marks: list[tuple[float, float]] = []  # (u, size across the line): ticks of strokes and blobs
     thick_limit = THICK_FACTOR * width + THICK_MARGIN_PX
     skips: list[tuple[float, float]] = []  # u ranges of ticks and of strokes too long to be blobs
     for stroke in strokes:
@@ -315,7 +334,7 @@ def _ink_ticks(
         at_band_edge = stroke.top <= 1 or stroke.bottom >= 2 * radius - 1
         lefts = stats[stroke.members, cv2.CC_STAT_LEFT]
         rights = lefts + stats[stroke.members, cv2.CC_STAT_WIDTH]
-        axis = _axis_of(stroke, pixels)
+        axis = _axis_of(stroke.m, pixels)
         # Where the stroke crosses the cleared rows it leaves no component: widen its range by that run.
         run_in_zone = 1.0
         if axis is not None and abs(axis[1]) > 1e-3:
@@ -326,20 +345,36 @@ def _ink_ticks(
         if axis is None:
             continue
         du, dv, mu, mv, elongation = axis
-        if elongation < ELONGATION or abs(dv) < 1e-6:
+        if elongation < ELONGATION:
+            # No clear direction: a compound of a bar or extension line and a slash, or a dot. If it
+            # crosses the line, is tick-sized, stays in the band and is thin, it is a tick at the line.
+            rows = stroke.bottom - stroke.top + 1
+            if (
+                len(stroke.edge_u) == 2
+                and not at_band_edge
+                and lo <= rows <= hi
+                and stroke.n / rows <= thick_limit
+            ):
+                marks.append((sum(stroke.edge_u) / 2, float(rows)))
+                skips.append(span)
+            continue
+        if abs(dv) < 1e-6:
             continue
         extent = (stroke.bottom - stroke.top + 1) / abs(dv)  # along the axis, across the cleared rows too
         if stroke.n / max(extent, 1.0) > thick_limit:
             continue
         angle = math.degrees(math.atan2(abs(dv), abs(du)))  # to the line, 0..90
         if angle >= 90.0 - PERP_TOL_DEG:
-            tick = True
+            tick = extent >= lo  # shorter marks (arrowhead wedges, dots) are left to the blob rule
         elif abs(angle - 45.0) <= DIAG_TOL_DEG:
             tick = (not at_band_edge) and lo <= extent <= hi
         else:
             tick = False
         if tick:
-            ticks.append(mu - mv * du / dv)
+            if len(stroke.edge_u) == 2:  # both halves: where they meet the line
+                marks.append((sum(stroke.edge_u) / 2, float(stroke.bottom - stroke.top + 1)))
+            else:
+                marks.append((mu - mv * du / dv, float(stroke.bottom - stroke.top + 1)))
             skips.append(span)
 
     # Blobs: the thickness of the ink through the line, per column, away from the strokes found above.
@@ -355,22 +390,47 @@ def _ink_ticks(
         skip[max(0, math.floor(first)) : max(0, math.ceil(last)) + 1] = True
     columns = np.flatnonzero((thickness >= line_width + BLOB_EXCESS_PX) & ~skip)
     for group in np.split(columns, np.flatnonzero(np.diff(columns) > 2) + 1) if columns.size else []:
-        if group.size <= blob_max_len and (thickness[group] - line_width).sum() <= blob_max_area:
-            ticks.append(_blob_position(group, thickness[group]) - slack)
+        if group.size > blob_max_len or (thickness[group] - line_width).sum() > blob_max_area:
+            continue
+        marks.append((_blob_position(group, thickness, ~skip, line_width, blob_max_len / 2) - slack, 0.0))
+    # Small marks (dots, arrowheads, short strokes) next to a tick of tick size are part of it: an
+    # arrowhead at an extension line. Heads meeting tip to tip at an interior extension line are one mark.
+    big = [u_ for u_, size in marks if size >= lo]
+    small = [u_ for u_, size in marks if size < lo and all(abs(u_ - b_) > blob_max_len for b_ in big)]
+    ticks = big + _cluster(np.array(sorted(small)), max(BLOB_MERGE_PX, 2.0 * width + 4.0))
     return [t for t in ticks if -END_SLACK_PX <= t <= length + END_SLACK_PX]
 
 
-def _blob_position(columns: np.ndarray, thickness: np.ndarray) -> float:
+def _blob_position(
+    columns: np.ndarray, thickness: np.ndarray, usable: np.ndarray, line_width: float, max_reach: float
+) -> float:
     """Column of a blob: the centre of the run; for an arrowhead (clearly thicker at one end than at the
-    other) the tip, extrapolated from the thickness profile to where it would vanish."""
-    first, last = float(columns[0]), float(columns[-1])
-    edge = max(1, len(columns) // 4)
-    start, end = float(thickness[:edge].mean()), float(thickness[-edge:].mean())
+    other) the tip, where the linear fit of its taper (the columns thicker than the line next to the run)
+    would vanish. The tip lies at most `max_reach` px beyond the narrow end of the taper."""
+    first, last = int(columns[0]), int(columns[-1])
+    while (
+        first > 0 and usable[first - 1] and thickness[first - 1] > line_width and last - first < 4 * max_reach
+    ):
+        first -= 1
+    while (
+        last < len(thickness) - 1
+        and usable[last + 1]
+        and thickness[last + 1] > line_width
+        and last - first < 4 * max_reach
+    ):
+        last += 1
+    xs = np.arange(first, last + 1, dtype=np.float64)
+    t = thickness[first : last + 1]
+    edge = max(1, len(xs) // 4)
+    start, end = float(t[:edge].mean()), float(t[-edge:].mean())
     if abs(end - start) >= 2.0 and last > first:
-        slope = abs(end - start) / (last - first)
-        reach = min(min(start, end) / slope, 12.0)
-        return first - reach if end > start else last + reach
-    return (first + last) / 2.0
+        slope, intercept = np.polyfit(xs, t, 1)
+        if abs(slope) > 0.1:
+            vanish = -intercept / slope
+            if slope > 0:
+                return float(min(first, max(vanish, first - max_reach)))
+            return float(max(last, min(vanish, last + max_reach)))
+    return (float(columns[0]) + float(columns[-1])) / 2.0
 
 
 def _cluster(positions: np.ndarray, gap: float) -> list[float]:
@@ -384,9 +444,9 @@ def _cluster(positions: np.ndarray, gap: float) -> list[float]:
 # --- dimension lines ----------------------------------------------------------------------------------
 
 
-def _dedupe_ticks(positions: Sequence[float], width: float) -> list[float]:
-    """Ticks closer than `max(4, 2 line widths)` px along the line are one tick."""
-    return _cluster(np.array(sorted(positions)), max(TICK_DEDUPE_PX, 2.0 * width))
+def _dedupe_ticks(positions: Sequence[float], gap: float) -> list[float]:
+    """Ticks closer than `gap` px along the line are one tick."""
+    return _cluster(np.array(sorted(positions)), gap)
 
 
 def _collinear_overlap(a: DimensionLine, b: DimensionLine) -> bool:
@@ -424,9 +484,9 @@ def find_dimension_lines(
     line (see `_ink_ticks`; LSD drops strokes shorter than its minimum length, which includes many
     interior ticks), together with dot / arrowhead blobs. Pass a text-free mask (`OcrResult.ink_notext`,
     not `Preprocessed.ink`) so that glyphs touching the line cannot read as ticks. Ticks closer than
-    `max(4, 2 line widths)` px are one tick. Collinear duplicates of one line are dropped. Ids `L1..Ln`
-    follow the (min y, min x, max y, max x) order of the lines. `check_deadline` is called for every
-    candidate.
+    4 px are one tick (marks of one tick in the ink: `max(4, 2 line widths)`). Collinear duplicates of
+    one line are dropped. Ids `L1..Ln` follow the (min y, min x, max y, max x) order of the lines.
+    `check_deadline` is called for every candidate.
     """
     long_side = float(region.long_side)
     numeric = _numeric(tokens)
@@ -443,10 +503,14 @@ def find_dimension_lines(
             check_deadline()
         if cand.length < MIN_LINE_FRAC * long_side or not labels.beside(cand):
             continue
-        ticks = _segment_ticks(cand, index, p0, p1, lo, hi)
+        ticks = _dedupe_ticks(_segment_ticks(cand, index, p0, p1, lo, hi), TICK_DEDUPE_PX)
         if ink is not None:
-            ticks += _ink_ticks(cand, ink, long_side, check_deadline)
-        ticks = _dedupe_ticks(ticks, max(1.0, cand.width_px))
+            # Marks of one tick (arrowhead, extension line, slash) are merged within `max(4, 2 widths)`;
+            # then ink and segment ticks within 4 px are one tick.
+            from_ink = _dedupe_ticks(
+                _ink_ticks(cand, ink, long_side, check_deadline), max(TICK_DEDUPE_PX, 2.0 * cand.width_px)
+            )
+            ticks = _dedupe_ticks(ticks + from_ink, TICK_DEDUPE_PX)
         if len(ticks) >= 2:
             found.append((cand, ticks))
 

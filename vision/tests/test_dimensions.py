@@ -1,5 +1,6 @@
 """Dimension lines, dimension spans and heuristic text association (06 §8.4 steps 1-5)."""
 
+import hashlib
 import itertools
 import math
 import time
@@ -673,6 +674,187 @@ def test_slash_tick_length_scales_with_the_page() -> None:
     assert ink_ticks(ink, y, 2, region=Rect(0, 0, 2400, 700)) == pytest.approx(TICKS, abs=3)  # 12 .. 72 px
     # On a 5000 px page a slash tick is 25 .. 150 px long: 17 px is a speck, the bars are still ticks.
     assert ink_ticks(ink, y, 2, region=Rect(0, 0, 5000, 700)) == pytest.approx([300, 1200], abs=3)
+
+
+@pytest.mark.parametrize("length", [80, 100, 140])
+def test_shallow_crossing_strokes_are_not_ticks(length: int) -> None:
+    failures = []
+    for angle in (32, 35, 38, 40, 140, 145):
+        for stroke_width in (1, 2, 3):
+            for phase in PHASES:
+                y = phase_y(phase)
+                ink = plan()
+                stroke(ink, (299, y), (1201, y), 2)
+                for x in (300, 1200):
+                    stroke(ink, (x, y - 8), (x, y + 8), 2)
+                stroke(ink, *polar((750, y), angle, length), stroke_width)
+                found = ink_ticks(ink, y, 2, phase=phase)
+                if found != pytest.approx([300, 1200], abs=3):
+                    failures.append((angle, stroke_width, phase, found))
+    assert not failures, failures[:8]
+
+
+@pytest.mark.parametrize("angle", [35, 40, 140, 145])
+def test_real_ticks_at_shallow_angles_are_exact(angle: int) -> None:
+    for tick_width in (1, 2, 3):
+        for phase in PHASES:
+            y = phase_y(phase)
+            ink = plan()
+            stroke(ink, (299, y), (1201, y), 2)
+            for x in TICKS:
+                stroke(ink, *polar((x, y), angle, 17), tick_width)
+            found = ink_ticks(ink, y, 2, phase=phase)
+            assert found == pytest.approx(TICKS, abs=2), (
+                angle,
+                tick_width,
+                phase,
+                found,
+            )  # a blob would be ~4 off
+
+
+@pytest.mark.parametrize("angle", [45, 135])
+@pytest.mark.parametrize("gap", [25, 40])
+def test_stacked_slash_chains_find_each_tick_once(gap: int, angle: int) -> None:
+    xs = [300, 900, 1500]
+    failures = []
+    for line_width, tick_width, ext_width in itertools.product((1, 2, 3), repeat=3):
+        for phase in PHASES:
+            inner = phase_y(phase) + 100
+            outer = inner - gap
+            ink = plan()
+            for y in (inner, outer):
+                stroke(ink, (299, y), (1501, y), line_width)
+            for x in xs:
+                stroke(ink, (x, inner + 50), (x, outer - 8), ext_width)
+                for y in (inner, outer):
+                    stroke(ink, *polar((x, y), angle, 17), tick_width)
+            offset = JITTER[phase]
+            segments = [
+                seg("S1", (299, inner + offset), (1501, inner + offset), float(line_width)),
+                seg("S2", (299, outer + offset), (1501, outer + offset), float(line_width)),
+            ]
+            tokens = [tok("T1", "9000", 600, inner - 19), tok("T2", "9000", 600, outer - 19)]
+            lines = find_dimension_lines(segments, tokens, REGION, ink=ink)
+            got = [[round(line.p0[0] + t) for t in line.tick_positions] for line in lines]
+            if len(lines) != 2 or any(g != pytest.approx(xs, abs=3) for g in got):
+                failures.append((line_width, tick_width, ext_width, phase, got))
+    assert not failures, failures[:8]
+
+
+ARROWHEADS = [(8, 8), (10, 6), (12, 5), (16, 8)]
+
+
+@pytest.mark.parametrize(("length", "base"), ARROWHEADS)
+@pytest.mark.parametrize("line_width", [2, 3])
+def test_arrowhead_with_extension_line_is_one_tick(length: int, base: int, line_width: int) -> None:
+    for phase in PHASES:
+        y = phase_y(phase)
+        ink = plan()
+        stroke(ink, (300, y), (1200, y), line_width)
+        for x, direction in ((300, 1), (1200, -1)):
+            triangle(ink, (x, y), length, base, direction, y)
+            stroke(ink, (x, y - 30), (x, y + 30), 2)  # the extension line runs through the tip
+        found = ink_ticks(ink, y, line_width, phase=phase, x0=299, x1=1201)
+        assert found == pytest.approx([300, 1200], abs=6), (length, base, line_width, phase, found)
+
+
+@pytest.mark.parametrize("extension_lines", [True, False])
+@pytest.mark.parametrize(("length", "base"), ARROWHEADS)
+@pytest.mark.parametrize("line_width", [2, 3])
+def test_chain_with_arrowheads_at_every_boundary(
+    length: int, base: int, line_width: int, extension_lines: bool
+) -> None:
+    xs = [300, 750, 1200]
+    for phase in PHASES:
+        y = phase_y(phase)
+        ink = plan()
+        stroke(ink, (300, y), (1200, y), line_width)
+        for i, x in enumerate(xs):
+            if i < len(xs) - 1:
+                triangle(ink, (x, y), length, base, 1, y)
+            if i > 0:
+                triangle(ink, (x, y), length, base, -1, y)  # interior heads meet tip to tip
+            if extension_lines:
+                stroke(ink, (x, y - 30), (x, y + 30), 1)
+        found = ink_ticks(ink, y, line_width, phase=phase, x0=299, x1=1201)
+        if not extension_lines and base <= line_width + 3:
+            continue  # too flat to rise above the line: no mark to find
+        assert found == pytest.approx(xs, abs=6), (length, base, line_width, extension_lines, phase, found)
+
+
+@pytest.mark.parametrize("direction", [1, -1])  # 1: body on the line, tip at its end; -1: body beyond the end
+@pytest.mark.parametrize(("length", "base"), [(10, 6), (12, 6), (16, 8), (20, 10)])
+@pytest.mark.parametrize("line_width", [2, 3])
+def test_arrowhead_tips_are_located_within_6_px(
+    length: int, base: int, line_width: int, direction: int
+) -> None:
+    for phase in PHASES:
+        y = phase_y(phase)
+        ink = plan()
+        stroke(ink, (300, y), (1200, y), line_width)
+        triangle(ink, (300, y), length, base, direction, y)
+        triangle(ink, (1200, y), length, base, -direction, y)
+        found = ink_ticks(ink, y, line_width, phase=phase, x0=299, x1=1201)
+        assert found == pytest.approx([300, 1200], abs=6), (length, base, line_width, direction, phase, found)
+
+
+def _vector_scene(rng: np.random.Generator) -> tuple[Rect, list[Segment], list[TextToken]]:
+    region = Rect(0, 0, 2400, 700)
+    segments: list[Segment] = []
+    tokens: list[TextToken] = []
+    for _ in range(int(rng.integers(1, 5))):
+        y = float(rng.integers(40, 660))
+        x0 = float(rng.integers(0, 600))
+        x1 = x0 + float(rng.integers(150, 1700))
+        width = float(rng.choice([1.0, 2.0, 3.0, 4.0, 6.0]))
+        segments.append(Segment(f"S{len(segments)}", (x0, y), (x1, y), width, True, "vector"))
+        for _ in range(int(rng.integers(0, 7))):
+            x = float(rng.uniform(x0 - 8, x1 + 8))
+            half = float(rng.uniform(3, 30))
+            angle = math.radians(float(rng.choice([45, 90, 135, 70, 20, 90])))
+            dx, dy = math.cos(angle) * half, math.sin(angle) * half
+            tick_width = float(rng.choice([1.0, 2.0, 3.0]))
+            segments.append(
+                Segment(f"S{len(segments)}", (x - dx, y + dy), (x + dx, y - dy), tick_width, True, "vector")
+            )
+        if rng.random() < 0.7:
+            tokens.append(
+                tok(f"T{len(tokens)}", "6000", float(rng.uniform(x0, x1)), y - float(rng.uniform(5, 50)))
+            )
+    for _ in range(int(rng.integers(0, 6))):
+        x, y = float(rng.integers(0, 2300)), float(rng.integers(0, 600))
+        end = (x + float(rng.integers(3, 300)), y + float(rng.integers(-40, 40)))
+        segments.append(Segment(f"S{len(segments)}", (x, y), end, 2.0, True, "vector"))
+    return region, segments, tokens
+
+
+def test_vector_path_output_is_unchanged() -> None:
+    """Without ink, dimension lines, spans and associations are exactly those of the segment-only
+    implementation of commit 5512b3c (the digest was taken from that code on these 300 scenes)."""
+    rng = np.random.default_rng(20261021)
+    digest = hashlib.sha256()
+    found = 0
+    for _ in range(300):
+        region, segments, tokens = _vector_scene(rng)
+        lines = find_dimension_lines(segments, tokens, region)
+        spans = find_dimension_spans(lines, tokens, region)
+        found += len(lines)
+        digest.update(repr((lines, spans, associate_dimension_texts(spans, tokens))).encode())
+    assert found == 301
+    assert digest.hexdigest() == "bb5adcb858b2af6d783ed6c8d82bab1701750d9eb5b5004d7b06f1c58d753b59"
+
+
+def test_glyph_one_empty_row_from_the_line_is_not_a_tick() -> None:
+    for phase in PHASES:
+        y = phase_y(phase)
+        ink = plan()
+        stroke(ink, (299, y), (1201, y), 2)
+        for x in (300, 1200):
+            stroke(ink, (x, y - 8), (x, y + 8), 2)
+        for x in range(310, 1190, 22):  # stems with one empty row between them and the line
+            ink[y - 19 : y - 2, x : x + 2] = 255  # tick-sized; one empty row (y - 2)
+            ink[y + 3 : y + 20, x + 11 : x + 13] = 255
+        assert ink_ticks(ink, y, 2, phase=phase) == pytest.approx([300, 1200], abs=3), phase
 
 
 def test_span_association_tie_uses_list_position_not_id_strings() -> None:
