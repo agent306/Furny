@@ -201,3 +201,9 @@ Ruling: pre-fallback tool_use/thinking blocks stay in replayed `native` (K9, SDK
 Carry Task 25: fix _MASKED_KEY regex (providers.py:117) — add '.' to the class and a leading \b (`task-manager` currently becomes `ta[REDACTED]`; `sk-ant-api03-AbCd...wXyZ` leaves the tail).
 Task 24: minor (deferred): no test with real trigger shape {"type":"refusal","category":null}; status<400 → provider_overloaded untested; 408/409 after retries → provider_bad_request (arguably unreachable); endpoint double-records last_error; timeout_s is per-read not wall-clock (×3 with retries); usage summed over declined attempt with served model only.
 Task 24: complete (commits c452d79..6811110, review clean)
+Task 25: impl 4e72fee (DONE; 1312 full). Decisions: output tokens min(caller, settings cap); compat timeout OPENAI_COMPAT_TIMEOUT_S; content_filter → ProviderRefusal; tool calls with finish 'stop' → tool_use; empty tool args → {}. Concerns: compat native replay carries server extras (reasoning_content); image-only tool result content ''; _new_images imported from anthropic module.
+Task 25: review 4e72fee: spec ✅ (18 §3, §7.2, §7.3, §7.5; all 5 carries; 5 decisions judged sound), quality Approved.
+Carry Task 26: the labeler must enforce its own outer deadline — compat calls use OPENAI_COMPAT_TIMEOUT_S and ignore a shorter caller timeout_s (openai_compatible_provider.py:27); move `_new_images` from anthropic_provider to a shared module if Task 26 touches providers; add a test asserting openai_provider.INVALID_JSON == labeling INVALID_JSON_SENTINEL.
+Carry Task 34: live/replay check that OpenAI and a compat server accept replayed native extras (reasoning_content, annotations: []) and an image-only tool result with content "".
+Task 25: minor (deferred): _MASKED_KEY swallows a trailing '.' (cosmetic) and misses `foo_sk-…` (\b after '_'); no test that the non-compat OpenAI path honours caller timeout_s.
+Task 25: complete (commits df7b1fd..4e72fee, review clean)
