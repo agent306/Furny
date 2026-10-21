@@ -12,6 +12,7 @@ CLOSE_FRAC = 0.02  # closing kernel, fraction of the long edge
 NEAR_FRAC = 0.05  # components this close (fraction of the long edge) belong to one drawing
 SIBLING_MIN_SHARE = 0.30  # another drawing with this share of the main plan's wall pixels is warned about
 SURROUND_MIN_COVER = 0.50  # a solid drawing covering this share of a strip drawing's box makes it annotation
+INSIDE_MIN_SHARE = 0.80  # a drawing with this share of its box inside the region is no excluded rival
 MAX_COMPONENTS = 2000  # grouping bound: the largest components by wall pixels
 INK_LINK_FRAC = 0.005  # ink closing kernel for linking wall components, fraction of the long edge
 EXPAND_FRAC = 0.06  # dimension chains live outside the walls
@@ -112,8 +113,10 @@ def detect_plan_region(
     plan: the HDB plan covers 0.72 of its ring's box) and no candidate. A solid stair or lift core inside a
     double-line plan covers a few percent of the plan's box (fix round 4), so the plan stays. Another
     drawing holding >= 30 % as much (a key-plan inset, a strip of site context) is excluded with the warning
-    `plan_region_ambiguous {components}` (the main plan plus every such drawing). With no wall pixels at
-    all the region is the whole image and nothing is warned (the validator reports `no_walls_detected`).
+    `plan_region_ambiguous {components}` (the main plan plus every such drawing); one with >= 80 % of its
+    box inside the region (a solid core within a double-line plan) is not excluded and not counted. With
+    no wall pixels at all the region is the whole image and nothing is warned (the validator reports
+    `no_walls_detected`).
 
     Components are also one drawing when the same `ink` component (closed with a `0.005 * long_edge`
     square) touches both: window frames, door leaves and railings join the wall pieces of one plan across
@@ -146,11 +149,29 @@ def detect_plan_region(
     ]
     mass = np.array([m for _, m in drawings], np.float64)
     main = int(np.argmax(mass))
-    rivals = int((mass >= SIBLING_MIN_SHARE * mass[main]).sum()) - 1
+    union = drawings[main][0]
+    region = union.expand(round(EXPAND_FRAC * union.long_side)).clip(w, h)
+    # A heavy drawing inside the region (a solid core within a double-line plan) is not excluded: no rival.
+    rivals = sum(
+        1
+        for i, (box, m) in enumerate(drawings)
+        if i != main
+        and m >= SIBLING_MIN_SHARE * mass[main]
+        and _overlap(box, region) < INSIDE_MIN_SHARE * _area(box)
+    )
     if rivals:
         ctx.warn("plan_region_ambiguous", {"components": rivals + 1})
-    union = drawings[main][0]
-    return union.expand(round(EXPAND_FRAC * union.long_side)).clip(w, h)
+    return region
+
+
+def _area(r: Rect) -> int:
+    return max(r.w, 0) * max(r.h, 0)
+
+
+def _overlap(a: Rect, b: Rect) -> int:
+    dx = min(a.x + a.w, b.x + b.w) - max(a.x, b.x)
+    dy = min(a.y + a.h, b.y + b.h) - max(a.y, b.y)
+    return max(dx, 0) * max(dy, 0)
 
 
 def _inside(inner: Rect, outer: Rect) -> bool:

@@ -543,8 +543,11 @@ def test_tables_with_uneven_rows_do_not_become_the_plan_region(style: str, case:
     else:
         _table(img, 1500, 200, IRREGULAR_ROWS[:20], [400, 400])
     alone = preprocess(page_of(base), make_ctx()).region
-    assert preprocess(page_of(img), make_ctx()).region == alone
+    ctx = make_ctx()
+    assert preprocess(page_of(img), ctx).region == alone
     assert alone.x + alone.w < 1250
+    if case == "title-block frame":  # a rival outside the region, excluded and warned about
+        assert [(w.code, w.params) for w in ctx.warnings] == [("plan_region_ambiguous", {"components": 2})]
 
 
 def test_a_double_line_plan_wins_over_a_table_with_text() -> None:
@@ -599,8 +602,11 @@ def test_a_bold_rule_or_frame_does_not_take_the_region(style: str, case: str) ->
     else:
         cv2.rectangle(img, (1700, 100), (2300, 1600), (0, 0, 0), 6)
     alone = preprocess(page_of(base), make_ctx()).region
-    assert preprocess(page_of(img), make_ctx()).region == alone
+    ctx = make_ctx()
+    assert preprocess(page_of(img), ctx).region == alone
     assert alone.x + alone.w < 1250
+    if case == "title-block frame":  # a rival outside the region, excluded and warned about
+        assert [(w.code, w.params) for w in ctx.warnings] == [("plan_region_ambiguous", {"components": 2})]
 
 
 @pytest.mark.parametrize("style", ["filled", "double"])
@@ -652,9 +658,12 @@ def test_a_solid_core_inside_a_double_line_plan_keeps_the_plan(t: int, core: str
     """Fix round 4 (re-review 3, R3-1): a solid stair or lift core inside a double-line plan, weighing 30-52 %
     of the plan's strips at t 14. A strip drawing is only that solid drawing's annotation when the solid box
     also covers >= 50 % of the strip box (the HDB plan covers 0.72 of its dimension ring; a core ~0.055 of
-    its plan): the region is the whole plan, not the core (round 3 took the core)."""
+    its plan): the region is the whole plan, not the core (round 3 took the core). The core, inside the
+    region, is not warned about as a rival."""
     alone = preprocess(page_of(render_plan((2400, 1700), _plan_walls("double", t))), make_ctx()).region
     img = render_plan((2400, 1700), [*_plan_walls("double", t), *CORES[core]])
-    r = preprocess(page_of(img), make_ctx()).region
+    ctx = make_ctx()
+    r = preprocess(page_of(img), ctx).region
     assert r == alone
+    assert ctx.warnings == []  # the core lies inside the region: it is no excluded rival
     assert r.x < 200 and r.y < 300 and r.x + r.w > 1100 and r.y + r.h > 1000
