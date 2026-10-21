@@ -94,3 +94,14 @@ export type {
 } from './units/types';
 export { parseLength } from './units/parse';
 export { formatAngle, formatArea, formatLength } from './units/format';
+export {
+    difference,
+    intersection,
+    intersectionArea,
+    offset,
+    union,
+} from './geometry/clip';
+export type { OffsetJoin } from './geometry/clip';
+export { triangulate } from './geometry/triangulate';
+export type { TriangleMesh } from './geometry/triangulate';
+export { cyrb53 } from './geometry/hash';
