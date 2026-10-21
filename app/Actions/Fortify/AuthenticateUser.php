@@ -20,14 +20,30 @@ use Laravel\Fortify\Fortify;
  */
 final class AuthenticateUser
 {
+    /** Request attribute holding the outcome of the first call, for the second call of the same login. */
+    private const string MEMO = 'auth.authenticate_user';
+
     /** @throws ValidationException when the password is right but the account is not active */
     public static function handle(Request $request): ?User
     {
+        // Fortify asks twice for one login: its two-factor step and its authenticate step each call this. The
+        // second call gets the answer of the first, so one login costs one hash check and one time box.
+        $key = hash('sha256', (string) self::email($request)."\0".(is_string($request->input('password')) ? $request->input('password') : ''));
+        $memo = $request->attributes->get(self::MEMO);
+
+        if (is_array($memo) && $memo['key'] === $key) {
+            return $memo['user'];
+        }
+
         // Every way out takes the same minimum time, the exceptions of the inactive path included.
-        return (new Timebox)->call(
+        $user = (new Timebox)->call(
             static fn (): ?User => self::authenticate($request),
             (int) config('auth.login_timebox_microseconds'),
         );
+
+        $request->attributes->set(self::MEMO, ['key' => $key, 'user' => $user]);
+
+        return $user;
     }
 
     /** The login email, trimmed and lower-cased; null when it is missing or not text. */
@@ -53,8 +69,10 @@ final class AuthenticateUser
 
         // Soft-deleted users are left out by the model's scope. Exactly one hash check happens on every path: when
         // there is nobody (or no password) to compare with, it is made against a placeholder, so a wrong email
-        // costs what a wrong password costs.
-        $matches = Hash::check($password, $user->password ?? self::placeholderHash()) && $password !== '';
+        // costs what a wrong password costs. The placeholder is read every time, so the work does not depend on
+        // the email either.
+        $placeholder = self::placeholderHash();
+        $matches = Hash::check($password, $user->password ?? $placeholder) && $password !== '';
 
         if ($user === null || $user->password === null || ! $matches) {
             return null;

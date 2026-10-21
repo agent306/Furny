@@ -12,12 +12,17 @@ use Illuminate\Auth\Events\Logout;
 use Throwable;
 
 /**
- * `auth.logout` (13 §5.4 step 5, §17): takes the session out of the registry and writes the audit entry. The
- * browser history is cleared by `LogoutResponse`, after the session has been invalidated. `CurrentDeviceLogout` is
- * what signing out one device fires; `Logout` is fired by the other ends of a session.
+ * `auth.logout` (13 §5.4 step 5, §17): takes the session out of the registry and, when the user signed out
+ * themselves, writes the audit entry. The browser history is cleared by `LogoutResponse`, after the session has
+ * been invalidated. `CurrentDeviceLogout` is what signing out one device fires; `Logout` is fired by the other ends
+ * of a session. Those others (a forced logout, an expired or revoked session, a revoked device) have audit entries
+ * of their own, so they are not recorded as the user logging out.
  */
 final class RecordLogout
 {
+    /** Request attribute the user's own logout sets before it signs out. */
+    public const string USER_INITIATED = 'auth.logout.user_initiated';
+
     public function __construct(private readonly SessionRegistry $registry) {}
 
     public function handle(Logout|CurrentDeviceLogout $event): void
@@ -37,6 +42,10 @@ final class RecordLogout
                 // The registry is a convenience for the user: signing out must not fail because Redis is down.
                 report($e);
             }
+        }
+
+        if ($request->attributes->get(self::USER_INITIATED) !== true) {
+            return;
         }
 
         activity('security')

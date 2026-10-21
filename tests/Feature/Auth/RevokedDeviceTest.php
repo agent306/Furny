@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Str;
+use Spatie\Activitylog\Models\Activity;
 use Tests\Support\SessionStamp;
 
 beforeEach(function (): void {
@@ -107,4 +108,68 @@ it('keeps the remember cookies of other devices when a user signs out the device
     $this->assertAuthenticatedAs($this->user);
 
     Redis::connection('sessions')->del('sess:revoked:'.$current, 'sess:meta:'.$current);
+});
+
+describe('auth.logout is written for the user\'s own logout only', function (): void {
+    /** How many `auth.logout` entries exist. */
+    function logoutEntries(): int
+    {
+        return Activity::query()->where('event', 'auth.logout')->count();
+    }
+
+    it('is not written when a revoked device is signed out', function (): void {
+        $this->actingAs($this->user)
+            ->withCookie((string) config('session.cookie'), $this->deviceA)
+            ->get(route('customer.dashboard'))
+            ->assertRedirectToRoute('login');
+
+        expect(logoutEntries())->toBe(0);
+    });
+
+    it('is not written when a deactivated user is signed out', function (): void {
+        $this->user->forceFill(['is_active' => false])->save();
+
+        $this->actingAs($this->user)->get(route('customer.dashboard'))->assertRedirectToRoute('login');
+
+        expect(logoutEntries())->toBe(0);
+    });
+
+    it('is not written when a staff session has expired', function (): void {
+        $staff = User::factory()->estimator()->create();
+
+        $this->actingAs($staff)
+            ->withSession(SessionStamp::loginHoursAgo(13))
+            ->get(route('admin.dashboard'))
+            ->assertRedirectToRoute('login');
+
+        expect(logoutEntries())->toBe(0);
+    });
+
+    it('is not written when the device in use is signed out from the device list, which has its own entry', function (): void {
+        $current = Str::random(40);
+        Session::getHandler()->write($current, '[]');
+        app(SessionRegistry::class)->register($this->user, $current, Request::create('/'), 'password', false);
+
+        $this->actingAs($this->user)
+            ->withCookie((string) config('session.cookie'), $current)
+            ->delete(route('account.sessions.destroy', SessionKey::for($current)))
+            ->assertRedirectToRoute('login');
+
+        expect(logoutEntries())->toBe(0)
+            // One entry for device A (setup) and one for this device.
+            ->and(Activity::query()->where('event', 'auth.sessions_revoked')->count())->toBe(2);
+
+        Redis::connection('sessions')->del('sess:revoked:'.$current, 'sess:meta:'.$current);
+    });
+
+    it('is written once when the user signs out, by form or by JSON', function (): void {
+        $this->actingAs($this->user)->post(route('logout'))->assertRedirect('/');
+
+        expect(logoutEntries())->toBe(1);
+
+        Auth::forgetGuards();
+        $this->actingAs($this->user)->postJson(route('logout'))->assertNoContent();
+
+        expect(logoutEntries())->toBe(2);
+    });
 });

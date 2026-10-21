@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Actions\Fortify\ApplyRememberPolicy;
 use App\Domain\Identity\Events\CustomerRegistered;
 use App\Domain\Identity\Models\User;
+use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Middleware\FortifyRouteGuards;
 use App\Http\Middleware\TrackSession;
 use App\Http\Responses\LoginResponse;
@@ -111,3 +112,8 @@ it('hands every auth page the flags, the Turnstile key and canRegister', functio
     ['password.confirm', 'Auth/ConfirmPassword', true],
     ['verification.notice', 'Auth/VerifyEmail', true],
 ]);
+
+it('serves the logout route with the app controller, over Fortify\'s own route', function (): void {
+    expect(Route::getRoutes()->getByName('logout')->getController())->toBeInstanceOf(AuthenticatedSessionController::class)
+        ->and(Route::getRoutes()->getByName('logout')->gatherMiddleware())->toContain('auth:web');
+});

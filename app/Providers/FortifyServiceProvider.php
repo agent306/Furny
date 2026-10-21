@@ -10,6 +10,7 @@ use App\Actions\Fortify\CreateNewUser;
 use App\Actions\Fortify\ResetUserPassword;
 use App\Domain\Identity\Events\CustomerRegistered;
 use App\Domain\Identity\Listeners\SendWelcomeNotification;
+use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Responses\LoginResponse;
 use App\Http\Responses\LogoutResponse;
 use App\Http\Responses\RegisterResponse;
@@ -30,6 +31,7 @@ use Laravel\Fortify\Contracts\RegisterResponse as RegisterResponseContract;
 use Laravel\Fortify\Contracts\TwoFactorLoginResponse as TwoFactorLoginResponseContract;
 use Laravel\Fortify\Features as FortifyFeatures;
 use Laravel\Fortify\Fortify;
+use Laravel\Fortify\Http\Controllers\AuthenticatedSessionController as FortifyAuthenticatedSessionController;
 
 final class FortifyServiceProvider extends ServiceProvider
 {
@@ -42,6 +44,7 @@ final class FortifyServiceProvider extends ServiceProvider
         $this->app->singleton(TwoFactorLoginResponseContract::class, TwoFactorLoginResponse::class);
         $this->app->singleton(RegisterResponseContract::class, RegisterResponse::class);
         $this->app->singleton(LogoutResponseContract::class, LogoutResponse::class);
+        $this->app->bind(FortifyAuthenticatedSessionController::class, AuthenticatedSessionController::class);
     }
 
     /**

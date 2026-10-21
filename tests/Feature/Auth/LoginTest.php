@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
+use App\Actions\Fortify\AuthenticateUser;
 use App\Domain\Identity\Models\User;
 use App\Support\Auth\RecentAuthentication;
 use App\Support\Auth\SessionKey;
 use App\Support\Auth\SessionRegistry;
 use App\Support\Http\RateLimitedResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
@@ -17,6 +19,7 @@ use Illuminate\Testing\TestResponse;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Activitylog\Models\Activity;
 use Symfony\Component\HttpFoundation\Cookie;
+use Tests\Support\CountingHasher;
 use Tests\Support\InertiaRequest;
 use Tests\Support\SessionStamp;
 
@@ -417,6 +420,25 @@ describe('logging out', function (): void {
         $this->actingAs($this->customer)->postJson(route('logout'))->assertNoContent();
     });
 
+    it('answers an Inertia visit with a 302 to the root and clears the history', function (): void {
+        $this->actingAs($this->customer)
+            ->withHeaders(InertiaRequest::headers())
+            ->post(route('logout'))
+            ->assertStatus(302)
+            ->assertRedirect('/');
+
+        expect(session('inertia.clear_history'))->toBeTrue();
+    });
+
+    it('needs the CSRF token and does nothing without it', function (): void {
+        $this->app['env'] = 'local';
+
+        $this->actingAs($this->customer)->post(route('logout'))->assertStatus(419);
+
+        $this->assertAuthenticatedAs($this->customer);
+        expect(Activity::query()->where('event', 'auth.logout')->count())->toBe(0);
+    });
+
     it('keeps the other sessions of the user', function (): void {
         ($this->from)()->post(route('login.store'), ['email' => 'asha@example.com', 'password' => 'password']);
         $first = session()->getId();
@@ -490,7 +512,7 @@ describe('the login page', function (): void {
 });
 
 describe('no enumeration', function (): void {
-    it('does exactly one hash check on every way to sign in or to fail, and makes no hash', function (string $email, string $password): void {
+    it('does exactly one hash check, and makes no hash, on every way to sign in or to fail', function (string $email, string $password, ?string $error): void {
         User::factory()->passwordless()->create(['email' => 'nopass@example.com']);
         User::factory()->inactive()->create(['email' => 'gone@example.com']);
         User::factory()->pendingDeletion()->create(['email' => 'deleted@example.com']);
@@ -498,20 +520,50 @@ describe('no enumeration', function (): void {
         // The placeholder hash is made once, ever; this request makes it.
         ($this->login)('nobody@example.com');
 
-        $hasher = Hash::partialMock();
-        $hasher->shouldReceive('check')->once()->passthru();
-        $hasher->shouldReceive('make')->never();
+        $hasher = CountingHasher::install();
 
-        ($this->login)($email, $password);
+        $response = ($this->login)($email, $password);
+
+        expect($hasher->checks)->toBe(1)->and($hasher->makes)->toBe(0);
+
+        // The count is of a login that ran to its end: the redirect of a success, the error of a failure.
+        if ($error === null) {
+            $response->assertRedirect(route('customer.dashboard'));
+            $this->assertAuthenticatedAs($this->customer);
+        } else {
+            $response->assertSessionHasErrors(['email' => __($error)]);
+            $this->assertGuest();
+        }
     })->with([
-        'an unknown email' => ['nobody@example.com', 'password'],
-        'a wrong password' => ['asha@example.com', 'wrong'],
-        'a user without a password' => ['nopass@example.com', 'password'],
-        'an inactive user, wrong password' => ['gone@example.com', 'wrong'],
-        'an inactive user, right password' => ['gone@example.com', 'password'],
-        'a soft-deleted user' => ['deleted@example.com', 'password'],
-        'the right password' => ['asha@example.com', 'password'],
+        'an unknown email' => ['nobody@example.com', 'password', 'auth.failed'],
+        'a wrong password' => ['asha@example.com', 'wrong', 'auth.failed'],
+        'a user without a password' => ['nopass@example.com', 'password', 'auth.failed'],
+        'an inactive user, wrong password' => ['gone@example.com', 'wrong', 'auth.failed'],
+        'an inactive user, right password' => ['gone@example.com', 'password', 'auth.inactive'],
+        'a soft-deleted user' => ['deleted@example.com', 'password', 'auth.failed'],
+        'the right password' => ['asha@example.com', 'password', null],
     ]);
+
+    it('does one check and one time box for the two calls Fortify makes for a login', function (): void {
+        $request = Request::create('/login', 'POST', ['email' => 'asha@example.com', 'password' => 'password']);
+        config(['auth.login_timebox_microseconds' => 0]);
+        $hasher = CountingHasher::install();
+
+        $first = AuthenticateUser::handle($request);
+        $second = AuthenticateUser::handle($request);
+
+        expect($first?->is($this->customer))->toBeTrue()->and($second)->toBe($first)->and($hasher->checks)->toBe(1);
+    });
+
+    it('does not reuse the answer for other credentials on the same request', function (): void {
+        $request = Request::create('/login', 'POST', ['email' => 'asha@example.com', 'password' => 'password']);
+
+        expect(AuthenticateUser::handle($request))->not->toBeNull();
+
+        $request->merge(['password' => 'wrong']);
+
+        expect(AuthenticateUser::handle($request))->toBeNull();
+    });
 
     it('keeps the placeholder hash out of the request: it is made once and cached', function (): void {
         ($this->login)('nobody@example.com');
