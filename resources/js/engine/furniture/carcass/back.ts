@@ -134,13 +134,26 @@ export function backPanels(
             ),
         );
         const edges = [bx0, ...verticalSeams.map((c) => c.at), bx1];
+        // A fixed shelf supports a strip when it spans the strip's own column,
+        // so the cover test uses the column's inner faces rather than the
+        // strip edges: a side's inner face (the back runs into its groove) or,
+        // at a supported seam, the face of the partition the seam sits on.
+        const partitionAt = (seam: Seam | undefined): Divider | undefined =>
+            seam?.supported
+                ? fullHeight.find((d) => centre(d, 0) === seam.at)
+                : undefined;
         for (let k = 0; k + 1 < edges.length; k++) {
             const x0 = edges[k] ?? bx0;
             const x1 = edges[k + 1] ?? bx1;
-            // The back runs into the grooves, so a shelf spanning the interior
-            // supports the strip's whole width.
-            const from = Math.max(x0, ix0) + COVER_TOLERANCE;
-            const to = Math.min(x1, ix1) - COVER_TOLERANCE;
+            const left = partitionAt(verticalSeams[k - 1]);
+            const right = partitionAt(verticalSeams[k]);
+            const from =
+                (left
+                    ? (left.box.min[0] ?? 0) + (left.box.size[0] ?? 0)
+                    : Math.max(x0, ix0)) + COVER_TOLERANCE;
+            const to =
+                (right ? (right.box.min[0] ?? 0) : Math.min(x1, ix1)) -
+                COVER_TOLERANCE;
             const supports = layout.dividers
                 .filter(
                     (d) =>

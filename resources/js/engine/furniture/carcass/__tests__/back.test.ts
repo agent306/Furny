@@ -11,6 +11,9 @@ import {
     wardrobeFixture,
 } from '../../testing/docs';
 import { boxOfPart, partOf, runCarcass } from '../../testing/carcassRun';
+import { indexCatalog } from '../../catalogIndex';
+import { wardrobeHinged } from '../../templates/wardrobe_hinged';
+import { testIds } from '../../../testing/ids';
 
 const catalog = seedCatalog();
 const ROOT = 's_0000000001';
@@ -422,6 +425,92 @@ describe('backPanels: horizontal seams (07 §3.4.1 step 4)', () => {
         expect(
             ctx.issues.find((i) => i.code === 'furniture.back_split')?.params,
         ).toEqual({ count: 6 });
+    });
+});
+
+describe('backPanels: shelves inside a partition-bounded strip (fix round 1)', () => {
+    it('1800 x 2700, two columns with fixed shelves at y 1373: the shelf supports each strip', () => {
+        const column = (id: string, a: string, b: string): Section =>
+            splitSection(id, 'rows', [
+                [fixed(1300), leafSection(a)],
+                [flex(), leafSection(b)],
+            ]);
+        const doc = boxDocument({
+            width: 1800,
+            height: 2700,
+            depth: 600,
+            interior: splitSection(ROOT, 'columns', [
+                [
+                    flex(),
+                    column('s_0000000002', 's_0000000003', 's_0000000004'),
+                ],
+                [
+                    flex(),
+                    column('s_0000000005', 's_0000000006', 's_0000000007'),
+                ],
+            ]),
+        });
+        const { ctx, layout } = runCarcass(doc);
+        // partition x [891, 909] (centre 900); shelves y [1364, 1382] (centre 1373)
+        expect(layout.dividers.map((d) => d.key)).toEqual([
+            'section.s_0000000001.partition.1',
+            'section.s_0000000002.fixed_shelf.1',
+            'section.s_0000000005.fixed_shelf.1',
+        ]);
+        expect(piecesOf(ctx)).toEqual([
+            ['carcass.back.1', 11, 900, 11, 1373],
+            ['carcass.back.2', 11, 900, 1373, 2689],
+            ['carcass.back.3', 900, 1789, 11, 1373],
+            ['carcass.back.4', 900, 1789, 1373, 2689],
+        ]);
+        expect(seams(ctx)).toEqual([]);
+        expect(backIssues(ctx).map((i) => i.code)).toEqual([
+            'furniture.back_split',
+        ]);
+    });
+
+    it('a shelf in only one column supports only its own strip', () => {
+        const doc = boxDocument({
+            width: 1800,
+            height: 2700,
+            depth: 600,
+            interior: splitSection(ROOT, 'columns', [
+                [
+                    flex(),
+                    splitSection('s_0000000002', 'rows', [
+                        [fixed(1300), leafSection('s_0000000003')],
+                        [flex(), leafSection('s_0000000004')],
+                    ]),
+                ],
+                [flex(), leafSection('s_0000000005')],
+            ]),
+        });
+        const { ctx } = runCarcass(doc);
+        expect(piecesOf(ctx).map((p) => [p[1], p[2], p[3], p[4]])).toEqual([
+            [11, 900, 11, 1373],
+            [11, 900, 1373, 2689],
+            [900, 1789, 11, 1350],
+            [900, 1789, 1350, 2689],
+        ]);
+        expect(seams(ctx)).toEqual([{ axis: 'y', position: 1350 }]);
+    });
+
+    it('wardrobe_hinged at 2700 mm: the double-door column shelf supports its seam', () => {
+        const doc = wardrobeHinged.generate(
+            { ...wardrobeHinged.defaults, height: 2700 },
+            { catalog: indexCatalog(catalog), newId: testIds() },
+        );
+        const { ctx } = runCarcass(doc);
+        // interior top 2682, rows fixed 350 -> shelf y [2314, 2332], centre 2323
+        const rows = piecesOf(ctx).map((p) => [p[0], p[1], p[2], p[3], p[4]]);
+        expect(rows).toEqual([
+            ['carcass.back.1', 11, 609, 111, 1400],
+            ['carcass.back.2', 11, 609, 1400, 2689],
+            ['carcass.back.3', 609, 1789, 111, 2323],
+            ['carcass.back.4', 609, 1789, 2323, 2689],
+        ]);
+        // only the shelf-less single-door column has an unsupported seam
+        expect(seams(ctx)).toEqual([{ axis: 'y', position: 1400 }]);
     });
 });
 

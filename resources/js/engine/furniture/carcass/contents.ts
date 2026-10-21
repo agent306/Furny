@@ -41,11 +41,15 @@ function insetReduction(ctx: GenContext, sectionId: string): number {
  */
 export function contentDepth(
     ctx: GenContext,
-    env: Envelope,
+    env: Pick<Envelope, 'interior'>,
     sectionId: string,
 ): number {
     return env.interior.size[2] - insetReduction(ctx, sectionId);
 }
+
+/** `contentDepth` of a leaf: every leaf spans the interior's depth. */
+const leafDepth = (ctx: GenContext, leaf: SectionBoxInfo): number =>
+    contentDepth(ctx, { interior: leaf.box }, leaf.id);
 
 /**
  * Adds a hardware line for `roleKey`'s catalog default, or `code` when given.
@@ -135,12 +139,11 @@ export function shelvesFor(
     content: ContentOf<'shelves'>,
 ): void {
     const [x0, , z0] = leaf.box.min;
-    const [w, h, depthTotal] = leaf.box.size;
+    const [w, h] = leaf.box.size;
     const y1 = leaf.box.min[1] + h;
     const ts = ctx.t('shelf');
     const n = content.count;
-    const depth =
-        depthTotal - insetReduction(ctx, leaf.id) - content.frontSetback;
+    const depth = leafDepth(ctx, leaf) - content.frontSetback;
     const gap = (h - n * ts) / (n + 1);
 
     if (gap < 0 || depth <= 0) {
@@ -205,8 +208,8 @@ export function rodFor(
     leaf: SectionBoxInfo,
     content: ContentOf<'hanging_rod'>,
 ): void {
-    const [w, h, depthTotal] = leaf.box.size;
-    const cd = depthTotal - insetReduction(ctx, leaf.id);
+    const [w, h] = leaf.box.size;
+    const cd = leafDepth(ctx, leaf);
     const code =
         content.rodCode ?? ctx.idx.defaultHardware('rod.default')?.code;
     const maxLength = ctx.idx.hardware(code ?? '')?.specs.maxLengthMm;
@@ -249,8 +252,8 @@ export function basketsFor(
     content: ContentOf<'pull_out_basket'>,
 ): void {
     if (content.count < 1) return;
-    const [w, h, depthTotal] = leaf.box.size;
-    const cd = depthTotal - insetReduction(ctx, leaf.id);
+    const [w, h] = leaf.box.size;
+    const cd = leafDepth(ctx, leaf);
     addLine(ctx, leaf, 'basket.default', content.basketCode, {
         name: 'baskets',
         qty: content.count,

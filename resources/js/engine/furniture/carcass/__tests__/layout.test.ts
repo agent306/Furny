@@ -14,10 +14,13 @@ import {
 } from '../../testing/docs';
 import { boxOfPart, partOf, runCarcass } from '../../testing/carcassRun';
 import { computeEnvelope } from '../envelope';
+import { makePart } from '../../parts';
+import type { GenContext, Part } from '../../types';
 import {
     allocate,
     layoutFromEnvelope,
     layoutSections,
+    recordEndJoints,
     type SectionLabel,
 } from '../layout';
 
@@ -578,5 +581,130 @@ describe('layoutSections (public)', () => {
             catalog,
         );
         expect(layout.preorder).toEqual(['s_0000000001']);
+    });
+});
+
+describe('recordEndJoints contact rules (07 §3.8)', () => {
+    const ctxOf = () =>
+        createGenContext(
+            boxDocument({ width: 600, height: 720, depth: 560 }),
+            catalog,
+        );
+    /** A member 18 x 100 x 500 at the origin; its top end is the plane y = 100. */
+    const member = (ctx: GenContext): Part => {
+        const part = makePart(
+            {
+                key: 'm',
+                nameKey: 'parts.partition',
+                role: 'carcass',
+                materialCode: 'PB18-WHITE',
+                box: { min: [0, 0, 0], size: [18, 100, 500] },
+                thicknessAxis: 'x',
+                grainAxis: 'y',
+                banded: [],
+                visibleFaces: 0,
+            },
+            ctx,
+        );
+        ctx.parts.push(part);
+        return part;
+    };
+    /** A panel lying above `y`, spanning x and z as given. */
+    const above = (
+        ctx: GenContext,
+        y: number,
+        x: [number, number],
+        z: [number, number],
+    ): void => {
+        ctx.parts.push(
+            makePart(
+                {
+                    key: 'o',
+                    nameKey: 'parts.top',
+                    role: 'carcass',
+                    materialCode: 'PB18-WHITE',
+                    box: {
+                        min: [x[0], y, z[0]],
+                        size: [x[1] - x[0], 18, z[1] - z[0]],
+                    },
+                    thicknessAxis: 'y',
+                    grainAxis: 'x',
+                    banded: [],
+                    visibleFaces: 0,
+                },
+                ctx,
+            ),
+        );
+    };
+    const joints = (y: number, x: [number, number], z: [number, number]) => {
+        const ctx = ctxOf();
+        const m = member(ctx);
+        above(ctx, y, x, z);
+        recordEndJoints(ctx, m, 'y');
+        return ctx.joints;
+    };
+
+    it('records the contact with the shared edge as its length', () => {
+        expect(joints(100, [0, 100], [0, 500])).toEqual([
+            { member: 'm', other: 'o', length: 500 },
+        ]);
+        // partial overlap in z: the shared edge is 300 mm
+        expect(joints(100, [0, 100], [200, 900])).toEqual([
+            { member: 'm', other: 'o', length: 300 },
+        ]);
+    });
+
+    it('contacts that touch only at a corner or along an edge are no joint', () => {
+        // starts where the member ends in x: z overlaps, x does not
+        expect(joints(100, [18, 100], [0, 500])).toEqual([]);
+        // starts where the member ends in z: x overlaps, z does not
+        expect(joints(100, [0, 100], [500, 900])).toEqual([]);
+        // both: only the corner line touches
+        expect(joints(100, [18, 100], [500, 900])).toEqual([]);
+    });
+
+    it('faces match within 0.5 mm: 0.4 mm apart is a joint, 0.6 mm is not', () => {
+        expect(joints(100.4, [0, 100], [0, 500])).toHaveLength(1);
+        expect(joints(99.6, [0, 100], [0, 500])).toHaveLength(1);
+        expect(joints(100.6, [0, 100], [0, 500])).toEqual([]);
+        expect(joints(99.4, [0, 100], [0, 500])).toEqual([]);
+    });
+
+    it('a panel overlapping the member body is not on the far side of the end', () => {
+        expect(joints(50, [0, 100], [0, 500])).toEqual([]);
+    });
+
+    it('records each pair once', () => {
+        const ctx = ctxOf();
+        const m = member(ctx);
+        above(ctx, 100, [0, 100], [0, 500]);
+        recordEndJoints(ctx, m, 'y');
+        recordEndJoints(ctx, m, 'y');
+        expect(ctx.joints).toHaveLength(1);
+    });
+});
+
+describe('ctx.sections rounding', () => {
+    it('floors the leaf sizes and keeps the minimum', () => {
+        const ctx = createGenContext(
+            boxDocument({ width: 600, height: 720, depth: 560 }),
+            catalog,
+        );
+        const env = computeEnvelope(ctx);
+        if (!env) throw new Error('no envelope');
+        const layout = layoutFromEnvelope(ctx, {
+            ...env,
+            interior: { min: [18, 18, 13], size: [564.7, 684.9, 547.5] },
+        });
+        expect(ctx.sections).toEqual([
+            {
+                id: 's_0000000001',
+                box: { min: [18, 18, 13], size: [564, 684, 547] },
+            },
+        ]);
+        // the layout keeps the exact box
+        expect(layout.byId.get('s_0000000001')?.box.size).toEqual([
+            564.7, 684.9, 547.5,
+        ]);
     });
 });

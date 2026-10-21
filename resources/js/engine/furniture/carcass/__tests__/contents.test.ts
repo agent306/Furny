@@ -3,7 +3,7 @@ import type { CatalogSnapshot } from '../../../catalog/snapshot';
 import { mutateCatalog, seedCatalog } from '../../../testing/seedCatalog';
 import { createGenContext } from '../../context';
 import type { Content, Front } from '../../schema';
-import type { GenContext } from '../../types';
+import type { GenContext, Part } from '../../types';
 import {
     boxDocument,
     flex,
@@ -13,7 +13,10 @@ import {
 } from '../../testing/docs';
 import { boxOfPart, partOf, runCarcass } from '../../testing/carcassRun';
 import { computeEnvelope } from '../envelope';
-import { contentDepth } from '../contents';
+import { layoutFromEnvelope } from '../layout';
+import { carcassPanels } from '../panels';
+import { makePart } from '../../parts';
+import { contentDepth, shelvesFor } from '../contents';
 
 const catalog = seedCatalog();
 const B = 'EB08-WHITE';
@@ -259,6 +262,80 @@ describe('shelvesFor', () => {
         ).toEqual(['carcass.side.left', 'section.s_0000000005.partition.1']);
     });
 
+    it('pins go to the partition of the leaf row, not one at the same x in another row', () => {
+        // both rows split in two equal columns: the partitions line up at x = 491
+        const doc = boxDocument({
+            width: 1000,
+            height: 720,
+            depth: 560,
+            interior: splitSection(ROOT, 'rows', [
+                [
+                    flex(),
+                    splitSection('s_0000000002', 'columns', [
+                        [flex(), leafSection('s_0000000003')],
+                        [flex(), leafSection('s_0000000004')],
+                    ]),
+                ],
+                [
+                    flex(),
+                    splitSection('s_0000000005', 'columns', [
+                        [flex(), leafSection('s_0000000006', shelves())],
+                        [flex(), leafSection('s_0000000007', shelves())],
+                    ]),
+                ],
+            ]),
+        });
+        const { ctx } = runCarcass(doc);
+        // leaf height 333: pr = fl((333 - 128) / 32) + 1 = 7 -> 14 per leaf side
+        const pins = (key: string) => partOf(ctx, key).operations.shelfPinHoles;
+        expect(pins('section.s_0000000002.partition.1')).toBe(0);
+        expect(pins('section.s_0000000005.partition.1')).toBe(28);
+        expect(pins('carcass.side.left')).toBe(14);
+        expect(pins('carcass.side.right')).toBe(14);
+    });
+
+    it('a vertical that touches the leaf side but not the leaf in y or z is no bounding vertical', () => {
+        const ctx = createGenContext(leafBox(shelves({ count: 1 })), catalog);
+        const env = computeEnvelope(ctx);
+        if (!env) throw new Error('no envelope');
+        carcassPanels(ctx, env);
+        const layout = layoutFromEnvelope(ctx, env);
+        const leaf = layout.byId.get(ROOT);
+        if (!leaf) throw new Error('no leaf');
+        // decoys listed first, so an unchecked search would pick them
+        const decoy = (key: string, min: [number, number, number]): Part =>
+            makePart(
+                {
+                    key,
+                    nameKey: 'parts.partition',
+                    role: 'carcass',
+                    materialCode: 'PB18-WHITE',
+                    box: { min, size: [18, 100, 100] },
+                    thicknessAxis: 'x',
+                    grainAxis: 'y',
+                    banded: [],
+                    visibleFaces: 0,
+                },
+                ctx,
+            );
+        // right face at x = 18 (the leaf's left side): one above the leaf, one in front of it
+        const above = decoy('section.d.partition.1', [0, 800, 13]);
+        const front = decoy('section.d.partition.2', [0, 100, 700]);
+        ctx.parts.unshift(front);
+        ctx.parts.unshift(above);
+        shelvesFor(ctx, leaf, {
+            type: 'shelves',
+            count: 1,
+            adjustable: true,
+            frontSetback: 20,
+        });
+        expect(above.operations.shelfPinHoles).toBe(0);
+        expect(front.operations.shelfPinHoles).toBe(0);
+        expect(partOf(ctx, 'carcass.side.left').operations.shelfPinHoles).toBe(
+            2 * 18,
+        );
+    });
+
     it('pin holes per row: none below 128 mm, 1 pair at exactly 128 mm', () => {
         const pins = (h: number) =>
             partOf(
@@ -490,6 +567,20 @@ describe('rodFor (07 §3.10)', () => {
             qty: 3,
         });
         expect(hw(explicit.ctx, `section.${ROOT}.rod_supports`)?.qty).toBe(6);
+    });
+
+    it('a rod without maxLengthMm in its specs falls back to 1200 mm pieces', () => {
+        const base = catalog.hardware.find((h) => h.code === 'ROD-OVAL-1200');
+        if (!base) throw new Error('seed has no rod');
+        const bare = mutateCatalog(catalog, (draft) => {
+            const row = draft.hardware.find((h) => h.code === base.code);
+            if (row) row.specs = { profile: 'oval' };
+        });
+        // 1100 wide: one piece with the 1200 fallback (two if it were 1000)
+        const one = runCarcass(leafBox(rod(), { w: 1100, h: 1000 }), bare);
+        expect(hw(one.ctx, `section.${ROOT}.rod`)?.qty).toBe(1);
+        const two = runCarcass(leafBox(rod(), { w: 1300, h: 1000 }), bare);
+        expect(hw(two.ctx, `section.${ROOT}.rod`)?.qty).toBe(2);
     });
 
     it('missing rod and support defaults are omitted with warnings', () => {
