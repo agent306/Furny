@@ -857,6 +857,153 @@ def test_glyph_one_empty_row_from_the_line_is_not_a_tick() -> None:
         assert ink_ticks(ink, y, 2, phase=phase) == pytest.approx([300, 1200], abs=3), phase
 
 
+SUB_PIXEL = (0.0, 0.17, 0.33, 0.5, 0.67, 0.83)  # fractional line positions, one per phase
+
+
+@pytest.mark.parametrize("style", ["slash", "backslash"])
+@pytest.mark.parametrize("step_x", [600, 750])
+@pytest.mark.parametrize("line_width", [2, 3])
+def test_slash_ticks_on_a_line_with_a_one_pixel_step(style: str, step_x: int, line_width: int) -> None:
+    """The line's rows are found per column: a 1 px step in the line does not hide the ticks of the part
+    lying a row lower than the rest."""
+    for phase in PHASES:
+        y = phase_y(phase)
+        ink = plan()
+        ink[y : y + line_width, 299:step_x] = 255
+        ink[y + 1 : y + 1 + line_width, step_x:1202] = 255
+        for x in (300, 1200):
+            tick_stroke(ink, style, x, y + (line_width - 1) / 2 + (x > step_x), line_width)
+        found = ink_ticks(ink, y + (line_width - 1) / 2 + 0.5, line_width, phase=phase)
+        assert found == pytest.approx([300, 1200], abs=3), (style, step_x, line_width, phase, found)
+
+
+@pytest.mark.parametrize("drift", [0.25, 0.5, 0.75, 1.0, 1.5])
+@pytest.mark.parametrize("line_width", [2, 3])
+def test_slash_ticks_on_a_line_drifting_against_its_segment(drift: float, line_width: int) -> None:
+    """The ink is tilted against the (horizontal) segment by `drift` px over its length."""
+    for phase in PHASES:
+        y = phase_y(phase) + SUB_PIXEL[phase]
+        ink = plan()
+        stroke(ink, (299, y - drift / 2), (1201, y + drift / 2), line_width)
+        for x in (300, 1200):
+            tick_stroke(ink, "slash", x, y + drift * ((x - 299) / 902 - 0.5), line_width)
+        line = seg("S1", (299, y), (1201, y), float(line_width))
+        lines = find_dimension_lines([line], [tok("T1", "9000", 750, y - 19)], REGION, ink=ink)
+        found = [round(lines[0].p0[0] + t) for t in lines[0].tick_positions] if lines else []
+        assert found == pytest.approx([300, 1200], abs=6), (drift, line_width, phase, found)
+
+
+@pytest.mark.parametrize("gap", [8, 16, 28])
+def test_end_dot_is_not_absorbed_by_a_mark_beyond_the_end(gap: int) -> None:
+    """An extension line past the end of the segment (where the line's ink runs on) is dropped and
+    absorbs nothing: the dot at the end stays a tick."""
+    yy, xx = np.mgrid[0:700, 0:2400]
+    for phase in PHASES:
+        y = phase_y(phase)
+        ink = plan()
+        stroke(ink, (299, y), (1300, y), 2)
+        for x in (300, 750):
+            stroke(ink, (x, y - 8), (x, y + 8), 2)
+        ink[(xx - 1200) ** 2 + (yy - y) ** 2 <= 16] = 255
+        stroke(ink, (1200 + gap, y - 60), (1200 + gap, y + 60), 1)
+        line = seg("S1", (299, y + JITTER[phase]), (1201, y + JITTER[phase]))
+        tokens = [tok("T1", "6000", 525, y - 19), tok("T2", "6000", 975, y - 19)]
+        lines = find_dimension_lines([line], tokens, REGION, ink=ink)
+        found = [round(lines[0].p0[0] + t) for t in lines[0].tick_positions] if lines else []
+        assert found == pytest.approx(TICKS, abs=4), (gap, phase, found)
+
+
+@pytest.mark.parametrize(("length", "base"), [(10, 6), (12, 6)])
+@pytest.mark.parametrize("line_width", [2, 3])
+def test_arrowheads_off_the_line_axis_by_a_fraction_of_a_pixel(
+    length: int, base: int, line_width: int
+) -> None:
+    """The heads are drawn on whole rows and the line up to 0.8 px off their axis: they are found, tip
+    within 6 px, at every offset."""
+    for phase, offset in zip(PHASES, (0.0, 0.3, 0.5, -0.3, 0.8, -0.5), strict=True):
+        y = phase_y(phase)
+        ink = plan()
+        stroke(ink, (299, y + offset), (1201, y + offset), line_width)
+        triangle(ink, (300, y), length, base, 1, y)
+        triangle(ink, (1200, y), length, base, -1, y)
+        line = seg("S1", (299, y + offset), (1201, y + offset), float(line_width))
+        lines = find_dimension_lines([line], [tok("T1", "9000", 750, y - 19)], REGION, ink=ink)
+        found = [round(lines[0].p0[0] + t) for t in lines[0].tick_positions] if lines else []
+        assert found == pytest.approx([300, 1200], abs=6), (length, base, line_width, offset, found)
+
+
+@pytest.mark.parametrize("line_width", [1, 2, 3])
+def test_lone_glyph_stems_one_empty_row_from_the_line_are_not_ticks(line_width: int) -> None:
+    """Stems on one side only (no partner below to pair with), one empty row from the line's own ink."""
+    for phase in PHASES:
+        y = phase_y(phase) + SUB_PIXEL[phase]
+        ink = plan()
+        stroke(ink, (299, y), (1201, y), line_width)
+        for x in (300, 1200):
+            stroke(ink, (x, y - 8), (x, y + 8), line_width)
+        rows = np.flatnonzero(ink[:, 700])
+        for i, x in enumerate(range(330, 1180, 60)):
+            if i % 2:
+                ink[rows[-1] + 2 : rows[-1] + 19, x : x + 2] = 255
+            else:
+                ink[rows[0] - 18 : rows[0] - 1, x : x + 2] = 255
+        line = seg("S1", (299, y), (1201, y), float(line_width))
+        lines = find_dimension_lines([line], [tok("T1", "9000", 750, y - 30)], REGION, ink=ink)
+        found = [round(lines[0].p0[0] + t) for t in lines[0].tick_positions] if lines else []
+        assert found == pytest.approx([300, 1200], abs=3), (line_width, phase, found)
+
+
+def _rotated(centre: tuple[float, float], point: tuple[float, float], angle: float) -> tuple[float, float]:
+    c, s = math.cos(angle), math.sin(angle)
+    dx, dy = point[0] - centre[0], point[1] - centre[1]
+    return centre[0] + dx * c - dy * s, centre[1] + dx * s + dy * c
+
+
+@pytest.mark.parametrize("degrees", [3, 20])
+def test_bar_ticks_at_the_ends_of_a_thin_tilted_line(degrees: int) -> None:
+    """A 1.5 px line at a small angle resamples into short runs on alternating rows: where they are too
+    short to clear, a bar tick and the stub of line it sits on form one component straddling the line.
+    That is no half of a stroke; the bar is found by the blob rule."""
+    rng = np.random.default_rng(1)
+    angle = math.radians(degrees)
+    for trial in range(10):
+        centre = (800 + rng.uniform(-1, 1), 800 + rng.uniform(-1, 1))
+        ink = np.zeros((1600, 1600), np.uint8)
+        a, b = _rotated(centre, (400, 800), angle), _rotated(centre, (1200, 800), angle)
+        stroke(ink, a, b, 1.5)
+        ends = [_rotated(centre, (401, 800), angle), _rotated(centre, (1199, 800), angle)]
+        for t in ends:
+            stroke(ink, _rotated(t, (t[0], t[1] - 8), angle), _rotated(t, (t[0], t[1] + 8), angle), 1.5)
+        nx, ny = -math.sin(angle), math.cos(angle)
+        e0, e1 = rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5)
+        p0, p1 = (a[0] + nx * e0, a[1] + ny * e0), (b[0] + nx * e1, b[1] + ny * e1)
+        middle = ((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2)
+        lines = find_dimension_lines(
+            [seg("S1", p0, p1, 1.5)],
+            [tok("T1", "9000", middle[0], middle[1] - 19)],
+            Rect(0, 0, 2400, 700),
+            ink=ink,
+        )
+        found = sorted(lines[0].tick_positions) if lines else []
+        expected = [math.dist(p0, t) for t in ends]
+        assert found == pytest.approx(expected, abs=5), (degrees, trial, found, expected)
+
+
+def test_dashed_line_gives_no_misplaced_ticks() -> None:
+    """Dashes (40 px) shorter than 0.03 L leave no solid line to clear. The line's rows are then a guess
+    without a margin: a bar and the dash it sits on straddle them, are no half of a stroke, and the dash is
+    not read as the taper of an arrowhead (which put ticks 40 px inside the ends)."""
+    for phase in PHASES:
+        y = phase_y(phase) + SUB_PIXEL[phase]
+        ink = plan()
+        for x in range(299, 1201, 48):
+            stroke(ink, (x, y), (min(x + 40, 1201), y), 2)
+        for x in (300, 1200):
+            stroke(ink, (x, y - 8), (x, y + 8), 2)
+        found = ink_ticks(ink, y, 2, phase=phase)
+        assert found in ([], pytest.approx([300, 1200], abs=3)), (phase, found)
+
+
 def test_span_association_tie_uses_list_position_not_id_strings() -> None:
     token = tok("T1", "4000", 500, LINE_Y - 19)
     spans = [

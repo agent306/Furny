@@ -43,7 +43,6 @@ ELONGATION = 3.0  # a stroke's long axis is at least 3x the short one (rms): a c
 BLOB_LEN_FRAC = 0.012  # a blob is at most this long along the line (fraction of L)
 BLOB_MERGE_PX = 8.0  # blob marks closer than this (or 2 line widths + 4) are one mark
 BLOB_EXCESS_PX = 3  # a blob is at least this much thicker than the line
-NEAR_ROW_FRAC = 0.5  # a band row is "the line" when this share of it is a long horizontal run
 
 
 def _unit(p0: Pt, p1: Pt) -> tuple[float, float, float]:
@@ -197,8 +196,10 @@ def _ink_ticks(
 
     The ink is resampled into line coordinates (a band of +-(0.015 L + 6 px)); every long horizontal run
     (the line itself, parallel dimension lines, wall edges: >= 0.03 L) is cleared with a pixel of margin,
-    and the rest is split into 8-connected components. Components that touch the cleared line rows are
-    strokes; the two halves of a stroke crossing the line are merged. Per stroke:
+    and the rest is split into 8-connected components. The line's own rows are found per column (it may
+    step by a pixel or drift against the segment); components connected to them in the original ink,
+    through at most the one pixel of margin, are strokes (a glyph one empty row away is not), and the two
+    halves of a stroke crossing the line are merged. Per stroke:
     - wider than 2.5 line widths + 2 px (area / length): a wall, no tick;
     - angle 90 +- 10 degrees to the line: a tick of at least 0.005 L (bar ticks, extension lines ending at or
       crossing the line, extension lines running through an inner chain of a stacked dimension string);
@@ -206,10 +207,11 @@ def _ink_ticks(
       0.005 L ... 0.03 L long: a slash tick, of any width;
     - anything else (longer diagonals, other angles, blobs with no clear direction): no stroke tick.
     The tick sits where the stroke's fitted axis meets the line. Strokes that are no ticks (and do not run
-    out of the band) are searched for blobs: the ink beside the cleared rows, per column; runs where it is
-    at least `width + 3` px thick with an area of at most (0.006 L)^2 and a length of at most 0.012 L are
-    dots / arrowheads. A run is placed at its centre; an arrowhead (clearly wider at one end) at its tip,
-    extrapolated from the thickness profile.
+    out of the band) are searched for blobs: the ink run through the line's middle, per column; runs where
+    it is at least `width + 3` px thick with an area of at most (0.006 L)^2 and a length of at most 0.012 L
+    are dots / arrowheads. A run is placed at its centre; an arrowhead (clearly wider at one end) at its
+    tip, where its edges converge (see `_blob_position`). Marks outside the kept range (up to 6 px beyond
+    the ends) are dropped before they could absorb other marks.
     """
     length = _unit(line.p0, line.p1)[2]
     width = max(1.0, line.width_px)
@@ -223,47 +225,43 @@ def _ink_ticks(
     inked = _band(ink, line, radius, slack) > 0
     cols = inked.shape[1]
     run = min(math.ceil(hi) + 1, cols) | 1  # odd: OpenCV's even-sized kernels are off by one at run ends
-    cleared = np.zeros_like(inked)
+    opened = np.zeros_like(inked)  # the long horizontal runs
     long_rows = np.flatnonzero(inked.sum(axis=1) >= run)  # only these rows can hold a run that long
     if long_rows.size:
-        opened = cv2.morphologyEx(
-            inked[long_rows].astype(np.uint8), cv2.MORPH_OPEN, np.ones((1, run), np.uint8)
+        opened[long_rows] = (
+            cv2.morphologyEx(inked[long_rows].astype(np.uint8), cv2.MORPH_OPEN, np.ones((1, run), np.uint8))
+            > 0
         )
-        cleared[long_rows] = opened > 0
-        cleared[1:] |= cleared[:-1].copy()  # a pixel of margin above and below
-        cleared[:-1] |= cleared[1:].copy()
-    # The line's own rows: the cleared rows around v = 0.
-    row_share = cleared.mean(axis=1)
-    near = [
-        j
-        for j in range(max(0, radius - int(width / 2) - 3), min(2 * radius, radius + int(width / 2) + 3) + 1)
-        if row_share[j] >= NEAR_ROW_FRAC
-    ]
-    if near:
-        line_top = line_bottom = min(near, key=lambda j: abs(j - radius))
-        while line_top > 0 and row_share[line_top - 1] >= NEAR_ROW_FRAC:
-            line_top -= 1
-        while line_bottom < 2 * radius and row_share[line_bottom + 1] >= NEAR_ROW_FRAC:
-            line_bottom += 1
-    else:
-        line_top = line_bottom = radius
+    cleared = opened.copy()
+    cleared[1:] |= opened[:-1]  # a pixel of margin above and below
+    cleared[:-1] |= opened[1:]
+    # The line's own rows, per column (the line may step by a pixel or drift against the segment).
+    line_first, line_last, found = _line_rows(opened, radius, int(width / 2) + 3)
+    # Rows of the line with the margin: the most common local thickness + 2.
+    zone = int(np.bincount(line_last[found] - line_first[found]).argmax()) + 3 if found.any() else 1
     rest = inked & ~cleared
-    count, labels, stats, _ = cv2.connectedComponentsWithStats(rest.astype(np.uint8), connectivity=8)
+    count, labels, stats, centroids = cv2.connectedComponentsWithStats(rest.astype(np.uint8), connectivity=8)
     top, height, area = stats[:, cv2.CC_STAT_TOP], stats[:, cv2.CC_STAT_HEIGHT], stats[:, cv2.CC_STAT_AREA]
     bottom = top + height - 1
-    centre_row = top + height / 2.0
     min_area = max(3.0, width)
-    # A stroke touches the line when it is inked in the row next to the line (the outermost cleared row);
-    # a glyph one empty row away is not connected to it in the original ink.
+    # A stroke touches the line when it is connected to the line's own pixels at its columns in the
+    # original ink, through at most one pixel (the cleared margin): a glyph one empty row away is not.
+    lo_row, hi_row = max(0, int(line_first.min()) - 2), min(2 * radius, int(line_last.max()) + 2)
+    band_rows = np.arange(lo_row, hi_row + 1, dtype=np.int16)[:, None]
+    on_line = ((band_rows >= line_first) & (band_rows <= line_last)).astype(np.uint8)
+    ring = np.ones((3, 3), np.uint8)
+    next_to_line = (cv2.dilate(on_line, ring) > 0) & inked[lo_row : hi_row + 1]
+    reach = cv2.dilate(next_to_line.astype(np.uint8) | on_line, ring) > 0
     contact = np.zeros(count, bool)
-    for row, beyond in ((line_top, line_top - 1), (line_bottom, line_bottom + 1)):
-        if 0 <= beyond <= 2 * radius:
-            reach_cols = inked[row].copy()
-            reach_cols[1:] |= inked[row][:-1]
-            reach_cols[:-1] |= inked[row][1:]
-            contact[np.unique(labels[beyond][rest[beyond] & reach_cols])] = True
-    touching_up = (centre_row < line_top) & (bottom >= line_top - 1) & (area >= min_area) & contact
-    touching_down = (centre_row > line_bottom) & (top <= line_bottom + 1) & (area >= min_area) & contact
+    contact[labels[lo_row : hi_row + 1][rest[lo_row : hi_row + 1] & reach]] = True
+    # Side of the line: the middle of the component's rows lies beyond the cleared rows (the line and, where
+    # it was found, its margin) at its centroid's column. A component straddling them is no half of a stroke.
+    centre_col = np.clip((centroids[:, 0] + 0.5).astype(np.int64), 0, cols - 1)
+    centre_row = top + height / 2.0
+    margin = found.any().astype(np.int16)  # without a line found, the rows are a guess with no margin
+    stroke_like = contact & (area >= min_area)
+    touching_up = stroke_like & (centre_row < line_first[centre_col] - margin)
+    touching_down = stroke_like & (centre_row > line_last[centre_col] + margin)
     touching_up[0] = touching_down[0] = False
     touching = touching_up | touching_down
     ys, xs = np.nonzero(rest)
@@ -285,7 +283,6 @@ def _ink_ticks(
     edge_u = np.bincount(lab[at_edge], weights=u[at_edge], minlength=count) / np.maximum(
         np.bincount(lab[at_edge], minlength=count), 1
     )
-    zone = line_bottom - line_top + 1
     strokes: list[_Stroke] = []
     ups = [int(c) for c in np.flatnonzero(touching_up)]
     downs = [int(c) for c in np.flatnonzero(touching_down)]
@@ -379,34 +376,97 @@ def _ink_ticks(
 
     # Blobs: the thickness of the ink through the line, per column, away from the strokes found above.
     line_width = max(width, float(zone - 2))  # the line's own ink (the cleared rows have a pixel of margin)
-    mid = (line_top + line_bottom) // 2
-    pad = np.zeros((1, cols), bool)
-    up = np.argmin(np.vstack([inked[mid::-1], pad]), axis=0)  # inked rows from the line's middle upwards ...
-    down = np.argmin(np.vstack([inked[mid:], pad]), axis=0)  # ... and downwards
-    through = up + down - 1
-    thickness = np.where(inked[mid], through, 0).astype(np.float64)
+    run_top, run_bottom = _run_through(inked, line_first, line_last, found)
+    thickness = (run_bottom - run_top + 1).astype(np.float64)
     skip = np.zeros(cols, bool)
-    for first, last in skips:
-        skip[max(0, math.floor(first)) : max(0, math.ceil(last)) + 1] = True
+    for u_from, u_to in skips:
+        skip[max(0, math.floor(u_from)) : max(0, math.ceil(u_to)) + 1] = True
     columns = np.flatnonzero((thickness >= line_width + BLOB_EXCESS_PX) & ~skip)
     for group in np.split(columns, np.flatnonzero(np.diff(columns) > 2) + 1) if columns.size else []:
         if group.size > blob_max_len or (thickness[group] - line_width).sum() > blob_max_area:
             continue
-        marks.append((_blob_position(group, thickness, ~skip, line_width, blob_max_len / 2) - slack, 0.0))
+        position = _blob_position(
+            group, run_top, run_bottom, (line_first, line_last), ~skip, line_width, blob_max_len / 2
+        )
+        marks.append((position - slack, 0.0))
     # Small marks (dots, arrowheads, short strokes) next to a tick of tick size are part of it: an
     # arrowhead at an extension line. Heads meeting tip to tip at an interior extension line are one mark.
-    big = [u_ for u_, size in marks if size >= lo]
-    small = [u_ for u_, size in marks if size < lo and all(abs(u_ - b_) > blob_max_len for b_ in big)]
+    # Marks beyond the kept range (an extension line past the end) are dropped first: they absorb nothing.
+    kept = [(u_, size) for u_, size in marks if -END_SLACK_PX <= u_ <= length + END_SLACK_PX]
+    big = [u_ for u_, size in kept if size >= lo]
+    small = [u_ for u_, size in kept if size < lo and all(abs(u_ - b_) > blob_max_len for b_ in big)]
     ticks = big + _cluster(np.array(sorted(small)), max(BLOB_MERGE_PX, 2.0 * width + 4.0))
     return [t for t in ticks if -END_SLACK_PX <= t <= length + END_SLACK_PX]
 
 
+def _line_rows(opened: np.ndarray, centre: int, reach: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """First and last row of the line in each column of a band, and whether the column holds the line.
+
+    The line is the run of `opened` (long horizontal ink runs) rows nearest to row `centre`, within
+    `reach` rows of it. Columns without one (beyond the ends, gaps) take the nearest column's rows;
+    without any, the line is row `centre`."""
+    rows, cols = opened.shape
+    lo, hi = max(0, centre - reach), min(rows - 1, centre + reach)
+    window = opened[lo : hi + 1]
+    index = np.arange(lo, hi + 1, dtype=np.int16)[:, None]
+    distance = np.where(window, np.abs(index - centre), np.int16(rows))
+    found = distance.min(axis=0) < rows
+    if not found.all():
+        if not found.any():
+            return np.full(cols, centre, np.int16), np.full(cols, centre, np.int16), found
+        column = np.arange(cols)
+        left = np.maximum.accumulate(np.where(found, column, -cols))  # nearest column holding the line
+        right = np.minimum.accumulate(np.where(found, column, 2 * cols)[::-1])[::-1]
+        nearest = np.where(column - left <= right - column, left, right)
+        window = window[:, nearest]
+        distance = distance[:, nearest]
+    seed = lo + distance.argmin(axis=0).astype(np.int16)
+    first = np.where(~window & (index < seed), index, np.int16(lo - 1)).max(axis=0) + 1  # below the gap above
+    last = np.where(~window & (index > seed), index, np.int16(hi + 1)).min(axis=0) - 1  # above the gap below
+    return first, last, found
+
+
+def _run_through(
+    inked: np.ndarray, first: np.ndarray, last: np.ndarray, found: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per column, the top and bottom row of the vertical ink run through the middle of the line (rows
+    `first` ... `last`; bottom = top - 1 where that pixel is blank). Where the line was found and nothing
+    touches it, that is the line itself; elsewhere the run is followed up and down."""
+    rows, cols = inked.shape
+    column = np.arange(cols)
+    top, bottom = first.astype(np.int64), last.astype(np.int64)
+    touched = ~found
+    touched |= inked[np.maximum(first - 1, 0), column] & (first > 0)
+    touched |= inked[np.minimum(last + 1, rows - 1), column] & (last < rows - 1)
+    at = np.flatnonzero(touched)
+    if at.size:
+        mid = (first[at] + last[at]) // 2
+        part = inked[:, at]
+        pad = np.zeros((1, at.size), bool)
+        for row in np.unique(mid):  # a few values (steps, drift, the ends)
+            up = np.argmin(np.vstack([part[row::-1], pad]), axis=0)  # inked rows from `row` upwards ...
+            down = np.argmin(np.vstack([part[row:], pad]), axis=0)  # ... and downwards
+            here = at[mid == row]
+            top[here] = (int(row) - up + 1)[mid == row]
+            bottom[here] = np.maximum(int(row) + down - 1, int(row) - up)[mid == row]
+    return top, bottom
+
+
 def _blob_position(
-    columns: np.ndarray, thickness: np.ndarray, usable: np.ndarray, line_width: float, max_reach: float
+    columns: np.ndarray,
+    top: np.ndarray,
+    bottom: np.ndarray,
+    line_rows: tuple[np.ndarray, np.ndarray],
+    usable: np.ndarray,
+    line_width: float,
+    max_reach: float,
 ) -> float:
     """Column of a blob: the centre of the run; for an arrowhead (clearly thicker at one end than at the
-    other) the tip, where the linear fit of its taper (the columns thicker than the line next to the run)
-    would vanish. The tip lies at most `max_reach` px beyond the narrow end of the taper."""
+    other) the tip. The tip is where the linear fits of the head's upper and lower edges (where they show
+    beside the line) meet; with one edge showing, where it meets the line's middle; with none, where the
+    linear fit of the thickness would vanish. The taper is the run plus the columns thicker than the line
+    next to it, and the tip lies at most `max_reach` px beyond its narrow end."""
+    thickness = bottom - top + 1
     first, last = int(columns[0]), int(columns[-1])
     while (
         first > 0 and usable[first - 1] and thickness[first - 1] > line_width and last - first < 4 * max_reach
@@ -420,17 +480,46 @@ def _blob_position(
     ):
         last += 1
     xs = np.arange(first, last + 1, dtype=np.float64)
-    t = thickness[first : last + 1]
+    t = thickness[first : last + 1].astype(np.float64)
     edge = max(1, len(xs) // 4)
     start, end = float(t[:edge].mean()), float(t[-edge:].mean())
     if abs(end - start) >= 2.0 and last > first:
         slope, intercept = np.polyfit(xs, t, 1)
         if abs(slope) > 0.1:
-            vanish = -intercept / slope
+            tip = _tip(xs, top[first : last + 1], bottom[first : last + 1], line_rows, first, last, slope)
+            if tip is None:
+                tip = -intercept / slope
             if slope > 0:
-                return float(min(first, max(vanish, first - max_reach)))
-            return float(max(last, min(vanish, last + max_reach)))
+                return float(min(first, max(tip, first - max_reach)))
+            return float(max(last, min(tip, last + max_reach)))
     return (float(columns[0]) + float(columns[-1])) / 2.0
+
+
+def _tip(
+    xs: np.ndarray,
+    top: np.ndarray,
+    bottom: np.ndarray,
+    line_rows: tuple[np.ndarray, np.ndarray],
+    first: int,
+    last: int,
+    widening: float,
+) -> float | None:
+    """Column where the edges of an arrowhead (columns `xs`, ink rows `top` ... `bottom`) converge; None
+    when no edge shows beside the line. `widening` > 0: the head widens to the right."""
+    line_top, line_bottom = line_rows[0][first : last + 1], line_rows[1][first : last + 1]
+    fits = []
+    for rows, beside, sign in ((top, top < line_top, -1.0), (bottom, bottom > line_bottom, 1.0)):
+        if np.count_nonzero(beside) >= 2 and np.ptp(xs[beside]) > 0:
+            slope, intercept = np.polyfit(xs[beside], rows[beside].astype(np.float64), 1)
+            if sign * slope * np.sign(widening) > 0.05:  # opens away from the line towards the base
+                fits.append((float(slope), float(intercept)))
+    if len(fits) == 2:
+        (s_top, i_top), (s_bottom, i_bottom) = fits
+        return (i_bottom - i_top) / (s_top - s_bottom)
+    if len(fits) == 1:
+        axis = float((line_top + line_bottom).mean()) / 2.0
+        return (axis - fits[0][1]) / fits[0][0]
+    return None
 
 
 def _cluster(positions: np.ndarray, gap: float) -> list[float]:
