@@ -42,6 +42,8 @@ type OpeningRow = readonly [
     width: number,
     height: number,
     sillHeight: number,
+    /** Side of the wall the leaf swings into; defaults to `'left'` (+normal). */
+    swing?: Opening['swing'],
 ];
 type FloorFinish = (typeof FLOOR_FINISHES)[number];
 type RoomRow = readonly [
@@ -71,7 +73,8 @@ const door = (
     >,
     offset: number,
     width: number,
-): OpeningRow => [wall, 'door', type, offset, width, DOOR_HEIGHT, 0];
+    swing: Opening['swing'] = 'left',
+): OpeningRow => [wall, 'door', type, offset, width, DOOR_HEIGHT, 0, swing];
 const gap = (wall: string, offset: number, width: number): OpeningRow => [
     wall,
     'opening',
@@ -156,7 +159,8 @@ function buildFromTable(table: PlanTable): PlanDocument {
     }
 
     for (const row of table.openings) {
-        const [wall, kind, type, offset, width, height, sillHeight] = row;
+        const [wall, kind, type, offset, width, height, sillHeight, swing] =
+            row;
         const id = newId('o');
         doc.openings[id] = {
             id,
@@ -168,7 +172,7 @@ function buildFromTable(table: PlanTable): PlanDocument {
             height,
             sillHeight,
             hinge: 'start',
-            swing: 'left',
+            swing: swing ?? 'left',
             label: null,
         };
     }
@@ -269,7 +273,7 @@ const HDB_3ROOM: PlanTable = {
         int('N26', 'N10'), // W37
     ],
     openings: [
-        door('N16-N17', 'main_entrance', 800, 1000), // W16
+        door('N16-N17', 'main_entrance', 800, 1000, 'right'), // W16, into Living Room
         door('N18-N19', 'single_swing', 2300, 900), // W22
         door('N19-N20', 'single_swing', 2400, 900), // W23
         door('N20-N13', 'single_swing', 700, 900), // W31
@@ -359,10 +363,10 @@ const BROCHURE_2BHK: PlanTable = {
         int('A19', 'A20'),
     ],
     openings: [
-        door('A10-A11', 'main_entrance', 1600, 1000),
-        door('A16-A15', 'single_swing', 1500, 800),
+        door('A10-A11', 'main_entrance', 1600, 1000, 'right'), // into Living/Dining
+        door('A16-A15', 'single_swing', 1500, 800, 'right'), // into Bedroom 1
         door('A17-A7', 'single_swing', 1500, 800),
-        door('A14-A18', 'single_swing', 1900, 700),
+        door('A14-A18', 'single_swing', 1900, 700, 'right'), // into Toilet 1
         door('A7-A9', 'single_swing', 1200, 700),
         door('A16-A17', 'single_swing', 1595, 900),
         door('A19-A20', 'single_swing', 320, 500),
