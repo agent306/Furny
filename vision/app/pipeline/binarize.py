@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
-from skimage.filters import threshold_sauvola
 from skimage.morphology import skeletonize
 
 from app.pipeline.context import PipelineContext
@@ -26,6 +25,7 @@ WIDTH_BIN_PX = 0.5
 DEFAULT_T_THIN = 2.0
 THICK_K_MIN, THICK_K_MAX = 3, 15
 THICK_K_FACTOR = 2.2
+SAUVOLA_R = 127.5  # half the uint8 dynamic range: skimage's default `r` for uint8 input
 MIN_BLOB_KERNELS = 3  # components smaller than (3k)^2 px are dropped from `thick`
 
 
@@ -71,11 +71,35 @@ def _width_mode(dt: np.ndarray, ink: np.ndarray) -> float:
     return float(edges[int(np.argmax(hist))] + WIDTH_BIN_PX / 2)
 
 
+def sauvola_ink(gray: np.ndarray, window: int, k: float = SAUVOLA_K) -> np.ndarray:
+    """Sauvola binarization of a uint8 image: 255 where `gray < m * (1 + k * (s / R - 1))`, else 0.
+
+    Same result as `skimage.filters.threshold_sauvola`, but with float32 box filters instead of float64
+    integral images, which need ~3x the memory (06 §5.2 budget): `m` and `s` are the window mean and
+    standard deviation (reflect-101 borders), `R = 127.5`.
+    """
+    g = gray.astype(np.float32)
+    size = (window, window)
+    mean: np.ndarray = cv2.boxFilter(g, cv2.CV_32F, size, borderType=cv2.BORDER_REFLECT_101)
+    np.multiply(g, g, out=g)
+    sq_mean: np.ndarray = cv2.boxFilter(g, cv2.CV_32F, size, borderType=cv2.BORDER_REFLECT_101)
+    del g
+    var = sq_mean
+    var -= mean * mean
+    np.clip(var, 0.0, None, out=var)
+    np.sqrt(var, out=var)
+    var *= k / SAUVOLA_R
+    var += 1.0 - k
+    mean *= var  # threshold
+    ink: np.ndarray = (gray < mean).astype(np.uint8) * 255
+    return ink
+
+
 def _remove_small_blobs(mask: np.ndarray, min_area: int) -> np.ndarray:
     n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     keep = np.zeros(n, bool)
     keep[1:] = stats[1:, cv2.CC_STAT_AREA] >= min_area
-    out: np.ndarray = (keep[labels] * 255).astype(np.uint8)
+    out: np.ndarray = keep[labels].astype(np.uint8) * 255
     return out
 
 
@@ -98,17 +122,14 @@ def preprocess(page: NormalizedPage, ctx: PipelineContext) -> Preprocessed:
         gray = flatten_illumination(gray)
     ctx.check_deadline()
 
-    thresh = threshold_sauvola(  # type: ignore[no-untyped-call]
-        gray, window_size=sauvola_window(long_edge), k=SAUVOLA_K
-    )
-    ink = np.where(gray < thresh, 255, 0).astype(np.uint8)
+    ink = sauvola_ink(gray, sauvola_window(long_edge))
     ctx.check_deadline()
 
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     sat, val = hsv[..., 1], hsv[..., 2]
     paper = val < PAPER_V_MAX
     colorfulness = float(sat[paper].mean()) if paper.any() else 0.0
-    dark = np.where((val < DARK_V_MAX) & (sat < DARK_S_MAX), 255, 0).astype(np.uint8)
+    dark = ((val < DARK_V_MAX) & (sat < DARK_S_MAX)).astype(np.uint8) * 255
 
     dt = cv2.distanceTransform(ink, cv2.DIST_L2, 3)
     t_thin = _width_mode(dt, ink) if ink.any() else DEFAULT_T_THIN

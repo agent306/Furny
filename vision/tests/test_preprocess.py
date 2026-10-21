@@ -1,11 +1,24 @@
 """Sauvola preprocessing, style classification, thick mask and plan region (06 §7.6)."""
 
+import json
+import subprocess
+import sys
+from pathlib import Path
+
 import cv2
 import numpy as np
 import pytest
+from skimage.filters import threshold_sauvola
 
 from app.pipeline import binarize
-from app.pipeline.binarize import Preprocessed, preprocess, sauvola_window, stroke_width_mode, thick_kernel
+from app.pipeline.binarize import (
+    Preprocessed,
+    preprocess,
+    sauvola_ink,
+    sauvola_window,
+    stroke_width_mode,
+    thick_kernel,
+)
 from app.pipeline.normalize import NormalizedPage
 from app.pipeline.region import detect_plan_region
 from app.schemas.meta import PageImage, SourceKind
@@ -179,3 +192,51 @@ def test_region_empty_is_full_image() -> None:
     pre = preprocess(page_of(np.full((1200, 1800, 3), 255, np.uint8)), ctx)
     assert pre.region == Rect(0, 0, 1800, 1200)
     assert pre.t_thin == 2.0 and pre.colorfulness == 0.0
+
+
+def test_sauvola_ink_matches_skimage() -> None:
+    rng = np.random.default_rng(7)
+    gray = np.full((900, 1300), 235, np.uint8)
+    gray[200:700, 300:1000] = rng.integers(0, 256, (500, 700))  # noisy block, hard for equality
+    gray[:, :600] = (gray[:, :600] * np.linspace(0.5, 1.0, 600)[None, :]).astype(np.uint8)
+    gray = (gray.astype(int) + rng.integers(-6, 7, gray.shape)).clip(0, 255).astype(np.uint8)
+    for window in (15, 33, 81):
+        expected = np.where(gray < threshold_sauvola(gray, window_size=window, k=0.2), 255, 0)
+        assert np.array_equal(sauvola_ink(gray, window), expected.astype(np.uint8)), window
+
+
+_PEAK_SCRIPT = """
+import json
+from app.pipeline.binarize import preprocess
+from tests.support.synth import SWall, render_plan
+from tests.test_normalize import make_ctx
+from tests.test_preprocess import page_of
+
+def status(key):
+    for line in open("/proc/self/status"):
+        if line.startswith(key + ":"):
+            return int(line.split()[1]) * 1024
+
+img = render_plan((6000, 4000), [SWall((900, 900), (5100, 900), 30), SWall((900, 900), (900, 3300), 30)])
+page = page_of(img)
+before = status("VmRSS")
+pre = preprocess(page, make_ctx())
+print(json.dumps({"peak_delta": status("VmHWM") - before, "nbytes": img.nbytes, "kind": pre.drawing_kind}))
+"""
+
+
+@pytest.mark.skipif(not Path("/proc/self/status").exists(), reason="needs /proc for peak RSS")
+def test_preprocess_peak_memory_is_bounded() -> None:
+    """06 §5.2 budget (1.5 GB per run): skimage's float64 integral images peaked at ~1.5 GB here."""
+    root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        [sys.executable, "-c", _PEAK_SCRIPT],
+        cwd=root,
+        env={"PYTHONPATH": str(root), "PATH": ""},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    result = json.loads(proc.stdout)
+    assert result["kind"] == "architectural_line_drawing"
+    assert result["peak_delta"] < 1_000_000_000, result
