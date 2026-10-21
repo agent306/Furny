@@ -1578,3 +1578,38 @@ def test_wall_beyond_a_gap_past_the_end_tick_is_no_tick() -> None:
         line = [seg("S1", (299, y + JITTER[phase]), (1217, y + JITTER[phase]))]
         labels = [tok("T1", "4500", 525, y - 19), tok("T2", "4500", 975, y - 19)]
         assert raster_ticks(line, labels, ink) == [pytest.approx(TICKS, abs=3)], phase
+
+
+@pytest.mark.parametrize("off", range(6))
+@pytest.mark.parametrize("gap", [20, 30, 50, 120])
+@pytest.mark.parametrize("side", ["start", "end"])
+def test_wall_face_at_either_end_is_a_tick_when_the_segment_stops_short(
+    side: str, gap: int, off: int
+) -> None:
+    """Task 20 review I1 (N2's mirror): a slash chain dimensioned from (or to) a solid wall's face `gap` px
+    beyond its outer slash, the line's ink running up to the face, its LSD segment stopping `off` px short of
+    it: the face is a tick at either end."""
+    for phase in PHASES:
+        y = phase_y(phase)
+        ink = plan()
+        if side == "start":
+            face = 300
+            ticks = [face + gap, face + gap + 450, face + gap + 900]
+            stroke(ink, (face, y), (ticks[-1] + 1, y), 2)
+            ink[y - 100 : y + 100, face - 20 : face] = 255
+            p0, p1 = face + off, ticks[-1] + 1
+        else:
+            ticks = TICKS
+            face = ticks[-1] + gap
+            stroke(ink, (ticks[0] - 1, y), (face, y), 2)
+            ink[y - 100 : y + 100, face : face + 20] = 255
+            p0, p1 = ticks[0] - 1, face - off
+        for x in ticks:
+            stroke(ink, *polar((x, y), 45, 17), 2)
+        line = [seg("S1", (p0, y + JITTER[phase]), (p1, y + JITTER[phase]))]
+        labels = [
+            tok("T1", "4500", (ticks[0] + ticks[1]) / 2, y - 19),
+            tok("T2", "4500", (ticks[1] + ticks[2]) / 2, y - 19),
+        ]
+        expected = [face, *ticks] if side == "start" else [*ticks, face]
+        assert raster_ticks(line, labels, ink) == [pytest.approx(expected, abs=3)], (side, gap, off, phase)

@@ -324,7 +324,7 @@ def ink_ticks(
             # A wall the line ends at: its face is the tick (the line is dimensioned to it; a slash there
             # merges with the wall). A wall the line runs through is no tick.
             face = _wall_face_at_end(
-                np.isin(lab, stroke.members), u, v, zone, length, max(MARK_REACH_PX, lo), found[slack:]
+                np.isin(lab, stroke.members), u, v, zone, length, max(MARK_REACH_PX, lo), found, slack
             )
             if face is not None:
                 marks.append((face, float(rows), WALL))
@@ -412,11 +412,12 @@ def _wall_face_at_end(
     length: float,
     reach: float,
     line_at: np.ndarray,
+    slack: int,
 ) -> float | None:
     """The face (u) of a wall stroke (pixels ``member`` of the band pixels ``u``, ``v``) that the line
     ends at, else None: next to the line (within the cleared rows + 2) the wall lies wholly before the
     line's start and reaches within `END_SLACK_PX` of it, or wholly beyond its end, and the line runs up
-    to it: ``line_at`` (whether each column, from u = 0, holds the line) shows the line within
+    to it: ``line_at`` (whether each band column holds the line; column ``u + slack``) shows the line within
     `WALL_CONTACT_PX` of the wall (a line stopping short of a wall, a face line between them, is not
     dimensioned to it; Task 14b re-review N2). The face is read in the rows ``reach`` .. ``2 reach`` beyond
     the cleared ones (the median of their wall edges), clear of a slash merged with the wall at the line."""
@@ -428,7 +429,7 @@ def _wall_face_at_end(
     at_end = length - END_SLACK_PX <= first <= length + END_SLACK_PX and last > length + END_SLACK_PX
     if not (at_start or at_end):
         return None
-    lo = round(last) + 1 if at_start else round(first) - WALL_CONTACT_PX
+    lo = round(last) + 1 + slack if at_start else round(first) - WALL_CONTACT_PX + slack
     if not line_at[max(lo, 0) : max(lo + WALL_CONTACT_PX, 0)].any():
         return None
     away = member & (np.abs(v) > zone / 2.0 + reach) & (np.abs(v) <= zone / 2.0 + 2.0 * reach)

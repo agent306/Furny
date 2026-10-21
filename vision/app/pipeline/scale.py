@@ -63,6 +63,7 @@ FIXED_CONFIDENCE: dict[str, float] = {
     "default_guess": 0.1,
 }
 MAX_META_SAMPLES = 60
+MAX_COORD_MM = 1_000_000  # the range of a document coordinate (`schemas.plan.Coord`)
 KNOWN_X_WORDS = ("width",)  # a null-id known dimension spans the walls across (x) for "width", else down (y)
 
 
@@ -156,15 +157,22 @@ def _residual_pct(samples: Sequence[PxScaleSample], k: float) -> float:
 
 def fit_scale(samples: Sequence[PxScaleSample]) -> FitResult:
     """Steps 4-5 over a non-empty sample set: two rounds of 8 % rejection around the weighted median (the
-    second around the median of the first round's inliers), then WLS through the origin over the inliers."""
+    second around the median of the first round's inliers, re-testing every sample), then WLS through the
+    origin over the inliers. A round that would reject every sample (a median between estimates more than
+    ~16 % apart) keeps its input and ends the rejection (Task 20 fix round 1, C1): the high residual then
+    shows in the warning and the confidence."""
     if not samples:
         raise ValueError("fit_scale needs at least one sample")
     inliers = list(samples)
     for _ in range(REJECT_ROUNDS):
         m = _weighted_median(inliers)
-        inliers = [s for s in samples if abs(s.estimate / m - 1.0) <= REJECT_FRAC]
+        kept = [s for s in samples if abs(s.estimate / m - 1.0) <= REJECT_FRAC]
+        if not kept:
+            break
+        inliers = kept
     k = _wls(inliers)
-    rejected = [s for s in samples if not any(s is i for i in inliers)]
+    kept_ids = {id(s) for s in inliers}
+    rejected = [s for s in samples if id(s) not in kept_ids]
     return FitResult(k, inliers, rejected, _residual_pct(inliers, k))
 
 
@@ -271,17 +279,13 @@ def _known_sample(
     return PxScaleSample(known.mm, span_px, WEIGHT["known"], _axis_of(a, b), "overall", known.label, a, b)
 
 
-def collect_samples(
+def _collect(
     candidates: CandidateSet, labels: LabelingResult, hints: RecognizeHints
-) -> tuple[list[PxScaleSample], list[PxScaleSample]]:
-    """The primary samples (labelled dimensions and the known dimension) and the room samples (§8.2 step 1).
-
-    A dimension label gives a sample when it has a value and a span: kind ``chain_segment`` (w = 1) or
-    ``overall`` (w = 2), the labeler's kind overriding the span's (``room_interior`` / ``unknown`` keep the
-    span's). A room gives two (w = 0.5) when the labeler parsed both sizes in mm and its face exists."""
+) -> tuple[list[PxScaleSample], PxScaleSample | None, list[PxScaleSample]]:
+    """The dimension samples, the known-dimension sample and the room samples (see `collect_samples`)."""
     texts = {t.id: t.text for t in candidates.texts}
     spans = {s.id: s for s in candidates.spans}
-    primary: list[PxScaleSample] = []
+    dimensions: list[PxScaleSample] = []
     for d in labels.dimensions:
         span = spans.get(d.span_id) if d.span_id is not None else None
         if span is None or d.value_mm is None or d.value_mm <= 0:
@@ -291,23 +295,33 @@ def collect_samples(
             continue
         kind: SampleKind = d.kind if d.kind in ("chain_segment", "overall") else span.kind
         text = texts.get(d.text_id, str(d.value_mm))
-        primary.append(
+        dimensions.append(
             PxScaleSample(
                 d.value_mm, length, WEIGHT[kind], span.axis, kind, text, span.p0, span.p1, span.line_id
             )
         )
-    known = _known_sample(candidates, labels, hints)
-    if known is not None:
-        primary.append(known)
-    faces = {f.id: f for f in candidates.rooms}
+    faces = {f.id: f for f in candidates.rooms if not f.open}
     rooms: list[PxScaleSample] = []
     for r in labels.rooms:
         face = faces.get(r.id)
-        if face is None or not r.width_mm or not r.depth_mm:
+        if face is None or r.width_mm is None or r.depth_mm is None or min(r.width_mm, r.depth_mm) <= 0:
             continue
         text = r.size_text or f"{r.width_mm} x {r.depth_mm}"
         rooms.extend(_room_samples(face, r.width_mm, r.depth_mm, candidates.theta0, text))
-    return primary, rooms
+    return dimensions, _known_sample(candidates, labels, hints), rooms
+
+
+def collect_samples(
+    candidates: CandidateSet, labels: LabelingResult, hints: RecognizeHints
+) -> tuple[list[PxScaleSample], list[PxScaleSample]]:
+    """The primary samples (labelled dimensions and the known dimension) and the room samples (§8.2 step 1).
+
+    A dimension label gives a sample when it has a value and a span: kind ``chain_segment`` (w = 1) or
+    ``overall`` (w = 2), the labeler's kind overriding the span's (``room_interior`` / ``unknown`` keep the
+    span's). A room gives two (w = 0.5) when the labeler parsed both sizes in mm and its face is closed
+    (step 1: a face closed only across a passage, ``RoomFace.open``, may span the next space)."""
+    dimensions, known, rooms = _collect(candidates, labels, hints)
+    return [*dimensions, *([known] if known is not None else [])], rooms
 
 
 # --- scale note -----------------------------------------------------------------------------------------
@@ -372,7 +386,7 @@ def _scaled_y(s: PxScaleSample, factor: float) -> PxScaleSample:
 
 
 def _anisotropy(fit: FitResult, page: NormalizedPage) -> float:
-    """Step 7: k_y / k_x when both axes have >= 3 inliers, they differ by more than 2 % and the page is a
+    """Step 7: k_y / k_x when both axes have >= 3 inliers, |k_x / k_y - 1| > 2 % and the page is a
     raster one (or a rectified photo); else 1."""
     if page.source_kind not in ANISO_KINDS and not page.page_image.rectified:
         return 1.0
@@ -380,8 +394,8 @@ def _anisotropy(fit: FitResult, page: NormalizedPage) -> float:
     ys = [s for s in fit.inliers if s.axis == "y"]
     if len(xs) < ANISO_MIN_INLIERS or len(ys) < ANISO_MIN_INLIERS:
         return 1.0
-    ratio = _wls(ys) / _wls(xs)
-    return ratio if abs(ratio - 1.0) > ANISO_MIN_FRAC else 1.0
+    k_x, k_y = _wls(xs), _wls(ys)
+    return k_y / k_x if abs(k_x / k_y - 1.0) > ANISO_MIN_FRAC else 1.0
 
 
 def _room_check(rooms: Sequence[PxScaleSample], k: float) -> RoomLabelCheck:
@@ -407,17 +421,18 @@ def solve_scale(
     """06 §8.2: the scale of the page in mm per normalized px, with its method, fit and warnings
     (``scale_from_room_labels``, ``scale_guessed``, ``scale_anisotropy_corrected``, ``scale_high_residual``,
     ``scale_room_label_mismatch``)."""
-    primary, rooms = collect_samples(candidates, labels, hints)
-    known = [s for s in primary if s.weight == WEIGHT["known"] and s.line_id is None]
+    dimensions, known, rooms = _collect(candidates, labels, hints)
+    primary = [*dimensions, *([known] if known is not None else [])]
     method: ScaleMethod
+    fitted: list[PxScaleSample]
     if len(primary) >= 2:
         method, fitted = "dimension_chain", primary
     elif rooms:
         method, fitted = "room_label", rooms
     elif scale_note is not None:
         method, fitted = "scale_note", []
-    elif known:
-        method, fitted = "user_hint", known
+    elif known is not None:
+        method, fitted = "user_hint", [known]
     else:
         method, fitted = "default_guess", []
     room_rooms = len(rooms) // 2
@@ -485,12 +500,16 @@ def solve_scale(
 
 
 def to_scale_meta(result: ScaleResult) -> ScaleMeta:
-    """``ImportResultMeta.scale`` (06 §6): sample ends in document mm (``round(px x mm/px)``), at most 60
-    samples, inliers first."""
+    """``ImportResultMeta.scale`` (06 §6): sample ends in document mm (``round(px x mm/px)``, held to the
+    document's coordinate range, so an absurd scale from bad labels still serializes), at most 60 samples,
+    inliers first."""
     k = result.mm_per_px
 
+    def coord(v: float) -> int:
+        return max(-MAX_COORD_MM, min(MAX_COORD_MM, round(v * k)))
+
     def mm(p: Pt) -> Point:
-        return Point(x=round(p[0] * k), y=round(p[1] * k))
+        return Point(x=coord(p[0]), y=coord(p[1]))
 
     pairs = list(zip(result.used_samples, result.inlier_flags, strict=True))
     pairs.sort(key=lambda p: not p[1])  # stable: inliers first, each in sample order

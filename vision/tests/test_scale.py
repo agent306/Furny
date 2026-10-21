@@ -25,7 +25,7 @@ from app.pipeline.scale import (
 from app.pipeline.textparse import parse_token
 from app.schemas.api import KnownDimension, RecognizeHints
 from app.schemas.candidates import CandidateSet, DimensionSpan, RoomFace, TextToken, WallCandidate
-from app.schemas.labeling import DimensionLabel, KnownDimensionMatch, LabelingResult, RoomLabel
+from app.schemas.labeling import DimensionLabel, KnownDimensionMatch, LabelingResult, RoomLabel, WallLabel
 from app.schemas.meta import PageImage, SourceKind
 from app.utils.geometry import Pt, Rect
 from tests.test_normalize import make_ctx
@@ -69,6 +69,7 @@ class Plan:
         self.faces: list[RoomFace] = []
         self.rooms: list[RoomLabel] = []
         self.walls: list[WallCandidate] = []
+        self.wall_labels: list[WallLabel] = []
         self.theta0 = 0.0
 
     def span(self, p0: Pt, p1: Pt, value: int | None, kind: str = "chain_segment", line: str = "L1") -> str:
@@ -92,13 +93,22 @@ class Plan:
             else:
                 self.span((start[0], start[1] + a), (start[0], start[1] + at), v, line=line)
 
-    def room(self, x0: float, y0: float, w: float, h: float, size: tuple[int, int] | None) -> str:
+    def room(
+        self,
+        x0: float,
+        y0: float,
+        w: float,
+        h: float,
+        size: tuple[int, int] | None,
+        *,
+        open_face: bool = False,
+    ) -> str:
         """A rectangular face whose interior is `w` x `h` px (pixels x0 .. x0 + w - 1)."""
         rid = f"R{len(self.faces) + 1}"
         x1, y1 = x0 + w - 1, y0 + h - 1
         poly = ((x0, y0), (x1, y0), (x1, y1), (x0, y1))
         self.faces.append(
-            RoomFace(rid, poly, ((x0 + x1) / 2, (y0 + y1) / 2), w * h, (x0, y0, x1, y1), (), False)
+            RoomFace(rid, poly, ((x0 + x1) / 2, (y0 + y1) / 2), w * h, (x0, y0, x1, y1), (), open_face)
         )
         self.rooms.append(
             RoomLabel(
@@ -145,7 +155,7 @@ class Plan:
             dimensions=self.dims,
             rooms=self.rooms,
             missed_rooms=[],
-            walls=[],
+            walls=self.wall_labels,
             openings=[],
             missed_openings=[],
             known_dimension_match=known,
@@ -565,3 +575,208 @@ def test_to_scale_meta_keeps_at_most_60_samples_inliers_first() -> None:
     meta = to_scale_meta(result)
     assert len(meta.used_samples) == 60 and all(s.inlier for s in meta.used_samples)
     assert meta.samples == 70 and meta.rejected == 1
+
+
+# --- fix round 1: degenerate fits (C1) and boundaries (M1-M6) ------------------------------------------
+
+
+def test_fit_keeps_its_input_when_a_round_would_reject_everything() -> None:
+    """Review C1: estimates [10, 10, 20, 20] put the tie median (15) more than 8 % from every sample: the
+    round keeps its input and rejection stops; the fit is WLS over all four."""
+    samples = [sample(1000, 100.0), sample(2000, 200.0), sample(2000, 100.0), sample(1000, 50.0)]
+    fit = fit_scale(samples)
+    assert len(fit.inliers) == 4 and fit.rejected == []
+    assert fit.k == pytest.approx(_wls_of(samples))
+    assert fit.residual_pct > 3
+
+
+def _wls_of(samples: list[PxScaleSample]) -> float:
+    return sum(s.weight * s.value_mm * s.span_px for s in samples) / sum(
+        s.weight * s.span_px**2 for s in samples
+    )
+
+
+def test_one_room_whose_size_disagrees_with_its_face_does_not_crash() -> None:
+    """Review C1, reproduction 1: one room 3000 x 3000 on a 300 x 400 px face (10 and 7.5 mm/px)."""
+    plan = Plan()
+    plan.room(400, 300, 300, 400, (3000, 3000))
+    result, warnings = solve(plan)
+    assert result.method == "room_label" and math.isfinite(result.mm_per_px) and result.mm_per_px > 0
+    assert (result.samples, result.rejected) == (2, 0)
+    assert "scale_high_residual" in warnings
+
+
+def test_two_disagreeing_chain_labels_do_not_crash() -> None:
+    """Review C1, reproduction 2: two chain labels at 10 and 20 mm/px stay a dimension chain with a high
+    residual (warning, low confidence)."""
+    plan = Plan()
+    plan.span((100, 100), (400, 100), 3000)
+    plan.span((100, 200), (250, 200), 3000, line="L2")
+    result, warnings = solve(plan)
+    assert result.method == "dimension_chain"
+    assert (result.samples, result.rejected) == (2, 0)
+    assert result.mm_per_px == pytest.approx((3000 * 300 + 3000 * 150) / (300**2 + 150**2))
+    assert warnings["scale_high_residual"] == {"residualPct": round(result.residual_pct, 1)}
+    assert result.confidence == pytest.approx(scale_confidence("dimension_chain", result.residual_pct, 2, 0))
+
+
+def test_degenerate_sample_sets_never_raise() -> None:
+    """Review C1: seeded random sets of 1-3 dimension labels and rooms with wide spreads, near-zero and zero
+    spans and duplicates: `solve_scale` returns a finite positive scale."""
+    rng = np.random.default_rng(20)
+    for case in range(400):
+        plan = Plan()
+        for n in range(int(rng.integers(0, 4))):
+            length = float(rng.choice([0.0, 1e-6, 0.5, 3.0, rng.uniform(10, 900)]))
+            value = int(rng.choice([1, 100, 3000, 3000, 25000]))
+            y = 100 + 30 * n
+            plan.span(
+                (100, y),
+                (100 + length, y),
+                value,
+                kind=str(rng.choice(["chain_segment", "overall"])),
+                line=f"L{n}",
+            )
+            if rng.random() < 0.3:  # a duplicate
+                plan.span((100, y), (100 + length, y), value, line=f"L{n}")
+        for n in range(int(rng.integers(0, 3))):
+            w, h = (
+                float(rng.choice([1.0, 2.0, rng.uniform(20, 600)])),
+                float(rng.choice([1.0, rng.uniform(20, 600)])),
+            )
+            size = (int(rng.choice([100, 3000, 9000])), int(rng.choice([100, 3000, 9000])))
+            plan.room(200 + 10 * n, 300, w, h, size)
+        source = "pdf_vector" if rng.random() < 0.3 else "raster"
+        result, _ = solve(plan, page_of(source))  # type: ignore[arg-type]
+        assert math.isfinite(result.mm_per_px) and result.mm_per_px > 0, case
+        assert 0.0 <= result.confidence <= 1.0, case
+        to_scale_meta(result)
+
+
+def test_rejection_threshold_is_8_percent() -> None:
+    """Review M1: a sample 7 % off the median is an inlier, one 9 % off is rejected."""
+    samples = [sample(1000, 100.0) for _ in range(6)] + [sample(1070, 100.0), sample(1090, 100.0)]
+    fit = fit_scale(samples)
+    assert [s.value_mm for s in fit.rejected] == [1090]
+
+
+def test_second_round_retests_every_sample_around_the_new_median() -> None:
+    """Review M1: estimates [9, 9, 10, 10.3, 10.9]. Round 1 (median 10) keeps 10 and 10.3; round 2 (median
+    10.15) re-admits 10.9 (7.4 % off), the 9s stay out (11.3 %)."""
+    samples = [sample(1000, 1000 / e) for e in (9.0, 9.0, 10.0, 10.3, 10.9)]
+    fit = fit_scale(samples)
+    assert sorted(round(s.estimate, 2) for s in fit.inliers) == [10.0, 10.3, 10.9]
+    assert [round(s.estimate, 2) for s in fit.rejected] == [9.0, 9.0]
+
+
+@pytest.mark.parametrize(("spread", "warned"), [(0.035, True), (0.029, False)])
+def test_high_residual_threshold_is_3_percent(spread: float, warned: bool) -> None:
+    plan = Plan()
+    for n, e in enumerate([spread, -spread, spread, -spread]):
+        y = 150 + 40 * n
+        plan.span((200, y), (200 + 3000 / (10 * (1 + e)), y), 3000, line=f"L{n}")
+    result, warnings = solve(plan)
+    assert (result.residual_pct > 3) is warned
+    assert ("scale_high_residual" in warnings) is warned
+
+
+@pytest.mark.parametrize(("off", "warned"), [(0.11, True), (0.09, False)])
+def test_room_mismatch_threshold_is_10_percent(off: float, warned: bool) -> None:
+    plan = Plan()
+    plan.chain(10.0, [3000, 4000, 2500], (200, 150))
+    plan.room(400, 300, 300, 400, (round(3000 * (1 + off)), round(4000 * (1 + off))))
+    result, warnings = solve(plan)
+    assert result.room_label_check.median_discrepancy_pct == pytest.approx(100 * off)
+    assert ("scale_room_label_mismatch" in warnings) is warned
+
+
+def test_room_discrepancy_is_the_mean_of_its_two_samples() -> None:
+    """Width 4 % off, depth 14 % off: the room's discrepancy is 9 % (no warning)."""
+    plan = Plan()
+    plan.chain(10.0, [3000, 4000, 2500], (200, 150))
+    plan.room(400, 300, 300, 400, (3120, 4560))
+    result, warnings = solve(plan)
+    assert result.room_label_check.median_discrepancy_pct == pytest.approx(9.0)
+    assert "scale_room_label_mismatch" not in warnings
+
+
+def test_room_check_runs_in_the_corrected_frame() -> None:
+    """Review M1: on a page corrected for anisotropy (y at 10.5 mm/px), a room labelled at 10 mm/px across
+    and 10.5 mm/px down agrees exactly once its depth is in the corrected frame."""
+    plan = Plan()
+    plan.chain(10.0, [3000, 2000, 2500, 1500], (200, 150))
+    plan.chain(10.5, [3150, 2100, 2625, 1575], (150, 200), axis="y", line="L2")
+    plan.room(400, 300, 300, 400, (3000, 4200))
+    result, _ = solve(plan)
+    assert result.anisotropy_corrected is True
+    assert result.room_label_check.median_discrepancy_pct == pytest.approx(0.0, abs=1e-9)
+
+
+def test_anisotropy_on_an_unrectified_heic_page() -> None:
+    plan = Plan()
+    plan.chain(10.0, [3000, 2000, 2500, 1500], (200, 150))
+    plan.chain(10.5, [3150, 2100, 2625, 1575], (150, 200), axis="y", line="L2")
+    result, _ = solve(plan, page_of("heic"))
+    assert result.anisotropy_corrected is True
+
+
+@pytest.mark.parametrize(
+    ("k_y", "corrected"), [(9.802, True), (10.205, True), (9.81, False), (10.195, False)]
+)
+def test_anisotropy_threshold_is_k_x_over_k_y(k_y: float, corrected: bool) -> None:
+    """Review M2: spec step 7 tests |k_x / k_y - 1| > 2 %: k_y = 9.802 (2.02 %) is corrected, 10.195 (1.91 %)
+    is not."""
+    plan = Plan()
+    plan.chain(10.0, [3000, 2000, 2500, 1500], (200, 150))
+    plan.chain(k_y, [3000, 2000, 2500, 1500], (150, 200), axis="y", line="L2")
+    result, _ = solve(plan)
+    assert result.anisotropy_corrected is corrected
+
+
+def test_slanted_chain_is_not_consistent_with_a_horizontal_overall() -> None:
+    """Review M1: a chain on a line slanted 20 degrees (axis `other`) and a horizontal overall over its
+    projected extent with the chain's total: no consistent chain (only parallel lines on one axis count)."""
+    plan = Plan()
+    c, s = math.cos(math.radians(20.0)), math.sin(math.radians(20.0))
+    a, b, e = (200.0, 400.0), (200 + 300 * c, 400 + 300 * s), (200 + 700 * c, 400 + 700 * s)
+    plan.span(a, b, 3000)
+    plan.span(b, e, 4000)
+    plan.span((200, 300), (200 + 700 * c, 300), 7000, kind="overall", line="L2")
+    result, _ = solve(plan)
+    assert result.samples == 3
+    assert result.consistent_chains == 0
+
+
+def test_known_dimension_bbox_leaves_out_walls_labelled_not_wall() -> None:
+    """Review M1 (K20): a wall the labeler calls `not_wall` beyond the plan does not widen the bbox."""
+    plan = Plan()
+    plan.wall((200, 200), (1200, 200))
+    plan.wall((200, 900), (1200, 900))
+    stray = plan.wall((1500, 200), (1500, 900))
+    plan.wall_labels = [WallLabel(id=stray, verdict="not_wall", kind=None)]
+    hints = RecognizeHints(known_dimension=KnownDimension(label="Overall width", mm=10200))
+    primary, _ = collect_samples(
+        plan.candidates(), plan.labels(KnownDimensionMatch(wall_id=None, span_id=None)), hints
+    )
+    assert [s.span_px for s in primary] == [1020.0]
+
+
+def test_open_faces_give_no_room_sample() -> None:
+    """Review M6: spec step 1 takes rooms with a closed face; a face closed only across a passage
+    (`RoomFace.open`) may span the next space."""
+    plan = Plan()
+    plan.room(400, 300, 300, 400, (3000, 4000), open_face=True)
+    assert collect_samples(plan.candidates(), plan.labels(), RecognizeHints()) == ([], [])
+
+
+def test_meta_holds_sample_ends_to_the_document_range() -> None:
+    """An absurd scale (a 10 m label on a 2 px span) still serializes: sample ends are held to +-1 000 000."""
+    plan = Plan()
+    plan.span((100, 100), (102, 100), 10000)
+    plan.span((100, 200), (102, 200), 10000, line="L2")
+    result, _ = solve(plan)
+    meta = to_scale_meta(result)
+    assert result.mm_per_px == pytest.approx(5000.0)
+    assert {s.b.x for s in meta.used_samples} == {510000}
+    plan.span((1500, 300), (1502, 300), 10000, line="L3")
+    assert max(s.b.x for s in to_scale_meta(solve(plan)[0]).used_samples) == 1_000_000
