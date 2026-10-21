@@ -24,6 +24,7 @@ against).
 
 import itertools
 import json
+import logging
 import math
 import time
 from collections.abc import Sequence
@@ -76,8 +77,9 @@ def _quad_box(quad: list[list[float]]) -> tuple[float, float, float, float]:
 
 
 def record_ocr(stem: str) -> Path:
-    """Run the real OCR stage (``run_ocr``: the annotation region, Task 14b) and write ``<stem>.ocr.json``,
-    with the region it read and its wall-clock seconds."""
+    """Run the real OCR stage (``run_ocr``: the annotation region, Task 14b) and write ``<stem>.ocr.json``
+    with the region it read. The wall-clock seconds are logged, not written: the fixture stays the same
+    on every re-record of the same tokens."""
     from app.ocr.engine import OcrEngine
     from app.pipeline.ocr_stage import run_ocr
 
@@ -102,10 +104,10 @@ def record_ocr(stem: str) -> Path:
     doc = {
         "page": [w, h],
         "read_region": [read.x, read.y, read.w, read.h],
-        "seconds": round(seconds, 1),
         "tokens": rows,
     }
     path.write_text(json.dumps(doc, indent=1) + "\n")
+    logging.getLogger(__name__).info("record_ocr %s: %.1f s, %d tokens", stem, seconds, len(rows))
     return path
 
 
@@ -477,6 +479,10 @@ class DimMetrics:
     label_recall: float  # labelled intervals of matched lines whose token is associated with that span
     missed_intervals: list[str]  # "<line id>#<k>"
     missed_labels: list[str]
+    tick_recall: float = 0.0  # traced ticks of matched lines with a detected tick within 0.005 L
+    tick_precision: float = 0.0  # ticks of detected lines on traced lines within 0.005 L of a traced tick
+    missed_ticks: list[str] = field(default_factory=list)  # "<traced line id>@<k>"
+    false_ticks: list[str] = field(default_factory=list)  # "<detected line id>@<u px>"
 
 
 def _label_token(tokens: Sequence[TextToken], value: int, a: np.ndarray, b: np.ndarray) -> TextToken | None:
@@ -533,6 +539,29 @@ def dim_metrics(
                 hit_lab += 1
             else:
                 missed_lab.append(f"{t.id}#{k}:{label}")
+    # Ticks: of each matched traced line against the ticks of the detected lines matching it, and of each
+    # detected line lying on traced lines against the ticks of the traced lines it lies on.
+    by_id = {ln.id: ln for ln in lines}
+    missed_ticks: list[str] = []
+    n_truth_ticks = 0
+    for t in truths:
+        if not matched_by[t.id]:
+            continue
+        found_pts = [p for lid in matched_by[t.id] for p in _tick_points(by_id[lid])]
+        for k, tick in enumerate(t.ticks):
+            n_truth_ticks += 1
+            if not any(math.dist(tick, p) <= tol for p in found_pts):
+                missed_ticks.append(f"{t.id}@{k}")
+    false_ticks: list[str] = []
+    n_found_ticks = 0
+    for ln in lines:
+        if ln.id in false_lines:
+            continue
+        traced = [tick for t in truths if ln.id in matched_by[t.id] or _on_truth(ln, t) for tick in t.ticks]
+        for u, p in zip(ln.tick_positions, _tick_points(ln), strict=True):
+            n_found_ticks += 1
+            if not any(math.dist(p, tick) <= tol for tick in traced):
+                false_ticks.append(f"{ln.id}@{round(u)}")
     return DimMetrics(
         recall=sum(bool(v) for v in matched_by.values()) / len(truths) if truths else 0.0,
         precision=1.0 - len(false_lines) / len(lines) if lines else 1.0,
@@ -542,7 +571,34 @@ def dim_metrics(
         label_recall=hit_lab / n_lab if n_lab else 0.0,
         missed_intervals=missed_int,
         missed_labels=missed_lab,
+        tick_recall=1.0 - len(missed_ticks) / n_truth_ticks if n_truth_ticks else 0.0,
+        tick_precision=1.0 - len(false_ticks) / n_found_ticks if n_found_ticks else 1.0,
+        missed_ticks=missed_ticks,
+        false_ticks=false_ticks,
     )
+
+
+def _tick_points(line: DimensionLine) -> list[tuple[float, float]]:
+    ux, uy = line.p1[0] - line.p0[0], line.p1[1] - line.p0[1]
+    n = math.hypot(ux, uy)
+    return [(line.p0[0] + ux / n * u, line.p0[1] + uy / n * u) for u in line.tick_positions]
+
+
+def _on_truth(line: DimensionLine, truth: TruthDim) -> bool:
+    """At least a fifth of the detected line lies within 4 px of the traced line, parallel within 2 deg."""
+    if _angle_diff(truth.angle, _line_angle(line)) > DIM_MATCH_DEG:
+        return False
+    d = _dist_to_segments(_samples(line.p0, line.p1), truth.points[:-1], truth.points[1:]).min(axis=1)
+    return float((d <= DIM_MATCH_PX).mean()) >= 0.2
+
+
+def label_span(result: ChainResult, text: str) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """The span the token reading ``text`` (the first one) is associated with, or None."""
+    spans = find_dimension_spans(result.dims, result.ocr.tokens, result.pre.region)
+    association = associate_dimension_texts(spans, result.ocr.tokens)
+    token = next((t for t in result.ocr.tokens if t.text == text), None)
+    span = next((s for s in spans if token is not None and s.id == association.get(token.id)), None)
+    return None if span is None else (span.p0, span.p1)
 
 
 def chain_dim_metrics(result: ChainResult) -> DimMetrics:

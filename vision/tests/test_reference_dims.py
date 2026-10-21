@@ -11,6 +11,8 @@ The brief's recall target is >= 0.80 of all 24 traced lines; four of them are Ta
 ``residual`` in the truth (rulings B2 and C5b) and still counted.
 """
 
+import math
+
 import numpy as np
 import pytest
 
@@ -21,6 +23,7 @@ from tests.support.reference import (
     _polyline_samples,
     chain_dim_metrics,
     dim_metrics,
+    label_span,
     load_dim_truth,
     load_truth,
     run_chain,
@@ -31,7 +34,7 @@ pytestmark = pytest.mark.reference
 
 OUTER_OVERALL = {"top-overall": 11000, "bottom-overall": 11100, "right-mid": 7600, "right-overall": 8900}
 # recall, precision, free ends after Task 16c (HDB against its corrected truth)
-WALL_FLOOR = {"hdb-3room": (0.892, 0.962, 9), "brochure-2bhk": (0.911, 0.865, 17)}
+WALL_FLOOR = {"hdb-3room": (0.892, 0.963, 9), "brochure-2bhk": (0.912, 0.865, 17)}
 
 
 @pytest.fixture(scope="module")
@@ -128,6 +131,27 @@ def test_hdb_spans_and_labels(chains: dict[str, ChainResult]) -> None:
     m = chain_dim_metrics(chains["hdb-3room"])
     assert m.interval_recall >= 0.80, m.missed_intervals
     assert m.label_recall >= 0.80, m.missed_labels
+
+
+def test_hdb_tick_positions(chains: dict[str, ChainResult]) -> None:
+    """Review M1: on matched lines, >= 85 % of the traced ticks have a detected tick within 0.5 % L, and
+    >= 90 % of the detected lines' ticks lie within 0.5 % L of a traced tick."""
+    m = chain_dim_metrics(chains["hdb-3room"])
+    assert m.tick_recall >= 0.85, m.missed_ticks
+    assert m.tick_precision >= 0.90, m.false_ticks
+
+
+def test_hdb_overall_label_goes_to_the_overall_line(chains: dict[str, ChainResult]) -> None:
+    """Review M1: the "11000" label is associated with a span within 0.5 % L of the 11000 line's ticks (not
+    the top chain's overall span of the same extent)."""
+    r = chains["hdb-3room"]
+    span = label_span(r, "11000")
+    assert span is not None
+    truth = next(t for t in load_dim_truth("hdb-3room", r.page) if t.id == "top-overall")
+    tol = 0.005 * r.pre.region.long_side
+    ends = sorted([span[0], span[1]])
+    ticks = sorted(map(tuple, truth.ticks))
+    assert all(math.dist(a, b) <= tol for a, b in zip(ends, ticks, strict=True)), (span, ticks)
 
 
 def test_brochure_has_no_dimension_lines(chains: dict[str, ChainResult]) -> None:

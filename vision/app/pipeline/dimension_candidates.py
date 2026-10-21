@@ -23,6 +23,7 @@ GAP_CONTRAST = 8.0  # ... darker than the paper 5-8 px beside it by this many gr
 PAPER_NEAR_PX, PAPER_FAR_PX = 5, 8
 CHAIN_TEXT_MARGIN_PX = 3.0  # ... or under a text box grown by this margin
 CHAIN_DARKNESS_RATIO = 1.6  # pieces of one line are drawn with one pen: ink darkness within 1.6x
+END_REACH_FRAC = 0.02  # ... and on, faintly, to a crossing stroke within 0.02 L
 EXTEND_GAP_PX = 4  # a chain's ends run on (alone: not into a wall) through gaps of up to 4 px
 # A line paired like a double-line wall face is no dimension line (the walls stage's pair rules, 06 §8.1
 # step 3 with ruling R6): both lines >= 0.03 L, parallel within 2 degrees, 1.5 t_thin ... 0.02 L apart,
@@ -144,7 +145,7 @@ def candidate_lines(
     when they are drawn alike (with a gray image: ink darkness within 1.6x), parallel within 2 degrees,
     the ends facing each other lie within ``max(3 px, the wider stroke)`` of the other piece's line, and
     they overlap or the gap between them is at most ``0.06 L`` and runs on in the image
-    (`_Evidence.covered`; with no evidence at all, at most ``END_SLACK_PX``). A chain is the straight
+    (`Evidence.covered`; with no evidence at all, at most ``END_SLACK_PX``). A chain is the straight
     least-squares line through its pieces' ends, from the first to the last projection, with the
     length-weighted mean width and the id of its longest piece; with a gray image its ends then run on
     while the line does (`_extend_ends`).
@@ -195,16 +196,18 @@ def candidate_lines(
             thin[members[0]] if len(members) == 1 else _fit_chain(thin, members, p0, p1, length, unit, width)
         )
         if evidence.gray is not None:
-            line = _extend_ends(line, evidence, max_gap)
+            line = _extend_ends(line, evidence, max_gap, long_side)
         out.append((line, members))
     return out
 
 
-def _extend_ends(line: Segment, evidence: Evidence, reach: float) -> Segment:
+def _extend_ends(line: Segment, evidence: Evidence, reach: float, long_side: float) -> Segment:
     """``line`` lengthened at each end while it runs on alone in the image, with the same pen
-    (`_Evidence.hits` with ``alone``; gaps of up to `EXTEND_GAP_PX`), by at most ``reach``: the last pieces
+    (`Evidence.hits` with ``alone``; gaps of up to `EXTEND_GAP_PX`), by at most ``reach``: the last pieces
     of a faint line, or of one cut under its label, can be missing from the segments altogether. It stops
-    at a wall or a crossing stroke wider than the gap allowance and at a fainter line running on."""
+    at a wall or a crossing stroke wider than the gap allowance and at a fainter line running on; from
+    there it may still run on to a crossing stroke close by (`_run_to_crossing`): the end of a faint line
+    fading towards its last extension line."""
     ux, uy, _ = unit(line.p0, line.p1)
     u = np.array((ux, uy))
     normal = np.array((-uy, ux))
@@ -224,9 +227,48 @@ def _extend_ends(line: Segment, evidence: Evidence, reach: float) -> Segment:
                 gap += 1
                 if gap > EXTEND_GAP_PX:
                     break
+        thin_px = THICK_FACTOR * line.width_px + THICK_MARGIN_PX
+        last += _run_to_crossing(evidence, end + last * out, out, normal, END_REACH_FRAC * long_side, thin_px)
         new.append(end + last * out)
     (ax, ay), (bx, by) = new
     return Segment(line.id, (float(ax), float(ay)), (float(bx), float(by)), line.width_px, True, line.source)
+
+
+def _run_to_crossing(
+    evidence: Evidence, start: np.ndarray, out: np.ndarray, normal: np.ndarray, reach: float, thin_px: float
+) -> float:
+    """How far (px) a line ending at ``start`` runs on, faintly, to a stroke crossing it: within ``reach``
+    the gray image shows a line darker than the paper beside it (`GAP_CONTRAST`, gaps of up to
+    `EXTEND_GAP_PX`) up to a point whose ink runs across the line on both sides (5-8 px out), a stroke at
+    most ``thin_px`` wide along the line (not a wall); the line then ends 2 px past that crossing. 0 without
+    such a crossing (or without a gray image and ink)."""
+    if evidence.gray is None or evidence.ink is None or reach < 1.0:
+        return 0.0
+    steps = np.arange(1.0, reach + 1.0)
+    pts = start + steps[:, None] * out
+    across = np.arange(-CHAIN_ACROSS_PX, CHAIN_ACROSS_PX + 1, dtype=np.float64)
+    line = _sample_rows(evidence.gray, pts, normal, across).min(axis=1).astype(np.float64)
+    near = np.arange(PAPER_NEAR_PX, PAPER_FAR_PX + 1, dtype=np.float64)
+    paper = np.maximum(
+        _sample_rows(evidence.gray, pts, normal, near).max(axis=1),
+        _sample_rows(evidence.gray, pts, normal, -near).max(axis=1),
+    ).astype(np.float64)
+    shows = paper - line >= GAP_CONTRAST
+    above = (_sample_rows(evidence.ink, pts, normal, near) > 0).any(axis=1)
+    below = (_sample_rows(evidence.ink, pts, normal, -near) > 0).any(axis=1)
+    crossing = above & below & (_sample_rows(evidence.ink, pts, normal, across) > 0).any(axis=1)
+    gap = 0
+    for k in range(len(steps)):
+        if crossing[k]:
+            run = int(np.argmin(np.append(crossing[k:], False)))  # the crossing stroke's width along the line
+            return float(steps[k]) + 2.0 if run <= thin_px else 0.0  # a wall is no extension line
+        if shows[k]:
+            gap = 0
+        else:
+            gap += 1
+            if gap > EXTEND_GAP_PX:
+                break
+    return 0.0
 
 
 def _darkness(gray: np.ndarray, p0: np.ndarray, p1: np.ndarray, unit: np.ndarray) -> np.ndarray:

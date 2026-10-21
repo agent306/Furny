@@ -75,7 +75,8 @@ def annotation_region(region: Rect, w: int, h: int) -> Rect:
     side, clamped to the `w` x `h` page. Outer dimension chains and their overall lines are drawn up to
     ~0.15 L beyond the walls, past the plan region's 6 % margin. The OCR and segment stages read this
     region and the dimension stage uses all of it; walls, rooms and every other stage keep the plan region
-    (they select their segments and tokens inside it, see `segments.in_region` and `ocr_stage.in_region`).
+    (they get `segments.detect_segments`, the plan region's own segments, and select their tokens with
+    `ocr_stage.in_region`; `segments.detect_annotation_segments` adds the rest for the dimension stage).
     """
     region = region.clip(w, h)
     if region.w <= 0 or region.h <= 0:

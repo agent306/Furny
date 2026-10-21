@@ -5,6 +5,7 @@ Split out of `dimensions.py` (Task 14b); `find_dimension_lines` there is the sta
 """
 
 import bisect
+import itertools
 import math
 from collections.abc import Callable, Sequence
 
@@ -30,6 +31,8 @@ TICK_DEDUPE_PX = 4.0  # ticks closer than this along the line are one tick
 MARK, BAR, THROUGH, WALL = "mark", "bar", "through", "wall"
 MARK_REACH_PX, MARK_REACH_FRAC = 4.0, 0.01  # a mark widens a stroke within max(4 px, 0.01 L) of the line ...
 MARK_EXCESS_PX = 3.0  # ... by at least 3 px
+FACE_PAIR_MIN_THIN, FACE_PAIR_MAX_FRAC = 1.5, 0.02  # two bare strokes this far apart are a jamb's faces
+END_EXTRA_FRAC = 0.015  # a bare stroke this close beyond the outermost mark is the wall the line runs into
 # Ink bands (raster pages).
 BAND_MARGIN_PX = 6  # band half-height is ceil(0.015 L) + this
 THICK_FACTOR = 2.5  # a stroke wider than 2.5 line widths + 2 px is a wall, not a tick
@@ -207,13 +210,7 @@ def ink_ticks(
         _draw_pieces(inked, line, pieces, radius, slack)
     cols = inked.shape[1]
     run = min(math.ceil(hi) + 1, cols) | 1  # odd: OpenCV's even-sized kernels are off by one at run ends
-    opened = np.zeros_like(inked)  # the long horizontal runs
-    long_rows = np.flatnonzero(inked.sum(axis=1) >= run)  # only these rows can hold a run that long
-    if long_rows.size:
-        opened[long_rows] = (
-            cv2.morphologyEx(inked[long_rows].astype(np.uint8), cv2.MORPH_OPEN, np.ones((1, run), np.uint8))
-            > 0
-        )
+    opened = _long_runs(inked, run)  # the long horizontal runs
     cleared = opened.copy()
     cleared[1:] |= opened[:-1]  # a pixel of margin above and below
     cleared[:-1] |= opened[1:]
@@ -457,23 +454,56 @@ def _carries_mark(member: np.ndarray, u: np.ndarray, v: np.ndarray, zone: int, r
     return int(np.count_nonzero(width[near] >= float(np.median(width[far])) + MARK_EXCESS_PX)) >= 2
 
 
+def _long_runs(inked: np.ndarray, run: int) -> np.ndarray:
+    """The horizontal ink runs of a band at least `run` (odd) px long."""
+    opened = np.zeros_like(inked)
+    long_rows = np.flatnonzero(inked.sum(axis=1) >= run)  # only these rows can hold a run that long
+    if long_rows.size:
+        opened[long_rows] = (
+            cv2.morphologyEx(inked[long_rows].astype(np.uint8), cv2.MORPH_OPEN, np.ones((1, run), np.uint8))
+            > 0
+        )
+    return opened
+
+
 def _draw_pieces(
     inked: np.ndarray, line: Segment, pieces: Sequence[tuple[Pt, Pt]], radius: int, slack: int
 ) -> None:
-    """Draw the line's own pieces, joined end to end and run on to the line's ends, into its band (in
-    place), as wide as the line: a faint line that the ink threshold broke up (its pieces chained by the
-    gray image) is whole again, so the strokes crossing it are split into their halves at it and not joined
-    into one blob through their ticks."""
+    """Draw the line's centre into its band (in place), as wide as the line: at each column the mean offset
+    of the pieces covering it, interpolated across the gaps between them and held to the line's ends. A
+    faint line that the ink threshold broke up (its pieces chained by the gray image) is whole again, so the
+    strokes crossing it are split into their halves at it and not joined into one blob through their ticks.
+    One centre stroke, not each piece: overlapping copies of one stroke (its two LSD edges, a few px apart)
+    would thicken the line into bumps that read as blob ticks."""
     ux, uy, length = unit(line.p0, line.p1)
-    pts = [(float(slack), float(radius)), (length + slack, float(radius))]
+    cols = inked.shape[1]
+    total = np.zeros(cols)
+    count = np.zeros(cols)
+    column = np.arange(cols, dtype=np.float64)
     for a, b in pieces:
-        for p in (a, b):
-            rx, ry = p[0] - line.p0[0], p[1] - line.p0[1]
-            pts.append((rx * ux + ry * uy + slack, -rx * uy + ry * ux + radius))
-    pts.sort()
-    poly = np.round(np.array(pts) * 16).astype(np.int32)
+        (ua, va), (ub, vb) = (
+            (
+                (p[0] - line.p0[0]) * ux + (p[1] - line.p0[1]) * uy + slack,
+                -(p[0] - line.p0[0]) * uy + (p[1] - line.p0[1]) * ux,
+            )
+            for p in (a, b)
+        )
+        if ub < ua:
+            ua, va, ub, vb = ub, vb, ua, va
+        on = (column >= ua) & (column <= ub)
+        t = (column[on] - ua) / max(ub - ua, 1e-9)
+        total[on] += va + t * (vb - va)
+        count[on] += 1
+    covered = count > 0
+    if not covered.any():
+        return
+    offset = np.interp(column, column[covered], total[covered] / count[covered])
+    span = (column >= slack) & (column <= length + slack)
+    pts = np.stack([column[span], offset[span] + radius], axis=1)[::4]
     mask = np.zeros(inked.shape, np.uint8)
-    cv2.polylines(mask, [poly], False, 1, max(1, round(line.width_px)), cv2.LINE_8, 4)
+    cv2.polylines(
+        mask, [np.round(pts * 16).astype(np.int32)], False, 1, max(1, round(line.width_px)), cv2.LINE_8, 4
+    )
     inked |= mask > 0
 
 
@@ -613,15 +643,58 @@ def dedupe_ticks(positions: Sequence[float], gap: float) -> list[float]:
     return _cluster(np.array(sorted(positions)), gap)
 
 
-def styled_ticks(marks: Sequence[tuple[float, str]], gap: float) -> list[tuple[float, bool]]:
-    """Ticks from the marks of all sources, each with whether it carries a terminator mark: marks within
-    ``gap`` (``max(4, 2 line widths)``) are one tick. A line drawn with terminator marks (slashes,
-    arrowheads or dots; at least two ticks of those and of walls the line ends at, one of them a mark) takes
-    a stroke running through it on both sides as a tick only where it carries such a mark: a crossing door
-    jamb, partition face or other dimension line is no tick of it (Task 14b; the fix2 design counts every
-    through stroke, which stays right for lines whose ticks are bare extension lines)."""
-    styled = dedupe_ticks([u for u, kind in marks if kind == MARK], gap)
-    ends = dedupe_ticks([u for u, kind in marks if kind in (MARK, WALL)], gap)
-    if styled and len(ends) >= 2:
-        marks = [(u, kind) for u, kind in marks if kind != THROUGH or any(abs(u - m) <= gap for m in styled)]
-    return [(t, any(abs(t - m) <= gap for m in styled)) for t in dedupe_ticks([u for u, _ in marks], gap)]
+def styled_ticks(
+    marks: Sequence[tuple[float, str]],
+    gap: float,
+    ink_marks: Sequence[tuple[float, str]] = (),
+    long_side: float = 0.0,
+    t_thin: float = 0.0,
+) -> list[tuple[float, bool]]:
+    """Ticks from the marks of all sources (``marks`` from the segments, ``ink_marks`` from the ink), each
+    with whether it carries a terminator mark: marks within ``gap`` (``max(4, 2 line widths)``) are one tick.
+
+    A line drawn with terminator marks (slashes, arrowheads or dots; at least two ticks of those and of walls
+    the line ends at, one of them a mark) keeps only the strokes that look like its ticks (Task 14b; the
+    fix2 design counts every perpendicular stroke, which stays right for lines whose ticks are bare
+    extension lines):
+    - a stroke running through it on both sides counts only where it carries such a mark: a crossing door
+      jamb, partition face or other dimension line is no tick;
+    - a perpendicular segment counts only where the ink shows a tick other than a through stroke (LSD
+      reports door jambs and leaves the ink sees as no tick);
+    - two bare strokes ``1.5 t_thin .. 0.02 L`` apart, neither near a mark, are the two faces of a door jamb
+      or partition, no ticks;
+    - a bare stroke or wall beyond the outermost mark, within ``3 x 0.005 L`` of it, is the wall or face
+      line the line runs into past its end tick.
+    """
+    every = [*marks, *ink_marks]
+    styled = dedupe_ticks([u for u, kind in every if kind == MARK], gap)
+    ends = dedupe_ticks([u for u, kind in every if kind in (MARK, WALL)], gap)
+    if not (styled and len(ends) >= 2):
+        return [(t, False) for t in dedupe_ticks([u for u, _ in every], gap)]
+
+    def near_mark(u: float) -> bool:
+        return any(abs(u - m) <= gap for m in styled)
+
+    seen = [u for u, kind in ink_marks if kind != THROUGH]
+    kept = [(u, kind) for u, kind in ink_marks if kind != THROUGH or near_mark(u)]
+    kept += [
+        (u, kind) for u, kind in marks if kind == MARK or near_mark(u) or any(abs(u - w) <= gap for w in seen)
+    ]
+    if long_side > 0.0:
+        bare = sorted(u for u, kind in kept if not near_mark(u) and kind != WALL)
+        d_min, d_max = FACE_PAIR_MIN_THIN * t_thin, FACE_PAIR_MAX_FRAC * long_side
+        jambs = {a for a, b in itertools.pairwise(bare) if d_min <= b - a <= d_max}
+        jambs |= {b for a, b in itertools.pairwise(bare) if d_min <= b - a <= d_max}
+        beyond = END_EXTRA_FRAC * long_side
+        first, last = min(styled), max(styled)
+        kept = [
+            (u, kind)
+            for u, kind in kept
+            if near_mark(u)
+            or (
+                u not in jambs
+                and not (first - beyond <= u < first - gap)
+                and not (last + gap < u <= last + beyond)
+            )
+        ]
+    return [(t, near_mark(t)) for t in dedupe_ticks([u for u, _ in kept], gap)]

@@ -15,6 +15,7 @@ it stands on) and, on lines drawn with terminator marks, strokes that merely run
 Pages without ink (vector pages) keep the Task 14 rules unchanged.
 """
 
+import bisect
 import itertools
 import math
 from collections.abc import Callable, Sequence
@@ -41,7 +42,12 @@ __all__ = ["associate_dimension_texts", "find_dimension_lines", "find_dimension_
 NUMERIC_KINDS = frozenset({"mm_number", "metric_length", "feet_inch"})
 MIN_LINE_FRAC = 0.04  # a dimension line is at least this long (fraction of the plan region's long side L)
 TEXT_REACH = 2.5  # a label lies within this many text heights of the line
+ASSOC_TIE_FRAC = 0.01  # spans whose midpoints lie this share of their length closer tie (step 5)
 OWNER_TIE_PX = 3.0  # lines this much farther from a label than the nearest one share it
+STACK_REACH = 2.0  # lines on both sides of a label within 2 text heights contest it (stacked chains)
+SCALE_MIN_SAMPLES = 3  # uncontested labels needed for a scale estimate ...
+SCALE_FIT = 0.15  # ... a contested label fits an interval within this log ratio of it ...
+SCALE_MARGIN = 0.05  # ... and clearly better than the next interval by this much
 AXIS_TOL_DEG = 10.0  # x / y axis and text-orientation tolerance
 CROSS_TOL_DEG = 30.0  # another dimension line crossing within 90 +- 30 degrees takes no unmarked tick
 
@@ -64,6 +70,7 @@ class _Labels:
         self.height = np.array([t.height_px for t in tokens], np.float64)
         self.reach = TEXT_REACH * self.height
         self.angle = np.array([t.angle for t in tokens], np.int64)
+        self.value = np.array([float(t.parsed.mm or 0) for t in tokens], np.float64)
 
     def __len__(self) -> int:
         return len(self.x)
@@ -87,32 +94,105 @@ class _Labels:
         step 3's orientation rule; any angle beside a line on neither axis)."""
         return bool(np.any(self._near(line, oriented)[0]))
 
-    def owners(self, lines: Sequence[Segment]) -> set[int]:
-        """Indices of the ``lines`` that some label (oriented, see `beside`) belongs to.
+    def owners(self, lines: Sequence[Segment], ticks: Sequence[Sequence[tuple[float, bool]]]) -> set[int]:
+        """Indices of the ``lines`` (with their ``ticks``: u, marked) that some label belongs to.
 
-        A label belongs to the nearest line (across, from its centre) among those it is beside on its
-        baseline side, and to every line within `OWNER_TIE_PX` of that (collinear copies of one line); only
-        when no line is there, to the nearest on the other side. Dimension text stands on its line: below
-        horizontal text, right of text reading upwards (06 §7.7 angle 90). So an extension line, a face
-        line or a stacked chain next to a dimension line does not borrow its label."""
-        if not lines:
+        A label (oriented, see `beside`) belongs to the nearest line across, on either side (06 §8.4 step 1
+        names no side), and to the lines within `OWNER_TIE_PX` of that distance on the same side (collinear
+        copies of one line). Stacked lines contest it: lines on the other side of the label within
+        `STACK_REACH` text heights. Among the contenders (and the nearest), in this order:
+        1. the lines whose consecutive ticks bracket the label's projection;
+        2. with a scale estimate (the median mm per px of the uncontested labels in a bracketing interval,
+           from at least `SCALE_MIN_SAMPLES` of them), the line whose bracketing interval matches the label's
+           value best, when it fits within `SCALE_FIT` (log ratio) and clearly (by `SCALE_MARGIN`) better
+           than the next;
+        3. the lines with the most terminator marks on the two ticks bracketing the label (a dimension line
+           carries the marks; an extension-crossed line beside it has bare crossings);
+        4. the lines that own no uncontested label (each dimension line has a label of its own);
+        5. the nearest.
+        A line owning no label is no dimension line, so an extension line, a face line or a stacked chain next
+        to a dimension line does not borrow its label (Task 14b fix round 1, replacing the baseline side)."""
+        n_lines, n_labels = len(lines), len(self)
+        if not n_lines:
             return set()
-        base = np.full((len(lines), len(self)), np.inf)
-        other = np.full((len(lines), len(self)), np.inf)
+        across = np.full((n_lines, n_labels), np.nan)
+        along = np.full((n_lines, n_labels), np.nan)
         for k, line in enumerate(lines):
-            near, across, ux, uy = self._near(line, True)
-            # The foot of the label centre on the line: below it (angle 0) or right of it (angle 90) is the
-            # baseline side.
-            foot_x = self.x + across * uy
-            foot_y = self.y - across * ux
-            on_base = np.where(self.angle == 90, foot_x > self.x, foot_y > self.y)
-            dist = np.abs(across)
-            base[k, near & on_base] = dist[near & on_base]
-            other[k, near & ~on_base] = dist[near & ~on_base]
-        gaps = np.where(np.isfinite(base).any(axis=0)[None, :], base, other)
-        best = gaps.min(axis=0)
-        owns = np.isfinite(gaps) & (gaps <= best[None, :] + OWNER_TIE_PX)
-        return {int(k) for k in np.flatnonzero(owns.any(axis=1))}
+            near, acr, ux, uy = self._near(line, True)
+            rx, ry = self.x - line.p0[0], self.y - line.p0[1]
+            across[k, near] = acr[near]
+            along[k, near] = (rx * ux + ry * uy)[near]
+        positions = [sorted(u for u, _ in t) for t in ticks]
+
+        def bracket(k: int, j: int) -> tuple[float, float] | None:
+            pos = positions[k]
+            i = bisect.bisect_right(pos, along[k, j])
+            return (pos[i - 1], pos[i]) if 0 < i < len(pos) else None
+
+        def end_marks(k: int, j: int) -> int:
+            """Terminator-marked ticks among the two bracketing the label's projection on line ``k``."""
+            iv = bracket(k, j)
+            if iv is None:
+                return 0
+            return sum(1 for u, m in ticks[k] if m and u in iv)
+
+        def contenders(j: int) -> tuple[int, list[int]]:
+            near = np.flatnonzero(~np.isnan(across[:, j]))
+            if not near.size:
+                return -1, []
+            dist = np.abs(across[near, j])
+            nearest = int(near[np.argmin(dist)])
+            side = np.sign(across[nearest, j])
+            rival = [
+                int(k)
+                for k in near
+                if np.sign(across[k, j]) != side and abs(across[k, j]) <= STACK_REACH * self.height[j]
+            ]
+            if abs(across[nearest, j]) > STACK_REACH * self.height[j]:
+                rival = []
+            return nearest, [nearest, *rival]
+
+        contest = [contenders(j) for j in range(n_labels)]
+        owned_alone: set[int] = {c[0] for c in contest if len(c[1]) == 1}
+        samples = []
+        for j, (nearest, cands) in enumerate(contest):
+            interval = bracket(nearest, j) if len(cands) == 1 else None
+            if interval is not None and self.value[j] > 0 and interval[1] > interval[0]:
+                samples.append(self.value[j] / (interval[1] - interval[0]))
+        scale = float(np.median(samples)) if len(samples) >= SCALE_MIN_SAMPLES else None
+
+        owners: set[int] = set()
+        for j, (nearest, cands) in enumerate(contest):
+            if nearest < 0:
+                continue
+            pool = cands
+            if len(pool) > 1:
+                bracketed = [k for k in pool if bracket(k, j) is not None]
+                pool = bracketed or pool
+            if len(pool) > 1 and scale is not None and self.value[j] > 0:
+                misfit = {}
+                for k in pool:
+                    iv = bracket(k, j)
+                    if iv is not None:
+                        misfit[k] = abs(math.log(self.value[j] / (scale * max(iv[1] - iv[0], 1e-9))))
+                if misfit:
+                    ranked = sorted(misfit, key=lambda k: misfit[k])
+                    clear = len(ranked) == 1 or misfit[ranked[1]] - misfit[ranked[0]] >= SCALE_MARGIN
+                    if misfit[ranked[0]] <= SCALE_FIT and clear:
+                        pool = [ranked[0]]
+            if len(pool) > 1:
+                marked = {k: end_marks(k, j) for k in pool}
+                most = max(marked.values())
+                pool = [k for k in pool if marked[k] == most]
+            if len(pool) > 1:
+                pool = [k for k in pool if k not in owned_alone] or pool
+            winner = min(pool, key=lambda k: abs(across[k, j]))
+            side = np.sign(across[winner, j])
+            d = abs(across[winner, j])
+            for other in np.flatnonzero(~np.isnan(across[:, j])).tolist():
+                if np.sign(across[other, j]) == side and abs(across[other, j]) <= d + OWNER_TIE_PX:
+                    owners.add(int(other))
+        return owners
 
 
 # --- dimension lines ----------------------------------------------------------------------------------
@@ -207,6 +287,7 @@ def _raster_lines(
     p1 = np.array([s.p1 for s in thin], np.float64).reshape(-1, 2)
     boxes = np.array([t.box for t in tokens], np.float64).reshape(-1, 4)
     chains = candidate_lines(thin, Evidence(ink, gray, boxes), long_side, check_deadline)
+    width = float(np.median([s.width_px for s in thin])) if t_thin is None else t_thin
     found: list[tuple[Segment, list[tuple[float, bool]]]] = []
     for cand, members in chains:
         if check_deadline is not None:
@@ -217,18 +298,17 @@ def _raster_lines(
         # A line chained from pieces or run on beyond its piece is drawn into its band (`_draw_pieces`).
         pieces = [(thin[k].p0, thin[k].p1) for k in members]
         whole = len(members) == 1 and cand.length <= thin[members[0]].length + 1.0
-        marks += ink_ticks(cand, ink, long_side, check_deadline, [] if whole else pieces)
-        ticks = styled_ticks(marks, max(TICK_DEDUPE_PX, 2.0 * cand.width_px))
+        from_ink = ink_ticks(cand, ink, long_side, check_deadline, [] if whole else pieces)
+        ticks = styled_ticks(marks, max(TICK_DEDUPE_PX, 2.0 * cand.width_px), from_ink, long_side, width)
         if len(ticks) >= 2:
             found.append((cand, ticks))
     if not found:
         return []
-    width = float(np.median([s.width_px for s in thin])) if t_thin is None else t_thin
     partners = [c for c, _ in chains] + [s for s in segments if not s.is_thin and s.length > 0]
     centres = np.array([_centre(t) for t in tokens], np.float64).reshape(-1, 2)
     faces = wall_faces(found, partners, ink, centres, width, long_side, float(np.median(labels.height)))
     found = [f for k, f in enumerate(found) if k not in faces]
-    owners = labels.owners([c for c, _ in found])
+    owners = labels.owners([c for c, _ in found], [t for _, t in found])
     found = [f for k, f in enumerate(found) if k in owners]
     found = [(c, t) for c, t in _drop_crossings(found) if len(t) >= 2]
     # The best-supported stroke of a duplicate wins: most terminator marks, then most ticks, then longest.
@@ -362,18 +442,31 @@ def associate_dimension_texts(spans: Sequence[DimensionSpan], tokens: Sequence[T
     """Heuristic text -> span association (06 §8.4 step 5), text id -> span id.
 
     Each numeric token is assigned to the span listing it whose midpoint is nearest to the token centre's
-    projection on the span; ties go to the shorter span. Tokens no span lists are left out.
+    projection on the span; ties go to the shorter span. Spans of (nearly) one extent on parallel lines (an
+    overall line and the chain beside it, both listing the overall label: length and midpoint distance
+    within `ASSOC_TIE_FRAC` of the span) go to the one on a line at least a text height nearer to the token
+    (Task 14b fix round 1; 06 names the shorter span only). Tokens no span lists are left out.
     """
     by_id = {t.id: t for t in _numeric(tokens)}
-    best: dict[str, tuple[float, float, int]] = {}
+    listed: dict[str, list[tuple[float, float, float, int]]] = {}
     for order, span in enumerate(spans):
         length = math.dist(span.p0, span.p1)
         for text_id in span.near_text_ids:
             token = by_id.get(text_id)
             if token is None:
                 continue
-            along, _ = along_and_across(span.p0, span.p1, _centre(token))
-            key = (round(abs(along - length / 2), 6), length, order)
-            if text_id not in best or key < best[text_id]:
-                best[text_id] = key
-    return {text_id: spans[key[2]].id for text_id, key in best.items()}
+            along, across = along_and_across(span.p0, span.p1, _centre(token))
+            listed.setdefault(text_id, []).append((abs(along - length / 2), abs(across), length, order))
+    out = {}
+    for text_id, options in listed.items():
+        first = min(options, key=lambda o: (round(o[0], 6), o[2], o[3]))
+        same = [  # spans of (nearly) the same extent as the first, on lines nearer to the token
+            o
+            for o in options
+            if abs(o[2] - first[2]) <= ASSOC_TIE_FRAC * first[2]
+            and abs(o[0] - first[0]) <= ASSOC_TIE_FRAC * first[2]
+            and o[1] <= first[1] - by_id[text_id].height_px  # a parallel line a text height nearer
+        ]
+        chosen = min(same, key=lambda o: (round(o[1], 6), o[3])) if same else first
+        out[text_id] = spans[chosen[3]].id
+    return out

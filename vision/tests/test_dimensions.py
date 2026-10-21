@@ -1338,3 +1338,152 @@ def test_single_character_token_on_a_tick_does_not_erase_it() -> None:
         notext = ink.copy()
         notext[text_mask(ink.shape, [label, misread]) > 0] = 0
         assert raster_ticks(line, [label, misread], notext) == [pytest.approx(expected, abs=3)], text
+
+
+# --- label ownership on either side of the line (Task 14b fix round 1, review I1) -----------------------
+
+
+def test_label_below_a_chain_is_not_taken_by_a_crossed_line_below_it() -> None:
+    """Labels written below a chain, a line 30 px under it crossed by short bars: the label is as near to
+    both; the chain, whose ticks carry slashes, owns it, and the crossed line is no dimension line."""
+    for phase in PHASES:
+        y = phase_y(phase)
+        ink = plan()
+        slashed_line(ink, 299, 1201, TICKS, y)
+        stroke(ink, (299, y + 30), (1201, y + 30), 2)
+        for x in TICKS:
+            stroke(ink, (x, y - 150), (x, y + 8), 2)  # extension lines from a plan above
+            stroke(ink, (x, y + 22), (x, y + 38), 2)  # bars crossing the lower line
+        off = JITTER[phase]
+        segments = [
+            seg("S1", (299, y + off), (1201, y + off)),
+            seg("S2", (299, y + 30 + off), (1201, y + 30 + off)),
+        ]
+        label = [tok("T1", "9000", 525, y + 15, height=16)]
+        found = find_dimension_lines(segments, label, REGION, ink=ink, t_thin=2.0)
+        assert [round(ln.p0[1] - off) for ln in found] == [y], phase
+
+
+def stacked_chain_case(gap: int, phase: int, below: bool, vertical: bool) -> tuple[list[float], list[float]]:
+    """Two stacked slash-ticked chains `gap` px apart with extension lines from the plan running through the
+    inner one to 8 px past the outer one; two labels on the inner chain's intervals and one on the outer
+    chain, written on the side `below` (right of a vertical line) or above (left). Returns the expected and
+    found line offsets across (y of horizontal lines, x of vertical ones)."""
+    base = 600 + phase if vertical else phase_y(phase)
+    sign = 1 if below else -1  # the outer chain lies on the labels' side: away from the plan
+    inner, outer = base, base + sign * gap
+    plan_side = inner - sign * 50
+    size = (1600, 1600) if vertical else (700, 2400)
+    ink = plan(size)
+    along = [200, 700, 1200] if vertical else [300, 900, 1500]
+    lo, hi = along[0] - 1, along[-1] + 1
+
+    def pt(a: float, c: float) -> tuple[float, float]:
+        return (c, a) if vertical else (a, c)
+
+    for c in (inner, outer):
+        stroke(ink, pt(lo, c), pt(hi, c), 2)
+    for a in along:
+        stroke(ink, pt(a, plan_side), pt(a, outer + sign * 8), 2)
+        for c in (inner, outer):
+            stroke(ink, *polar(pt(a, c), 45, 17), 2)
+    off = JITTER[phase]
+    segments = [
+        seg("S1", pt(lo, inner + off), pt(hi, inner + off)),
+        seg("S2", pt(lo, outer + off), pt(hi, outer + off)),
+    ]
+    angle = 90 if vertical else 0
+    mid = [(along[0] + along[1]) / 2, (along[1] + along[2]) / 2]
+    tokens = [
+        tok("T1", "6000", *pt(mid[0], inner + sign * 14), height=16, angle=angle),
+        tok("T2", "6000", *pt(mid[1], inner + sign * 14), height=16, angle=angle),
+        tok("T3", "12000", *pt(along[1], outer + sign * 14), height=16, angle=angle),
+    ]
+    region = Rect(0, 0, size[1], size[0])
+    lines = find_dimension_lines(segments, tokens, region, ink=ink, t_thin=2.0)
+    found = sorted(round((ln.p0[0] if vertical else ln.p0[1]) - off) for ln in lines)
+    return sorted([inner, outer]), found
+
+
+@pytest.mark.parametrize("gap", [30, 40, 50])
+@pytest.mark.parametrize("below", [True, False])
+def test_stacked_horizontal_chains_keep_their_labels_on_either_side(gap: int, below: bool) -> None:
+    """Review I1 (c1c and its control c1d): labels below (or above) each of two stacked chains; both chains
+    are dimension lines whichever side the text stands on."""
+    for phase in PHASES:
+        expected, found = stacked_chain_case(gap, phase, below, vertical=False)
+        assert found == expected, (gap, below, phase, found)
+
+
+@pytest.mark.parametrize("gap", [30, 40, 50])
+@pytest.mark.parametrize("right", [True, False])
+def test_stacked_vertical_chains_keep_their_labels_on_either_side(gap: int, right: bool) -> None:
+    """Review I1 (c2b and its control c2c): text reading upwards right (or left) of each of two stacked
+    vertical chains."""
+    for phase in PHASES:
+        expected, found = stacked_chain_case(gap, phase, right, vertical=True)
+        assert found == expected, (gap, right, phase, found)
+
+
+# --- tick accuracy (Task 14b fix round 1, review M1) ------------------------------------------------------
+
+
+def test_door_jamb_pair_is_no_tick_of_a_slash_ticked_line() -> None:
+    """Two bare strokes 6 px apart (a door jamb's faces) crossing a slash-ticked line are no ticks."""
+    for phase in PHASES:
+        y = phase_y(phase)
+        ink = plan()
+        slashed_line(ink, 299, 1201, TICKS, y)
+        for x in (500, 506):
+            stroke(ink, (x, y - 150), (x, y + 20), 2)
+        line = [seg("S1", (299, y + JITTER[phase]), (1201, y + JITTER[phase]))]
+        assert raster_ticks(line, [tok("T1", "9000", 650, y - 19)], ink) == [pytest.approx(TICKS, abs=3)], (
+            phase
+        )
+
+
+def test_bare_stroke_just_past_the_end_mark_is_no_tick() -> None:
+    """A slash-ticked line running on 14 px past its end tick into a face line: the face is no tick."""
+    for phase in PHASES:
+        y = phase_y(phase)
+        ink = plan()
+        slashed_line(ink, 299, 1215, TICKS, y)
+        stroke(ink, (1214, y - 150), (1214, y + 3), 2)  # the face line it runs into, from the plan side
+        line = [seg("S1", (299, y + JITTER[phase]), (1215, y + JITTER[phase]))]
+        assert raster_ticks(line, [tok("T1", "9000", 525, y - 19)], ink) == [pytest.approx(TICKS, abs=3)], (
+            phase
+        )
+
+
+def test_faint_end_runs_on_to_its_extension_line() -> None:
+    """A line fading out before its first extension line (the ink and the segment stop 30 px short; the gray
+    image shows it, too light for the same pen): it still reaches that tick."""
+    ink, faint = plan(), plan()
+    slashed_line(ink, 330, 1201, [750, 1200])
+    stroke(ink, (300, LINE_Y - 150), (300, LINE_Y + 8), 2)  # the extension line, with its slash
+    stroke(ink, *polar((300, LINE_Y), 45, 17), 2)
+    stroke(faint, (299, LINE_Y), (330, LINE_Y), 2)
+    gray = gray_of(ink)
+    gray[(faint > 0) & (ink == 0)] = 232
+    line = [seg("S1", (330, LINE_Y), (1201, LINE_Y))]
+    assert raster_ticks(line, [tok("T1", "9000", 525, LINE_Y - 19)], ink, gray) == [
+        pytest.approx(TICKS, abs=3)
+    ]
+
+
+def test_overall_label_goes_to_its_own_line_not_a_chain_of_the_same_extent() -> None:
+    """06 §8.4 step 5 with Task 14b's tie: an overall line 40 px below a chain of the same extent; the
+    overall label (under it), beside both, goes to the overall line's span (it is a text height nearer),
+    not to the chain's overall span, which comes first in id order."""
+    chain = chain_segments(TICK_X)
+    overall = [
+        seg("S9", (TICK_X[0] - 1.0, LINE_Y + 40), (TICK_X[-1] + 1.0, LINE_Y + 40)),
+        slash("S10", TICK_X[0], LINE_Y + 40),
+        slash("S11", TICK_X[-1], LINE_Y + 40),
+    ]
+    tokens = [*labels_over(TICK_X, ["9000", "9000"]), tok("T9", "18000", 1150, LINE_Y + 52)]
+    lines = find_dimension_lines([*chain, *overall], tokens, REGION)
+    spans = find_dimension_spans(lines, tokens, REGION)
+    assert sum("T9" in s.near_text_ids for s in spans if s.kind == "overall") == 2  # both overall spans
+    owner = {s.id: s for s in spans}[associate_dimension_texts(spans, tokens)["T9"]]
+    assert owner.p0[1] == pytest.approx(LINE_Y + 40) and owner.kind == "overall"

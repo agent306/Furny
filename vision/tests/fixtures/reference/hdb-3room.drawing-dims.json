@@ -12,7 +12,8 @@
   "additions": {
    "i400": "The vertical 400 at the AC ledge (src x ~799, y 133-184, ticks at y ~139 and ~176) is drawn with slash ticks and a label like every other dimension line but is not in the brief's list; traced as a dimension line."
   },
-  "residuals": "Task 34 residuals, still counted in recall (Task 14b rulings B2 and C5b), marked 'residual' on the line: 'text_mask' (i400, i600): no line segment, the labels' OCR boxes with the text-mask dilation cover the stroke, so LSD never sees it; 'faint_in_photo' (left-overall 7000, left 3300/2500/1000): the photo shows these strokes at gray 228-252 on paper 254 over long stretches (7000: source y ~210-330), with no segment and no contrast to chain them through."
+  "residuals": "Task 34 residuals, still counted in recall (Task 14b rulings B2 and C5b), marked 'residual' on the line: 'text_mask' (i400, i600): no line segment, the labels' OCR boxes with the text-mask dilation cover the stroke, so LSD never sees it; 'faint_in_photo' (left-overall 7000, left 3300/2500/1000): the photo shows these strokes at gray 228-252 on paper 254 over long stretches (7000: source y ~210-330), with no segment and no contrast to chain them through.",
+  "fixes": "Task 14b fix round 1 (review T1-T3): i3100-bed1's end and tick[1] moved onto the black wall's left face (source x ~640.5, the slash crosses there); bottom and bottom-overall: tick[0] on the extension line (x ~143.2 / ~142.6) and the ends at the stroke's own ends (x ~136.5 and ~1132.5)."
  },
  "units": "source_px",
  "lines": [
@@ -402,44 +403,44 @@
    "id": "bottom",
    "kind": "outer_chain",
    "p0": [
-    145.0,
+    136.5,
     960.2
    ],
    "p1": [
-    1126.0,
+    1132.6,
     969.2
    ],
    "points": [
     [
-     145.0,
-     962.4
+     136.5,
+     962.3
     ],
     [
-     390.3,
+     385.5,
      962.5
     ],
     [
-     635.5,
+     634.5,
      962.7
     ],
     [
-     880.7,
-     967.0
+     883.5,
+     967.2
     ],
     [
-     1126.0,
+     1132.5,
      971.7
     ]
    ],
    "ticks": [
-    0.6,
-    360.8,
-    369.6,
-    685.5,
-    694.2,
-    746.0,
-    907.4,
-    980.8
+    6.7,
+    369.3,
+    378.1,
+    694.0,
+    702.7,
+    754.5,
+    915.9,
+    989.3
    ],
    "labels": [
     4100,
@@ -453,18 +454,18 @@
    "profile_check": [
     {
      "at": 0.2,
-     "offset_px": 0.07,
-     "min_gray": 77
+     "offset_px": -0.23,
+     "min_gray": 66
     },
     {
      "at": 0.5,
      "offset_px": -0.12,
-     "min_gray": 42
+     "min_gray": 43
     },
     {
      "at": 0.8,
-     "offset_px": 0.38,
-     "min_gray": 42
+     "offset_px": 0.31,
+     "min_gray": 47
     }
    ]
   },
@@ -472,38 +473,38 @@
    "id": "bottom-overall",
    "kind": "outer_overall",
    "p0": [
-    145.0,
-    1001.0
+    136.5,
+    1000.9
    ],
    "p1": [
-    1126.0,
-    1010.4
+    1132.6,
+    1010.5
    ],
    "points": [
     [
-     145.0,
+     136.5,
      1003.2
     ],
     [
-     390.2,
+     385.5,
      1003.4
     ],
     [
-     635.5,
+     634.5,
      1003.6
     ],
     [
-     880.8,
-     1007.6
+     883.5,
+     1007.7
     ],
     [
-     1126.0,
+     1132.5,
      1012.8
     ]
    ],
    "ticks": [
-    0.0,
-    981.0
+    6.1,
+    989.5
    ],
    "labels": [
     11100
@@ -512,17 +513,17 @@
     {
      "at": 0.2,
      "offset_px": 0.09,
-     "min_gray": 54
+     "min_gray": 46
     },
     {
      "at": 0.5,
-     "offset_px": 0.02,
-     "min_gray": 49
+     "offset_px": 0.03,
+     "min_gray": 45
     },
     {
      "at": 0.8,
-     "offset_px": 0.41,
-     "min_gray": 17
+     "offset_px": 0.47,
+     "min_gray": 26
     }
    ]
   },
@@ -719,12 +720,12 @@
     454.5
    ],
    "p1": [
-    644.0,
+    640.5,
     454.7
    ],
    "ticks": [
     4.1,
-    275.0
+    271.5
    ],
    "labels": [
     3100
@@ -737,13 +738,13 @@
     },
     {
      "at": 0.5,
-     "offset_px": -0.19,
-     "min_gray": 77
+     "offset_px": 0.01,
+     "min_gray": 70
     },
     {
      "at": 0.8,
-     "offset_px": 0.08,
-     "min_gray": 75
+     "offset_px": 0.0,
+     "min_gray": 58
     }
    ]
   },
