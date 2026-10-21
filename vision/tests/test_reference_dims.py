@@ -179,3 +179,12 @@ def test_dimension_stage_is_fast(chains: dict[str, ChainResult], stem: str) -> N
     seconds = chains[stem].seconds
     assert seconds["dimensions"] < 2.0, seconds
     assert seconds["total"] - seconds["ocr_replay"] < 10.0, seconds
+
+
+def test_hdb_dimension_floors(chains: dict[str, ChainResult]) -> None:
+    """The HDB values after the Task 14b re-review carries (N1-N3) are floors: recall 0.833, precision
+    1.000, intervals 0.979, labels 0.923, ticks 0.985 / 0.932."""
+    m = chain_dim_metrics(chains["hdb-3room"])
+    got = (m.recall, m.precision, m.interval_recall, m.label_recall, m.tick_recall, m.tick_precision)
+    floor = (0.833, 1.000, 0.979, 0.923, 0.985, 0.932)
+    assert all(round(g, 3) >= f for g, f in zip(got, floor, strict=True)), (got, m.false_ticks)

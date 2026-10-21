@@ -203,13 +203,17 @@ def _drop_crossings(
 ) -> list[tuple[Segment, list[tuple[float, bool]]]]:
     """Each line without its ticks where another of the dimension lines crosses or meets it: a dimension
     line is no extension line of another (Task 14b). An unmarked tick there is dropped; a marked one only
-    when the other line has a tick of its own at the crossing and more ticks than this line (the slash is
-    the other line's: an extension line crossing a chain at the chain's tick). Other marked ticks stay (an
-    extension line with a slash there may run along the other line's end)."""
+    when the crossing is at an end of this line (at its first or last tick) and the other line has a tick
+    of its own at the crossing and more ticks than this line (the slash is the other line's: an extension
+    line ending just past a chain, at the chain's tick). Other marked ticks stay: an extension line with a
+    slash there may run along the other line's end, and two chains crossing in the interior of both share
+    the slash (Task 14b re-review N1)."""
     out = []
     for k, (line, ticks) in enumerate(found):
         ux, uy, _ = unit(line.p0, line.p1)
         gap = max(TICK_DEDUPE_PX, 2.0 * line.width_px)
+        first = min((u for u, _ in ticks), default=0.0)
+        last = max((u for u, _ in ticks), default=0.0)
         crossings: list[tuple[float, bool]] = []  # (u, the crossing is the other line's tick)
         for j, (other, other_ticks) in enumerate(found):
             if j == k:
@@ -226,8 +230,14 @@ def _drop_crossings(
             reach = (gap + other.width_px) / other_len
             if -reach <= t <= 1.0 + reach:
                 at = t * other_len
-                theirs = len(other_ticks) > len(ticks) and any(abs(at - u) <= gap for u, _ in other_ticks)
-                crossings.append((s0 + t * (s1 - s0), theirs))
+                c = s0 + t * (s1 - s0)
+                at_end = c <= first + gap or c >= last - gap
+                theirs = (
+                    at_end
+                    and len(other_ticks) > len(ticks)
+                    and any(abs(at - u) <= gap for u, _ in other_ticks)
+                )
+                crossings.append((c, theirs))
         kept = [
             (u, marked)
             for u, marked in ticks

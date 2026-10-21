@@ -1499,3 +1499,82 @@ def test_overall_label_goes_to_its_own_line_not_a_chain_of_the_same_extent() -> 
     assert sum("T9" in s.near_text_ids for s in spans if s.kind == "overall") == 2  # both overall spans
     owner = {s.id: s for s in spans}[associate_dimension_texts(spans, tokens)["T9"]]
     assert owner.p0[1] == pytest.approx(LINE_Y + 40) and owner.kind == "overall"
+
+
+# --- Task 14b re-review carries (N1-N3) ------------------------------------------------------------------
+
+
+def test_crossing_chains_keep_the_slash_they_share() -> None:
+    """Re-review N1: two chains genuinely crossing (in the interior of both) at one slash each keep it; a
+    line whose end crosses a chain at the chain's slash (an extension line's geometry) still loses it."""
+    horizontal = (
+        seg("H", (300, 600), (1650, 600)),
+        [(0.0, True), (450.0, True), (900.0, True), (1350.0, True)],
+    )
+    vertical = (seg("V", (750, 300), (750, 900)), [(0.0, True), (300.0, True), (600.0, True)])
+    kept = dict((line.id, ticks) for line, ticks in dimmod._drop_crossings([horizontal, vertical]))
+    assert kept["V"] == vertical[1]
+    assert kept["H"] == horizontal[1]
+    ending = (seg("E", (750, 300), (750, 608)), [(0.0, True), (150.0, True), (300.0, True)])  # 8 px past H
+    kept = dict((line.id, ticks) for line, ticks in dimmod._drop_crossings([horizontal, ending]))
+    assert kept["E"] == [(0.0, True), (150.0, True)]
+
+
+def test_crossing_raster_chains_keep_the_slash_they_share() -> None:
+    """Re-review N1 on the page: a 4-tick horizontal chain and a 3-tick vertical chain crossing at a slash
+    of both, each with its own labels: the vertical chain keeps its middle tick."""
+    ink = plan((1000, 2400))
+    slashed_line(ink, 299, 1651, [300, 750, 1200, 1650], 500)
+    stroke(ink, (750, 199), (750, 801), 2)
+    for y in (200, 800):
+        stroke(ink, *polar((750, y), 45, 17), 2)
+    segments = [seg("S1", (299, 500), (1651, 500)), seg("S2", (750, 199), (750, 801))]
+    labels = [
+        *(tok(f"T{k}", "4500", x, 481) for k, x in enumerate((525, 975, 1425), 1)),
+        tok("T7", "3000", 731, 350, angle=90),
+        tok("T8", "3000", 731, 650, angle=90),
+    ]
+    found = sorted(raster_ticks(segments, labels, ink), key=len)
+    assert found == [pytest.approx([200, 500, 800], abs=3), pytest.approx([300, 750, 1200, 1650], abs=3)]
+
+
+@pytest.mark.parametrize("last_gap", [20, 30, 50])
+def test_short_last_interval_to_a_wall_face_keeps_its_end_tick(last_gap: int) -> None:
+    """Re-review N2: a slash chain dimensioned up to a solid wall's face `last_gap` px past its last slash
+    (within 0.015 L = 36 px for the two shorter gaps): the wall face is the end tick."""
+    for phase in PHASES:
+        y = phase_y(phase)
+        ink = plan()
+        face = 1200 + last_gap
+        slashed_line(ink, 299, face, TICKS, y)
+        ink[y - 100 : y + 100, face : face + 20] = 255
+        line = [seg("S1", (299, y + JITTER[phase]), (face, y + JITTER[phase]))]
+        labels = [tok("T1", "4500", 525, y - 19), tok("T2", "4500", 975, y - 19)]
+        assert raster_ticks(line, labels, ink) == [pytest.approx([*TICKS, face], abs=3)], (last_gap, phase)
+
+
+@pytest.mark.parametrize("length", [100, 101, 102, 103])
+def test_drawn_pieces_reach_the_line_end(length: int) -> None:
+    """Re-review N3: the centre stroke drawn into the band runs to the line's end (`length + slack`) whatever
+    the length modulo the subsampling step."""
+    from app.pipeline.dimension_ticks import _draw_pieces
+
+    radius, slack = 6, 5
+    band = np.zeros((2 * radius + 1, length + 2 * slack + 1), bool)
+    line = seg("S1", (0, 0), (length, 0), width=1.0)  # one px wide: the stroke ends at the last point
+    _draw_pieces(band, line, [((0, 0), (length, 0))], radius, slack)
+    assert np.flatnonzero(band.any(axis=0)).max() == length + slack
+
+
+def test_wall_beyond_a_gap_past_the_end_tick_is_no_tick() -> None:
+    """Re-review N2's control (the HDB L6 end): a line running ~10 px past its end slash, stopping short of
+    a face line and the wall beyond it: neither is a tick (the line is not dimensioned to the wall)."""
+    for phase in PHASES:
+        y = phase_y(phase)
+        ink = plan()
+        slashed_line(ink, 299, 1210, TICKS, y)
+        stroke(ink, (1216, y - 150), (1216, y + 150), 2)
+        ink[y - 100 : y + 100, 1223:1231] = 255
+        line = [seg("S1", (299, y + JITTER[phase]), (1217, y + JITTER[phase]))]
+        labels = [tok("T1", "4500", 525, y - 19), tok("T2", "4500", 975, y - 19)]
+        assert raster_ticks(line, labels, ink) == [pytest.approx(TICKS, abs=3)], phase

@@ -33,6 +33,7 @@ MARK_REACH_PX, MARK_REACH_FRAC = 4.0, 0.01  # a mark widens a stroke within max(
 MARK_EXCESS_PX = 3.0  # ... by at least 3 px
 FACE_PAIR_MIN_THIN, FACE_PAIR_MAX_FRAC = 1.5, 0.02  # two bare strokes this far apart are a jamb's faces
 END_EXTRA_FRAC = 0.015  # a bare stroke this close beyond the outermost mark is the wall the line runs into
+WALL_CONTACT_PX = 3  # a line ends at a wall when it shows within this many px of the wall's face
 # Ink bands (raster pages).
 BAND_MARGIN_PX = 6  # band half-height is ceil(0.015 L) + this
 THICK_FACTOR = 2.5  # a stroke wider than 2.5 line widths + 2 px is a wall, not a tick
@@ -322,7 +323,9 @@ def ink_ticks(
         if at_band_edge and stroke.n / rows > thick_limit:
             # A wall the line ends at: its face is the tick (the line is dimensioned to it; a slash there
             # merges with the wall). A wall the line runs through is no tick.
-            face = _wall_face_at_end(np.isin(lab, stroke.members), u, v, zone, length, max(MARK_REACH_PX, lo))
+            face = _wall_face_at_end(
+                np.isin(lab, stroke.members), u, v, zone, length, max(MARK_REACH_PX, lo), found[slack:]
+            )
             if face is not None:
                 marks.append((face, float(rows), WALL))
             continue
@@ -402,13 +405,21 @@ def ink_ticks(
 
 
 def _wall_face_at_end(
-    member: np.ndarray, u: np.ndarray, v: np.ndarray, zone: int, length: float, reach: float
+    member: np.ndarray,
+    u: np.ndarray,
+    v: np.ndarray,
+    zone: int,
+    length: float,
+    reach: float,
+    line_at: np.ndarray,
 ) -> float | None:
     """The face (u) of a wall stroke (pixels ``member`` of the band pixels ``u``, ``v``) that the line
     ends at, else None: next to the line (within the cleared rows + 2) the wall lies wholly before the
-    line's start and reaches within `END_SLACK_PX` of it, or wholly beyond its end. The face is read in the
-    rows ``reach`` .. ``2 reach`` beyond the cleared ones (the median of their wall edges), clear of a slash
-    merged with the wall at the line."""
+    line's start and reaches within `END_SLACK_PX` of it, or wholly beyond its end, and the line runs up
+    to it: ``line_at`` (whether each column, from u = 0, holds the line) shows the line within
+    `WALL_CONTACT_PX` of the wall (a line stopping short of a wall, a face line between them, is not
+    dimensioned to it; Task 14b re-review N2). The face is read in the rows ``reach`` .. ``2 reach`` beyond
+    the cleared ones (the median of their wall edges), clear of a slash merged with the wall at the line."""
     near = member & (np.abs(v) <= zone / 2.0 + 2.0)
     if not near.any():
         return None
@@ -416,6 +427,9 @@ def _wall_face_at_end(
     at_start = -END_SLACK_PX <= last <= END_SLACK_PX and first < -END_SLACK_PX
     at_end = length - END_SLACK_PX <= first <= length + END_SLACK_PX and last > length + END_SLACK_PX
     if not (at_start or at_end):
+        return None
+    lo = round(last) + 1 if at_start else round(first) - WALL_CONTACT_PX
+    if not line_at[max(lo, 0) : max(lo + WALL_CONTACT_PX, 0)].any():
         return None
     away = member & (np.abs(v) > zone / 2.0 + reach) & (np.abs(v) <= zone / 2.0 + 2.0 * reach)
     if not away.any():
@@ -499,7 +513,8 @@ def _draw_pieces(
         return
     offset = np.interp(column, column[covered], total[covered] / count[covered])
     span = (column >= slack) & (column <= length + slack)
-    pts = np.stack([column[span], offset[span] + radius], axis=1)[::4]
+    centre = np.stack([column[span], offset[span] + radius], axis=1)
+    pts = np.vstack([centre[:-1:4], centre[-1:]])  # every 4th column, and the line's last one
     mask = np.zeros(inked.shape, np.uint8)
     cv2.polylines(
         mask, [np.round(pts * 16).astype(np.int32)], False, 1, max(1, round(line.width_px)), cv2.LINE_8, 4
@@ -663,8 +678,9 @@ def styled_ticks(
       reports door jambs and leaves the ink sees as no tick);
     - two bare strokes ``1.5 t_thin .. 0.02 L`` apart, neither near a mark, are the two faces of a door jamb
       or partition, no ticks;
-    - a bare stroke or wall beyond the outermost mark, within ``3 x 0.005 L`` of it, is the wall or face
-      line the line runs into past its end tick.
+    - a bare stroke beyond the outermost mark, within ``3 x 0.005 L`` of it, is the face line the line runs
+      into past its end tick; a wall the line ends at stays a tick there (the face a short last interval is
+      dimensioned to, Task 14b re-review N2).
     """
     every = [*marks, *ink_marks]
     styled = dedupe_ticks([u for u, kind in every if kind == MARK], gap)
@@ -693,8 +709,10 @@ def styled_ticks(
             if near_mark(u)
             or (
                 u not in jambs
-                and not (first - beyond <= u < first - gap)
-                and not (last + gap < u <= last + beyond)
+                and (
+                    kind == WALL  # the wall face a short last interval runs to (Task 14b re-review N2)
+                    or (not (first - beyond <= u < first - gap) and not (last + gap < u <= last + beyond))
+                )
             )
         ]
     return [(t, near_mark(t)) for t in dedupe_ticks([u for u, _ in kept], gap)]
