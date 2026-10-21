@@ -8,3 +8,16 @@ export type ChangeProposalStatus = App.Domain.Orders.Enums.ChangeProposalStatus;
 export type ProposalItemDecision = App.Domain.Orders.Enums.ProposalItemDecision;
 export type IssueStatus = App.Domain.Orders.Enums.IssueStatus;
 export type NegotiationStatus = App.Domain.Orders.Enums.NegotiationStatus;
+
+export type StaffRole = App.Domain.Identity.Enums.StaffRole;
+export type StaffRowData = App.Domain.Identity.Data.StaffRowData;
+export type StaffInvitationRowData =
+    App.Domain.Identity.Data.StaffInvitationRowData;
+
+/** A role as the staff page offers it (11 §7): translated label and description, and whether the viewer may give it. */
+export type StaffRoleOption = {
+    name: StaffRole;
+    label: string;
+    description: string;
+    assignable: boolean;
+};

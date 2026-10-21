@@ -35,6 +35,9 @@ final class StaffInvitation extends Model
     /** @use HasFactory<StaffInvitationFactory> */
     use HasFactory, HasUlids;
 
+    /** How long an invitation, and its signed link, can be accepted: from sending, and again from every resend (13 §5.9). */
+    public const int VALID_FOR_HOURS = 72;
+
     /**
      * @return array<string, string>
      */
@@ -56,6 +59,17 @@ final class StaffInvitation extends Model
     protected function email(): Attribute
     {
         return Attribute::set(static fn (string $value): string => mb_strtolower(trim($value)));
+    }
+
+    /** Not accepted and not revoked: it still counts for the "one open invitation per address" rule, expired or not. */
+    public function isOpen(): bool
+    {
+        return $this->accepted_at === null && $this->revoked_at === null;
+    }
+
+    public function isExpired(): bool
+    {
+        return ! $this->expires_at->isFuture();
     }
 
     /**

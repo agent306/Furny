@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
@@ -50,6 +51,15 @@ final class AppServiceProvider extends ServiceProvider
         $this->configureTransport();
         $this->warnWhenCspOriginsAreRejected();
         $this->configurePulseUsers();
+        $this->constrainRouteParameters();
+    }
+
+    /** A malformed id is a 404 before any query (14 §1.6): ULID parameters are matched by shape. */
+    private function constrainRouteParameters(): void
+    {
+        foreach (['user', 'invitation'] as $parameter) {
+            Route::pattern($parameter, '[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}');
+        }
     }
 
     /** Set once the CSP warning has been given in this PHP process (boot runs again for every request under php-fpm workers). */

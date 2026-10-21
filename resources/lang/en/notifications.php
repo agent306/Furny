@@ -40,6 +40,17 @@ return [
         ],
     ],
 
+    // 12 §3.3, §3.7: the mail that invites someone to join the staff. `date` is when the invitation expires.
+    'staff' => [
+        'invited' => [
+            'staff' => [
+                'title' => "You're invited to {appName}",
+                'body' => '{inviterName} invited you to join as {role}. The link expires on {date}.',
+                'action' => 'Accept invitation',
+            ],
+        ],
+    ],
+
     'cta' => [
         'open_dashboard' => 'Open my dashboard',
     ],

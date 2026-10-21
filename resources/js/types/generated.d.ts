@@ -48,6 +48,40 @@ onboarded: boolean,
 hasPassword: boolean,
 twoFactorEnabled: boolean,
 };
+export type StaffInvitationRowData = {
+id: string,
+email: string,
+name: string,
+role: string,
+invitedBy: App.Domain.Identity.Data.UserRefData | null,
+expiresAt: string,
+expired: boolean,
+createdAt: string,
+};
+export type StaffRowAbilitiesData = {
+edit: boolean,
+deactivate: boolean,
+activate: boolean,
+resetTwoFactor: boolean,
+};
+export type StaffRowData = {
+id: string,
+name: string,
+email: string,
+role: string,
+twoFactorEnabled: boolean,
+twoFactorRequired: boolean,
+isActive: boolean,
+lastLoginAt: string | null,
+googleLinked: boolean,
+can: App.Domain.Identity.Data.StaffRowAbilitiesData,
+};
+export type UserRefData = {
+id: string,
+name: string,
+avatarUrl: string | null,
+isStaff: boolean,
+};
 }
 namespace Enums {
 export type DeliveryDriver = 'meta' | 'twilio' | 'msg91' | 'log' | 'array';

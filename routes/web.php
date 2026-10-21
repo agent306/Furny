@@ -8,6 +8,7 @@ use App\Http\Controllers\Account\SessionController;
 use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\Auth\PhoneOtpController;
 use App\Http\Controllers\Auth\ReauthenticateController;
+use App\Http\Controllers\Auth\StaffInvitationController;
 use App\Http\Controllers\CspReportController;
 use App\Http\Controllers\LegalController;
 use App\Http\Controllers\ManifestController;
@@ -78,6 +79,14 @@ Route::middleware(['auth', 'active'])->prefix('account')->name('account.')->grou
 Route::middleware(['auth', 'active'])->prefix('auth/reauthenticate')->group(function (): void {
     Route::get('', [ReauthenticateController::class, 'show'])->name('auth.reauthenticate');
     Route::post('', [ReauthenticateController::class, 'store'])->name('auth.reauthenticate.store');
+});
+
+// The link of a staff invitation mail (13 §5.9, 14 §3.4): public, and good only with its signature. A bad or an expired
+// signature answers with the `Auth/InvitationInvalid` page (`InvalidInvitationLink`) instead of the 403 page. The form
+// posts to the same signed URL.
+Route::middleware('signed')->prefix('staff/invitations')->name('staff.invitations.')->group(function (): void {
+    Route::get('{invitation}', [StaffInvitationController::class, 'show'])->name('show');
+    Route::post('{invitation}', [StaffInvitationController::class, 'accept'])->name('accept');
 });
 
 // A URL that matches nothing is a 404 raised inside the `web` group, so the Error page renders in the

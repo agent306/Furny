@@ -15,7 +15,9 @@ use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\RequireRecentAuthentication;
 use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\TrackSession;
+use App\Support\Http\CodedValidationException;
 use App\Support\Http\ErrorPage;
+use App\Support\Http\InvalidInvitationLink;
 use App\Support\Http\OtpErrorResponse;
 use App\Support\Http\RateLimitedResponse;
 use Illuminate\Foundation\Application;
@@ -144,6 +146,15 @@ $app = Application::configure(basePath: dirname(__DIR__))
 
         // A refused phone code: JSON for machines, the errors bag of 14 §1.9 for forms (13 §4).
         $exceptions->render(OtpErrorResponse::render(...));
+
+        // A domain refusal with a machine code (`staff.last_owner`): JSON clients get `{code, message, errors}`; forms get
+        // the errors bag with the code under `code` (14 §1.8, §1.9).
+        $exceptions->render(static fn (CodedValidationException $exception, Request $request) => ErrorPage::wantsMachineResponse($request)
+            ? response()->json(['code' => $exception->errorCode, 'message' => collect($exception->fieldErrors())->flatten()->first(), 'errors' => $exception->fieldErrors()], 422)
+            : null);
+
+        // The link of a staff invitation with a bad signature is a page about the invitation, not a bare 403.
+        $exceptions->render(InvalidInvitationLink::render(...));
 
         // 403/404/405/419/429/503, and 500 outside debug mode, render the Inertia `Error` page (10 §4.10).
         $exceptions->respond(ErrorPage::render(...));

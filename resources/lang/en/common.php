@@ -56,6 +56,10 @@ return [
     'nav' => [
         'dashboard' => 'Dashboard',
         'home' => 'Home',
+        'staff' => 'Staff',
+        'groups' => [
+            'administration' => 'Administration',
+        ],
     ],
 
     'offline' => [

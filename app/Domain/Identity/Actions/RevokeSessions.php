@@ -23,6 +23,12 @@ final class RevokeSessions
 
     public const string REASON_PASSWORD_CHANGED = 'password_changed';
 
+    /** A staff member was deactivated (13 §5.9). */
+    public const string REASON_DEACTIVATED = 'deactivated';
+
+    /** A staff member's two-factor authentication was reset (13 §5.10). */
+    public const string REASON_TWO_FACTOR_RESET = '2fa_reset';
+
     public const string REASON_PASSWORD_RESET = 'password_reset';
 
     /** Google was linked to an account whose address nobody had verified: whatever its earlier holder could use is cleared. */

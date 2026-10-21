@@ -4,13 +4,11 @@ declare(strict_types=1);
 
 namespace App\Domain\Identity\Actions;
 
-use App\Domain\Identity\Enums\LengthUnit;
-use App\Domain\Identity\Enums\UnitSystem;
 use App\Domain\Identity\Enums\UserType;
 use App\Domain\Identity\Events\CustomerRegistered;
 use App\Domain\Identity\Models\User;
+use App\Domain\Identity\Support\AccountDefaults;
 use App\Domain\Identity\Support\ContactVerification;
-use App\Support\Settings\Settings;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use SensitiveParameter;
@@ -28,7 +26,7 @@ final class RegisterCustomer
     public const int NAME_MAX = 120;
 
     public function __construct(
-        private readonly Settings $settings,
+        private readonly AccountDefaults $defaults,
         private readonly ContactVerification $contacts,
     ) {}
 
@@ -47,17 +45,12 @@ final class RegisterCustomer
         bool $emailVerified = false,
         ?string $verifiedPhone = null,
     ): User {
-        $units = $this->settings->units();
-
-        return DB::transaction(function () use ($name, $email, $password, $marketingOptIn, $googleId, $emailVerified, $verifiedPhone, $units): User {
+        return DB::transaction(function () use ($name, $email, $password, $marketingOptIn, $googleId, $emailVerified, $verifiedPhone): User {
             $user = new User([
                 'name' => $name,
                 'email' => $email,
                 'phone_e164' => $verifiedPhone,
-                'timezone' => $this->settings->business()->timezone,
-                'unit_system' => UnitSystem::from($units->defaultSystem),
-                'length_unit' => LengthUnit::from($units->defaultLengthUnit),
-                'locale' => (string) config('app.locale'),
+                ...$this->defaults->attributes(),
                 'marketing_opt_in' => $marketingOptIn,
                 ...($password === null ? [] : ['password' => $password]),
             ]);

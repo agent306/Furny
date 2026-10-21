@@ -55,6 +55,10 @@ return [
     'auth.google.redirect' => $entry('public'),
     'auth.google.callback' => $entry('public'),
 
+    // The staff invitation link (13 §5.9): public, and good only with its signature; the form posts to the same URL.
+    'staff.invitations.show' => $entry('public'),
+    'staff.invitations.accept' => $entry('public'),
+
     // Phone sign-in and sign-up (13 §5.2): for guests; the status poll reads the session's challenge, whoever holds it.
     'auth.otp.create' => $entry('guest'),
     'auth.otp.send' => $entry('guest'),
@@ -97,4 +101,15 @@ return [
 
     // Admin app (11 §2).
     'admin.dashboard' => $entry('staff'),
+
+    // Staff management (11 §7, 13 §5.9). Everything that concerns an owner also needs the owner gate, in the requests and
+    // the actions; the route needs `staff.manage`.
+    'admin.staff.index' => $entry('staff', 'staff.manage'),
+    'admin.staff.invitations.store' => $entry('staff', 'staff.manage'),
+    'admin.staff.invitations.resend' => $entry('staff', 'staff.manage'),
+    'admin.staff.invitations.revoke' => $entry('staff', 'staff.manage'),
+    'admin.staff.update' => $entry('staff', 'staff.manage'),
+    'admin.staff.deactivate' => $entry('staff', 'staff.manage'),
+    'admin.staff.activate' => $entry('staff', 'staff.manage'),
+    'admin.staff.two-factor.reset' => $entry('staff', 'staff.manage'),
 ];

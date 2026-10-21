@@ -16,14 +16,26 @@ describe('navigation data', () => {
         });
     });
 
-    it('adminNav is the dashboard for every staff member', () => {
-        expect(adminNav).toHaveLength(1);
+    it('adminNav is the dashboard for every staff member, and Staff for staff.manage', () => {
+        expect(adminNav).toHaveLength(2);
         expect(adminNav[0]?.items).toHaveLength(1);
         expect(adminNav[0]?.items[0]).toMatchObject({
             href: '/admin',
             exact: true,
         });
         expect(adminNav[0]?.items[0]?.anyOf).toBeUndefined();
+        expect(adminNav[1]).toMatchObject({
+            key: 'administration',
+            labelKey: 'common.nav.groups.administration',
+        });
+        expect(adminNav[1]?.items).toHaveLength(1);
+        expect(adminNav[1]?.items[0]).toMatchObject({
+            key: 'staff',
+            labelKey: 'common.nav.staff',
+            href: '/admin/staff',
+            icon: 'user-cog',
+            anyOf: ['staff.manage'],
+        });
     });
 
     it('uses only registered icons', () => {

@@ -1,10 +1,11 @@
 import { dashboard } from '@/routes/admin';
+import { index as staff } from '@/routes/admin/staff';
 import type { NavGroup } from '@/types';
 
 /**
  * The admin sidebar (15 §7.2). Items carry the permissions or owner gates that
  * reveal them (`anyOf`); a group whose items are all hidden is hidden. Later
- * milestones append their groups (Orders, Customers, Catalog, …).
+ * milestones append their groups (Orders, Customers, Catalog, …). Administration so far holds Staff.
  */
 export const adminNav: readonly NavGroup[] = [
     {
@@ -16,6 +17,19 @@ export const adminNav: readonly NavGroup[] = [
                 href: dashboard.url(),
                 icon: 'layout-dashboard',
                 exact: true,
+            },
+        ],
+    },
+    {
+        key: 'administration',
+        labelKey: 'common.nav.groups.administration',
+        items: [
+            {
+                key: 'staff',
+                labelKey: 'common.nav.staff',
+                href: staff.url(),
+                icon: 'user-cog',
+                anyOf: ['staff.manage'],
             },
         ],
     },

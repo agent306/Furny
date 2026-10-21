@@ -54,16 +54,16 @@ final class GoogleController extends Controller
     private const string USER_KEY = 'oauth.user';
 
     /** Session keys of the staff invitation flow (13 §5.9 step 4), set by the invitation page. */
-    private const string INVITATION_ID_KEY = 'invitation.id';
+    private const string INVITATION_ID_KEY = StaffInvitationController::SESSION_ID;
 
-    private const string INVITATION_URL_KEY = 'invitation.url';
+    private const string INVITATION_URL_KEY = StaffInvitationController::SESSION_URL;
 
     /**
      * What the callback leaves for the invitation page, under the id of the invitation it is for:
      * `invitation.google.{invitationId}` is `{id: Google subject, name: Google's display name}`. Read it with the id
      * of the invitation being accepted, so it cannot carry over to another one opened in the same browser.
      */
-    private const string INVITATION_GOOGLE_KEY = 'invitation.google';
+    private const string INVITATION_GOOGLE_KEY = StaffInvitationController::SESSION_GOOGLE;
 
     public function __construct(
         private readonly LinkGoogleAccount $links,
