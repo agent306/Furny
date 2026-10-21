@@ -1,0 +1,6 @@
+# Task 24 — carries (binding)
+
+1. Preflight K9 (overrides the brief's `test_anthropic_fallback_block` wording): `native` = the FULL response content, unchanged, including the `fallback` block in place, dumped with `model_dump(mode="json", by_alias=True, exclude_none=True)` (key `from`, not `from_`). Never strip/reorder/edit native content (18 §7.1, Global Constraint "replayed unchanged"). `text` = text after the last fallback block and usage summed over `usage.iterations` are kept as recorded deviations. Rewrite the test so it asserts byte-identical replay of native including the fallback block. (Full row: preflight.md K9.)
+2. Preflight K10: `lastError` records `provider_auth_failed`, `model_not_found` AND `provider_unreachable` — add the ConnectError → recorded assertion (Task 22's `record_provider_error` already filters to these three; call it for every ProviderError).
+3. Task 22 contract: adapters are constructed as `Adapter(settings, resolved_model)` (see the registry docstring).
+4. Task 22 review carry: `_scrub` in `app/api/providers.py` removes only full secret values — also scrub masked keys echoed in provider 401 text (e.g. regex `sk-[\w*-]{6,}`, and Anthropic's `sk-ant-…` forms). Wrap the provider-test adapter call in `anyio.fail_after(timeout_s)` so a hung adapter can't pin a worker. Add tests for both.
