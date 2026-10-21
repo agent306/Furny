@@ -107,7 +107,7 @@ function propsOf(wall: WallProps): WallProps {
 }
 
 /** The point `offset` along a wall from its `a` end. */
-function pointAlong(d: Doc, wall: Wall, offset: number): Vec2 {
+export function pointAlong(d: Doc, wall: Wall, offset: number): Vec2 {
     const { a, b } = segmentOf(d, wall);
     const length = dist(a, b);
     return length < 1e-9 ? a : add(a, scale(sub(b, a), offset / length));
@@ -116,7 +116,7 @@ function pointAlong(d: Doc, wall: Wall, offset: number): Vec2 {
 const sortedIds = (record: object): string[] => Object.keys(record).sort(cmpId);
 
 /** The openings of one wall by offset, ties by id. */
-function openingsOf(d: Doc, wallId: string): Draft<Opening>[] {
+export function openingsOf(d: Doc, wallId: string): Draft<Opening>[] {
     return Object.values(d.openings)
         .filter((o) => o.wallId === wallId)
         .sort((p, q) => p.offset - q.offset || cmpId(p.id, q.id));
@@ -125,7 +125,7 @@ function openingsOf(d: Doc, wallId: string): Draft<Opening>[] {
 const pairKey = (a: string, b: string): string =>
     cmpId(a, b) <= 0 ? `${a}|${b}` : `${b}|${a}`;
 
-function pushDeleted(out: Out, ...ids: string[]): void {
+export function pushDeleted(out: Out, ...ids: string[]): void {
     for (const id of ids) {
         if (!out.deletedIds.includes(id)) out.deletedIds.push(id);
     }
@@ -135,7 +135,7 @@ function pushDeleted(out: Out, ...ids: string[]): void {
  * The integer offset nearest to `offset` at which an opening of `width`
  * lies inside a wall of `length`, or `null` when no integer offset does.
  */
-function fitOffset(
+export function fitOffset(
     offset: number,
     width: number,
     length: number,
@@ -147,7 +147,7 @@ function fitOffset(
 }
 
 /** Deletes a wall and the openings on it; the ids go to `out.deletedIds`. */
-function deleteWall(d: Doc, wallId: string, out: Out): void {
+export function deleteWall(d: Doc, wallId: string, out: Out): void {
     const openings = openingsOf(d, wallId).map((o) => o.id);
     delete d.walls[wallId];
     for (const id of openings) delete d.openings[id];

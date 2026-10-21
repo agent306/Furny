@@ -977,11 +977,11 @@ describe('createPlanBus', () => {
             registry: { moveNodes, addRawWall, removeWall },
         });
 
-    it('starts from the initial document with an empty registry by default', () => {
+    it('starts from the initial document with the plan commands registered by default', () => {
         const { doc } = rect();
         const bus = createPlanBus({ initial: doc, footprints });
         expect(bus.getDoc()).toBe(doc);
-        expect(Object.keys(PLAN_COMMANDS)).toEqual([]);
+        expect(Object.keys(PLAN_COMMANDS)).toContain('addWall');
     });
 
     it('turns a 200-step node drag into one history entry that undo reverts', () => {

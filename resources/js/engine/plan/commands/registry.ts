@@ -12,6 +12,7 @@ import {
     type PlanCommandContext,
     type PlanDefaults,
 } from './pipeline';
+import { WALL_COMMANDS } from './walls';
 
 /** Results `createPlanBus` remembers by document identity. */
 const DERIVE_MEMO_SLOTS = 2;
@@ -21,11 +22,10 @@ type PlanCommandRegistry = Record<
     AnyCommandDef<PlanDocument, PlanCommandContext>
 >;
 
-/**
- * Every plan command by name (04 §6.6). Empty until the command tasks add
- * their groups (`...WALL_COMMANDS`, ...) here.
- */
-export const PLAN_COMMANDS = {} satisfies PlanCommandRegistry;
+/** Every plan command by name (04 §6.6); the command groups are spread in here. */
+export const PLAN_COMMANDS = {
+    ...WALL_COMMANDS,
+} satisfies PlanCommandRegistry;
 
 export type PlanCommandType = keyof typeof PLAN_COMMANDS & string;
 
