@@ -1,6 +1,7 @@
 """Intermediate (pre-assembly) candidate types shared by the pipeline stages (06 section 7-8).
 
-Extended task by task; this module currently holds ``ParsedText``, ``TextToken`` and ``Segment``.
+Extended task by task; this module currently holds ``ParsedText``, ``TextToken``, ``Segment``,
+``DimensionLine`` and ``DimensionSpan``.
 """
 
 import math
@@ -85,3 +86,34 @@ class Segment:
     def angle_deg(self) -> float:
         """Undirected angle in [0, 180), image axes (y down)."""
         return seg_angle_deg(self.p0[0], self.p0[1], self.p1[0], self.p1[1])
+
+
+@dataclass(frozen=True, slots=True)
+class DimensionLine:
+    """A dimension line (06 section 8.4 step 1): a thin segment with >= 2 ticks and a numeric label nearby.
+
+    ``p0``/``p1`` are the endpoints of the underlying segment ``segment_id``; ``tick_positions`` are the
+    sorted distances of the ticks from ``p0`` along the line, in pixels.
+    """
+
+    id: str
+    p0: Pt
+    p1: Pt
+    tick_positions: list[float]
+    segment_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class DimensionSpan:
+    """The stretch between two ticks of a dimension line (06 section 8.4 steps 2-4), in pixels.
+
+    ``near_text_ids`` lists the numeric tokens that may carry the span's value.
+    """
+
+    id: str
+    p0: Pt
+    p1: Pt
+    axis: Literal["x", "y", "other"]
+    kind: Literal["chain_segment", "overall"]
+    near_text_ids: list[str]
+    line_id: str
