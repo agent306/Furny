@@ -182,3 +182,36 @@ describe('when Cloudflare cannot be reached', function (): void {
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => ! str_contains(json_encode($context), 'the-token') && ! str_contains(json_encode($context), 'secret-key'))->once();
     });
 });
+
+describe('the unavailable flag (a typed signal for callers, not the message)', function (): void {
+    /** Runs the rule once and returns it. */
+    $run = function (bool $failOpen): TurnstileToken {
+        $rule = new TurnstileToken('register', $failOpen);
+        Validator::make(['cf_turnstile_response' => 'token'], ['cf_turnstile_response' => [$rule]])->passes();
+
+        return $rule;
+    };
+
+    it('is set when Cloudflare cannot be reached or answers with a server error, open or closed', function (bool $failOpen) use ($run): void {
+        Http::fake(fn () => throw new ConnectionException('timeout'));
+        expect($run($failOpen)->unavailable)->toBeTrue();
+
+        fakeCloudflare(status: 503);
+        expect($run($failOpen)->unavailable)->toBeTrue();
+    })->with([true, false]);
+
+    it('is not set when Cloudflare answered, whatever the answer', function () use ($run): void {
+        fakeCloudflare();
+        expect($run(false)->unavailable)->toBeFalse();
+
+        fakeCloudflare(['success' => false]);
+        expect($run(false)->unavailable)->toBeFalse();
+    });
+
+    it('is not set while the captcha is off', function () use ($run): void {
+        config(['services.turnstile.site_key' => null]);
+        Http::fake(fn () => throw new ConnectionException('timeout'));
+
+        expect($run(false)->unavailable)->toBeFalse();
+    });
+});

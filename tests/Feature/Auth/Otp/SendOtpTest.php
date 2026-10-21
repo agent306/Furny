@@ -19,6 +19,7 @@ use App\Rules\TurnstileToken;
 use App\Support\Settings\Groups\WhatsAppTemplateData;
 use App\Support\Settings\Settings;
 use App\Support\Settings\SettingsGroup;
+use Carbon\CarbonImmutable;
 use Illuminate\Hashing\HashManager;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Log\Events\MessageLogged;
@@ -36,6 +37,8 @@ const OTP_E164 = '+919876543210';
 const OTP_IP = '203.0.113.45';
 
 beforeEach(function (): void {
+    // The global counter is per clock hour: the clock is pinned mid-hour so that no test straddles the turn of one.
+    $this->travelTo(CarbonImmutable::parse('2026-10-21 12:20:00', 'UTC'));
     $this->delivery = app(OtpDelivery::class);
     // One send; a different number and address each time unless the test says otherwise.
     $this->send = fn (string $phone = OTP_PHONE, ?string $ip = OTP_IP, ?string $token = null, OtpPurpose $purpose = OtpPurpose::Login) => app(SendOtp::class)->handle($phone, $purpose, $ip, $token);
@@ -774,18 +777,18 @@ describe('reservations (parallel sends, 13 section 4.5)', function (): void {
         expect($this->delivery->sent())->toHaveCount(1);
     });
 
-    it('gives the counters back but keeps the cooldown when every channel fails', function (): void {
+    it('gives the number and the system their counters back but keeps the cooldown and the IP count when every channel fails', function (): void {
         $this->delivery->failOn(OtpChannel::Sms);
 
         expect(otpRefusal(fn () => ($this->send)())->errorCode)->toBe('otp_send_failed');
 
         expect(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'phone', OTP_E164, OTP_IP)))->toBe(0)
-            ->and(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'ip', OTP_E164, OTP_IP)))->toBe(0)
+            ->and(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'ip', OTP_E164, OTP_IP)))->toBe(1)
             ->and(Cache::get(OtpLimits::globalKey(), 0))->toBe(0)
             ->and(otpRefusal(fn () => ($this->send)())->errorCode)->toBe('otp_cooldown');
     });
 
-    it('gives the counters back and keeps the cooldown when a channel fails in an unexpected way', function (): void {
+    it('keeps the IP count and the cooldown when a channel fails in an unexpected way', function (): void {
         $this->app->instance(OtpDelivery::class, new class implements OtpDelivery
         {
             public function send(OtpChannel $channel, string $e164, #[SensitiveParameter] string $message, #[SensitiveParameter] string $code, string $otpId): void
@@ -796,7 +799,36 @@ describe('reservations (parallel sends, 13 section 4.5)', function (): void {
 
         expect(fn () => ($this->send)())->toThrow(LogicException::class);
         expect(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'phone', OTP_E164, OTP_IP)))->toBe(0)
+            ->and(RateLimiter::attempts(OtpLimits::key(OtpLimits::SEND, 'ip', OTP_E164, OTP_IP)))->toBe(1)
             ->and(Cache::has(OtpLimits::cooldownKey(OTP_E164)))->toBeTrue();
+    });
+
+    it('lets forced failures from one IP run into its hourly limit', function (): void {
+        $this->delivery->failOn(OtpChannel::Sms);
+
+        foreach (range(1, 10) as $n) {
+            expect(otpRefusal(fn () => ($this->send)(otpPhone($n)))->errorCode)->toBe('otp_send_failed');
+        }
+
+        $refusal = otpRefusal(fn () => ($this->send)(otpPhone(11)));
+
+        expect($refusal->errorCode)->toBe('otp_rate_limited')
+            ->and($this->delivery->sent())->toBe([])
+            ->and(Cache::get(OtpLimits::globalKey(), 0))->toBe(0);
+    });
+
+    it('asks forced failures from one IP for a captcha from the third on', function (): void {
+        otpEnableCaptcha();
+        $this->delivery->failOn(OtpChannel::Sms);
+
+        foreach (range(1, 2) as $n) {
+            Session::flush();
+            expect(otpRefusal(fn () => ($this->send)(otpPhone($n)))->errorCode)->toBe('otp_send_failed');
+        }
+
+        Session::flush();
+
+        expect(otpRefusal(fn () => ($this->send)(otpPhone(3)))->errorCode)->toBe('captcha_required');
     });
 
     it('keeps the counters of a send that went out', function (): void {

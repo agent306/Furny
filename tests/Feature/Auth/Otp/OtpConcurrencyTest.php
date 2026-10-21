@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Domain\Identity\Models\OtpCode;
 use App\Domain\Identity\Otp\OtpLimits;
 use App\Support\Settings\Groups\AuthSettings;
+use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -24,12 +25,17 @@ use Symfony\Component\Process\Process;
 | visible to them, so what they write is committed and removed again by a separate connection.
 */
 
+const OTP_FROZEN_AT = '2026-10-21 12:20:00';
+
 beforeEach(function (): void {
     try {
-        Redis::connection('cache')->flushdb();
+        Redis::connection('cache')->ping();
     } catch (Throwable) {
         $this->markTestSkipped('Redis is not reachable.');
     }
+
+    // The clock is pinned mid-hour, here and in the workers, so that the per-hour global counter has one key.
+    $this->travelTo(CarbonImmutable::parse(OTP_FROZEN_AT, 'UTC'));
 
     // Migrate the test database (lazily) before the other processes use it.
     OtpCode::query()->count();
@@ -39,7 +45,11 @@ beforeEach(function (): void {
     $this->committed = DB::connectUsing('otp_parallel', config('database.connections.'.config('database.default')));
     $this->started = now()->subSecond();
     $this->phones = new ArrayObject;
-    $this->limiter = new RateLimiter(Cache::store('redis'));
+
+    // Cache keys of this test only: a prefix of its own, which the workers get too, and which is all that is deleted.
+    $this->prefix = 'otp-test-'.bin2hex(random_bytes(6));
+    $this->cache = Cache::build(['driver' => 'redis', 'connection' => 'cache', 'prefix' => $this->prefix]);
+    $this->limiter = new RateLimiter($this->cache);
 });
 
 afterEach(function (): void {
@@ -47,7 +57,13 @@ afterEach(function (): void {
     $this->committed->table('activity_log')->where('created_at', '>=', $this->started)->whereIn('event', ['auth.otp_sent', 'auth.otp_locked'])->delete();
     $this->committed->disconnect();
 
-    Redis::connection('cache')->flushdb();
+    $redis = Redis::connection('cache');
+    $client = (string) config('database.redis.options.prefix');
+
+    // `keys` answers with the client's own prefix on the keys; `del` adds it again.
+    foreach ($redis->keys($this->prefix.'*') as $key) {
+        $redis->del(str_starts_with($key, $client) ? substr($key, strlen($client)) : $key);
+    }
 });
 
 /** A live code for a number, committed so that the workers see it. */
@@ -78,6 +94,7 @@ function otpCommit(string $e164, string $code): string
  */
 function otpParallel(array $jobs): array
 {
+    $prefix = test()->prefix;
     $connection = config('database.connections.'.config('database.default'));
     $start = microtime(true) + 2.5 + 0.15 * count($jobs);
 
@@ -87,6 +104,8 @@ function otpParallel(array $jobs): array
         [
             'APP_ENV' => 'testing',
             'CACHE_STORE' => 'redis',
+            'CACHE_PREFIX' => $prefix,
+            'OTP_WORKER_NOW' => OTP_FROZEN_AT,
             'REDIS_CACHE_DB' => (string) config('database.redis.cache.database'),
             'DB_CONNECTION' => (string) config('database.default'),
             'DB_HOST' => (string) $connection['host'],
@@ -161,7 +180,7 @@ describe('sends', function (): void {
     it('never goes past the global hourly cap when requests from many IPs arrive at once', function (): void {
         // Settings live in the test transaction, which the workers cannot see: they use the default cap, so the
         // counter is put three places below it.
-        Cache::store('redis')->put(OtpLimits::globalKey(), AuthSettings::defaults()->otpGlobalHourlyCap - 3, 7200);
+        $this->cache->put(OtpLimits::globalKey(), AuthSettings::defaults()->otpGlobalHourlyCap - 3, 7200);
 
         $base = random_int(100, 800);
         $phones = array_map(fn (int $n): string => '98765 6'.str_pad((string) ($base + $n), 4, '0', STR_PAD_LEFT), range(1, 8));

@@ -13,6 +13,8 @@ declare(strict_types=1);
 |   php otp-worker.php send   <start epoch> <phone> <ip>
 |   php otp-worker.php verify <start epoch> <e164> <ip> <code>
 |
+| `OTP_WORKER_NOW` (environment) pins the clock of the worker.
+|
 | Prints one JSON line: {"result": "ok"|<error code>, "delivered": int}.
 */
 
@@ -22,6 +24,7 @@ use App\Domain\Identity\Enums\OtpPurpose;
 use App\Domain\Identity\Otp\ArrayOtpDelivery;
 use App\Domain\Identity\Otp\OtpDelivery;
 use App\Domain\Identity\Otp\OtpException;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
 
@@ -30,6 +33,13 @@ require __DIR__.'/../../vendor/autoload.php';
 $app = require __DIR__.'/../../bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 $app->singleton(OtpDelivery::class, ArrayOtpDelivery::class);
+
+// The clock of the test that started this worker, so that both compute the same hourly counter.
+if (is_string(getenv('OTP_WORKER_NOW'))) {
+    $now = new DateTimeImmutable((string) getenv('OTP_WORKER_NOW').' UTC');
+    Carbon\Carbon::setTestNow($now);
+    CarbonImmutable::setTestNow($now);
+}
 
 [, $mode, $start] = $argv;
 

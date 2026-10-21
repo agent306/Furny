@@ -39,8 +39,9 @@ use Throwable;
  * The cooldown, the hourly limits and the global cap are reserved before any slow work (the captcha call, bcrypt,
  * the transaction): the cooldown with an atomic `Cache::add`, the counters by incrementing first and comparing the
  * count that came back. Parallel requests therefore cannot all pass a check that none of them has counted yet. A
- * send that is refused before it is tried gives its reservations back; one whose channels all failed gives back the
- * counters but keeps the cooldown, as the number was still sent to.
+ * send that is refused before it is tried gives its reservations back; one whose channels all failed (they threw
+ * `OtpDeliveryException`: definitely not sent) gives back the number's and the system's counters, but keeps the
+ * cooldown and the IP's count, so failures cannot be used to try without limit.
  *
  * Whether the number belongs to an account is not asked here, so the answer is the same for known and unknown numbers.
  * The caller keeps the session challenge (`otp.challenge`), which holds what only it knows (intent, name).
@@ -71,7 +72,7 @@ final class SendOtp
 
         $this->reserveCooldown($e164);
 
-        // What is reserved from here on, to give back when this send does not happen.
+        // What is reserved from here on, to give back when this send does not happen. Keyed by what is counted.
         $counters = [];
 
         try {
@@ -103,7 +104,10 @@ final class SendOtp
         try {
             $channel = $this->deliver($otp, $e164, $code, $channels);
         } catch (Throwable $exception) {
-            // Nothing went out, so the counters are given back; the cooldown stays (13 §4.2).
+            // Nothing went out: the number and the system get their places back, the cooldown stays (13 §4.2). The
+            // IP does not, so that forced failures cannot give one address unlimited tries: they count toward its
+            // limit and its captcha like any send.
+            unset($counters['ip']);
             $this->release($counters);
 
             throw $exception;
@@ -148,7 +152,7 @@ final class SendOtp
      * Counts this send against the hourly limit of a number or an IP, and refuses it when the count that came back is
      * over the limit. The count is the place in line, so it stays valid however many requests run in parallel.
      *
-     * @param  list<array{string, int}>  $counters  reserved so far, as [key, window]; this one is added
+     * @param  array<string, array{string, int}>  $counters  reserved so far, as [key, window]; this one is added
      */
     private function reserveHourly(string $e164, ?string $ip, string $kind, array &$counters): int
     {
@@ -156,7 +160,7 @@ final class SendOtp
         ['max' => $max, 'decay' => $decay] = OtpLimits::limit(OtpLimits::SEND, $kind);
 
         $count = RateLimiter::hit($key, $decay);
-        $counters[] = [$key, $decay];
+        $counters[$kind] = [$key, $decay];
 
         if ($count > $max) {
             throw new OtpException('otp_rate_limited', 429, ['retryAfter' => max(1, RateLimiter::availableIn($key))]);
@@ -168,19 +172,19 @@ final class SendOtp
     /**
      * The system-wide count of sends this hour; the channels decide from the place this send got in it.
      *
-     * @param  list<array{string, int}>  $counters
+     * @param  array<string, array{string, int}>  $counters
      */
     private function reserveGlobal(array &$counters): int
     {
         $key = OtpLimits::globalKey();
 
         Cache::add($key, 0, now()->addHours(2));
-        $counters[] = [$key, 0];
+        $counters['global'] = [$key, 0];
 
         return (int) Cache::increment($key);
     }
 
-    /** @param  list<array{string, int}>  $counters */
+    /** @param  array<string, array{string, int}>  $counters */
     private function release(array $counters): void
     {
         foreach ($counters as [$key, $decay]) {
@@ -220,15 +224,12 @@ final class SendOtp
         }
 
         // Fail closed: an SMS costs money, so a check that cannot be made is a failed check (13 §3).
-        $validator = Validator::make(
-            ['cf_turnstile_response' => $token],
-            ['cf_turnstile_response' => [new TurnstileToken('otp_send', failOpen: false)]],
-        );
+        $rule = new TurnstileToken('otp_send', failOpen: false);
 
-        if ($validator->fails()) {
-            $unavailable = $validator->errors()->first('cf_turnstile_response') === __('auth.captcha_unavailable');
-
-            throw new OtpException($unavailable ? 'captcha_unavailable' : 'captcha_required', $unavailable ? 503 : 422);
+        if (Validator::make(['cf_turnstile_response' => $token], ['cf_turnstile_response' => [$rule]])->fails()) {
+            throw $rule->unavailable
+                ? new OtpException('captcha_unavailable', 503)
+                : new OtpException('captcha_required', 422);
         }
     }
 

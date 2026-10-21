@@ -26,10 +26,15 @@ final class TurnstileToken implements ValidationRule
     /** Run for an empty value too: a missing token is a failed check, not a skipped one. */
     public bool $implicit = true;
 
+    /** Set by `validate()` when Cloudflare could not be asked (connection error or 5xx), whether the form then passed or failed. */
+    public bool $unavailable = false;
+
     public function __construct(private readonly string $action, private readonly bool $failOpen) {}
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
+        $this->unavailable = false;
+
         if (! Features::enabled('captcha')) {
             return;
         }
@@ -81,6 +86,7 @@ final class TurnstileToken implements ValidationRule
 
     private function unavailable(Closure $fail, string $reason): void
     {
+        $this->unavailable = true;
         Log::warning('captcha.unavailable', ['form' => $this->action, 'reason' => $reason, 'fail_open' => $this->failOpen]);
 
         if (! $this->failOpen) {
