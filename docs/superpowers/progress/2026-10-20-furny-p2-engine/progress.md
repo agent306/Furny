@@ -262,3 +262,4 @@ Task 46: fix bcefc7f + 1d71366 (injection guard; 16 tests). Review 353c607..1d71
 Spec 19 (deviation): 08 §8.1 CSV — OWASP formula-injection escaping on text cells (leading = + - @ TAB CR → ').
 Task 46: minor (deferred): bcefc7f red mid-history (bisect); material-name '' fallback for unknown code (exportCsv.ts:299).
 Task 46: complete (commits 353c607..1d71366, review clean)
+Merged main 8a5518f (host baseline) → 993fab1; full vitest 5108/5108.
