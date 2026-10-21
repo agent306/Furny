@@ -37,6 +37,8 @@ export interface PlanBusConfig<M extends PlanCommandRegistry> {
     /** Default: `engine/ids.ts::newId`. */
     newId?: PlanCommandContext['newId'];
     maxHistory?: number;
+    /** Passed to the generic bus (`CommandBusConfig.mergeBaseCache`). */
+    mergeBaseCache?: boolean;
     /** Default: `PLAN_COMMANDS`. Lets a caller run its own commands (tests, benches). */
     registry?: M;
 }
@@ -74,6 +76,9 @@ export function createPlanBus<
         pathToEntityId: planPathToEntityId,
         messageKeyPrefix: PLAN_COMMAND_KEY_PREFIX,
         ...(cfg.maxHistory === undefined ? {} : { maxHistory: cfg.maxHistory }),
+        ...(cfg.mergeBaseCache === undefined
+            ? {}
+            : { mergeBaseCache: cfg.mergeBaseCache }),
         getContext: (doc) => ({
             geometry: derive(doc),
             derive,

@@ -6,6 +6,7 @@
 import { distToRing, pointInPolygon, pointInRing } from '../geometry/polygon';
 import { closestPointOnSeg } from '../geometry/segment';
 import { EPS } from '../geometry/tolerance';
+import { cmpId } from '../compare';
 import { dist, rot, type Vec2 } from '../geometry/vec2';
 import {
     CLASS_ORDER,
@@ -19,13 +20,7 @@ import {
     type Shape,
 } from './hitIndex';
 import { query } from './snapIndex';
-import {
-    cmp,
-    snapTolerance,
-    z,
-    type Box,
-    type SnapPointerType,
-} from './snapShared';
+import { snapTolerance, z, type Box, type SnapPointerType } from './snapShared';
 
 function ringDistance(p: Vec2, pts: Vec2[]): number {
     return pointInRing(p, pts) === 'outside' ? distToRing(p, pts) : 0;
@@ -62,7 +57,7 @@ interface Found {
 
 /** Comparison of two hits of one class (best first). */
 function compareWithin(cls: ClassKey, a: Found, b: Found, p: Vec2): number {
-    const byId = cmp(a.entry.id, b.entry.id);
+    const byId = cmpId(a.entry.id, b.entry.id);
     switch (cls) {
         case 'body': {
             // Inside hits (distance 0) come first, then by distance. Stacked
@@ -232,5 +227,5 @@ export function hitTestRect(
             if (picked) ids.add(e.id);
         }
     }
-    return [...ids].sort(cmp);
+    return [...ids].sort(cmpId);
 }

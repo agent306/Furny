@@ -235,4 +235,10 @@ export interface CommandBusConfig<
     messageKeyPrefix: string;
     /** Clock for `HistoryEntry.at`; default `Date.now`. Injectable for tests. */
     now?: () => number;
+    /**
+     * Keep the state a `replace` merge re-runs on between steps (default
+     * `true`). `false` rebuilds it from the entry's inverse patches every
+     * step; the results are identical, only slower. For tests and diagnosis.
+     */
+    mergeBaseCache?: boolean;
 }

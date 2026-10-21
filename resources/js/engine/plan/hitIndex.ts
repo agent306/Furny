@@ -17,6 +17,7 @@
 import { signedArea } from '../geometry/polygon';
 import { EPS } from '../geometry/tolerance';
 import { rot, type Vec2 } from '../geometry/vec2';
+import { cmpId } from '../compare';
 import type { DerivedPlan } from './derive';
 import { MISSING_SIZE } from './drawing/items';
 import type { DrawGroup, DrawItem, PlanDrawing } from './drawing/types';
@@ -27,7 +28,7 @@ import {
 } from './footprint';
 import type { PlanDocument } from './schema';
 import { buildClass, ringBox, segBox, type SnapItemIndex } from './snapIndex';
-import { cmp, type Box } from './snapShared';
+import { type Box } from './snapShared';
 
 export type HitKind =
     | 'handle'
@@ -245,7 +246,7 @@ export function buildHitIndex(
     footprints: FootprintProvider,
 ): HitIndex {
     const sorted = (rec: Record<string, unknown>): string[] =>
-        Object.keys(rec).sort(cmp);
+        Object.keys(rec).sort(cmpId);
 
     const openings: Entry[] = [];
     for (const id of sorted(geom.openings)) {

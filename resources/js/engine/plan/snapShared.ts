@@ -33,7 +33,3 @@ export const TIE_EPS = 1e-6;
 
 /** Float slack for range and overlap tests (mm). */
 export const SLACK = 1e-6;
-
-/** Orders ids by code unit so every id-sorted iteration is deterministic. */
-export const cmp = (a: string, b: string): number =>
-    a < b ? -1 : a > b ? 1 : 0;

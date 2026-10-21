@@ -10,6 +10,7 @@
  */
 import { ringBBox } from '../../geometry/polygon';
 import type { Vec2 } from '../../geometry/vec2';
+import { cmpId } from '../../compare';
 import type { DerivedPlan } from '../derive';
 import type { PlanDocument } from '../schema';
 import { drawDimension, autoDimensions } from './dimensions';
@@ -27,9 +28,8 @@ import {
 } from './types';
 import { drawWall, drawWallOutline } from './walls';
 
-const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const sortedIds = (record: Record<string, unknown>): string[] =>
-    Object.keys(record).sort(cmp);
+    Object.keys(record).sort(cmpId);
 
 const layerOfText = (item: DrawItem): LayerName | null =>
     item.t === 'text' && item.style !== 'dim_text' ? 'TEXT' : null;
@@ -115,7 +115,7 @@ function sortGroups(groups: DrawGroup[]): DrawGroup[] {
     const key = (g: DrawGroup): string => g.entityId ?? '￿';
     return groups
         .map((g, i) => ({ g, i }))
-        .sort((p, q) => cmp(key(p.g), key(q.g)) || p.i - q.i)
+        .sort((p, q) => cmpId(key(p.g), key(q.g)) || p.i - q.i)
         .map(({ g }) => g);
 }
 

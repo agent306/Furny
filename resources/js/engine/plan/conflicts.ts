@@ -15,6 +15,7 @@ import {
 } from '../geometry/polygon';
 import { EPS } from '../geometry/tolerance';
 import { add, scale, sub, type Vec2 } from '../geometry/vec2';
+import { cmpId } from '../compare';
 import type { DerivedOpening, DerivedPlan, DerivedWall } from './derive';
 import { FIXTURE_LIBRARY } from './fixtures';
 import {
@@ -62,7 +63,6 @@ const TWO_LEAF_TYPES: ReadonlySet<Opening['type']> = new Set([
     'french_window',
 ]);
 
-const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const z = (n: number): number => (n === 0 ? 0 : n);
 const clean = (p: Vec2): Vec2 => ({ x: z(p.x), y: z(p.y) });
 
@@ -164,7 +164,7 @@ export function doorSwingSectors(
     geom: DerivedPlan,
 ): Array<{ openingId: string; polygon: Vec2[] }> {
     const out: Array<{ openingId: string; polygon: Vec2[] }> = [];
-    for (const id of Object.keys(doc.openings).sort(cmp)) {
+    for (const id of Object.keys(doc.openings).sort(cmpId)) {
         const o = doc.openings[id]!;
         if (!SWING_TYPES.has(o.type)) continue;
         const derived = geom.openings[id];
@@ -236,7 +236,7 @@ function collectItems(
             makeItem(f.id, fixtureFootprint(f).corners, f.elevation, f.height),
         );
     }
-    return items.sort((a, b) => cmp(a.id, b.id));
+    return items.sort((a, b) => cmpId(a.id, b.id));
 }
 
 const verticalOverlap = (item: Item, bottom: number, top: number): number =>
@@ -281,7 +281,7 @@ interface SolidWall {
 
 function solidWalls(doc: PlanDocument, geom: DerivedPlan): SolidWall[] {
     return Object.keys(geom.walls)
-        .sort(cmp)
+        .sort(cmpId)
         .map((id) => {
             const wall = geom.walls[id]!;
             const openings = wall.openings.flatMap(({ id: openingId }) => {
@@ -347,7 +347,7 @@ function wallConflicts(
 /** Sort-and-sweep on `bbox.min.x`; the smaller id is reported as `entityId`. */
 function itemConflicts(items: Item[], out: PlacementConflict[]): void {
     const byX = [...items].sort(
-        (a, b) => a.bbox.min.x - b.bbox.min.x || cmp(a.id, b.id),
+        (a, b) => a.bbox.min.x - b.bbox.min.x || cmpId(a.id, b.id),
     );
     for (let i = 0; i < byX.length; i += 1) {
         const a = byX[i]!;
@@ -360,7 +360,7 @@ function itemConflicts(items: Item[], out: PlacementConflict[]): void {
             }
             const overlap = intersectionArea(a.poly, b.poly);
             if (overlap > MIN_OVERLAP_AREA) {
-                const [first, second] = cmp(a.id, b.id) < 0 ? [a, b] : [b, a];
+                const [first, second] = cmpId(a.id, b.id) < 0 ? [a, b] : [b, a];
                 out.push(
                     conflict('overlaps_item', first.id, second.id, overlap),
                 );
@@ -413,7 +413,7 @@ function windowConflicts(
         poly: PolygonWithHoles[];
         bbox: BBox;
     }> = [];
-    for (const id of Object.keys(doc.openings).sort(cmp)) {
+    for (const id of Object.keys(doc.openings).sort(cmpId)) {
         const o = doc.openings[id]!;
         if (o.kind !== 'window') continue;
         const derived = geom.openings[id];
@@ -460,8 +460,8 @@ export function computePlacementConflicts(
     windowConflicts(items, doc, geom, out);
     return out.sort(
         (a, b) =>
-            cmp(a.kind, b.kind) ||
-            cmp(a.entityId, b.entityId) ||
-            cmp(a.otherId, b.otherId),
+            cmpId(a.kind, b.kind) ||
+            cmpId(a.entityId, b.entityId) ||
+            cmpId(a.otherId, b.otherId),
     );
 }

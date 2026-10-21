@@ -6,6 +6,7 @@
  */
 import Flatbush from 'flatbush';
 import { lerp, type Vec2 } from '../geometry/vec2';
+import { cmpId } from '../compare';
 import type { DerivedPlan } from './derive';
 import {
     fixtureFootprint,
@@ -14,7 +15,7 @@ import {
     type FootprintProvider,
 } from './footprint';
 import type { PlanDocument } from './schema';
-import { cmp, type Box } from './snapShared';
+import { type Box } from './snapShared';
 
 export interface SnapNodeItem {
     id: string;
@@ -121,7 +122,7 @@ export function buildSnapIndex(
     footprints: FootprintProvider,
 ): SnapIndex {
     const nodeItems: SnapNodeItem[] = Object.keys(doc.nodes)
-        .sort(cmp)
+        .sort(cmpId)
         .map((id) => ({
             id,
             at: { x: doc.nodes[id]!.x, y: doc.nodes[id]!.y },
@@ -131,7 +132,7 @@ export function buildSnapIndex(
     const faceItems: SnapFaceItem[] = [];
     const keyItems: SnapKeyPointItem[] = [];
     const wallById = new Map<string, SnapWallItem>();
-    for (const id of Object.keys(geom.walls).sort(cmp)) {
+    for (const id of Object.keys(geom.walls).sort(cmpId)) {
         const derived = geom.walls[id]!;
         const wall = doc.walls[id];
         if (!wall) continue;
@@ -168,7 +169,7 @@ export function buildSnapIndex(
             openingId: null,
         });
     }
-    for (const id of Object.keys(geom.openings).sort(cmp)) {
+    for (const id of Object.keys(geom.openings).sort(cmpId)) {
         const o = geom.openings[id]!;
         keyItems.push(
             {
@@ -207,10 +208,10 @@ export function buildSnapIndex(
             height: f.height,
         });
     }
-    footprintItems.sort((p, q) => cmp(p.id, q.id));
+    footprintItems.sort((p, q) => cmpId(p.id, q.id));
 
     const wallsAtNode = new Map<string, readonly string[]>();
-    for (const id of Object.keys(geom.nodes).sort(cmp)) {
+    for (const id of Object.keys(geom.nodes).sort(cmpId)) {
         wallsAtNode.set(id, geom.nodes[id]!.wallIds);
     }
 

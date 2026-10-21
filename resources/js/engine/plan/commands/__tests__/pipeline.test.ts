@@ -20,6 +20,7 @@ import { makeDirtyPlan, makeRectPlan } from '../../testing/fixtures';
 import { metaFactory, strip } from '../../testing/strip';
 import { roundMm } from '../../../geometry/tolerance';
 import { CommandAbort } from '../../../commands/types';
+import { mulberry32 } from '../../../testing/random';
 import { definePlanCommand } from '../define';
 import { planPathToEntityId } from '../paths';
 import {
@@ -606,6 +607,61 @@ describe('executePlanCommand: phases and patches', () => {
         expect([p.x, p.y, p.rotation]).toEqual([2500, 400, 0]);
     });
 
+    it('writes no rotation patch for float noise below 1e-6 degrees, also across the 360 wrap', () => {
+        const { doc, n, w } = rect();
+        const move = {
+            moves: [
+                { id: n.tl, x: 0, y: 300 },
+                { id: n.tr, x: 5000, y: 300 },
+            ],
+        };
+        for (const stored of [1e-9, 360 - 1e-9]) {
+            const start = edit(doc, (d) => {
+                d.placements.f_sofa00001 = placement(
+                    'f_sofa00001',
+                    w.top,
+                    'right',
+                    2500,
+                    100,
+                    stored,
+                );
+            });
+            const out = ok(run(start, moveNodes, move));
+            const p = out.doc.placements.f_sofa00001!;
+            expect([p.x, p.y]).toEqual([2500, 400]);
+            expect(p.rotation).toBe(stored);
+            const rotationPatches = out.patches.filter(
+                (patch) =>
+                    patch.path[0] === 'placements' &&
+                    patch.path[2] === 'rotation',
+            );
+            expect(rotationPatches).toEqual([]);
+        }
+    });
+
+    it('still writes the rotation once it differs by more than the noise bound', () => {
+        const { doc, n, w } = rect();
+        const start = edit(doc, (d) => {
+            d.placements.f_sofa00001 = placement(
+                'f_sofa00001',
+                w.top,
+                'right',
+                2500,
+                100,
+                0.01,
+            );
+        });
+        const out = ok(
+            run(start, moveNodes, {
+                moves: [
+                    { id: n.tl, x: 0, y: 300 },
+                    { id: n.tr, x: 5000, y: 300 },
+                ],
+            }),
+        );
+        expect(out.doc.placements.f_sofa00001!.rotation).toBe(0);
+    });
+
     it('clamps the placement to the shortened face, and centres it when it does not fit', () => {
         const { doc, n, w } = rect();
         const start = edit(doc, (d) => {
@@ -1039,5 +1095,132 @@ describe('createPlanBus', () => {
         expect(bus.getDoc()).toEqual(start);
         expect(bus.redo()).toBe(true);
         expect(Object.keys(bus.getDoc().rooms)).toEqual([large.id]);
+    });
+    it('gives the same documents and history with and without the replace-merge base cache', () => {
+        const { doc, n } = rect();
+        const tr = n.tr;
+        const bl = n.bl;
+        const tl = n.tl;
+        type Op =
+            | { op: 'drag'; id: string; dx: number; dy: number }
+            | { op: 'step'; id: string; dx: number; dy: number }
+            | { op: 'quiet'; id: string; dx: number; dy: number }
+            | { op: 'tx'; id: string; dx: number; dy: number }
+            | { op: 'undo' | 'redo' | 'seal' | 'reset' };
+        const at = { [tr]: [5000, 0], [bl]: [0, 4000], [tl]: [0, 0] } as Record<
+            string,
+            [number, number]
+        >;
+        const move = (id: string, dx: number, dy: number) => ({
+            moves: [{ id, x: at[id]![0] + dx, y: at[id]![1] + dy }],
+        });
+
+        let quietRuns = 0;
+        for (let seed = 1; seed <= 24; seed += 1) {
+            const rnd = mulberry32(seed);
+            const pick = <T>(list: readonly T[]): T =>
+                list[Math.floor(rnd() * list.length)]!;
+            const amount = (): number => Math.floor(rnd() * 241) - 120;
+            const ops: Op[] = [];
+            for (let i = 0; i < 26; i += 1) {
+                const r = rnd();
+                const spec = { id: pick([tr, bl]), dx: amount(), dy: amount() };
+                if (r < 0.4) ops.push({ op: 'drag', ...spec });
+                else if (r < 0.5) ops.push({ op: 'step', ...spec, id: tl });
+                else if (r < 0.62) ops.push({ op: 'quiet', ...spec });
+                else if (r < 0.7) ops.push({ op: 'tx', ...spec });
+                else if (r < 0.8) ops.push({ op: 'undo' });
+                else if (r < 0.88) ops.push({ op: 'redo' });
+                else if (r < 0.95) ops.push({ op: 'seal' });
+                else ops.push({ op: 'reset' });
+            }
+
+            const make = (cache: boolean) =>
+                createPlanBus({
+                    initial: doc,
+                    footprints,
+                    newId: freshIds(),
+                    mergeBaseCache: cache,
+                    registry: { moveNodes },
+                });
+            const buses = [make(true), make(false)] as const;
+            const snapshot = (bus: (typeof buses)[number]) => ({
+                doc: bus.getDoc(),
+                undo: bus
+                    .history()
+                    .undo.map((e) => [
+                        e.type,
+                        e.mergeKey,
+                        e.sealed,
+                        e.patches,
+                        e.inversePatches,
+                    ]),
+                redo: bus
+                    .history()
+                    .redo.map((e) => [
+                        e.type,
+                        e.mergeKey,
+                        e.sealed,
+                        e.patches,
+                        e.inversePatches,
+                    ]),
+            });
+            const play = (bus: (typeof buses)[number], o: Op): unknown => {
+                switch (o.op) {
+                    case 'drag':
+                        return bus.execute(
+                            'moveNodes',
+                            move(o.id, o.dx, o.dy),
+                            { merge: true },
+                        );
+                    case 'step':
+                        return bus.execute('moveNodes', move(o.id, o.dx, o.dy));
+                    case 'quiet':
+                        return bus.execute(
+                            'moveNodes',
+                            move(o.id, o.dx, o.dy),
+                            { merge: true, history: false },
+                        );
+                    case 'tx':
+                        try {
+                            return bus.transaction('test.tx', () => {
+                                bus.execute('moveNodes', move(o.id, o.dx, 0));
+                                bus.execute(
+                                    'moveNodes',
+                                    move(o.id, o.dx, o.dy),
+                                );
+                            });
+                        } catch (error) {
+                            return String(error);
+                        }
+                    case 'undo':
+                        return bus.undo();
+                    case 'redo':
+                        return bus.redo();
+                    case 'seal':
+                        return bus.seal();
+                    case 'reset':
+                        return bus.reset(doc);
+                }
+            };
+
+            for (const [i, o] of ops.entries()) {
+                const [cached, plain] = buses.map((bus) => play(bus, o));
+                const label = `seed ${seed} op ${i} ${JSON.stringify(o)}`;
+                expect(
+                    JSON.stringify(cached, (_k, v) =>
+                        v instanceof Set ? [...v] : v,
+                    ),
+                    label,
+                ).toBe(
+                    JSON.stringify(plain, (_k, v) =>
+                        v instanceof Set ? [...v] : v,
+                    ),
+                );
+                expect(snapshot(buses[0]), label).toEqual(snapshot(buses[1]));
+                if (o.op === 'quiet') quietRuns += 1;
+            }
+        }
+        expect(quietRuns).toBeGreaterThan(20);
     });
 });

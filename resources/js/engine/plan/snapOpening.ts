@@ -11,10 +11,10 @@ import { pointInRing, ringBBox } from '../geometry/polygon';
 import { closestPointOnSeg } from '../geometry/segment';
 import { add, dot, scale, sub, type Vec2 } from '../geometry/vec2';
 import { roundMm } from '../geometry/tolerance';
+import { cmpId } from '../compare';
 import type { DerivedPlan, DerivedWall } from './derive';
 import type { PlanDocument } from './schema';
 import {
-    cmp,
     SLACK,
     snapTolerance,
     TIE_EPS,
@@ -106,7 +106,7 @@ function wallUnderCursor(
         }
     }
     let best: Found | null = null;
-    for (const id of Object.keys(geom.walls).sort(cmp)) {
+    for (const id of Object.keys(geom.walls).sort(cmpId)) {
         const hit = reachOf(geom.walls[id]!, cursor, tol);
         if (hit === null) continue;
         if (
@@ -169,7 +169,7 @@ function overlapsOther(
 ): boolean {
     const u0 = offset - width / 2;
     const u1 = offset + width / 2;
-    for (const id of Object.keys(doc.openings).sort(cmp)) {
+    for (const id of Object.keys(doc.openings).sort(cmpId)) {
         const o = doc.openings[id]!;
         if (o.wallId !== wallId || o.id === openingId) continue;
         const o0 = o.offset - o.width / 2;

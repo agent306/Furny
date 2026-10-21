@@ -137,6 +137,14 @@ function storedRotation(deg: number): number {
     return rounded >= 360 ? 0 : rounded + 0;
 }
 
+/** Rotations closer than this (degrees, wrapped at 360) are the same rotation. */
+const ROTATION_NOISE_DEG = 1e-6;
+
+function sameRotation(a: number, b: number): boolean {
+    const d = normDeg(a - b);
+    return Math.min(d, 360 - d) < ROTATION_NOISE_DEG;
+}
+
 /** Writes only the coordinates that differ, so an unchanged point makes no patch. */
 function setPoint(target: { x: number; y: number }, to: Vec2): void {
     const x = mm(to.x);
@@ -248,7 +256,9 @@ function followPlacements(
         const front =
             attachment.side === 'left' ? wall.normal : scale(wall.normal, -1);
         const rotation = storedRotation(rotationFromFront(front));
-        if (target.rotation !== rotation) target.rotation = rotation;
+        if (!sameRotation(target.rotation, rotation)) {
+            target.rotation = rotation;
+        }
     }
 }
 

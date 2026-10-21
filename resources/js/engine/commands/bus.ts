@@ -198,6 +198,7 @@ export function createCommandBus<
      * one; any other change of the document or the entries misses it.
      */
     let mergeBase: { seq: number; doc: D; base: D } | null = null;
+    const cacheMergeBase = cfg.mergeBaseCache !== false;
 
     // ---- helpers -------------------------------------------------------
 
@@ -423,7 +424,9 @@ export function createCommandBus<
                     : merged(out.patches, out.inversePatches);
             commitMerge(out.doc, entry, patches, changedIds);
             mergeBase =
-                entry === null ? null : { seq: top.seq, doc: out.doc, base };
+                entry === null || !cacheMergeBase
+                    ? null
+                    : { seq: top.seq, doc: out.doc, base };
             return resultOf(out, changedIds);
         }
 
