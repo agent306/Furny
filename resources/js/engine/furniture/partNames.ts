@@ -3,7 +3,8 @@
  * Each entry is a template: `{param}` placeholders are filled from the part's
  * `nameParams`, and a missing param simply drops out ("Back panel" when the
  * back is not split). `{piece}` numbers the pieces of a long panel split at
- * seams ("Top 1", "Top 2"; spec 19, Task 40).
+ * seams ("Top 1", "Top 2"; spec 19, Task 40); behind a second param it reads
+ * "Fixed shelf 2 – piece 3" and drops out together with its "– piece" lead-in.
  */
 export const PART_NAMES_EN: Record<string, string> = {
     'parts.side_left': 'Left side',
@@ -12,7 +13,7 @@ export const PART_NAMES_EN: Record<string, string> = {
     'parts.bottom': 'Bottom {piece}',
     'parts.back': 'Back panel {n}',
     'parts.partition': 'Partition {n}',
-    'parts.fixed_shelf': 'Fixed shelf {n} {piece}',
+    'parts.fixed_shelf': 'Fixed shelf {n} – piece {piece}',
     'parts.shelf': 'Shelf {n}',
     'parts.plinth_front': 'Plinth front {piece}',
     'parts.plinth_back': 'Plinth back {piece}',
@@ -30,7 +31,7 @@ export const PART_NAMES_EN: Record<string, string> = {
     'parts.drawer_back': 'Drawer back',
     'parts.drawer_bottom': 'Drawer bottom',
     'parts.table_top': 'Table top {piece}',
-    'parts.table_top_layer': 'Table top layer {n} {piece}',
+    'parts.table_top_layer': 'Table top layer {n} – piece {piece}',
     'parts.table_leg': 'Leg',
     'parts.apron': 'Apron {piece}',
     'parts.stretcher': 'Stretcher {piece}',
@@ -59,7 +60,7 @@ export function partNameEn(
     // A missing param drops out together with the space before it; the values
     // themselves (a user-supplied extra part name) are never rewritten.
     return template
-        .replace(/\s*\{(\w+)\}/g, (match, name: string) => {
+        .replace(/(?:\s+– piece)?\s*\{(\w+)\}/g, (match, name: string) => {
             const value = Object.hasOwn(nameParams, name)
                 ? nameParams[name]
                 : undefined;

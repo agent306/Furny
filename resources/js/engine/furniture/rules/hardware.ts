@@ -9,6 +9,33 @@ import type { EdgeClass, Overlay } from '../fronts/openings';
 import type { Front, HardwareKey } from '../schema';
 import type { GenContext, HardwareLine, Part } from '../types';
 
+/** Every `HardwareLine.reasonKey` (07 §6.12), for the translation coverage check. */
+export const HARDWARE_REASON_KEYS = [
+    'hardware.reason.hinges_for_door',
+    'hardware.reason.hinge_plates',
+    'hardware.reason.handles_for_front',
+    'hardware.reason.handle_for_drawer',
+    'hardware.reason.slides_for_drawer',
+    'hardware.reason.shelf_supports',
+    'hardware.reason.hanging_rod',
+    'hardware.reason.rod_supports',
+    'hardware.reason.baskets',
+    'hardware.reason.cam_locks',
+    'hardware.reason.dowels',
+    'hardware.reason.screw_pack',
+    'hardware.reason.plinth_legs',
+    'hardware.reason.cabinet_legs',
+    'hardware.reason.table_legs',
+    'hardware.reason.wall_brackets',
+    'hardware.reason.anti_tip',
+    'hardware.reason.sliding_track',
+    'hardware.reason.sliding_rollers',
+    'hardware.reason.gas_struts',
+    'hardware.reason.flap_stays',
+    'hardware.reason.table_corner_brackets',
+    'hardware.reason.extra',
+] as const;
+
 /** Flaps and drawer fronts wider than this get two handles / mechanisms (07 §6.3-§6.4). */
 const SINGLE_FITTING_MAX_WIDTH = 600;
 

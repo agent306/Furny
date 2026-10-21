@@ -64,7 +64,11 @@ describe('partNameEn', () => {
         expect(partNameEn('parts.top', { piece: 1 })).toBe('Top 1');
         expect(partNameEn('parts.top', {})).toBe('Top');
         expect(partNameEn('parts.fixed_shelf', { n: 2, piece: 3 })).toBe(
-            'Fixed shelf 2 3',
+            'Fixed shelf 2 – piece 3',
+        );
+        expect(partNameEn('parts.fixed_shelf', { n: 2 })).toBe('Fixed shelf 2');
+        expect(partNameEn('parts.table_top_layer', { n: 1, piece: 2 })).toBe(
+            'Table top layer 1 – piece 2',
         );
         expect(partNameEn('parts.table_top', { piece: 2 })).toBe('Table top 2');
         for (const key of [

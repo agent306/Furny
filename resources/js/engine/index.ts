@@ -330,6 +330,7 @@ export type { PostProcessInfo } from './plan/commands/postprocess';
 export { definePlanCommand } from './plan/commands/define';
 export { PLAN_COMMANDS, createPlanBus } from './plan/commands/registry';
 export type { PlanBusConfig, PlanCommandType } from './plan/commands/registry';
+export type { PlanFragment } from './plan/commands/fragment';
 export {
     insertWallSegment,
     mergeNodeInto,

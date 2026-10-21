@@ -249,7 +249,7 @@ describe('IssueSchema', () => {
         const issue = {
             code: 'plan.node_missing',
             severity: 'error',
-            messageKey: 'engine.plan.issue.node_missing',
+            messageKey: 'plan_editor.issues.node_missing',
             params: { wallId: 'w_0000000001', count: 2 },
             entityIds: ['w_0000000001'],
         };
