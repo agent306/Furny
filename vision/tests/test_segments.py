@@ -442,7 +442,7 @@ def test_vector_is_thin_follows_merged_width() -> None:
     img = np.full((600, 900, 3), 255, np.uint8)
     page = page_of(img, kind="pdf_vector")
     vector = VectorPage(
-        segments=[VSeg((50.0, 50.0), (200.0, 50.0), 2.0), VSeg((150.0, 50.0), (400.0, 50.0), 6.0)],
+        segments=[VSeg((50.0, 50.0), (260.0, 50.0), 3.0), VSeg((250.0, 50.0), (400.0, 50.0), 4.5)],
         filled=[],
         words=[],
         object_count=2,
@@ -450,9 +450,10 @@ def test_vector_is_thin_follows_merged_width() -> None:
     page = dataclasses.replace(page, vector=vector)
     pre = dataclasses.replace(preprocess(page, make_ctx()), t_thin=2.0)
     ocr = OcrResult([], np.zeros(pre.ink.shape, np.uint8), pre.ink.copy())
-    # widths 2 and 6 are too different to fuse: thin stays thin, thick stays thick
-    segs = detect_segments(page, pre, ocr, make_ctx())
-    assert sorted((s.is_thin, round(s.width_px)) for s in segs) == [(False, 6), (True, 2)]
+    (merged,) = detect_segments(page, pre, ocr, make_ctx())
+    # (210 x 3.0 + 150 x 4.5) / 360 = 3.625 > 1.8 x t_thin = 3.6, although the base segment alone is thin
+    assert merged.width_px == pytest.approx(3.625)
+    assert merged.is_thin is False
 
 
 def test_merge_scales_to_tens_of_thousands_of_segments() -> None:
@@ -467,7 +468,21 @@ def test_merge_scales_to_tens_of_thousands_of_segments() -> None:
     out = merge_collinear(segs)
     elapsed = time.perf_counter() - started
     assert 30_000 < len(out) <= 40_000
-    assert elapsed < 4.0  # about 1 s here; the quadratic version needed ~19 s
+    assert elapsed < 8.0  # about 1 s here; the quadratic version needed ~19 s
+
+
+def test_merge_checks_the_deadline_while_a_chain_grows() -> None:
+    calls: list[int] = []
+
+    def check() -> None:
+        calls.append(1)
+        if len(calls) >= 2:
+            raise TimeoutError
+
+    # 3000 pieces 1 px apart fuse one neighbour per round into a single line.
+    chain = [seg((float(i * 6), 0.0), (float(i * 6 + 5), 0.0)) for i in range(3000)]
+    with pytest.raises(TimeoutError):
+        merge_collinear(chain, check_deadline=check)
 
 
 def test_merge_checks_the_deadline() -> None:

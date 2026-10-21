@@ -173,12 +173,14 @@ def merge_collinear(
         if c1 != c0:
             cells.setdefault((c1[0], c1[1]), []).append(k)
     out: list[Segment] = []
-    for step, i in enumerate(int(k) for k in np.argsort(-length, kind="stable")):
-        if check_deadline is not None and step % _DEADLINE_EVERY == 0:
-            check_deadline()
+    work = 0  # live bases plus growth rounds: the deadline is checked every `_DEADLINE_EVERY` of them
+    for i in (int(k) for k in np.argsort(-length, kind="stable")):
         if not alive[i]:
             continue
         alive[i] = 0
+        if check_deadline is not None and work % _DEADLINE_EVERY == 0:
+            check_deadline()
+        work += 1
         base_len = float(length_l[i])
         if base_len == 0.0:
             continue
@@ -195,6 +197,9 @@ def merge_collinear(
 
         accept = _near_line(angle_l, p0_l, p1_l, base_angle, angle_tol_deg, (ox, oy), (nx, ny), margin)
         while True:
+            if check_deadline is not None and work % _DEADLINE_EVERY == 0:
+                check_deadline()  # a long chain of tiny pieces grows by one neighbour per round
+            work += 1
             a = (ox + ux * t_lo, oy + uy * t_lo)
             b = (ox + ux * t_hi, oy + uy * t_hi)
             cand = _gather_candidates(cells, alive, accept, a, b, margin)
