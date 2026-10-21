@@ -40,7 +40,7 @@ from app.pipeline.binarize import Preprocessed, preprocess
 from app.pipeline.decode import decode_raster
 from app.pipeline.dimensions import associate_dimension_texts, find_dimension_lines, find_dimension_spans
 from app.pipeline.normalize import NormalizedPage, normalize
-from app.pipeline.ocr_stage import MASK_DILATE_PX, OcrResult
+from app.pipeline.ocr_stage import OcrResult, text_mask
 from app.pipeline.region import annotation_region
 from app.pipeline.segments import detect_annotation_segments, detect_segments
 from app.pipeline.textparse import parse_token
@@ -136,13 +136,7 @@ def replay_ocr(stem: str, pre: Preprocessed) -> OcrResult:
                 parsed=parse_token(r["text"]),
             )
         )
-    mask = np.zeros((h, w), np.uint8)
-    for t in tokens:
-        x0, y0, x1, y1 = t.box
-        mask[
-            max(0, int(np.floor(y0)) - MASK_DILATE_PX) : min(h, int(np.ceil(y1)) + MASK_DILATE_PX + 1),
-            max(0, int(np.floor(x0)) - MASK_DILATE_PX) : min(w, int(np.ceil(x1)) + MASK_DILATE_PX + 1),
-        ] = 255
+    mask = text_mask((h, w), tokens)  # exactly run_ocr's mask (single-character `other` tokens left out)
     ink_notext = pre.ink.copy()
     ink_notext[mask > 0] = 0
     return OcrResult(tokens=tokens, text_mask=mask, ink_notext=ink_notext)

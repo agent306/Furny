@@ -12,7 +12,7 @@
   "additions": {
    "i400": "The vertical 400 at the AC ledge (src x ~799, y 133-184, ticks at y ~139 and ~176) is drawn with slash ticks and a label like every other dimension line but is not in the brief's list; traced as a dimension line."
   },
-  "residuals": "i400 and i600 have no line segment: their labels' OCR boxes (with the text-mask dilation) cover the stroke, so LSD never sees it (Task 14b ruling B2: carried to Task 34)."
+  "residuals": "Task 34 residuals, still counted in recall (Task 14b rulings B2 and C5b), marked 'residual' on the line: 'text_mask' (i400, i600): no line segment, the labels' OCR boxes with the text-mask dilation cover the stroke, so LSD never sees it; 'faint_in_photo' (left-overall 7000, left 3300/2500/1000): the photo shows these strokes at gray 228-252 on paper 254 over long stretches (7000: source y ~210-330), with no segment and no contrast to chain them through."
  },
  "units": "source_px",
  "lines": [
@@ -212,7 +212,8 @@
      "offset_px": -0.21,
      "min_gray": 188
     }
-   ]
+   ],
+   "residual": "faint_in_photo"
   },
   {
    "id": "left-overall",
@@ -270,7 +271,8 @@
      "offset_px": 0.28,
      "min_gray": 185
     }
-   ]
+   ],
+   "residual": "faint_in_photo"
   },
   {
    "id": "right",
@@ -630,7 +632,8 @@
      "offset_px": -0.04,
      "min_gray": 148
     }
-   ]
+   ],
+   "residual": "text_mask"
   },
   {
    "id": "i1900-1200",
@@ -958,7 +961,8 @@
      "offset_px": -0.05,
      "min_gray": 27
     }
-   ]
+   ],
+   "residual": "text_mask"
   },
   {
    "id": "i1300",

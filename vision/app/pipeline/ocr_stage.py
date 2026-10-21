@@ -31,7 +31,7 @@ _WORD = re.compile(r"\S+")
 @dataclass(frozen=True, eq=False)
 class OcrResult:
     tokens: list[TextToken]
-    text_mask: np.ndarray  # uint8 0/255, token boxes dilated by 2 px
+    text_mask: np.ndarray  # uint8 0/255, token boxes dilated by 2 px (see `masks_text`)
     ink_notext: np.ndarray  # uint8 0/255, `ink` with the text mask removed
 
 
@@ -192,10 +192,21 @@ def _read_region(
     return [orient(r) for r in merge_passes(pass_a, pass_b)]
 
 
-def _text_mask(shape: tuple[int, int], tokens: list[TextToken]) -> np.ndarray:
+def masks_text(token: TextToken) -> bool:
+    """Whether a token's box goes into the text mask: every token but a single character that parses as
+    `other` (Task 14b ruling C5a, a deviation from 06 §7.7). Such a token is nearly always a tick, slash or
+    arrowhead of the line work misread as "1", "l" or "/"; masking it would erase that tick. The token itself
+    is kept."""
+    return not (len(token.text.strip()) == 1 and token.parsed.kind == "other")
+
+
+def text_mask(shape: tuple[int, int], tokens: Sequence[TextToken]) -> np.ndarray:
+    """The text mask: the boxes of the tokens that `masks_text`, grown by `MASK_DILATE_PX`."""
     h, w = shape
     mask = np.zeros((h, w), np.uint8)
     for t in tokens:
+        if not masks_text(t):
+            continue
         x0, y0, x1, y1 = t.box
         mask[
             max(0, int(np.floor(y0)) - MASK_DILATE_PX) : min(h, int(np.ceil(y1)) + MASK_DILATE_PX + 1),
@@ -227,7 +238,7 @@ def run_ocr(page: NormalizedPage, pre: Preprocessed, ocr: OcrLike, ctx: Pipeline
         tokens = _sorted_tokens(_read_region(ocr, crop, (region.x, region.y), ctx))
     else:
         tokens = []
-    mask = _text_mask((h, w), tokens)
+    mask = text_mask((h, w), tokens)
     ink_notext = pre.ink.copy()
     ink_notext[mask > 0] = 0
     return OcrResult(tokens=tokens, text_mask=mask, ink_notext=ink_notext)

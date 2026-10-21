@@ -1322,3 +1322,19 @@ def test_slashes_on_extension_lines_running_through_mark_the_line() -> None:
     stroke(ink, (500, LINE_Y - 150), (500, LINE_Y + 150), 2)
     line = [seg("S1", (299, LINE_Y), (1201, LINE_Y))]
     assert raster_ticks(line, [tok("T1", "9000", 650, LINE_Y - 19)], ink) == [pytest.approx(TICKS, abs=3)]
+
+
+def test_single_character_token_on_a_tick_does_not_erase_it() -> None:
+    """Ruling C5a: OCR reading a slash tick as "1" (one character, kind `other`) leaves it out of the text
+    mask, so the tick stays in `ink_notext`; a multi-character token there is still masked."""
+    from app.pipeline.ocr_stage import text_mask
+
+    ink = plan()
+    slashed_line(ink, 299, 1201, TICKS)
+    label = tok("T1", "9000", 525, LINE_Y - 19)
+    line = [seg("S1", (299, LINE_Y), (1201, LINE_Y))]
+    for text, expected in (("1", TICKS), ("11", [300, 750])):
+        misread = tok("T2", text, 1200, LINE_Y, height=18.0)  # over the end tick
+        notext = ink.copy()
+        notext[text_mask(ink.shape, [label, misread]) > 0] = 0
+        assert raster_ticks(line, [label, misread], notext) == [pytest.approx(expected, abs=3)], text

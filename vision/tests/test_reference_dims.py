@@ -7,8 +7,8 @@ profile checks). A traced and a detected line match when they are parallel withi
 
 The outer chains lie up to ~0.15 L beyond the walls, outside the plan region; the OCR and segment stages
 read the annotation region (the plan region grown by 0.15 L, Task 14b ruling B1) for the dimension stage.
-The brief's recall target (>= 0.80 of all 24 traced lines, with every outer overall line matched) is a
-strict xfail while two lines stay out of reach (see the xfail's reason and the Task 14b report).
+The brief's recall target is >= 0.80 of all 24 traced lines; four of them are Task 34 residuals, marked
+``residual`` in the truth (rulings B2 and C5b) and still counted.
 """
 
 import numpy as np
@@ -29,13 +29,7 @@ from tests.support.reference import (
 
 pytestmark = pytest.mark.reference
 
-OUTER_OVERALL = {
-    "top-overall": 11000,
-    "bottom-overall": 11100,
-    "left-overall": 7000,
-    "right-mid": 7600,
-    "right-overall": 8900,
-}
+OUTER_OVERALL = {"top-overall": 11000, "bottom-overall": 11100, "right-mid": 7600, "right-overall": 8900}
 WALL_FLOOR = {"hdb-3room": (0.868, 0.893, 34), "brochure-2bhk": (0.908, 0.856, 18)}  # recall, precision, ends
 
 
@@ -102,18 +96,29 @@ def test_hdb_outer_lines_beyond_the_plan_region_are_found(chains: dict[str, Chai
     m = chain_dim_metrics(chains["hdb-3room"])
     found = {"top", "right", "right-mid", "bottom", "top-overall", "bottom-overall"}
     assert not found & set(m.unmatched), m.unmatched
-    assert m.recall >= 0.79, m.unmatched  # 19 of 24; see the strict xfail below
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Task 14b: 8900's top tick is erased by a one-character OCR token ('1', the tick read as text) "
-    "in the text mask, and the 7000 line's upper fifth is below the photo's contrast (gray 228-252 on 254 "
-    "paper: no segment, no gray evidence); 19 / 24 matched, needs a ruling (see the report)",
-)
 def test_hdb_dimension_recall_and_outer_overall_lines(chains: dict[str, ChainResult]) -> None:
+    """The brief's targets: recall >= 0.80 over all 24 traced lines (the Task 34 residuals counted) and
+    every outer overall line matched (11000, 11100, 7600, 8900; 7000 is a residual, ruling C5b)."""
     m = chain_dim_metrics(chains["hdb-3room"])
-    assert m.recall >= 0.80 and not set(OUTER_OVERALL) & set(m.unmatched), m.unmatched
+    assert m.recall >= 0.80, m.unmatched
+    assert not set(OUTER_OVERALL) & set(m.unmatched), m.unmatched
+
+
+def test_residual_lines_are_marked_for_task_34() -> None:
+    import json
+
+    from tests.support.reference import REFERENCE_DIR
+
+    raw = json.loads((REFERENCE_DIR / "hdb-3room.drawing-dims.json").read_text())
+    residual = {ln["id"]: ln["residual"] for ln in raw["lines"] if "residual" in ln}
+    assert residual == {
+        "left": "faint_in_photo",
+        "left-overall": "faint_in_photo",
+        "i400": "text_mask",
+        "i600": "text_mask",
+    }
 
 
 def test_hdb_spans_and_labels(chains: dict[str, ChainResult]) -> None:
@@ -141,6 +146,8 @@ def test_walls_do_not_regress(chains: dict[str, ChainResult], stem: str) -> None
 
 @pytest.mark.parametrize("stem", list(IMAGES))
 def test_dimension_stage_is_fast(chains: dict[str, ChainResult], stem: str) -> None:
+    """Dimensions < 2 s; the chain's non-OCR stages < 10 s (ruling C5c: real OCR is reported, bounded by
+    `recognize_timeout_s`)."""
     seconds = chains[stem].seconds
     assert seconds["dimensions"] < 2.0, seconds
-    assert seconds["total"] < 10.0, seconds
+    assert seconds["total"] - seconds["ocr_replay"] < 10.0, seconds
