@@ -20,7 +20,10 @@ use Illuminate\Support\Facades\Gate;
  * `staff.manage_owners` gate. The actions call this as well as the requests, so no caller can skip the gate.
  *
  * The last active owner can be neither demoted nor deactivated. Whoever reduces the owners takes the owners lock first
- * and counts afterwards: two owners who demote each other at the same moment cannot both succeed.
+ * and counts afterwards: two owners who demote each other at the same moment cannot both succeed. Everything that can
+ * change who is an owner takes the same lock, so an action asks `authorizeTarget` / `authorizeGrant` once more after
+ * it holds the lock, on the actor and the target as they are then (`reload`, `refresh`): a promotion or a demotion
+ * that was committed while the request waited cannot slip past the gate.
  */
 final class StaffAccess
 {
@@ -74,6 +77,18 @@ final class StaffAccess
         $name = $staff->roles->pluck('name')->first();
 
         return is_string($name) ? StaffRole::tryFrom($name) : null;
+    }
+
+    /**
+     * The actor as the database has them now. An action asks its authorization a second time once it holds the owners
+     * lock, and the request's own copy of the actor may be older than what a request that held the lock before has
+     * committed (a demotion, a deactivation).
+     *
+     * @throws AuthorizationException when the actor is gone
+     */
+    public function reload(User $actor): User
+    {
+        return User::query()->whereKey($actor->getKey())->first() ?? throw new AuthorizationException;
     }
 
     /** Takes the owners lock for the rest of the surrounding transaction. */

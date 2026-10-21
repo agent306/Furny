@@ -121,10 +121,8 @@ return [
         'submit' => 'Create my account',
         'google_connected' => 'Your Google account is connected. You still choose a password.',
         'expires' => 'This invitation expires on {date}.',
-        // The caption under the button, with the two links in between (as the Google button's does).
-        'terms_before' => 'By creating your account you accept the',
-        'terms_and' => 'and the',
-        'terms_after' => '.',
+        // The caption under the button, one message: the tags mark the two links (the Google button's caption is built the same way).
+        'terms' => 'By creating your account you accept the <terms>Terms of service</terms> and the <privacy>Privacy policy</privacy>.',
     ],
 
     'invalid' => [

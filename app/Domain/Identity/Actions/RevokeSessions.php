@@ -26,6 +26,9 @@ final class RevokeSessions
     /** A staff member was deactivated (13 §5.9). */
     public const string REASON_DEACTIVATED = 'deactivated';
 
+    /** A staff member was reactivated (13 §5.9). */
+    public const string REASON_REACTIVATED = 'reactivated';
+
     /** A staff member's two-factor authentication was reset (13 §5.10). */
     public const string REASON_TWO_FACTOR_RESET = '2fa_reset';
 

@@ -112,16 +112,69 @@ describe('EditStaffDialog (11 §7)', () => {
         );
     });
 
-    it('shows the last-owner refusal under the role', async () => {
-        dialog();
-        page.props.errors = {
-            role: 'There must be at least one active owner.',
-            code: 'staff.last_owner',
-        };
+    async function submit(): Promise<void> {
+        q<HTMLFormElement>('[data-test="edit-form"]')?.dispatchEvent(
+            new Event('submit', { bubbles: true, cancelable: true }),
+        );
         await flushPromises();
+    }
+
+    it('shows the last-owner refusal under the role', async () => {
+        put.mockImplementation(
+            (
+                _url: string,
+                _data: unknown,
+                options: { onError?: (errors: Record<string, string>) => void },
+            ) =>
+                options.onError?.({
+                    role: 'There must be at least one active owner.',
+                    code: 'staff.last_owner',
+                }),
+        );
+        dialog();
+        await flushPromises();
+
+        await submit();
 
         expect(q('#edit-role-error')?.textContent).toContain(
             'There must be at least one active owner.',
         );
+    });
+
+    it('starts without the refusal of the last time when it is opened again', async () => {
+        put.mockImplementation(
+            (
+                _url: string,
+                _data: unknown,
+                options: { onError?: (errors: Record<string, string>) => void },
+            ) => options.onError?.({ role: 'There must be an owner.' }),
+        );
+        const wrapper = dialog();
+        await flushPromises();
+        await submit();
+        expect(q('#edit-role-error')?.textContent).toContain(
+            'There must be an owner.',
+        );
+
+        await wrapper.setProps({ open: false });
+        await flushPromises();
+        await wrapper.setProps({ open: true });
+        await flushPromises();
+
+        expect(q('#edit-role-error')?.textContent?.trim() ?? '').toBe('');
+    });
+
+    it('does not show an error that belongs to something else on the page', async () => {
+        const wrapper = dialog();
+        await wrapper.setProps({ open: false });
+        page.props.errors = {
+            name: 'A name from another form.',
+            role: 'A role from another form.',
+        };
+        await wrapper.setProps({ open: true });
+        await flushPromises();
+
+        expect(q('#edit-name-error')?.textContent?.trim() ?? '').toBe('');
+        expect(q('#edit-role-error')?.textContent?.trim() ?? '').toBe('');
     });
 });

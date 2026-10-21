@@ -11,6 +11,7 @@ vi.mock('@inertiajs/vue3', async (importOriginal) => {
 });
 
 import GoogleButton from '@/components/auth/GoogleButton.vue';
+import en from '@/lang/generated/en.json';
 import { resetPage } from '@/test/inertiaPage';
 
 enableAutoUnmount(afterEach);
@@ -51,6 +52,17 @@ describe('GoogleButton (10 §4.2, 13 §5.3)', () => {
         expect(caption.get('a[href="/privacy"]').attributes('rel')).toContain(
             'noopener',
         );
+    });
+
+    it('has its caption as one message with tags, which a translator can reorder', () => {
+        const messages: Record<string, string> = en;
+
+        expect(messages['auth_ui.google.caption']).toBe(
+            'By continuing you accept the <terms>Terms of service</terms> and <privacy>Privacy policy</privacy>.',
+        );
+        expect(
+            Object.keys(messages).filter((key) => /caption_/.test(key)),
+        ).toEqual([]);
     });
 
     it('has no caption when it links an account instead of signing in', () => {

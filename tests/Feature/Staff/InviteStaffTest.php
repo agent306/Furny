@@ -47,6 +47,9 @@ describe('inviting a staff member (13 section 5.9 step 1)', function (): void {
         $invitation = StaffInvitation::query()->sole();
 
         Notification::assertSentOnDemand(StaffInvited::class, function (StaffInvited $notification, array $channels, AnonymousNotifiable $notifiable) use ($invitation): bool {
+            // The mail is queued: it is built some time after the invitation was, and must not count 72 hours from then.
+            $this->travel(2)->hours();
+
             $mail = $notification->toMail($notifiable);
             $url = $mail->actionUrl;
 
@@ -57,7 +60,8 @@ describe('inviting a staff member (13 section 5.9 step 1)', function (): void {
                 ->and(URL::hasValidSignature(Request::create($url)))->toBeTrue();
 
             parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
-            expect((int) $query['expires'])->toBe($invitation->expires_at->getTimestamp());
+            expect((int) $query['expires'])->toBe($invitation->expires_at->getTimestamp())
+                ->not->toBe(now()->addHours(72)->getTimestamp());
 
             // Dead as soon as the invitation is: the signature carries the same expiry.
             $this->travel(73)->hours();
@@ -262,9 +266,13 @@ describe('resending (13 section 5.9 step 2)', function (): void {
             ->and(Activity::query()->where('event', 'staff.invitation_resent')->sole()->subject_id)->toBe($invitation->id);
 
         Notification::assertSentOnDemand(StaffInvited::class, function (StaffInvited $notification, array $channels, AnonymousNotifiable $notifiable) use ($invitation): bool {
+            // Queued: built after the resend, and still carrying the expiry the resend set.
+            $this->travel(1)->hour();
             parse_str((string) parse_url((string) $notification->toMail($notifiable)->actionUrl, PHP_URL_QUERY), $query);
 
-            return $notifiable->routes['mail'] === 'nina@example.com' && (int) $query['expires'] === $invitation->expires_at->getTimestamp();
+            return $notifiable->routes['mail'] === 'nina@example.com'
+                && (int) $query['expires'] === $invitation->expires_at->getTimestamp()
+                && (int) $query['expires'] !== now()->addHours(72)->getTimestamp();
         });
     });
 

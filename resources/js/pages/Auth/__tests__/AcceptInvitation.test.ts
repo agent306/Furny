@@ -17,6 +17,7 @@ vi.mock('@inertiajs/vue3', async (importOriginal) => {
 });
 
 import { Head } from '@inertiajs/vue3';
+import en from '@/lang/generated/en.json';
 import AcceptInvitation from '@/pages/Auth/AcceptInvitation.vue';
 import { page, resetPage } from '@/test/inertiaPage';
 import type { FeatureFlags } from '@/types/inertia';
@@ -169,6 +170,19 @@ describe('AcceptInvitation (11 §7.1)', () => {
         expect(caption.findAll('a').map((a) => a.attributes('target'))).toEqual(
             ['_blank', '_blank'],
         );
+    });
+
+    it('has the caption as one message with tags, which a translator can reorder', () => {
+        const messages: Record<string, string> = en;
+
+        expect(messages['staff.accept.terms']).toBe(
+            'By creating your account you accept the <terms>Terms of service</terms> and the <privacy>Privacy policy</privacy>.',
+        );
+        expect(
+            Object.keys(messages).filter((key) =>
+                key.startsWith('staff.accept.terms_'),
+            ),
+        ).toEqual([]);
     });
 
     it('has the submit button', () => {

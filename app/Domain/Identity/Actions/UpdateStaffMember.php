@@ -38,6 +38,11 @@ final class UpdateStaffMember
             $this->access->lockOwners();
             $staff->refresh();
 
+            // Once more, on what the database says now: the first check ran before the lock was ours.
+            $actor = $this->access->reload($actor);
+            $this->access->authorizeTarget($actor, $staff);
+            $this->access->authorizeGrant($actor, $role);
+
             $from = $this->access->roleOf($staff);
             $changesRole = $from !== $role;
 

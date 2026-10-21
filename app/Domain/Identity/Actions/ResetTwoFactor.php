@@ -15,6 +15,10 @@ use LogicException;
  * Clears a staff member's two-factor authentication and signs them out everywhere (13 §5.10): they enrol again at their
  * next sign-in. `$actor` is the staff member who does it for someone else; the break-glass console command passes null
  * and `via` `console`. Nobody resets their own through here.
+ *
+ * It does not look at what there is to clear: 13 §5.10 makes no exception, so a member with nothing set (or an enrolment
+ * that was never confirmed) is signed out everywhere and the reset is audited all the same. Whoever offers the action
+ * decides when it is worth offering (the staff page shows it for a member with two-factor authentication on).
  */
 final class ResetTwoFactor
 {
@@ -42,6 +46,14 @@ final class ResetTwoFactor
         }
 
         DB::transaction(function () use ($actor, $user, $via): void {
+            // The owners lock, so that a promotion to owner that is under way is over before the gate is asked again.
+            $this->access->lockOwners();
+            $user->refresh();
+
+            if ($actor !== null) {
+                $this->access->authorizeTarget($this->access->reload($actor), $user);
+            }
+
             $user->forceFill([
                 'two_factor_secret' => null,
                 'two_factor_recovery_codes' => null,

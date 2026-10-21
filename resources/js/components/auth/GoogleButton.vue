@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
+import RichText from '@/components/common/RichText.vue';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/composables/useI18n';
 import { redirect } from '@/routes/auth/google';
@@ -71,22 +72,26 @@ const href = computed(() => redirect.url({ query: { intent: props.intent } }));
             class="text-center text-xs leading-relaxed text-muted-foreground"
             data-test="google-caption"
         >
-            {{ t('auth_ui.google.caption_before') }}
-            <a
-                :href="terms().url"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="underline underline-offset-4"
-                >{{ t('legal.terms.title') }}</a
-            >
-            {{ t('auth_ui.google.caption_and') }}
-            <a
-                :href="privacy().url"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="underline underline-offset-4"
-                >{{ t('legal.privacy.title') }}</a
-            >{{ t('auth_ui.google.caption_after') }}
+            <RichText message-key="auth_ui.google.caption">
+                <template #terms="{ text }">
+                    <a
+                        :href="terms().url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="underline underline-offset-4"
+                        >{{ text }}</a
+                    >
+                </template>
+                <template #privacy="{ text }">
+                    <a
+                        :href="privacy().url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="underline underline-offset-4"
+                        >{{ text }}</a
+                    >
+                </template>
+            </RichText>
         </p>
     </div>
 </template>

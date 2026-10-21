@@ -5,6 +5,7 @@ import GoogleButton from '@/components/auth/GoogleButton.vue';
 import PasswordField from '@/components/auth/PasswordField.vue';
 import InputError from '@/components/common/InputError.vue';
 import RequiredMark from '@/components/common/RequiredMark.vue';
+import RichText from '@/components/common/RichText.vue';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -194,22 +195,26 @@ function describedBy(error: string | undefined): string | undefined {
                 class="text-center text-xs leading-relaxed text-muted-foreground"
                 data-test="terms-caption"
             >
-                {{ t('staff.accept.terms_before') }}
-                <a
-                    :href="terms().url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="underline underline-offset-4"
-                    >{{ t('legal.terms.title') }}</a
-                >
-                {{ t('staff.accept.terms_and') }}
-                <a
-                    :href="privacy().url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="underline underline-offset-4"
-                    >{{ t('legal.privacy.title') }}</a
-                >{{ t('staff.accept.terms_after') }}
+                <RichText message-key="staff.accept.terms">
+                    <template #terms="{ text }">
+                        <a
+                            :href="terms().url"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="underline underline-offset-4"
+                            >{{ text }}</a
+                        >
+                    </template>
+                    <template #privacy="{ text }">
+                        <a
+                            :href="privacy().url"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="underline underline-offset-4"
+                            >{{ text }}</a
+                        >
+                    </template>
+                </RichText>
             </p>
         </Form>
 

@@ -27,6 +27,7 @@ import { useConfirm } from '@/composables/useConfirm';
 import { useControlSize } from '@/composables/useControlSize';
 import { useFormat } from '@/composables/useFormat';
 import { useI18n } from '@/composables/useI18n';
+import { usePermissions } from '@/composables/usePermissions';
 import { ICONS } from '@/lib/icons';
 import { activate, deactivate } from '@/routes/admin/staff';
 import { resend, revoke } from '@/routes/admin/staff/invitations';
@@ -50,6 +51,7 @@ const { t } = useI18n();
 const { confirm } = useConfirm();
 const { formatDateTime } = useFormat();
 const size = useControlSize();
+const { can } = usePermissions();
 
 const inviting = ref(false);
 const editing = ref<StaffRowData | null>(null);
@@ -130,6 +132,14 @@ async function revokeInvitation(
     if (confirmed) {
         router.delete(revoke.url(invitation.id), visit);
     }
+}
+
+/**
+ * An invitation to the owner role is for owners to resend or revoke (13 §7.3, `staff.manage_owners`); for anybody else
+ * the buttons would only lead to the 403 page.
+ */
+function canManageInvitation(invitation: StaffInvitationRowData): boolean {
+    return invitation.role !== 'owner' || can('staff.manage_owners');
 }
 
 function hasActions(member: StaffRowData): boolean {
@@ -399,7 +409,10 @@ function hasActions(member: StaffRowData): boolean {
                             </template>
                         </TableCell>
                         <TableCell class="text-right">
-                            <div class="flex justify-end gap-1">
+                            <div
+                                v-if="canManageInvitation(invitation)"
+                                class="flex justify-end gap-1"
+                            >
                                 <Button
                                     variant="ghost"
                                     size="sm"

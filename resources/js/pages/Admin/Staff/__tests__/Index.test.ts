@@ -30,7 +30,7 @@ vi.mock('@/composables/useConfirm', () => ({
 }));
 
 import StaffIndex from '@/pages/Admin/Staff/Index.vue';
-import { resetPage } from '@/test/inertiaPage';
+import { page, resetPage } from '@/test/inertiaPage';
 import type {
     StaffInvitationRowData,
     StaffRoleOption,
@@ -249,6 +249,55 @@ describe('Admin/Staff/Index (11 §7)', () => {
             {},
             expect.objectContaining({ preserveScroll: true }),
         );
+    });
+
+    describe('an invitation to the owner role', () => {
+        const ownerInvitation: StaffInvitationRowData = {
+            ...(invitations[0] as StaffInvitationRowData),
+            id: 'INV3',
+            email: 'boss@example.com',
+            name: 'Bo Boss',
+            role: 'owner',
+        };
+        const withOwnerInvitation = () =>
+            index({ invitations: [...invitations, ownerInvitation] });
+        const buttons = (wrapper: VueWrapper, id: string) => [
+            wrapper
+                .find(
+                    `[data-test="invitation-${id}"] [data-test="resend-button"]`,
+                )
+                .exists(),
+            wrapper
+                .find(
+                    `[data-test="invitation-${id}"] [data-test="revoke-button"]`,
+                )
+                .exists(),
+        ];
+
+        it('has no Resend and Revoke for someone without staff.manage_owners', () => {
+            const wrapper = withOwnerInvitation();
+
+            expect(buttons(wrapper, 'INV3')).toEqual([false, false]);
+            expect(
+                wrapper.get('[data-test="invitation-INV3"]').text(),
+            ).toContain('boss@example.com');
+            // The other invitations are theirs to manage.
+            expect(buttons(wrapper, 'INV1')).toEqual([true, true]);
+            expect(buttons(wrapper, 'INV2')).toEqual([true, true]);
+        });
+
+        it('has Resend and Revoke for someone who passes the owner gate', () => {
+            page.props.auth = {
+                user: {
+                    type: 'staff',
+                    permissions: ['staff.manage'],
+                    abilities: ['staff.manage_owners'],
+                },
+            };
+            const wrapper = withOwnerInvitation();
+
+            expect(buttons(wrapper, 'INV3')).toEqual([true, true]);
+        });
     });
 
     it('revokes only after the confirmation', async () => {

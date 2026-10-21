@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Domain\Identity\Actions\ActivateUser;
 use App\Domain\Identity\Actions\DeactivateUser;
 use App\Domain\Identity\Actions\InviteStaff;
 use App\Domain\Identity\Actions\ResetTwoFactor;
@@ -11,7 +12,9 @@ use App\Domain\Identity\Models\StaffInvitation;
 use App\Domain\Identity\Models\User;
 use App\Support\Auth\SessionRegistry;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Str;
@@ -48,6 +51,31 @@ function openStaffSession(User $user): string
     app(SessionRegistry::class)->register($user, $id, Request::create('/', server: ['REMOTE_ADDR' => '203.0.113.45']), 'password', false);
 
     return $id;
+}
+
+/**
+ * Runs `$change` once, right after the next owners lock is taken: what another request that held the lock before has
+ * committed by the time this one gets it. The change is made through the query builder, so no model of the test sees it.
+ */
+function afterOwnersLock(Closure $change): void
+{
+    $done = false;
+
+    DB::listen(static function (QueryExecuted $query) use (&$done, $change): void {
+        if (! $done && str_contains($query->sql, 'pg_advisory_xact_lock')) {
+            $done = true;
+            $change();
+        }
+    });
+}
+
+/** Gives `$user` exactly the role `$role` in the database, behind the back of every model in memory. */
+function setRoleBehindTheBack(User $user, StaffRole $role): void
+{
+    $roleId = DB::table(config('permission.table_names.roles'))->where('name', $role->value)->value('id');
+
+    DB::table(config('permission.table_names.model_has_roles'))->where('model_id', $user->getKey())->delete();
+    DB::table(config('permission.table_names.model_has_roles'))->insert(['role_id' => $roleId, 'model_type' => $user->getMorphClass(), 'model_id' => $user->getKey()]);
 }
 
 beforeEach(function (): void {
@@ -586,5 +614,165 @@ describe('the actions outside a request', function (): void {
 
         expect(fn () => app(InviteStaff::class)->handle($this->admin, 'x@example.com', 'Xavier Ex', StaffRole::Owner))
             ->toThrow(AuthorizationException::class);
+    });
+});
+
+describe('the owner gate of the target, asked by the actions themselves', function (): void {
+    it('refuses an admin on an owner in every action, whoever calls them', function (string $action): void {
+        $inactiveOwner = User::factory()->owner()->inactive()->create();
+
+        $call = match ($action) {
+            'update' => fn () => app(UpdateStaffMember::class)->handle($this->admin, $this->owner, 'Olga Owner', StaffRole::Admin),
+            'deactivate' => fn () => app(DeactivateUser::class)->handle($this->admin, $this->owner),
+            'activate' => fn () => app(ActivateUser::class)->handle($this->admin, $inactiveOwner),
+            'reset' => fn () => app(ResetTwoFactor::class)->handle($this->admin, $this->owner),
+        };
+
+        expect($call)->toThrow(AuthorizationException::class);
+
+        expect($this->owner->refresh()->is_active)->toBeTrue()
+            ->and($this->owner->two_factor_confirmed_at)->not->toBeNull()
+            ->and($this->owner->hasRole('owner'))->toBeTrue()
+            ->and($inactiveOwner->refresh()->is_active)->toBeFalse();
+    })->with(['update', 'deactivate', 'activate', 'reset']);
+
+    it('lets an owner act on an owner in every action', function (): void {
+        $second = User::factory()->owner()->create();
+        $gone = User::factory()->owner()->inactive()->create();
+
+        app(UpdateStaffMember::class)->handle($this->owner, $second, 'Renamed Owner', StaffRole::Owner);
+        app(ActivateUser::class)->handle($this->owner, $gone);
+
+        expect($second->refresh()->name)->toBe('Renamed Owner')
+            ->and($gone->refresh()->is_active)->toBeTrue();
+    });
+});
+
+describe('authorization is asked again once the owners lock is held (13 section 5.9)', function (): void {
+    it('refuses to edit a member who was made an owner while the request waited', function (): void {
+        afterOwnersLock(fn () => setRoleBehindTheBack($this->estimator, StaffRole::Owner));
+
+        expect(fn () => app(UpdateStaffMember::class)->handle($this->admin, $this->estimator, 'Eli Renamed', StaffRole::Estimator))
+            ->toThrow(AuthorizationException::class);
+
+        expect($this->estimator->refresh()->name)->toBe('Eli Estimator');
+    });
+
+    it('refuses to deactivate a member who was made an owner while the request waited', function (): void {
+        afterOwnersLock(fn () => setRoleBehindTheBack($this->estimator, StaffRole::Owner));
+
+        expect(fn () => app(DeactivateUser::class)->handle($this->admin, $this->estimator))->toThrow(AuthorizationException::class);
+
+        expect($this->estimator->refresh()->is_active)->toBeTrue();
+    });
+
+    it('refuses to reactivate a member who was made an owner while the request waited', function (): void {
+        $gone = User::factory()->support()->inactive()->create();
+        afterOwnersLock(fn () => setRoleBehindTheBack($gone, StaffRole::Owner));
+
+        expect(fn () => app(ActivateUser::class)->handle($this->admin, $gone))->toThrow(AuthorizationException::class);
+
+        expect($gone->refresh()->is_active)->toBeFalse();
+    });
+
+    it('refuses to reset the two-factor authentication of a member who was made an owner while the request waited', function (): void {
+        afterOwnersLock(fn () => setRoleBehindTheBack($this->estimator, StaffRole::Owner));
+
+        expect(fn () => app(ResetTwoFactor::class)->handle($this->admin, $this->estimator))->toThrow(AuthorizationException::class);
+
+        expect(Activity::query()->where('event', 'auth.2fa_reset')->count())->toBe(0);
+    });
+
+    it('refuses an actor who lost the owner role while the request waited', function (string $action): void {
+        $actor = User::factory()->owner()->create();
+        $target = User::factory()->owner()->create(['name' => 'Target Owner']);
+        $gone = User::factory()->owner()->inactive()->create();
+        // The gate has been asked once already, so the actor's roles are in memory.
+        expect(app(UpdateStaffMember::class)->handle($actor, $this->estimator, 'Eli Estimator', StaffRole::Estimator))->toBeInstanceOf(User::class);
+
+        afterOwnersLock(fn () => setRoleBehindTheBack($actor, StaffRole::Admin));
+
+        $call = match ($action) {
+            'update' => fn () => app(UpdateStaffMember::class)->handle($actor, $target, 'Taken Over', StaffRole::Owner),
+            'grant' => fn () => app(UpdateStaffMember::class)->handle($actor, $this->estimator, 'Eli Estimator', StaffRole::Owner),
+            'deactivate' => fn () => app(DeactivateUser::class)->handle($actor, $target),
+            'activate' => fn () => app(ActivateUser::class)->handle($actor, $gone),
+        };
+
+        expect($call)->toThrow(AuthorizationException::class);
+
+        expect($target->refresh()->name)->toBe('Target Owner')
+            ->and($target->is_active)->toBeTrue()
+            ->and($gone->refresh()->is_active)->toBeFalse()
+            ->and($this->estimator->refresh()->hasRole('estimator'))->toBeTrue();
+    })->with(['update', 'grant', 'deactivate', 'activate']);
+
+    it('refuses an actor who was deactivated while the request waited', function (): void {
+        $actor = User::factory()->admin()->create();
+        afterOwnersLock(fn () => User::query()->whereKey($actor->getKey())->update(['is_active' => false]));
+
+        expect(fn () => app(DeactivateUser::class)->handle($actor, $this->estimator))->toThrow(AuthorizationException::class);
+
+        expect($this->estimator->refresh()->is_active)->toBeTrue();
+    });
+});
+
+describe('reactivating also signs the member out everywhere (13 section 5.9)', function (): void {
+    beforeEach(function (): void {
+        $this->gone = User::factory()->support()->inactive()->create();
+    });
+
+    it('destroys what sessions are left and rotates the remember token', function (): void {
+        $session = openStaffSession($this->gone);
+        $this->gone->forceFill(['remember_token' => 'old-remember-token'])->save();
+
+        $this->actingAs($this->admin)->postJson(route('admin.staff.activate', $this->gone))->assertRedirect();
+
+        $revoked = Activity::query()->where('event', 'auth.sessions_revoked')->sole();
+
+        expect($this->gone->refresh()->is_active)->toBeTrue()
+            ->and($this->gone->remember_token)->not->toBe('old-remember-token')->not->toBeNull()
+            ->and(Session::getHandler()->read($session))->toBe('')
+            ->and($revoked->properties->all())->toBe(['count' => 1, 'reason' => 'reactivated']);
+    });
+
+    it('rotates the remember token even when no session is left', function (): void {
+        $this->gone->forceFill(['remember_token' => 'old-remember-token'])->save();
+
+        app(ActivateUser::class)->handle($this->admin, $this->gone);
+
+        expect($this->gone->refresh()->remember_token)->not->toBe('old-remember-token');
+    });
+
+    it('leaves a member who is active already alone', function (): void {
+        $session = openStaffSession($this->estimator);
+        $this->estimator->forceFill(['remember_token' => 'old-remember-token'])->save();
+
+        app(ActivateUser::class)->handle($this->admin, $this->estimator);
+
+        expect($this->estimator->refresh()->remember_token)->toBe('old-remember-token')
+            ->and(Session::getHandler()->read($session))->not->toBe('');
+    });
+});
+
+describe('resetting two-factor authentication of a member who has none (13 section 5.10)', function (): void {
+    it('resets all the same: the sessions go and the reset is audited, as the spec has no exception', function (): void {
+        $target = User::factory()->admin()->withoutTwoFactor()->create();
+        $session = openStaffSession($target);
+
+        app(ResetTwoFactor::class)->handle($this->owner, $target);
+
+        expect(Session::getHandler()->read($session))->toBe('')
+            ->and(Activity::query()->where('event', 'auth.2fa_reset')->sole()->subject_id)->toBe($target->id);
+    });
+
+    it('clears an enrolment that was started and never confirmed', function (): void {
+        $target = User::factory()->admin()->withoutTwoFactor()->create();
+        $target->forceFill(['two_factor_secret' => encrypt('SECRET'), 'two_factor_recovery_codes' => encrypt('[]')])->save();
+
+        app(ResetTwoFactor::class)->handle($this->owner, $target);
+
+        expect($target->refresh()->two_factor_secret)->toBeNull()
+            ->and($target->two_factor_recovery_codes)->toBeNull();
     });
 });

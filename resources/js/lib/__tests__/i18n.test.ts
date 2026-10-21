@@ -37,6 +37,9 @@ const messages = {
     'a.dateSkeleton': '{at, date, ::yyyyMMMd}',
     'a.timeSkeleton': '{at, time, ::hm}',
     'a.broken': '{count, plural, one {#}',
+    'a.rich':
+        'Read the <terms>Terms of {site}</terms> and <privacy>Privacy</privacy>.',
+    'a.richOnly': '<b>Bold</b>',
 };
 
 function setup(options: { timeZone?: string; numberLocale?: string } = {}) {
@@ -106,6 +109,45 @@ describe('t()', () => {
         t('a.plain');
 
         expect(construct).toHaveBeenCalledTimes(2);
+    });
+
+    describe('parts() for a message with tags', () => {
+        it('splits the text from the tagged runs, in order', () => {
+            expect(setup().parts('a.rich', { site: 'Furny' })).toEqual([
+                'Read the ',
+                { tag: 'terms', text: 'Terms of Furny' },
+                ' and ',
+                { tag: 'privacy', text: 'Privacy' },
+                '.',
+            ]);
+        });
+
+        it('is one tagged part for a message that is only a tag', () => {
+            expect(setup().parts('a.richOnly')).toEqual([
+                { tag: 'b', text: 'Bold' },
+            ]);
+        });
+
+        it('is the text for a message without tags', () => {
+            expect(setup().parts('a.b', { name: 'Asha' })).toEqual([
+                'Hello Asha',
+            ]);
+        });
+
+        it('is the key, with a warning, for a key that is missing', () => {
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+            expect(setup().parts('a.missing')).toEqual(['a.missing']);
+            expect(warn).toHaveBeenCalled();
+        });
+
+        it('never throws on a message that is not valid ICU', () => {
+            vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+            expect(setup().parts('a.broken', { count: 1 })).toEqual([
+                'a.broken',
+            ]);
+        });
     });
 
     describe('in the configured time zone', () => {

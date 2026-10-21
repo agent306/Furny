@@ -28,9 +28,7 @@ return [
     // 10 §4.2, §4.3. The caption sits under the Google button: pressing it is accepting the terms (13 §5.3).
     'google' => [
         'continue' => 'Continue with Google',
-        'caption_before' => 'By continuing you accept the',
-        'caption_and' => 'and',
-        'caption_after' => '.',
+        'caption' => 'By continuing you accept the <terms>Terms of service</terms> and <privacy>Privacy policy</privacy>.',
         'or' => 'or',
     ],
 

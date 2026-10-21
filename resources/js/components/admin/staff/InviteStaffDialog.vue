@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { router, usePage } from '@inertiajs/vue3';
-import { computed, ref, watch } from 'vue';
+import { router } from '@inertiajs/vue3';
+import { ref, watch } from 'vue';
 import StaffRolePicker from '@/components/admin/staff/StaffRolePicker.vue';
 import InputError from '@/components/common/InputError.vue';
 import RequiredMark from '@/components/common/RequiredMark.vue';
@@ -33,7 +33,6 @@ const emit = defineEmits<{ 'update:open': [value: boolean] }>();
 
 const { t } = useI18n();
 const size = useControlSize();
-const page = usePage();
 const { focusFirstError } = useFocusFirstError(
     () => document.querySelector('[role="dialog"]') ?? document,
 );
@@ -43,9 +42,11 @@ const email = ref('');
 const role = ref<StaffRole | ''>('');
 const processing = ref(false);
 
-const errors = computed(() => page.props.errors ?? {});
+// The refusals of this dialog's own send, not the page's errors: those outlive the dialog and are also where the
+// refusal of an action elsewhere on the page (a resend) is left.
+const errors = ref<Record<string, string>>({});
 
-// Every time the dialog opens it starts over.
+// Every time the dialog opens it starts over, with no refusal of the time before.
 watch(
     () => props.open,
     (open) => {
@@ -53,6 +54,7 @@ watch(
             name.value = '';
             email.value = '';
             role.value = '';
+            errors.value = {};
         }
     },
 );
@@ -68,10 +70,16 @@ function submit(): void {
         {
             preserveScroll: true,
             preserveState: true,
-            onStart: () => (processing.value = true),
+            onStart: () => {
+                processing.value = true;
+                errors.value = {};
+            },
             onFinish: () => (processing.value = false),
             onSuccess: () => emit('update:open', false),
-            onError: () => void focusFirstError(),
+            onError: (refused) => {
+                errors.value = refused;
+                void focusFirstError();
+            },
         },
     );
 }

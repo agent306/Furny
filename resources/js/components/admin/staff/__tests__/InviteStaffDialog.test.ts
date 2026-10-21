@@ -171,18 +171,79 @@ describe('InviteStaffDialog (11 §7)', () => {
         );
     });
 
+    /** Fills in and sends the form; the server's answer is `answer(options)`. */
+    async function send(
+        answer: (options: {
+            onError?: (errors: Record<string, string>) => void;
+        }) => void,
+    ): Promise<void> {
+        post.mockImplementation(
+            (
+                _url: string,
+                _data: unknown,
+                options: { onError?: (errors: Record<string, string>) => void },
+            ) => answer(options),
+        );
+
+        type('#invite-name', 'Nina Hire');
+        type('#invite-email', 'nina@example.com');
+        q<HTMLElement>('[data-test="role-estimator"]')?.click();
+        await flushPromises();
+        q<HTMLFormElement>('[data-test="invite-form"]')?.dispatchEvent(
+            new Event('submit', { bubbles: true, cancelable: true }),
+        );
+        await flushPromises();
+    }
+
     it('shows the refusal of the server under the email', async () => {
         dialog();
-        page.props.errors = {
-            email: 'This email already belongs to an account.',
-            code: 'staff.email_in_use',
-        };
         await flushPromises();
+
+        await send((options) =>
+            options.onError?.({
+                email: 'This email already belongs to an account.',
+                code: 'staff.email_in_use',
+            }),
+        );
 
         expect(q('#invite-email-error')?.textContent).toContain(
             'This email already belongs to an account.',
         );
         expect(q('#invite-email')?.getAttribute('aria-invalid')).toBe('true');
+    });
+
+    it('starts without the refusal of the last time when it is opened again', async () => {
+        const wrapper = dialog();
+        await flushPromises();
+        await send((options) =>
+            options.onError?.({ email: 'This email already belongs.' }),
+        );
+        expect(q('#invite-email-error')?.textContent).toContain(
+            'This email already belongs.',
+        );
+
+        await wrapper.setProps({ open: false });
+        await flushPromises();
+        await wrapper.setProps({ open: true });
+        await flushPromises();
+
+        expect(q('#invite-email-error')?.textContent?.trim() ?? '').toBe('');
+        expect(q('#invite-email')?.getAttribute('aria-invalid')).toBeNull();
+    });
+
+    it('does not show an error that belongs to something else on the page', async () => {
+        // A refused resend leaves its error under `email` in the page's errors (staff.email_in_use).
+        const wrapper = dialog();
+        await wrapper.setProps({ open: false });
+        page.props.errors = {
+            email: 'This email already belongs to an account.',
+            code: 'staff.email_in_use',
+        };
+        await wrapper.setProps({ open: true });
+        await flushPromises();
+
+        expect(q('#invite-email-error')?.textContent?.trim() ?? '').toBe('');
+        expect(q('#invite-email')?.getAttribute('aria-invalid')).toBeNull();
     });
 
     it('closes after a successful send', async () => {

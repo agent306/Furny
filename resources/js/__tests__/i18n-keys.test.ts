@@ -23,6 +23,8 @@ const ENUM_KEY_PATTERNS: Record<string, string> = {
 const KEY_CALLS = [
     /(?<![\w$])\$?t\(\s*(['"])([\w.]+)\1/g,
     /\b(?:labelKey|titleKey|tabLabelKey)\s*:\s*(['"])([\w.]+)\1/g,
+    // `<RichText message-key="…">`: a message with tags, rendered by the component.
+    /(?<![:\w])message-?[kK]ey\s*=\s*(['"])([\w.]+)\1/g,
 ];
 
 function sourceFiles(): string[] {
@@ -71,13 +73,17 @@ describe('literal translation keys', () => {
         const source = `
             t('a.one'); $t("a.two"); i18n.t('a.three');
             { labelKey: 'a.four', titleKey: "a.five", tabLabelKey: 'a.six' }
+            <RichText message-key="a.seven" /> <RichText messageKey="a.eight" />
+            <RichText :message-key="variable" />
             format('not.a.key'); t(\`dynamic.\${x}\`); t(variable);
         `;
 
         expect(literalKeys(source).sort()).toEqual([
+            'a.eight',
             'a.five',
             'a.four',
             'a.one',
+            'a.seven',
             'a.six',
             'a.three',
             'a.two',
