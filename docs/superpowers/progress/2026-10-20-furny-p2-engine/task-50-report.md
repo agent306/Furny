@@ -65,3 +65,23 @@ Local smoke (I13, not a gate): built CLI `compute-bom` with the committed 3-door
 - 22x22 cold derive has only about 10 samples per bench run (500 ms time budget); its median is stable (67 to 82 ms) given the 400 ms line.
 - Timing is host-noisy; the thinnest margin after fixes is snap+hit index (2.4 to 4.3 ms of 6 ms).
 - Test helper `scripts/` is outside ESLint-ignored/format:check scope (`format:check` covers `resources/` and `engine-cli/` only); `check-bench.mjs` is prettier-formatted anyway and lint passes.
+
+## Fix round 1 (review findings)
+
+Changes
+- IMPORTANT 1, `plan/commands/fragment.ts`: `mayAddNoWall(d, seg)` rewritten with bounds derived from `resolveEndpoint`. A resolved endpoint lies at most `SNAP = hypot(MIN_WALL_LENGTH, NODE_MERGE_TOL) + 1` (about 12.2 mm) from its point: existing node or T node within 5 mm, wall-end snap up to hypot(10, 5) = 11.18 mm, rounding under 1 mm. `wall_duplicate` needs (A) both ends on one node, so the points are within `2*SNAP` (about 24.4 mm), or (B) every part covered or joined, which needs an existing wall W with a part within `NODE_MERGE_TOL` of the resolved segment (joined case: its ends are cut nodes within 5 mm of it) or a collinear `intersectSegments` overlap (W starts within 5 mm of the line and is parallel within 0.5 degrees, so it is at most `5 + 0.01*|W|` from the segment over the overlap). The resolved and the pasted segment differ by at most `SNAP`, so the dry run is skipped only when no wall is within `NODE_MERGE_TOL + SNAP + 0.01*|W|` of the pasted segment and the segment is longer than `2*SNAP`. The proof is in the doc comment; the old "two merge tolerances" comment is gone. `addsWall` is now exported for the test.
+- Consequence: any wall touching or crossing the pasted segment forces the dry run. The 97-wall grid paste is back to about 117 to 148 ms (every grid wall touches an earlier one); the speedup now only applies to walls clear of everything else. Correctness wins.
+- MINOR 3: `check-bench.mjs` `fmt()` no longer throws on a non-number; the FAIL line is printed. MINOR 4: duplicate benchmark names exit 1. MINOR 5: `hitIndex.ts` pushes items in a loop instead of spreading.
+- `cmpId` check: `engine/compare.ts` is `a < b ? -1 : a > b ? 1 : 0`, the exact body of the removed `compareStr` (plain code-unit order), so semantics are identical.
+
+Tests (written first, seen red)
+- Counterexample as an `insertFragment` test (`entities.test.ts`, "still skips a wall whose ends both snap to one wall-end node"): red before the fix with `wall_too_short`, now green; the wall is skipped, idMap is empty, nodes and walls unchanged.
+- Seeded property test (mulberry32(50), 8000 random segments near two plans, spreads 3 to 400 mm): whenever `mayAddNoWall` says skip, `addsWall` must return true. Not vacuous (more than 100 skips asserted). Mutation check: weakening the bounds makes it fail.
+- Helper tests updated to the new signature; `checkBench.test.ts` gained non-numeric and duplicate-name cases (7 tests).
+
+Commands and results
+- `yarn vitest run resources/js/engine/plan`: 38 files, 1589 tests pass.
+- `yarn vitest run resources/js/engine/__tests__/checkBench.test.ts`: 7 pass.
+- `yarn lint`: clean. `yarn format:check`: clean. `yarn typecheck`: clean.
+- `yarn vitest run` (full): 210 files, 5217 tests, 0 failures. One run caught a purity-test hit on the word "document." in my new comment; reworded.
+- `yarn bench:check`: all 12 budgets pass (snap+hit index 1.9 ms, cold derive 7x6 7.1 ms, moveNode 3.0 ms, warm derive 2.1 ms). estimateFurniture p99 read 30 ms in this run (load spike), limit 100 ms.

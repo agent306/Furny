@@ -3,8 +3,11 @@ import type { ExecuteResult } from '../../../commands/types';
 import { cyrb53 } from '../../../geometry/hash';
 import type { PlanDocument } from '../../schema';
 import { FOOTPRINT, Graph, busOf, ok, refused } from '../../testing/graph';
+import { mulberry32 } from '../../../testing/random';
+import { create } from 'mutative';
 import { definePlanCommand } from '../define';
-import { mayAddNoWall, type PlanFragment } from '../fragment';
+import { addsWall, mayAddNoWall, type PlanFragment } from '../fragment';
+import { PROPS } from '../../testing/graph';
 import { PLAN_COMMANDS, createPlanBus } from '../registry';
 
 // ---- fixtures ----------------------------------------------------------------
@@ -1021,34 +1024,107 @@ describe('deleteEntities', () => {
     });
 });
 
-describe('mayAddNoWall (insertFragment dry-run skip)', () => {
-    const { g } = room();
-    const doc = g.doc;
+describe('insertFragment dry-run skip (mayAddNoWall)', () => {
     const span = (a: [number, number], b: [number, number]) => ({
         a: { x: a[0], y: a[1] },
         b: { x: b[0], y: b[1] },
     });
 
-    it('is false for a wall in empty space: the dry run is skipped', () => {
-        expect(mayAddNoWall(doc, span([8000, 0], [12000, 0]), [])).toBe(false);
-        // crossing and touching walls still add a wall
-        expect(mayAddNoWall(doc, span([2500, -500], [2500, 3500]), [])).toBe(
-            false,
-        );
-        expect(mayAddNoWall(doc, span([5000, 0], [9000, 0]), [])).toBe(false);
+    it('is false for walls clear of every existing wall: the dry run is skipped', () => {
+        const { g } = room();
+        expect(mayAddNoWall(g.doc, span([8000, 0], [12000, 0]))).toBe(false);
+        expect(mayAddNoWall(g.doc, span([0, 8000], [5000, 9000]))).toBe(false);
     });
 
-    it('is true when an existing wall covers the segment', () => {
-        expect(mayAddNoWall(doc, span([1000, 0], [2000, 0]), [[0, 1]])).toBe(
+    it('is true next to or on existing walls, and for tiny segments', () => {
+        const { g } = room();
+        expect(mayAddNoWall(g.doc, span([0, 0], [5000, 0]))).toBe(true);
+        expect(mayAddNoWall(g.doc, span([1000, 0], [2000, 0]))).toBe(true);
+        expect(mayAddNoWall(g.doc, span([2500, -500], [2500, 3500]))).toBe(
             true,
         );
+        expect(mayAddNoWall(g.doc, span([8000, 0], [8010, 0]))).toBe(true);
     });
 
-    it('is true when an existing wall lies on both ends of the segment', () => {
-        expect(mayAddNoWall(doc, span([0, 0], [5000, 0]), [])).toBe(true);
+    it('still skips a wall whose ends both snap to one wall-end node (11.2 mm off)', () => {
+        // Node n with a wall east and a wall west. (10,5) and (-10,-5) are each
+        // 5 mm from a wall line and 10 mm from its end, so both resolve to n.
+        const g = new Graph();
+        const west = g.node(-2000, 0);
+        const n = g.node(0, 0);
+        const east = g.node(2000, 0);
+        g.wall(west, n);
+        g.wall(n, east);
+        const start = g.doc;
+        const fragment = emptyFragment();
+        fragment.nodes['n_00000f0001'] = { id: 'n_00000f0001', x: 10, y: 5 };
+        fragment.nodes['n_00000f0002'] = { id: 'n_00000f0002', x: -10, y: -5 };
+        fragment.walls['w_00000f0001'] = {
+            ...PROPS,
+            id: 'w_00000f0001',
+            a: 'n_00000f0001',
+            b: 'n_00000f0002',
+        };
+        const bus = busOf(g);
+        const result = ok(
+            bus.execute('insertFragment', { fragment, dx: 0, dy: 0 }),
+        );
+        expect(result.result.idMap).toEqual({});
+        expect(Object.keys(bus.getDoc().walls)).toHaveLength(2);
+        expect(bus.getDoc().nodes).toEqual(start.nodes);
     });
 
-    it('is true for a segment whose ends could resolve to one node', () => {
-        expect(mayAddNoWall(doc, span([8000, 0], [8010, 0]), [])).toBe(true);
+    it('never skips a dry run that would find a duplicate (seeded property)', () => {
+        const random = mulberry32(50);
+        const near = (v: number, spread: number) =>
+            v + (random() - 0.5) * spread;
+        let skipped = 0;
+        let tried = 0;
+        for (const build of [
+            () => room().g.doc,
+            () => {
+                const g = new Graph();
+                const hub = g.node(0, 0);
+                for (const [x, y] of [
+                    [2000, 0],
+                    [-2000, 0],
+                    [0, 1500],
+                    [-30, -900],
+                ] as const) {
+                    g.wall(hub, g.node(x, y));
+                }
+                g.wall(g.node(0, 4000), g.node(40000, 4000.5));
+                return g.doc;
+            },
+        ]) {
+            const doc = build();
+            const anchors = Object.values(doc.nodes);
+            for (let i = 0; i < 4000; i += 1) {
+                const a = anchors[Math.floor(random() * anchors.length)]!;
+                const b = anchors[Math.floor(random() * anchors.length)]!;
+                const spread = [3, 12, 30, 400][i % 4]!;
+                // ends near anchors, or a short stub, or a long reach
+                const seg = {
+                    a: { x: near(a.x, spread), y: near(a.y, spread) },
+                    b:
+                        i % 3 === 0
+                            ? {
+                                  x: near(a.x, 2 * spread),
+                                  y: near(a.y, 2 * spread),
+                              }
+                            : { x: near(b.x, spread), y: near(b.y, spread) },
+                };
+                tried += 1;
+                create(doc, (d) => {
+                    if (mayAddNoWall(d, seg)) return;
+                    skipped += 1;
+                    expect(
+                        addsWall(d, { point: seg.a }, { point: seg.b }, PROPS),
+                    ).toBe(true);
+                });
+            }
+        }
+        expect(tried).toBe(8000);
+        expect(skipped).toBeGreaterThan(100); // the property is not vacuous
     });
 });

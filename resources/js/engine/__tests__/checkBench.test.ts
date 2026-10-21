@@ -58,4 +58,19 @@ describe('scripts/check-bench.mjs (16 §10)', () => {
         expect(res.status).toBe(1);
         expect(res.stderr).toContain('unknown threshold metric "medain"');
     });
+
+    it('prints a FAIL line, not a crash, for a non-numeric measurement', () => {
+        const res = run([{ ...fast, median: 'n/a' as unknown as number }], {
+            op: { median: 5 },
+        });
+        expect(res.status).toBe(1);
+        expect(res.stderr).not.toContain('TypeError');
+        expect(res.stdout).toContain('FAIL op median');
+    });
+
+    it('fails on duplicate benchmark names instead of overwriting', () => {
+        const res = run([fast, fast], { op: { median: 5 } });
+        expect(res.status).toBe(1);
+        expect(res.stderr).toContain('duplicate benchmark name "op"');
+    });
 });

@@ -24,6 +24,10 @@ const measured = new Map();
 for (const file of report.files ?? []) {
     for (const group of file.groups ?? []) {
         for (const bench of group.benchmarks ?? []) {
+            if (measured.has(bench.name)) {
+                console.error(`duplicate benchmark name "${bench.name}"`);
+                process.exit(1);
+            }
             measured.set(bench.name, bench);
         }
     }
@@ -31,7 +35,8 @@ for (const file of report.files ?? []) {
 
 const METRICS = { median: 'median', p95: 'p99' };
 const failures = [];
-const fmt = (ms) => ms.toFixed(3).padStart(9);
+const fmt = (ms) =>
+    (typeof ms === 'number' ? ms.toFixed(3) : String(ms)).padStart(9);
 for (const [name, limits] of Object.entries(thresholds)) {
     const bench = measured.get(name);
     if (!bench) {

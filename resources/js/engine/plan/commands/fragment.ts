@@ -37,7 +37,7 @@ import {
     projectParam,
     type Seg,
 } from '../../geometry/segment';
-import { NODE_MERGE_TOL } from '../../geometry/tolerance';
+import { MIN_WALL_LENGTH, NODE_MERGE_TOL } from '../../geometry/tolerance';
 import { add, dist, dot, scale, sub, type Vec2 } from '../../geometry/vec2';
 import {
     MAX_FIXTURES,
@@ -210,7 +210,7 @@ function scratchIds(): PlanCommandContext['newId'] {
  * the draft: `false` when it is covered or both ends resolve to one node
  * (`wall_duplicate`). Any other refusal is left for the real run to report.
  */
-function addsWall(
+export function addsWall(
     d: Doc,
     from: EndpointRef,
     to: EndpointRef,
@@ -235,27 +235,55 @@ function addsWall(
 }
 
 /**
- * Whether pasting `seg` might add no wall (`wall_duplicate`), so `addsWall`
- * must try it. `false` is certain: `wall_duplicate` needs both ends to resolve
- * to one node (the ends then lie within two merge tolerances of each other) or
- * every part of the segment to be covered or already joined, and both need an
- * existing wall along the segment (`covered`) or one with both ends on it.
- * Large pastes into empty space skip the dry run entirely.
+ * The most a resolved endpoint can lie from the point it came from
+ * (`resolveEndpoint`): an existing node or a T node is within
+ * `NODE_MERGE_TOL`; a wall's end node is chosen when the point is within
+ * `NODE_MERGE_TOL` of the wall and projects within `MIN_WALL_LENGTH` of that
+ * end, so up to `hypot(MIN_WALL_LENGTH, NODE_MERGE_TOL)`; a new node is
+ * rounded (under 1 mm). The 1 mm covers rounding and float noise.
  */
-export function mayAddNoWall(
-    d: Doc,
-    seg: Seg,
-    covered: ReadonlyArray<[number, number]>,
-): boolean {
-    if (dist(seg.a, seg.b) <= 4 * NODE_MERGE_TOL || covered.length > 0) {
-        return true;
-    }
-    return Object.values(d.walls).some(
-        (wall) =>
-            hasEnds(d, wall) &&
-            closestPointOnSeg(pointOf(d, wall.a), seg).dist <= NODE_MERGE_TOL &&
-            closestPointOnSeg(pointOf(d, wall.b), seg).dist <= NODE_MERGE_TOL,
+const SNAP = Math.hypot(MIN_WALL_LENGTH, NODE_MERGE_TOL) + 1;
+/** Largest sine of the angle `intersectSegments` still calls parallel (`ANGLE_TOL` is 0.5 degrees), rounded up. */
+const PARALLEL_SLOPE = 0.01;
+
+/** Distance between two segments: 0 when they touch or cross. */
+function segmentGap(p: Seg, q: Seg): number {
+    if (intersectSegments(p, q, 0).kind !== 'none') return 0;
+    return Math.min(
+        closestPointOnSeg(p.a, q).dist,
+        closestPointOnSeg(p.b, q).dist,
+        closestPointOnSeg(q.a, p).dist,
+        closestPointOnSeg(q.b, p).dist,
     );
+}
+
+/**
+ * Whether pasting `seg` might add no wall (`wall_duplicate`), so `addsWall`
+ * must try it. `false` is a proof that it adds a wall. The dry run resolves
+ * both ends to nodes `ra`, `rb`, each within `SNAP` of its point, then calls
+ * `insertWallSegment(ra, rb)`, which finds no wall to make only when
+ * - `ra === rb`: then the points are within `2 * SNAP` of each other; or
+ * - every part of `ra -> rb` is covered or already joined. That needs an
+ *   existing wall W (or a piece of one) either
+ *   (a) joining two nodes that lie on `ra -> rb` (within `NODE_MERGE_TOL` of
+ *       it): a part of W is then within `NODE_MERGE_TOL` of `ra -> rb`; or
+ *   (b) overlapping `ra -> rb` collinearly (`intersectSegments`): W is
+ *       parallel within `ANGLE_TOL` and starts within `NODE_MERGE_TOL` of the
+ *       line, so over the stretch that overlaps it W is at most
+ *       `NODE_MERGE_TOL + PARALLEL_SLOPE * |W|` from `ra -> rb`.
+ *   `ra -> rb` and `seg` differ by at most `SNAP` at every point, so in both
+ *   cases W is within `NODE_MERGE_TOL + SNAP + PARALLEL_SLOPE * |W|` of `seg`.
+ * A paste clear of those bounds skips the dry run, which copies the plan.
+ */
+export function mayAddNoWall(d: Doc, seg: Seg): boolean {
+    if (dist(seg.a, seg.b) <= 2 * SNAP) return true;
+    return Object.values(d.walls).some((wall) => {
+        if (!hasEnds(d, wall)) return false;
+        const other = { a: pointOf(d, wall.a), b: pointOf(d, wall.b) };
+        const reach =
+            NODE_MERGE_TOL + SNAP + PARALLEL_SLOPE * dist(other.a, other.b);
+        return segmentGap(seg, other) <= reach;
+    });
 }
 
 /** A pasted fragment wall: where it lands and what existing walls covered of it. */
@@ -398,14 +426,13 @@ function pasteFragment(
     for (const wall of sortedValues(f.walls)) {
         const props = wallProps(wall);
         const seg = { a: shift(f.nodes[wall.a]!), b: shift(f.nodes[wall.b]!) };
-        const covered = coveredSpans(d, seg);
         if (
-            mayAddNoWall(d, seg, covered) &&
+            mayAddNoWall(d, seg) &&
             !addsWall(d, refOf(wall.a), refOf(wall.b), props)
         ) {
             continue;
         }
-        lines.set(wall.id, { seg, covered });
+        lines.set(wall.id, { seg, covered: coveredSpans(d, seg) });
         for (const end of [wall.a, wall.b]) {
             idMap[end] ??= resolveEndpoint(d, refOf(end), ctx, out);
         }

@@ -288,7 +288,7 @@ export function buildHitIndex(
     for (const g of groupsOf(drawing, 'TEXT', 'room')) {
         const key = g.entityId ?? '';
         const items = roomItems.get(key);
-        if (items) items.push(...g.items);
+        if (items) for (const item of g.items) items.push(item);
         else roomItems.set(key, [...g.items]);
     }
     const roomLabels: Entry[] = [];
