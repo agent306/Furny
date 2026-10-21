@@ -6,6 +6,7 @@ hand ``find_room_faces`` a drawn wall mask and a hand-built graph, so each rule 
 """
 
 import dataclasses
+import math
 from collections.abc import Sequence
 
 import cv2
@@ -26,7 +27,7 @@ from app.schemas.candidates import (
     WallGraph,
 )
 from app.utils.geometry import Rect
-from tests.support.synth import SDoor, SGap, render_plan
+from tests.support.synth import SDoor, SGap, SWall, render_plan
 from tests.test_segments_walls import PARTITION, SIZE, plan, run, token
 
 T = 14
@@ -215,6 +216,41 @@ def test_candidate_set_scale_y() -> None:
     assert scaled.scale_y(1.0) == scaled
 
 
+def test_scale_y_scales_lengths_across_y() -> None:
+    """Review I1 / M3: a length measured across a line scales with that line's normal. A horizontal token's
+    ``height_px`` (its box height) and a horizontal wall's thickness and segment's width scale by f; a
+    vertical token's ``height_px`` (its box width) and a vertical wall's thickness are kept; a diagonal
+    wall's thickness scales by f / its own stretch; ``theta0`` turns with the plan (tan θ' = f tan θ)."""
+    f = 1.1
+    flat = token("T1", "1200", 100.0, 100.0, height=10.0)
+    upright = dataclasses.replace(flat, id="T2", angle=90, box=(95.0, 70.0, 105.0, 130.0))
+    walls = [
+        WallCandidate("W1", (0.0, 50.0), (400.0, 50.0), "N1", "N2", 14.0, "filled", 1.0, 2, ()),
+        WallCandidate("W2", (0.0, 50.0), (0.0, 450.0), "N1", "N3", 14.0, "filled", 1.0, 1, ()),
+        WallCandidate("W3", (0.0, 0.0), (300.0, 400.0), "N4", "N5", 10.0, "filled", 1.0, 2, ()),
+    ]
+    segments = [
+        Segment("S1", (0.0, 10.0), (200.0, 10.0), 3.0, True, "lsd"),
+        Segment("S2", (0.0, 10.0), (0.0, 210.0), 3.0, True, "lsd"),
+    ]
+    cs = dataclasses.replace(
+        candidate_set(rooms=[], spans=[]), texts=[flat, upright], walls=walls, segments=segments, theta0=10.0
+    )
+    scaled = cs.scale_y(f)
+    flat_s, upright_s = scaled.texts
+    assert flat_s.height_px == pytest.approx(flat_s.box[3] - flat_s.box[1]) == pytest.approx(11.0)
+    assert upright_s.height_px == pytest.approx(upright_s.box[2] - upright_s.box[0]) == pytest.approx(10.0)
+    w1, w2, w3 = scaled.walls
+    assert w1.thickness_px == pytest.approx(14.0 * f)
+    assert w2.thickness_px == pytest.approx(14.0)
+    k3 = math.hypot(300.0, 400.0 * f) / 500.0  # the diagonal's own stretch
+    assert w3.thickness_px == pytest.approx(10.0 * f / k3)
+    assert scaled.segments[0].width_px == pytest.approx(3.0 * f)
+    assert scaled.segments[1].width_px == pytest.approx(3.0)
+    assert scaled.theta0 == pytest.approx(math.degrees(math.atan(f * math.tan(math.radians(10.0)))))
+    assert cs.scale_y(f).theta0 != 10.0 and candidate_set(rooms=[], spans=[]).scale_y(f).theta0 == 0.0
+
+
 def candidate_set(*, rooms: list[RoomFace], spans: list[DimensionSpan]) -> CandidateSet:
     """A small hand-built ``CandidateSet``: one vertical wall N1 (10, 20) -> N2 (10, 400) with a gap and an
     opening over u 100-200, one token, one segment and one dimension line."""
@@ -312,3 +348,71 @@ def test_graph_walls_close_the_mask() -> None:
     )
     assert len(rooms) == 2
     assert not any(f.open for f in rooms)
+
+
+# --- corridors (review I2, M7) --------------------------------------------------------------------------
+
+
+def corridor_plan(top_x: int, bottom_x: int) -> list[SWall]:
+    """Four rooms around a 150 px corridor (y 850-1000) across the whole plan, with the top rooms'
+    partition at ``top_x`` and the bottom rooms' at ``bottom_x``."""
+    return [
+        *plan("filled")[:4],
+        SWall((300, 850), (2100, 850), T),
+        SWall((300, 1000), (2100, 1000), T),
+        SWall((top_x, 300), (top_x, 850), T),
+        SWall((bottom_x, 1000), (bottom_x, 1500), T),
+    ]
+
+
+@pytest.mark.parametrize(("top_x", "bottom_x"), [(1200, 1200), (1000, 1400)], ids=["aligned", "offset"])
+def test_corridor_across_partitions_is_one_closed_face(top_x: int, bottom_x: int) -> None:
+    """Review I2: partitions aligned across a corridor make the walls stage record the corridor's width as a
+    gap of a wall running between two junctions; that is no opening of an unfinished wall (the free-end
+    rule), so the corridor stays one closed face. Offset partitions give the same five faces."""
+    r = run(render_plan(SIZE, corridor_plan(top_x, bottom_x)))
+    openings = find_openings(r.graph, r.pre, r.segments, r.pre.ink)
+    rooms, _ = find_room_faces(r.ext.mask, r.graph, openings, [], r.pre.region, r.ext.t_median)
+    assert len(rooms) == 5
+    corridor = [f for f in rooms if f.bbox[1] > 850 and f.bbox[3] < 1000]
+    assert len(corridor) == 1
+    assert corridor[0].bbox[0] < 320 and corridor[0].bbox[2] > 2080
+    assert not any(f.open for f in rooms)
+
+
+def test_door_between_junctions_still_closes() -> None:
+    """The rule of review I2 spares doors and windows: a door filling a wall between two junctions closes."""
+    mask = outline_mask()
+    cv2.line(mask, (300, 850), (2100, 850), 255, T)
+    cv2.line(mask, (1200, 300), (1200, 850), 255, T)
+    n = {"A": (300.0, 850.0), "B": (1200.0, 850.0), "C": (2100.0, 850.0), "D": (1200.0, 300.0)}
+    n |= {"E": (300.0, 1500.0), "F": (1200.0, 1500.0), "G": (2100.0, 1500.0)}
+    walls = [
+        wall("W1", n["A"], n["B"], "A", "B"),
+        wall("W2", n["B"], n["C"], "B", "C"),
+        wall("W3", n["D"], n["B"], "D", "B"),
+        wall("W4", n["E"], n["F"], "E", "F"),
+        wall("W5", n["F"], n["G"], "F", "G"),
+        wall("W6", n["A"], n["E"], "A", "E"),
+        wall("W7", n["C"], n["G"], "C", "G"),
+    ]
+    span = dataclasses.replace(wall("W8", n["B"], n["F"], "B", "F"), openings_px=((0.0, 650.0),))
+    graph = WallGraph(n, [*walls, span], [GapCandidate("W8", 0.0, 650.0)])
+    passage, door = (
+        [OpeningCandidate("O1", "W8", 0.0, 650.0, kind, kind, "start", "left", 0.8)]  # type: ignore[arg-type]
+        for kind in ("opening", "door")
+    )
+    assert len(find_room_faces(mask, graph, passage, [], REGION, float(T))[0]) == 3
+    assert len(find_room_faces(mask, graph, door, [], REGION, float(T))[0]) == 4
+
+
+def test_corridor_anchor_sits_mid_ridge() -> None:
+    """Review M7: on a flat distance-transform ridge the anchor is the ridge pixel nearest its middle, not
+    its first pixel."""
+    mask = outline_mask()
+    cv2.line(mask, (300, 850), (2100, 850), 255, T)
+    cv2.line(mask, (300, 1000), (2100, 1000), 255, T)
+    rooms, _ = find_room_faces(mask, EMPTY, [], [], REGION, float(T))
+    (corridor,) = [f for f in rooms if f.bbox[1] > 850 and f.bbox[3] < 1000]
+    assert corridor.anchor_px[0] == pytest.approx(1200, abs=10)
+    assert corridor.anchor_px[1] == pytest.approx(925, abs=2)

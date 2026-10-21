@@ -255,8 +255,14 @@ class CandidateSet:
         """A copy with every y coordinate multiplied by ``factor`` (06 section 8.2 step 7, anisotropy).
 
         Lengths measured along a line (opening and gap intervals along a wall, tick positions along a
-        dimension line) follow their line's new length; room areas scale by ``factor``. Stroke widths, wall
-        thicknesses and text heights of horizontal text are lengths across, not coordinates, and are kept.
+        dimension line) follow their line's new length ``k``; lengths measured across a line (wall
+        thicknesses, stroke widths) scale by ``factor / k``, so a horizontal wall thickens by ``factor`` and
+        a vertical one keeps its thickness; room areas scale by ``factor``. A token's ``height_px`` is its
+        box height at angle 0 (scaled) and its box width at angle 90 (kept). ``theta0`` turns with the plan:
+        ``tan theta0' = factor x tan theta0``.
+
+        The face-id map of ``find_room_faces`` is not part of the set: a caller holding it must rebuild it
+        (or resample it, nearest neighbour) for the scaled set.
         """
 
         def pt(p: Pt) -> Pt:
@@ -275,7 +281,7 @@ class CandidateSet:
         def text(t: TextToken) -> TextToken:
             x0, y0, x1, y1 = t.box
             q0, q1, q2, q3 = t.quad
-            height = t.height_px * factor if t.angle == 90 else t.height_px
+            height = t.height_px * factor if t.angle == 0 else t.height_px
             return replace(
                 t,
                 quad=(pt(q0), pt(q1), pt(q2), pt(q3)),
@@ -297,12 +303,21 @@ class CandidateSet:
                 bbox=(x0, y0 * factor, x1, y1 * factor),
             )
 
+        def across(a: Pt, b: Pt) -> float:
+            """New width per old width across ``a -> b`` (area scales by ``factor``, length by ``k``)."""
+            return factor / stretch(a, b)
+
+        rad = math.radians(self.theta0)
+        theta0 = math.degrees(math.atan2(math.sin(rad) * factor, math.cos(rad))) % 90.0
         region = self.region
         y0, y1 = round(region.y * factor), round((region.y + region.h) * factor)
         return replace(
             self,
             texts=[text(t) for t in self.texts],
-            segments=[replace(s, p0=pt(s.p0), p1=pt(s.p1)) for s in self.segments],
+            segments=[
+                replace(s, p0=pt(s.p0), p1=pt(s.p1), width_px=s.width_px * across(s.p0, s.p1))
+                for s in self.segments
+            ],
             dimension_lines=[line(d) for d in self.dimension_lines],
             spans=[replace(s, p0=pt(s.p0), p1=pt(s.p1)) for s in self.spans],
             nodes={k: pt(p) for k, p in self.nodes.items()},
@@ -311,6 +326,7 @@ class CandidateSet:
                     w,
                     a=pt(w.a),
                     b=pt(w.b),
+                    thickness_px=w.thickness_px * across(w.a, w.b),
                     openings_px=tuple((along(w.id, u0), along(w.id, u1)) for u0, u1 in w.openings_px),
                 )
                 for w in self.walls
@@ -321,4 +337,5 @@ class CandidateSet:
             ],
             rooms=[room(r) for r in self.rooms],
             region=Rect(region.x, y0, region.w, y1 - y0),
+            theta0=theta0,
         )

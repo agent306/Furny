@@ -800,13 +800,15 @@ def opening_metrics(
 class TruthRoom:
     """One traced room in normalized page px: an interior ``point``, a rough ``polygon``, the label as
     printed (None: unlabelled) and, for a space open onto another without a door, the id of that room
-    (``opens_onto``)."""
+    (``opens_onto``). ``kind`` is ``"room"`` or ``"ledge"`` (an AC ledge or a recess too small to live in,
+    review M1): ledges are neutral in ``room_metrics``."""
 
     id: str
     point: tuple[float, float]
     polygon: np.ndarray  # (k, 2)
     label: str | None
     opens_onto: str | None
+    kind: str = "room"
 
 
 def load_rooms_truth(stem: str, page: NormalizedPage) -> list[TruthRoom]:
@@ -819,7 +821,7 @@ def load_rooms_truth(stem: str, page: NormalizedPage) -> list[TruthRoom]:
         out.append(
             TruthRoom(
                 r["id"], (float(px), float(py)), _apply(m, np.array(r["polygon"], np.float64)), r["label"],
-                r.get("opens_onto"),
+                r.get("opens_onto"), r.get("kind", "room"),
             )
         )  # fmt: skip
     return out
@@ -865,7 +867,9 @@ def room_metrics(
     other truth room's point, except the open rooms that open onto it (a kitchen open to the living room
     shares its face, as drawn). Such an open room is reported as ``open_in_host``, neither matched nor
     missed. A face holding the points of several spaces merges them; a truth room is split when two or more
-    faces each lie at least half inside its polygon."""
+    faces each lie at least half inside its polygon. Ledges (``kind == "ledge"``) are left out: neither
+    matched nor counted against, like the spaces outside the flat."""
+    truth = [r for r in truth if r.kind != "ledge"]
     polys = {f.id: np.array(f.polygon_px, np.float64) for f in faces}
     holders = {r.id: [f.id for f in faces if _poly_contains(polys[f.id], r.point)] for r in truth}
     in_face: dict[str, list[str]] = {}

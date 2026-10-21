@@ -6,12 +6,16 @@
    line outside its openings (the graph's L/T closures and the walls stage's links are walls the mask
    lacks). Then each opening (the openings stage's candidates and the graph's own gap intervals) is drawn
    across as a line of its wall's thickness (door "closures"), and so is every remaining end-to-end gap of
-   at most ``18 t`` between collinear walls when one of the two facing ends is free.
+   at most ``18 t`` between collinear walls when one of the two facing ends is free. A passage or bare gap
+   spanning a whole wall whose both ends are crossings (another wall leaves each end on both sides of its
+   line) is not closed: it is a corridor's width between two through walls where aligned partitions meet
+   it, not an unfinished wall (review I2).
 2. ``free = ~closed`` inside the plan region, in 4-connected components.
 3. Components touching the region border (the outside), smaller than ``0.002 x`` the region area, or whose
    bounding box is more than 15 times longer than wide (slivers) are no faces.
 4. Each face's outer contour, simplified with ``approxPolyDP(0.5 t_median)``, is its polygon.
-5. Its anchor is the maximum of its distance transform (the pole of inaccessibility), strictly inside.
+5. Its anchor is the maximum of its distance transform (the pole of inaccessibility), strictly inside; on a
+   flat ridge, the ridge pixel nearest the ridge's middle.
 6. ``contains_text_ids`` lists the tokens centred inside its polygon (the innermost one when faces nest).
 7. Faces are ``R1..`` in the order of their anchors' ``(y, x)``. A face is ``open`` when it only closes
    thanks to passage closures longer than ``6 t`` (``t`` the closed wall's thickness): without them its
@@ -41,6 +45,7 @@ MAX_CLOSURE_T = 18.0  # step 1: collinear wall ends up to this many t apart are 
 MIN_AREA_FRAC = 0.002  # step 3: faces smaller than this share of the region area are dropped
 MAX_ASPECT = 15.0  # step 3: faces whose bounding box is longer than this many times its width are slivers
 POLY_EPS_T = 0.5  # step 4: approxPolyDP epsilon, in t_median
+RIDGE_TOL_PX = 0.5  # step 5: distance-transform values this close to the maximum lie on its ridge
 COLLINEAR_DEG = 3.0  # step 1: two walls are collinear within this angle ...
 COLLINEAR_ACROSS_T = 0.5  # ... and with the other end within this many t of the line
 _SHIFT = 4  # cv2 drawing sub-pixel bits
@@ -87,12 +92,18 @@ def find_room_faces(
         return [], face_map
     walls = (wall_mask > 0).astype(np.uint8) * 255
     intervals = _opening_intervals(graph, openings)
+    crossed = _crossed_ends(graph)
     closures: list[_Closure] = []
     for wall in graph.walls:
         cut = intervals.get(wall.id, [])
         for a, b in _pieces(wall, [(u0, u1) for u0, u1, _ in cut]):
             _draw(walls, a, b, wall.thickness_px)
-        closures += [_Closure(_at(wall, u0), _at(wall, u1), wall.thickness_px, p) for u0, u1, p in cut]
+        between_crossings = crossed[(wall.id, wall.a_node)] and crossed[(wall.id, wall.b_node)]
+        length, t = math.dist(wall.a, wall.b), wall.thickness_px
+        for u0, u1, passage in cut:
+            if passage and between_crossings and u0 <= t and u1 >= length - t:
+                continue  # a corridor crossing aligned partitions, not an unfinished wall (review I2)
+            closures.append(_Closure(_at(wall, u0), _at(wall, u1), t, passage))
     closures += _collinear_closures(graph)
 
     closed = walls.copy()
@@ -102,15 +113,14 @@ def find_room_faces(
         if not c.long:
             _draw(short, c.a, c.b, c.thickness)
 
-    labels, kept = _faces(closed, region)
-    short_labels, _ = _faces(short, region, keep=False)
+    labels, _, kept = _faces(closed, region)
+    short_labels, short_boxes, _ = _faces(short, region, keep=False)
     beyond_long = (closed > 0) & (short == 0)  # the long closures' own pixels
 
     found: list[tuple[Pt, int, np.ndarray, tuple[int, int, int, int]]] = []
     for k, (x, y, bw, bh) in kept:
         mask = (labels[y : y + bh, x : x + bw] == k).astype(np.uint8)
-        dt = cv2.distanceTransform(np.pad(mask, 1), cv2.DIST_L2, 5)[1:-1, 1:-1]
-        row, col = np.unravel_index(int(np.argmax(dt)), dt.shape)
+        col, row = _anchor(mask)
         found.append(((float(x + col), float(y + row)), k, mask, (x, y, bw, bh)))
     found.sort(key=lambda f: (f[0][1], f[0][0]))
 
@@ -129,7 +139,7 @@ def find_room_faces(
                 area_px=float(mask.sum()),
                 bbox=(float(x), float(y), float(x + bw - 1), float(y + bh - 1)),
                 contains_text_ids=(),
-                open=_is_open(labels == k, short_labels, beyond_long, anchor),
+                open=_is_open(labels, k, short_labels, short_boxes, beyond_long, anchor),
             )
         )
     texts = _texts_in(faces, polygons, tokens)
@@ -189,9 +199,41 @@ def _pieces(wall: WallCandidate, cut: list[tuple[float, float]]) -> list[tuple[P
     return out
 
 
+def _crossed_ends(graph: WallGraph) -> dict[tuple[str, str], bool]:
+    """Per (wall, node): another wall runs straight across the wall's line there, leaving the node on both
+    sides of it (each at least 45 degrees off the line). A gap spanning a whole wall between two such
+    crossings is the width of a corridor between two through walls."""
+    at_node: dict[str, list[tuple[str, Pt]]] = defaultdict(list)
+    for wall in graph.walls:
+        length = math.dist(wall.a, wall.b)
+        if length == 0:
+            continue
+        ux, uy = (wall.b[0] - wall.a[0]) / length, (wall.b[1] - wall.a[1]) / length
+        at_node[wall.a_node].append((wall.id, (ux, uy)))
+        at_node[wall.b_node].append((wall.id, (-ux, -uy)))
+    sin45 = math.sin(math.radians(45.0))
+    out: dict[tuple[str, str], bool] = defaultdict(bool)
+    for node, leaving in at_node.items():
+        for wid, (dx, dy) in leaving:
+            sides = {
+                1 if dx * vy - dy * vx > 0 else -1
+                for oid, (vx, vy) in leaving
+                if oid != wid and abs(dx * vy - dy * vx) >= sin45
+            }
+            out[(wid, node)] = sides == {1, -1}
+    return out
+
+
+def _degrees(graph: WallGraph) -> dict[str, int]:
+    degree: dict[str, int] = defaultdict(int)
+    for wall in graph.walls:
+        degree[wall.a_node] += 1
+        degree[wall.b_node] += 1
+    return degree
+
+
 def _ends(graph: WallGraph) -> tuple[list[_End], dict[str, int]]:
     """Both ends of every wall, and the node degrees."""
-    degree: dict[str, int] = defaultdict(int)
     ends = []
     for wall in graph.walls:
         length = math.dist(wall.a, wall.b)
@@ -199,9 +241,8 @@ def _ends(graph: WallGraph) -> tuple[list[_End], dict[str, int]]:
             continue
         ux, uy = (wall.b[0] - wall.a[0]) / length, (wall.b[1] - wall.a[1]) / length
         for node, p, u in ((wall.a_node, wall.a, (-ux, -uy)), (wall.b_node, wall.b, (ux, uy))):
-            degree[node] += 1
             ends.append(_End(wall.id, node, p, u, wall.thickness_px))
-    return ends, degree
+    return ends, _degrees(graph)
 
 
 def _collinear_closures(graph: WallGraph) -> list[_Closure]:
@@ -275,16 +316,17 @@ def _draw(img: np.ndarray, a: Pt, b: Pt, thickness: float) -> None:
 
 def _faces(
     closed: np.ndarray, region: Rect, *, keep: bool = True
-) -> tuple[np.ndarray, list[tuple[int, tuple[int, int, int, int]]]]:
-    """4-connected components of the free space inside ``region`` (page-sized labels) and, with ``keep``,
-    the ones that are faces (step 3) with their boxes."""
+) -> tuple[np.ndarray, np.ndarray, list[tuple[int, tuple[int, int, int, int]]]]:
+    """4-connected components of the free space inside ``region`` (page-sized labels), their
+    ``connectedComponentsWithStats`` rows and, with ``keep``, the ones that are faces (step 3) with their
+    boxes."""
     h, w = closed.shape[:2]
     free = np.zeros((h, w), np.uint8)
     rs, cs = slice(region.y, region.y + region.h), slice(region.x, region.x + region.w)
     free[rs, cs] = (closed[rs, cs] == 0).astype(np.uint8)
     n, labels, stats, _ = cv2.connectedComponentsWithStats(free, connectivity=4)
     if not keep:
-        return labels, []
+        return labels, stats, []
     min_area = MIN_AREA_FRAC * region.w * region.h
     x1, y1 = region.x + region.w, region.y + region.h
     kept = []
@@ -295,7 +337,17 @@ def _faces(
         if area < min_area or max(bw, bh) > MAX_ASPECT * min(bw, bh):
             continue
         kept.append((k, (x, y, bw, bh)))
-    return labels, kept
+    return labels, stats, kept
+
+
+def _anchor(mask: np.ndarray) -> tuple[int, int]:
+    """Step 5: the maximum of the face's distance transform (column, row in ``mask``). On a flat ridge (a
+    corridor) it is the ridge pixel nearest the ridge's middle (review M7)."""
+    dt = cv2.distanceTransform(np.pad(mask, 1), cv2.DIST_L2, 5)[1:-1, 1:-1]
+    rows, cols = np.nonzero(dt >= float(dt.max()) - RIDGE_TOL_PX)
+    d = (rows - rows.mean()) ** 2 + (cols - cols.mean()) ** 2
+    i = int(np.argmin(d))
+    return int(cols[i]), int(rows[i])
 
 
 def _polygon(mask: np.ndarray, x: int, y: int, eps: float) -> np.ndarray:
@@ -305,14 +357,23 @@ def _polygon(mask: np.ndarray, x: int, y: int, eps: float) -> np.ndarray:
     return np.asarray(poly.reshape(-1, 2) + np.array([x, y]), np.int64)
 
 
-def _is_open(face: np.ndarray, short_labels: np.ndarray, beyond_long: np.ndarray, anchor: Pt) -> bool:
-    """Without the long closures, the free space at the face's anchor reaches pixels outside the face (other
-    than the long closures' own)."""
-    k = short_labels[round(anchor[1]), round(anchor[0])]
-    if k == 0:
+def _is_open(
+    labels: np.ndarray,
+    k: int,
+    short_labels: np.ndarray,
+    short_boxes: np.ndarray,
+    beyond_long: np.ndarray,
+    anchor: Pt,
+) -> bool:
+    """Without the long closures, the free space at face ``k``'s anchor reaches pixels outside the face
+    (other than the long closures' own). Read in that free space's box, which holds the face."""
+    j = int(short_labels[round(anchor[1]), round(anchor[0])])
+    if j == 0:
         return False
-    reach = short_labels == k
-    return bool((reach & ~face & ~beyond_long).any())
+    x, y, bw, bh = (int(v) for v in short_boxes[j][:4])
+    rs, cs = slice(y, y + bh), slice(x, x + bw)
+    reach = short_labels[rs, cs] == j
+    return bool((reach & (labels[rs, cs] != k) & ~beyond_long[rs, cs]).any())
 
 
 def _texts_in(

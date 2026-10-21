@@ -34,7 +34,7 @@ pytestmark = pytest.mark.reference
 STEMS = sorted(IMAGES)
 # Regression floors: the matched rooms Task 18 reached with 06 §8.6 on the current walls stage. The HDB's
 # remaining rooms need walls the walls stage does not extract (I11, I12, I14, I16, I17; task-18-report.md).
-ROOMS_FLOOR = {"hdb-3room": 4, "brochure-2bhk": 3}
+ROOMS_FLOOR = {"hdb-3room": 3, "brochure-2bhk": 3}  # ledges excluded (review M1 ruling)
 HDB_TARGET = 7  # carried to Task 34 with the walls residuals (ruling R18-a): a strict xfail until then
 LABEL_SHARE_MIN = 0.8
 
@@ -65,6 +65,7 @@ def test_truth_rooms_are_consistent(stem: str) -> None:
         assert [k for k, p in polys.items() if p.contains(Point(r["point"]))] == [r["id"]]
         assert r["label"] is None or parse_token(r["label"]).kind == "room_name", r["label"]
         assert r["open"] == ("opens_onto" in r)
+        assert r.get("kind", "room") in {"room", "ledge"}
         if r["open"]:
             host = next(h for h in rooms if h["id"] == r["opens_onto"])
             assert not host["open"]
@@ -90,12 +91,13 @@ def test_room_metric_scores_the_truth_itself(stem: str) -> None:
     polys = [Polygon(t.polygon) for t in truth]
     exact = [face(f"R{k}", p) for k, p in enumerate(polys, 1)]
     m = room_metrics(truth, exact, [])
-    assert sorted(m.matched) == sorted(t.id for t in truth)
+    assert sorted(m.matched) == sorted(t.id for t in truth if t.kind != "ledge")
     assert not m.merged and not m.split and not m.unmatched
 
     a, b = next(
         (i, j) for i in range(len(polys)) for j in range(i + 1, len(polys))
         if polys[i].buffer(2).intersects(polys[j]) and not truth[i].opens_onto and not truth[j].opens_onto
+        and truth[i].kind == truth[j].kind == "room"
     )  # fmt: skip
     joined = unary_union([polys[a].buffer(1), polys[b].buffer(1)])
     faces = [f for k, f in enumerate(exact) if k not in (a, b)] + [face("RX", joined)]
@@ -122,9 +124,9 @@ def test_matched_rooms_do_not_drop(stem: str, chains: dict[str, ChainResult]) ->
 
 @pytest.mark.xfail(
     strict=True,
-    reason="Task 34 target (ruling R18-a): the HDB needs walls the walls stage does not extract -- I11 "
-    "(toilet 2), I12/I16 (the bay), I14 (toilet 3 / bedroom 3), I17 (the store); with them find_room_faces "
-    "matches 11 of 11 (task-18-report.md)",
+    reason="Task 34 target (ruling R18-a): >= 7 of the HDB's 10 rooms (ledges excluded) need walls the walls "
+    "stage does not extract -- I11 (toilet 2), I12/I16 (the bay ledge off toilet 3), I14 (toilet 3 / bedroom "
+    "3), I17 (the store); with them find_room_faces matches all 10 (task-18-report.md)",
 )
 def test_hdb_seven_rooms_are_matched(chains: dict[str, ChainResult]) -> None:
     assert len(metrics(chains["hdb-3room"]).matched) >= HDB_TARGET
