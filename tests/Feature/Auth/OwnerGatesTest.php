@@ -78,3 +78,27 @@ it('exposes the owner abilities and permission names to the frontend', function 
         ->and($support->permissionNames())->toBe(['customers.view', 'messages.post', 'orders.confirm', 'orders.view'])
         ->and($customer->permissionNames())->toBe([]);
 });
+
+it('never lets a customer pass a staff permission, even with a role or direct permission attached by mistake', function (): void {
+    $viaRole = User::factory()->create();
+    $viaRole->assignRole('estimator');
+    $direct = User::factory()->create();
+    $direct->givePermissionTo('orders.view');
+    $both = User::factory()->create();
+    $both->assignRole('owner');
+    $both->givePermissionTo('quotes.view_costs');
+
+    foreach ([$viaRole, $direct, $both] as $customer) {
+        expect($customer->isStaff())->toBeFalse()
+            ->and(Gate::forUser($customer)->allows('orders.view'))->toBeFalse()
+            ->and($customer->can('orders.view'))->toBeFalse()
+            ->and(Gate::forUser($customer)->allows('quotes.view_costs'))->toBeFalse()
+            ->and(Gate::forUser($customer)->allows('owner'))->toBeFalse();
+    }
+});
+
+it('does not affect customer abilities that are not staff permissions', function (): void {
+    Gate::define('probe-own-thing', static fn (User $user): bool => true);
+
+    expect(Gate::forUser(User::factory()->create())->allows('probe-own-thing'))->toBeTrue();
+});

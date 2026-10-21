@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 
 /** @return array<string, int> */
-function tableCounts(): array
+function dbSeederTableCounts(): array
 {
     $counts = [];
     foreach (DB::select('select tablename from pg_tables where schemaname = current_schema() order by tablename') as $table) {
@@ -24,11 +24,11 @@ it('can run twice without changing any table count', function (): void {
     config(['seed.owner' => ['name' => 'Owner', 'email' => 'owner@furny.test', 'password' => 'a-long-owner-password']]);
 
     expect(Artisan::call('db:seed', ['--force' => true]))->toBe(0);
-    $first = tableCounts();
+    $first = dbSeederTableCounts();
 
     expect(Artisan::call('db:seed', ['--force' => true]))->toBe(0);
 
-    expect(tableCounts())->toBe($first)
+    expect(dbSeederTableCounts())->toBe($first)
         ->and($first['users'])->toBe(1)
         ->and($first['roles'])->toBe(5)
         ->and($first['permissions'])->toBe(24)

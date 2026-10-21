@@ -4,18 +4,16 @@ declare(strict_types=1);
 
 use App\Domain\Identity\Enums\PermissionName;
 use App\Domain\Identity\Enums\StaffRole;
+use App\Domain\Identity\Models\User;
 use Database\Seeders\RolesAndPermissionsSeeder;
+use Illuminate\Cache\Events\KeyForgetFailed;
+use Illuminate\Cache\Events\KeyForgotten;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
-
-/** The 24 permissions of 13 §7.1, in that order. */
-const ALL_PERMISSIONS = [
-    'orders.view', 'orders.review', 'orders.assign', 'orders.propose_changes', 'quotes.create', 'quotes.send',
-    'quotes.view_costs', 'orders.confirm', 'orders.cancel', 'orders.hold', 'orders.close', 'production.manage',
-    'messages.post', 'customers.view', 'customers.manage', 'catalog.manage', 'presets.manage', 'templates.manage',
-    'settings.manage', 'staff.manage', 'ai.manage', 'reports.view', 'plans.edit_any', 'audit.view',
-];
+use Tests\Support\PermissionMatrix;
 
 beforeEach(function (): void {
     // Pristine state regardless of any baseline seeding (16 §2).
@@ -24,53 +22,46 @@ beforeEach(function (): void {
     app(PermissionRegistrar::class)->forgetCachedPermissions();
 });
 
-function seedRoles(): void
+function authSeedRoles(): void
 {
     app(RolesAndPermissionsSeeder::class)->run();
 }
 
 /** @return list<string> */
-function permissionsOf(string $role): array
+function authPermissionsOf(string $role): array
 {
     return Role::findByName($role, 'web')->permissions->pluck('name')->sort()->values()->all();
 }
 
 it('seeds exactly the 24 permissions of 13 §7.1 on the web guard', function (): void {
-    seedRoles();
+    authSeedRoles();
 
     expect(Permission::query()->count())->toBe(24)
-        ->and(Permission::query()->pluck('name')->all())->toEqualCanonicalizing(ALL_PERMISSIONS)
+        ->and(Permission::query()->pluck('name')->all())->toEqualCanonicalizing(PermissionMatrix::ALL)
         ->and(Permission::query()->where('guard_name', '!=', 'web')->count())->toBe(0)
-        ->and(array_map(static fn (PermissionName $p): string => $p->value, PermissionName::cases()))->toBe(ALL_PERMISSIONS);
+        ->and(array_map(static fn (PermissionName $p): string => $p->value, PermissionName::cases()))->toBe(PermissionMatrix::ALL);
 });
 
 it('seeds the five staff roles', function (): void {
-    seedRoles();
+    authSeedRoles();
 
     expect(Role::query()->pluck('name')->all())->toEqualCanonicalizing(['owner', 'admin', 'estimator', 'production', 'support'])
         ->and(Role::query()->where('guard_name', '!=', 'web')->count())->toBe(0);
 });
 
 dataset('role matrix', function (): array {
-    $estimator = [
-        'orders.view', 'orders.review', 'orders.assign', 'orders.propose_changes', 'quotes.create', 'quotes.send',
-        'quotes.view_costs', 'orders.confirm', 'orders.cancel', 'orders.hold', 'messages.post', 'customers.view',
-        'presets.manage', 'plans.edit_any',
-    ];
+    $rows = [];
+    foreach (PermissionMatrix::roles() as $role => $names) {
+        $rows[$role] = [$role, $names];
+    }
 
-    return [
-        'owner' => ['owner', ALL_PERMISSIONS],
-        'admin' => ['admin', ALL_PERMISSIONS],
-        'estimator' => ['estimator', $estimator],
-        'production' => ['production', ['orders.view', 'orders.hold', 'production.manage', 'messages.post', 'customers.view']],
-        'support' => ['support', ['orders.view', 'orders.confirm', 'messages.post', 'customers.view']],
-    ];
+    return $rows;
 });
 
 it('grants each role exactly its matrix row', function (string $role, array $expected): void {
-    seedRoles();
+    authSeedRoles();
 
-    expect(permissionsOf($role))->toBe(collect($expected)->sort()->values()->all());
+    expect(authPermissionsOf($role))->toBe(collect($expected)->sort()->values()->all());
 })->with('role matrix');
 
 it('keeps StaffRole::permissions() in step with the seeded matrix', function (string $role, array $expected): void {
@@ -80,20 +71,20 @@ it('keeps StaffRole::permissions() in step with the seeded matrix', function (st
 })->with('role matrix');
 
 it('is idempotent and syncs a role back to the matrix', function (): void {
-    seedRoles();
+    authSeedRoles();
 
     $extra = Permission::findOrCreate('orders.fly', 'web');
     Role::findByName('support', 'web')->givePermissionTo($extra);
-    expect(permissionsOf('support'))->toContain('orders.fly');
+    expect(authPermissionsOf('support'))->toContain('orders.fly');
 
     $ids = Role::query()->orderBy('name')->pluck('id')->all();
-    seedRoles();
+    authSeedRoles();
 
     expect(Permission::query()->where('name', '!=', 'orders.fly')->count())->toBe(24)
         ->and(Role::query()->count())->toBe(5)
         ->and(Role::query()->orderBy('name')->pluck('id')->all())->toBe($ids)
-        ->and(permissionsOf('support'))->not->toContain('orders.fly')
-        ->and(permissionsOf('support'))->toHaveCount(4);
+        ->and(authPermissionsOf('support'))->not->toContain('orders.fly')
+        ->and(authPermissionsOf('support'))->toHaveCount(4);
 });
 
 it('ensureSeeded seeds a fresh database and leaves a seeded one alone', function (): void {
@@ -105,4 +96,40 @@ it('ensureSeeded seeds a fresh database and leaves a seeded one alone', function
     $ids = Role::query()->orderBy('name')->pluck('id')->all();
     RolesAndPermissionsSeeder::ensureSeeded();
     expect(Role::query()->orderBy('name')->pluck('id')->all())->toBe($ids);
+});
+
+it('resets the permission cache after its transaction has closed', function (): void {
+    authSeedRoles();
+
+    // The writes forget the cache themselves, but inside the transaction a concurrent request could
+    // re-fill it with uncommitted-era data; the last reset must therefore happen outside it.
+    $base = DB::transactionLevel();
+    $levels = [];
+    Event::listen([KeyForgotten::class, KeyForgetFailed::class], function (KeyForgotten|KeyForgetFailed $event) use (&$levels): void {
+        if ($event->key === config('permission.cache.key')) {
+            $levels[] = DB::transactionLevel();
+        }
+    });
+
+    authSeedRoles();
+
+    expect($levels)->not->toBeEmpty()->and(end($levels))->toBe($base);
+});
+
+it('does not serve a stale cached permission set after the run', function (): void {
+    authSeedRoles();
+    $user = User::factory()->support()->create();
+
+    // Grant an extra permission behind the package's back (no model events) and warm the cache with it.
+    DB::table('role_has_permissions')->insert([
+        'role_id' => Role::findByName('support', 'web')->id,
+        'permission_id' => Permission::findByName('production.manage', 'web')->id,
+    ]);
+    app(PermissionRegistrar::class)->forgetCachedPermissions();
+    expect($user->fresh()->hasPermissionTo('production.manage'))->toBeTrue();
+
+    authSeedRoles();
+
+    expect($user->fresh()->hasPermissionTo('production.manage'))->toBeFalse()
+        ->and($user->fresh()->hasPermissionTo('orders.view'))->toBeTrue();
 });

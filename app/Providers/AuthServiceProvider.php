@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Domain\Identity\Enums\OwnerGate;
+use App\Domain\Identity\Enums\PermissionName;
 use App\Domain\Identity\Enums\StaffRole;
 use App\Domain\Identity\Models\User;
 use Illuminate\Contracts\Auth\Access\Gate as GateContract;
@@ -22,7 +23,13 @@ final class AuthServiceProvider extends ServiceProvider
     public function boot(): void
     {
         // Must precede spatie's Gate::before (disabled in config/permission.php): the first non-null result wins.
-        Gate::before(static fn (User $user): ?bool => $user->isStaff() && ! $user->is_active ? false : null);
+        // Inactive staff are denied everything; customers never pass a staff permission check, even if a
+        // role or permission was attached to them by mistake.
+        Gate::before(static fn (User $user, string $ability): ?bool => match (true) {
+            $user->isStaff() => $user->is_active ? null : false,
+            PermissionName::tryFrom($ability) !== null => false,
+            default => null,
+        });
         app(PermissionRegistrar::class)->registerPermissions(app(GateContract::class));
 
         Gate::define(OwnerGate::OWNER, static fn (User $user): bool => self::isActiveStaffWith($user, StaffRole::Owner));
@@ -32,7 +39,7 @@ final class AuthServiceProvider extends ServiceProvider
         }
 
         // 17 §5.11 item 12. Pulse defines a local-only default while it registers; this replaces it.
-        // Horizon's and Telescope's gate() hooks are left empty so they cannot override these.
+        // Horizon's and Telescope's providers check only these gates (no local-environment bypass).
         foreach (['viewHorizon', 'viewPulse', 'viewTelescope'] as $dashboard) {
             Gate::define($dashboard, static fn (User $user): bool => self::isActiveStaffWith($user, StaffRole::Owner, StaffRole::Admin));
         }
