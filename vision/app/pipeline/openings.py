@@ -27,13 +27,13 @@ opening is only a break in the solid ink; the line may run through several graph
 2. **window**: thin segments parallel to the wall (within 3 degrees) inside the gap's strip (``0.75 t`` to
    either side of the centre line, as ruling B2's frame-line evidence reads it): at least two lines each
    covering >= 80 % of ``g`` make a ``casement``; at least three lines, two of them offset sashes (overlapping
-   by at most 60 % of the shorter, together covering >= 80 % of ``g``) a ``sliding_window``. In a solid wall
-   (a break of its solid ink, or a gap with solid ink on both sides) a window also needs a light interior
-   and a frame or sash line strictly inside the strip or jamb lines at both ends (Task 17 review I1): a
-   hollow or lighter-filled stretch of a solid wall keeps the wall's outline as two lines on its faces.
+   by at most 60 % of the shorter, together covering >= 80 % of ``g``) a ``sliding_window``. In a break of
+   a solid wall's ink a window also needs a light interior and a frame or sash line strictly inside the
+   strip or jamb lines at both ends (Task 17 review I1: a lighter-filled stretch of the wall keeps its
+   outline as two lines on its faces); a jamb meeting the wall's end counts, and a gap of the graph takes
+   the rule above as it stands (ruling N1).
 3. otherwise a passage (``opening``, support 0.0), for gaps of the graph only: a break in a solid wall
-   without a door or window symbol is a change of drawing style, not an opening, and so is a gap of a solid
-   wall whose outline runs on along both faces (Task 17 review I1); nor is a gap along which
+   without a door or window symbol is a change of drawing style, not an opening; nor is a gap along which
    the text mask removed ink over half of its length (a wall line erased under a label, or a symbol hidden
    by one).
 
@@ -87,8 +87,7 @@ WINDOW_LINES = 2
 WINDOW_INNER = 0.35  # a solid-wall break's window needs a frame line within 0.35 t of the centre ...
 JAMB_ANGLE_DEG = 10.0  # ... or jamb lines across the wall (within 10 degrees of its normal) ...
 JAMB_REACH, JAMB_REACH_PX = 0.25, 3.0  # ... at both ends (within max(3 px, t / 4)) ...
-JAMB_SPAN = 0.6  # ... spanning 60 % of its thickness, on paper 2 px to either side (Task 17 review I1)
-JAMB_CLEAR_PX = 2.0
+JAMB_SPAN = 0.6  # ... spanning 60 % of its thickness (Task 17 review I1; meeting the wall end: ruling N1)
 WINDOW_LIGHTER = 40.0  # a window in a solid wall is this much lighter than the wall beside it
 SASH_LINES = 3
 SASH_MIN_COVER = 0.4  # a sash covers at least 40 % of g ...
@@ -145,8 +144,8 @@ class _Ink:
     near: np.ndarray
     unknown: np.ndarray
     masked: np.ndarray  # ink the text mask removed (where labels were)
-    solid: np.ndarray  # pre.thick
     gray: np.ndarray  # pre.gray
+    notext: np.ndarray  # ink_notext: a solid-wall window's inner frame line (ruling N1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,7 +184,7 @@ def find_openings(
         a = (round(w.a[0] * 16), round(w.a[1] * 16))
         b = (round(w.b[0] * 16), round(w.b[1] * 16))
         cv2.line(unknown, a, b, 1, max(1, round(w.thickness_px + 2 * ARC_WINDOW_PX)), cv2.LINE_8, 4)
-    ink = _Ink(near, unknown, masked, pre.thick, pre.gray)
+    ink = _Ink(near, unknown, masked, pre.gray, ink_notext)
     thin = np.array([(*s.p0, *s.p1) for s in segments if s.is_thin], np.float64).reshape(-1, 4)
     frames = {w.id: _frame(w) for w in graph.walls}
     order = {w.id: k for k, w in enumerate(graph.walls)}
@@ -416,32 +415,17 @@ def _classify(u0: float, u1: float, f: _Frame, ink: _Ink, thin: np.ndarray, is_g
     door = _door(u0, u1, f, ink, thin)
     if door is not None and door.support >= DOOR_CLEAR:
         return door
-    in_solid = not is_gap or _solid_flanked(u0, u1, f, ink.solid)
-    window = _window(u0, u1, f, thin, solid=ink if in_solid else None)
+    # Ruling N1 (re-review 1): the I1 evidence is asked of solid-ink breaks only; a gap of the graph takes
+    # 06 §8.5's window rule as it stands.
+    window = _window(u0, u1, f, thin, solid=None if is_gap else ink)
     if window is not None:
         window_type, support = window
         return _Found(u0, u1, "window", window_type, "start", "left", support)
     if door is not None:
         return door
-    if is_gap and not _under_label(u0, u1, f, ink.masked) and not (in_solid and _outlined(u0, u1, f, thin)):
+    if is_gap and not _under_label(u0, u1, f, ink.masked):
         return _Found(u0, u1, "opening", "opening", "start", "left", 0.0)
     return None
-
-
-def _outlined(u0: float, u1: float, f: _Frame, thin: np.ndarray) -> bool:
-    """The wall's outline runs on along ``[u0, u1]``: thin lines on both of its faces (``|offset| >=
-    0.35 t``, one to either side) each cover 80 % of it. A gap of a solid wall so outlined is a hollow
-    stretch of that wall (Task 17 review I1), no passage."""
-    g = u1 - u0
-    rel = thin - np.concatenate((f.a, f.a))[None, :] if thin.size else thin
-    reach = WINDOW_STRIP * f.t
-    lines = frame_lines(
-        rel, f.d, f.n, u0, u1, -reach, reach, angle_deg=WINDOW_ANGLE_DEG, cluster_px=WINDOW_CLUSTER_PX
-    )
-    faces = [
-        ln.offset for ln in lines if abs(ln.offset) > WINDOW_INNER * f.t and ln.covered >= WINDOW_COVER * g
-    ]
-    return any(o > 0 for o in faces) and any(o < 0 for o in faces)
 
 
 def _under_label(u0: float, u1: float, f: _Frame, masked: np.ndarray) -> bool:
@@ -594,12 +578,14 @@ def _window(
     """(type, support) of a window in ``[u0, u1]``, or None (module doc, step 2); the support is the mean
     coverage of its two best lines.
 
-    In a solid wall (a break of its solid ink, or a gap with solid ink on both sides; ``solid`` carries the
-    solid ink and grey: Task 17 review I1) the window also needs what a hollow or lighter-filled stretch of
-    the wall has not: a light interior (``_light_inside``: 40 grey levels above the solid flanks), and a
-    frame or sash line strictly inside the strip (``|offset| <= 0.35 t``, off the faces, covering 40 %)
-    or jamb lines across the wall at both ends, on paper (the solid pieces' own end edges are no jambs).
-    Such a stretch keeps the wall's outline, two lines on its faces, and is a change of drawing style."""
+    In a break of a solid wall's ink (``solid`` carries its grey and text-free ink: Task 17 review I1,
+    ruling N1) the window also needs what a lighter-filled stretch of the wall has not: a light interior
+    (``_light_inside``: 40 grey levels above the solid flanks), and a frame or sash line strictly inside
+    the strip (``|offset| <= 0.35 t``, off the faces, covering 40 %: a segment, or ``_inner_ink``) or jamb
+    lines across the wall at both ends. A jamb line meeting the wall's end counts (ruling N1), and so does
+    the solid piece's own end edge, which a hollow (double-line) stretch of the wall has too: two face
+    lines between solid pieces are a casement (06 §8.5, the brief's casement), whatever the drawing meant
+    (deviation 17)."""
     g = u1 - u0
     rel = thin - np.concatenate((f.a, f.a))[None, :] if thin.size else thin
     reach = WINDOW_STRIP * f.t
@@ -612,7 +598,8 @@ def _window(
         if not _light_inside(u0, u1, f, solid.gray):
             return None
         inner = any(abs(ln.offset) <= WINDOW_INNER * f.t and ln.covered >= SASH_MIN_COVER * g for ln in lines)
-        jambs = _jamb_line(rel, f, u0, solid.solid) and _jamb_line(rel, f, u1, solid.solid)
+        inner = inner or _inner_ink(u0, u1, f, solid.notext)
+        jambs = _jamb_line(rel, f, u0) and _jamb_line(rel, f, u1)
         if not inner and not jambs:
             return None
     cover = sorted((ln.covered / g for ln in lines), reverse=True)
@@ -629,16 +616,18 @@ def _window(
     return None
 
 
-def _flank_points(u0: float, u1: float, f: _Frame) -> np.ndarray:
-    """Centre-line points just outside ``[u0, u1]`` (0.5 t beyond each end, and 0.25 t to either side)."""
-    pts = [f.at(u, k * f.t) for u in (u0 - 0.5 * f.t, u1 + 0.5 * f.t) for k in (-0.25, 0.0, 0.25)]
-    return np.array(pts)
-
-
-def _solid_flanked(u0: float, u1: float, f: _Frame, solid: np.ndarray) -> bool:
-    """Solid ink just outside both ends of ``[u0, u1]`` on the wall's line: a gap in a solid wall."""
-    hit = ink_at(solid, _flank_points(u0, u1, f)).reshape(2, 3)
-    return bool(hit.any(axis=1).all())
+def _inner_ink(u0: float, u1: float, f: _Frame, notext: np.ndarray) -> bool:
+    """Ink along ``[u0, u1]`` on one line strictly inside the strip (``|offset| <= 0.35 t``, 1 px steps)
+    over 40 % of it: a glass line LSD merged into the wall's own centre-line segment (ruling N1)."""
+    u = np.arange(u0, u1 + 1e-9, 1.0)
+    reach = math.floor(WINDOW_INNER * f.t)
+    if not u.size:
+        return False
+    for k in np.arange(-reach, reach + 1e-9, 1.0):
+        pts = f.a[None, :] + u[:, None] * f.d[None, :] + (f.n * k)[None, :]
+        if float(ink_at(notext, pts).mean()) >= SASH_MIN_COVER:
+            return True
+    return False
 
 
 def _light_inside(u0: float, u1: float, f: _Frame, gray: np.ndarray) -> bool:
@@ -663,10 +652,10 @@ def _light_inside(u0: float, u1: float, f: _Frame, gray: np.ndarray) -> bool:
     return light(u) >= light(flanks) + WINDOW_LIGHTER
 
 
-def _jamb_line(rel: np.ndarray, f: _Frame, u: float, solid: np.ndarray) -> bool:
+def _jamb_line(rel: np.ndarray, f: _Frame, u: float) -> bool:
     """A thin line across the wall (within 10 degrees of its normal) at ``u`` (within ``max(3 px, t / 4)``
-    along it), spanning at least 60 % of its thickness, with no solid ink 2 px to either side of its middle
-    (a solid piece's end edge is no jamb); ``rel`` are the thin segments relative to ``f.a``."""
+    along it), spanning at least 60 % of its thickness; ``rel`` are the thin segments relative to ``f.a``.
+    A jamb meeting the wall's end counts (ruling N1)."""
     if not rel.size:
         return False
     p0, p1 = rel[:, :2], rel[:, 2:]
@@ -676,12 +665,7 @@ def _jamb_line(rel: np.ndarray, f: _Frame, u: float, solid: np.ndarray) -> bool:
     at = np.abs((p0 + p1) @ f.d / 2.0 - u) <= max(JAMB_REACH_PX, JAMB_REACH * f.t)
     o0, o1 = p0 @ f.n, p1 @ f.n
     lo, hi = np.maximum(np.minimum(o0, o1), -0.5 * f.t), np.minimum(np.maximum(o0, o1), 0.5 * f.t)
-    for k in np.flatnonzero(across & at & ((hi - lo) >= JAMB_SPAN * f.t)).tolist():
-        mid = f.a + (p0[k] + p1[k]) / 2.0
-        sides = np.array([mid + f.d * JAMB_CLEAR_PX, mid - f.d * JAMB_CLEAR_PX])
-        if not ink_at(solid, sides).any():
-            return True
-    return False
+    return bool((across & at & ((hi - lo) >= JAMB_SPAN * f.t)).any())
 
 
 def _overlap(x: FrameLine, y: FrameLine) -> float:

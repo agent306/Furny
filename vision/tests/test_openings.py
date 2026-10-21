@@ -80,12 +80,7 @@ def test_double_swing() -> None:
 
 
 def test_window_casement() -> None:
-    """Frame lines on both faces and a glass line between them (04 §8.2's casement). The window is a break
-    in the solid wall, not a gap of the graph: two lines on the faces alone would be a hollow stretch of
-    wall (Task 17 review I1), the glass line inside the strip makes it a window."""
-    img = render_plan(
-        SIZE, room(24), windows=[SWindow(TOP, 300, 120, lines=3)]
-    )  # 24: LSD keeps 3 lines apart
+    img = render_plan(SIZE, room(), windows=[SWindow(TOP, 300, 120, lines=2)])
     _, _, ops = openings_on_top(img)
     (o,) = ops
     assert (o.kind, o.type) == ("window", "casement")
@@ -418,14 +413,47 @@ def test_uniform_grey_wall_has_no_panel() -> None:
     assert find_openings(r.graph, pre, r.segments, r.pre.ink) == []
 
 
+# --- Task 17 re-review 1: N1 ----------------------------------------------------------------------------
+
+
+def test_window_casement_with_a_glass_line_in_a_solid_wall() -> None:
+    """N1: 04 §8.2's casement, frame lines on both faces and a glass line between them, in a t 14 filled
+    wall. LSD keeps only the two face lines 7 px apart; the window stands on them and the wall's ends."""
+    img = render_plan(SIZE, room(), windows=[SWindow(TOP, 300, 120, lines=3)])
+    _, _, ops = openings_on_top(img)
+    (o,) = ops
+    assert (o.kind, o.type) == ("window", "casement")
+    assert o.u0 == pytest.approx(300, abs=6) and o.u1 == pytest.approx(420, abs=6)
+
+
+def test_window_frame_rectangle_whose_jambs_meet_the_wall_ends() -> None:
+    """N1: a frame rectangle in a filled wall, two face lines and a jamb line across the wall 3 px inside
+    each end, in a t 14 filled wall. A jamb line meeting the wall end counts as a jamb (ruling N1)."""
+    t = 14
+    img = render_plan(SIZE, room(t), windows=[SWindow(TOP, 300, 120, lines=2)])
+    for x in (403, 517):
+        cv2.line(img, (x, 500 - t // 2), (x, 500 + t // 2), (0, 0, 0), 1)
+    _, _, ops = openings_on_top(img)
+    (o,) = ops
+    assert (o.kind, o.type) == ("window", "casement")
+    assert o.u0 == pytest.approx(300, abs=6) and o.u1 == pytest.approx(420, abs=6)
+
+
 # --- Task 17 review counter-cases ------------------------------------------------------------------------
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="ruling N1: two face lines between solid pieces, the brief's 2-line casement but for a 1 px "
+    "overshoot, read as a casement; deviation 17",
+)
 @pytest.mark.parametrize(("t", "span"), [(14, (350, 550)), (20, (300, 600))])
 def test_hollow_stretch_of_a_solid_wall_is_no_window(t: int, span: tuple[int, int]) -> None:
     """Review I1: a solid wall line with a hollow (double-line) stretch, brick infill between solid piers.
     Its two faces run along the break like a window's frame lines, but nothing is inside the strip and no
-    jamb crosses it: a change of drawing style, not an opening."""
+    jamb crosses it: a change of drawing style, not an opening. Since ruling N1 the solid pieces' end edges
+    count as jambs, and the stretch is the brief's casement (``test_window_casement``) in every pixel but
+    the face lines' 1 px overshoot: it reads as a window, a known residual (deviation 17)."""
     walls = room(t)
     walls[0] = SWall((100, 500), (span[0], 500), t)
     extra = [SWall((span[0], 500), (span[1], 500), t, style="double"), SWall((span[1], 500), (900, 500), t)]
