@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import vue from '@vitejs/plugin-vue';
 import laravel from 'laravel-vite-plugin';
 import { defineConfig } from 'vite';
+import { i18nWatch } from './vite/i18n-watch';
 
 export default defineConfig({
     plugins: [
@@ -24,6 +25,7 @@ export default defineConfig({
         wayfinder({
             formVariants: true,
         }),
+        i18nWatch(),
     ],
     server: {
         watch: {

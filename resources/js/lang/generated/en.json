@@ -1,0 +1,12 @@
+{
+    "common.a11y.skip_to_content": "Skip to content",
+    "common.actions.back": "Back",
+    "common.actions.cancel": "Cancel",
+    "common.actions.close": "Close",
+    "common.actions.confirm": "Confirm",
+    "common.actions.discard": "Discard",
+    "common.actions.retry": "Retry",
+    "common.actions.save_changes": "Save changes",
+    "common.counts.items": "{count, plural, one {# item} other {# items}}",
+    "common.photo_n": "Photo {n}"
+}
