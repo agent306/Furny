@@ -7,14 +7,16 @@ import io
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import numpy as np
 import pypdf
 import pytest
+from pypdf.generic import RectangleObject
 
 from app.api.errors import VisionError
-from app.pipeline import decode
+from app.pipeline import decode, pdf
 from app.pipeline.pdf import (
     classify_pdf_page,
     extract_vector_page,
@@ -96,7 +98,7 @@ def test_vector_coords() -> None:
         filled_rects=[(200, 200, 50, 30)],
     )
     vec = extract_vector_page(make_pdf([page]), 1, 150)
-    assert len(vec.segments) == 1 + 4  # the stroked line plus the rect's four edges
+    assert len(vec.segments) == 1  # the stroked line; the unstroked filled rect has no outline
     seg = vec.segments[0]
     assert seg.p0 == pytest.approx((150, 150))
     assert seg.p1 == pytest.approx((300, 150))
@@ -134,7 +136,7 @@ def test_vector_fill_colour_rule() -> None:
     )
     # dark gray, black RGB, red (lum 0.21) and CMYK black are dark; mid gray, white and CMYK white are not
     assert len(vec.filled) == 4
-    assert len(vec.segments) == 7 * 4
+    assert vec.segments == []  # fill-only shapes have no outline
 
 
 def test_vector_filled_curve_path_and_beziers() -> None:
@@ -183,6 +185,133 @@ def test_vector_rotated_text_is_angle_90() -> None:
     assert [words[t].angle for t in ("UP TEXT", "DOWN TEXT", "FLAT")] == [90, 90, 0]
     x0, y0, x1, y1 = words["UP TEXT"].box
     assert y1 - y0 > x1 - x0  # tall, narrow box
+
+
+def test_unstroked_shapes_do_not_inherit_stale_line_width() -> None:
+    body = "5 w 10 10 m 100 10 l S\n0 g 20 50 40 30 re f\n0 G 20 120 40 30 re S\n0 g 0 G 20 200 40 30 re B"
+    vec = extract_vector_page(_raw_single_page_pdf(body), 1, 72)
+    assert [s.width_px for s in vec.segments[:1]] == [5.0]
+    assert len(vec.segments) == 1 + 4 + 4  # line, stroked rect, filled+stroked rect; not the `f` rect
+    assert all(s.width_px == 5.0 for s in vec.segments)  # S/B rects really are stroked with width 5
+    assert len(vec.filled) == 2  # `f` and `B` rects (dark fill); the `S` rect is not filled
+    body = "5 w 10 10 m 100 10 l S\n0 g 20 50 40 30 re f"
+    vec = extract_vector_page(_raw_single_page_pdf(body), 1, 72)
+    assert [s.width_px for s in vec.segments] == [5.0]  # nothing thick from the fill-only rect
+    assert len(vec.filled) == 1
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+@pytest.mark.parametrize("crop", [None, (10, 10, 250, 190), (40, 0, 300, 150)])
+def test_vector_coords_align_with_render_under_cropbox_and_rotation(
+    crop: tuple[float, ...] | None, rotation: int
+) -> None:
+    base = make_pdf([PageSpec(300, 200, filled_rects=[(20, 20, 60, 30), (150, 100, 40, 40)])])
+    writer = pypdf.PdfWriter(clone_from=io.BytesIO(base))
+    if crop:
+        writer.pages[0].cropbox = RectangleObject(crop)
+    if rotation:
+        writer.pages[0].rotate(rotation)
+    buf = io.BytesIO()
+    writer.write(buf)
+    data = buf.getvalue()
+
+    image = render_pdf_page(data, 1, dpi=72).image
+    vec = extract_vector_page(data, 1, 72)
+    assert len(vec.filled) == 2
+    visible = 0
+    for poly in vec.filled:
+        xs, ys = zip(*poly.points, strict=True)
+        h, w = image.shape[:2]
+        x0, x1, y0, y1 = (round(v) for v in (min(xs), max(xs), min(ys), max(ys)))
+        # clip to the visible area; fully visible parts must be black and the pixels just outside white
+        cx0, cx1, cy0, cy1 = max(x0, 0), min(x1, w), max(y0, 0), min(y1, h)
+        if cy1 - cy0 < 3 or cx1 - cx0 < 3:
+            continue  # outside the CropBox
+        visible += 1
+        inner = image[cy0 + 1 : cy1 - 1, cx0 + 1 : cx1 - 1]
+        assert (inner == 0).all(), (crop, rotation, poly)
+        if x0 > 2:
+            assert (image[cy0 + 1 : cy1 - 1, x0 - 2] == 255).all(), (crop, rotation, poly)
+        if y0 > 2:
+            assert (image[y0 - 2, cx0 + 1 : cx1 - 1] == 255).all(), (crop, rotation, poly)
+    assert visible >= 1, (crop, rotation)
+
+
+def test_cropbox_repro_from_review() -> None:
+    base = make_pdf([PageSpec(300, 200, filled_rects=[(20, 20, 40, 40)])])
+    writer = pypdf.PdfWriter(clone_from=io.BytesIO(base))
+    writer.pages[0].cropbox = RectangleObject((10, 10, 250, 190))
+    buf = io.BytesIO()
+    writer.write(buf)
+    [poly] = extract_vector_page(buf.getvalue(), 1, 72).filled
+    assert min(x for x, _ in poly.points) == pytest.approx(10)
+    assert min(y for _, y in poly.points) == pytest.approx(10)
+
+
+@pytest.mark.parametrize("rotate", [0, 90, 180, 270])
+@pytest.mark.parametrize("crop", ["", "/CropBox [150 120 350 280]"])
+def test_mediabox_with_nonzero_origin_aligns(rotate: int, crop: str) -> None:
+    data = _raw_single_page_pdf("0 g 160 130 40 40 re f").replace(
+        b"/MediaBox [0 0 300 300]", f"/MediaBox [100 100 400 300] /Rotate {rotate} {crop}".encode()
+    )
+    image = render_pdf_page(data, 1, dpi=72).image
+    [poly] = extract_vector_page(data, 1, 72).filled
+    xs, ys = zip(*poly.points, strict=True)
+    x0, x1, y0, y1 = (round(v) for v in (min(xs), max(xs), min(ys), max(ys)))
+    assert (x1 - x0, y1 - y0) in {(40, 40)}
+    assert (image[y0 + 2 : y1 - 2, x0 + 2 : x1 - 2] == 0).all()
+    assert (image[y0 - 3, x0 + 2 : x1 - 2] == 255).all()
+    assert (image[y0 + 2 : y1 - 2, x0 - 3] == 255).all()
+
+
+def test_concurrent_pdfium_use_is_serialised() -> None:
+    """PDFium isn't thread-safe: /v1/inspect and /v1/normalize call in from worker threads."""
+    data = make_pdf([PageSpec(*A4_PT, lines=lines(30)), PageSpec(300, 200, filled_rects=[(10, 10, 50, 50)])])
+    errors: list[BaseException] = []
+    results: list[tuple[int, tuple[int, int, int]]] = []
+
+    def work(i: int) -> None:
+        try:
+            for _ in range(5):
+                n = pdf_page_count(data)
+                page = render_pdf_page(data, 1 + i % 2, dpi=96)
+                page_size_pt(data, 1)
+                results.append((n, page.image.shape))
+        except BaseException as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=work, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert len(results) == 40
+    assert {n for n, _ in results} == {2}
+    assert {shape for _, shape in results} == {(1123, 794, 3), (267, 400, 3)}
+
+
+def test_pdfium_lock_is_held_while_pdfium_is_used(monkeypatch: pytest.MonkeyPatch) -> None:
+    held: list[bool] = []
+    original = pdf.pdfium.PdfDocument
+
+    def spy(data: bytes) -> object:
+        held.append(pdf._PDFIUM_LOCK.locked())
+        return original(data)
+
+    monkeypatch.setattr(pdf.pdfium, "PdfDocument", spy)
+    pdf_page_count(make_pdf([PageSpec(100, 100)]))
+    assert held == [True]
+    assert not pdf._PDFIUM_LOCK.locked()
+
+
+def test_internal_bugs_are_not_reported_as_corrupt_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*args: object) -> None:
+        raise RuntimeError("bug in our conversion")
+
+    monkeypatch.setattr(pdf, "_add_object", boom)
+    with pytest.raises(RuntimeError, match="bug in our conversion"):
+        extract_vector_page(make_pdf([PageSpec(*A4_PT, lines=lines(3))]), 1, 72)
 
 
 def test_page_count_and_invalid_page() -> None:

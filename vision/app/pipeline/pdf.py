@@ -6,8 +6,10 @@ drawing operators. Neither library is ever given more than one page of pixels at
 
 import io
 import itertools
+import logging
 import math
-from collections.abc import Iterator
+import threading
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -19,6 +21,13 @@ from pdfminer.pdfdocument import PDFPasswordIncorrect
 
 from app.api.errors import VisionError
 from app.pipeline import decode
+
+logger = logging.getLogger("furny.vision.pdf")
+
+# PDFium is inherently not thread-safe, even across documents (pypdfium2 README, "Incompatibility with
+# Threading"), while /v1/inspect and /v1/normalize run in anyio worker threads of one process. Every
+# PDFium call therefore happens inside `_open_pdfium`, which holds this lock for its whole body.
+_PDFIUM_LOCK = threading.Lock()
 
 MAX_RENDER_DPI = 300.0
 MIN_RENDER_DPI = 72.0
@@ -113,14 +122,15 @@ def _invalid_page(page_number: int, count: int) -> VisionError:
 
 @contextmanager
 def _open_pdfium(data: bytes) -> Iterator[pdfium.PdfDocument]:
-    try:
-        doc = pdfium.PdfDocument(data)
-    except pdfium.PdfiumError as e:
-        raise (_encrypted() if _is_password_error(e) else _corrupt()) from e
-    try:
-        yield doc
-    finally:
-        doc.close()
+    with _PDFIUM_LOCK:
+        try:
+            doc = pdfium.PdfDocument(data)
+        except pdfium.PdfiumError as e:
+            raise (_encrypted() if _is_password_error(e) else _corrupt()) from e
+        try:
+            yield doc
+        finally:
+            doc.close()
 
 
 def _check_page(doc: pdfium.PdfDocument, page_number: int) -> None:
@@ -194,27 +204,33 @@ def _bitmap_to_bgr(bitmap: pdfium.PdfBitmap) -> "np.ndarray":
 
 
 @contextmanager
-def _open_plumber_page(data: bytes, page_number: int) -> Iterator[Any]:
+def _pdfplumber_errors() -> Iterator[None]:
+    """Map pdfplumber/pdfminer parse failures (its parsing is lazy) to API errors; log the cause."""
     try:
-        pdf = pdfplumber.open(io.BytesIO(data))
+        yield
+    except VisionError:
+        raise
     except PDFPasswordIncorrect as e:
         raise _encrypted() from e
     except Exception as e:
+        logger.warning("pdfplumber failed to read the PDF", exc_info=True)
         raise _corrupt() from e
+
+
+@contextmanager
+def _open_plumber_page(data: bytes, page_number: int) -> Iterator[Any]:
+    """Open one page. Only pdfplumber's own calls are mapped to errors, never the caller's body."""
+    with _pdfplumber_errors():
+        pdf = pdfplumber.open(io.BytesIO(data))
     try:
-        if not 1 <= page_number <= len(pdf.pages):
-            raise _invalid_page(page_number, len(pdf.pages))
-        page = pdf.pages[page_number - 1]
+        with _pdfplumber_errors():
+            if not 1 <= page_number <= len(pdf.pages):
+                raise _invalid_page(page_number, len(pdf.pages))
+            page = pdf.pages[page_number - 1]
         try:
             yield page
         finally:
             page.close()
-    except PDFPasswordIncorrect as e:
-        raise _encrypted() from e
-    except VisionError:
-        raise
-    except Exception as e:
-        raise _corrupt() from e
     finally:
         pdf.close()
 
@@ -225,7 +241,7 @@ def _object_count(page: Any) -> int:
 
 def classify_pdf_page(data: bytes, page_number: int) -> Literal["pdf_vector", "pdf_raster"]:
     """`pdf_vector` iff the page has >= 200 lines + rects + curves (06 §5.4)."""
-    with _open_plumber_page(data, page_number) as page:
+    with _open_plumber_page(data, page_number) as page, _pdfplumber_errors():
         return "pdf_vector" if _object_count(page) >= VECTOR_OBJECT_THRESHOLD else "pdf_raster"
 
 
@@ -290,14 +306,23 @@ def _subpaths(obj: dict[str, Any]) -> list[tuple[list[tuple[float, float]], bool
 
 
 def _add_object(
-    obj: dict[str, Any], dark_fill: bool, k: float, segments: list[VSeg], filled: list[VPolygon]
+    obj: dict[str, Any],
+    dark_fill: bool,
+    to_px: Callable[[float, float], tuple[float, float]],
+    k: float,
+    segments: list[VSeg],
+    filled: list[VPolygon],
 ) -> None:
-    """Append an object's edges (every rect/curve edge, stroked or not) and its dark fill."""
+    """Append an object's outline (only if stroked) and its dark fill (a polygon)."""
+    # An unstroked shape has no visible outline, and its graphics-state line width is stale (inherited
+    # from an earlier stroke), so it contributes no segments, only the fill polygon.
+    stroked = bool(obj.get("stroke", True))
     width_px = float(obj.get("linewidth") or 0.0) * k
     for pts, closed in _subpaths(obj):
-        scaled = [(x * k, y * k) for x, y in pts]
-        ring = [*scaled, scaled[0]] if closed and scaled[0] != scaled[-1] else scaled
-        segments.extend(VSeg(a, b, width_px) for a, b in itertools.pairwise(ring) if a != b)
+        scaled = [to_px(x, y) for x, y in pts]
+        if stroked:
+            ring = [*scaled, scaled[0]] if closed and scaled[0] != scaled[-1] else scaled
+            segments.extend(VSeg(a, b, width_px) for a, b in itertools.pairwise(ring) if a != b)
         if dark_fill and len(scaled) >= 3:
             filled.append(VPolygon(points=scaled[:-1] if scaled[0] == scaled[-1] else scaled))
 
@@ -306,7 +331,7 @@ def _is_char(obj: dict[str, Any]) -> bool:
     return bool(obj["object_type"] == "char")
 
 
-def _extract_words(page: Any, k: float) -> list[VWord]:
+def _extract_words(page: Any, to_px: Callable[[float, float], tuple[float, float]]) -> list[VWord]:
     """Words in px. Horizontal text reads normally; each direction of rotated text is its own pass.
 
     Text rotated counter-clockwise (the CAD norm for vertical dimensions) is read bottom-to-top and
@@ -337,19 +362,66 @@ def _extract_words(page: Any, k: float) -> list[VWord]:
         for w in sub.extract_words(
             keep_blank_chars=True, use_text_flow=False, extra_attrs=extra, **directions
         ):
-            box = (w["x0"] * k, w["top"] * k, w["x1"] * k, w["bottom"] * k)
-            words.append(VWord(text=w["text"], box=box, angle=angle))
+            x0, y0 = to_px(w["x0"], w["top"])
+            x1, y1 = to_px(w["x1"], w["bottom"])
+            words.append(VWord(text=w["text"], box=(x0, y0, x1, y1), angle=angle))
     return words
 
 
+def _crop_origin_pt(data: bytes, page_number: int) -> tuple[float, float]:
+    """Offset `(dx, dy)` in pt of the visible area's top-left from the MediaBox's top-left.
+
+    PDFium renders only the CropBox (with /Rotate applied); pdfplumber's coordinates cover the whole
+    MediaBox. They differ whenever a CropBox is set, so vector coordinates are shifted to the render.
+    """
+    with _open_pdfium(data) as doc:
+        _check_page(doc, page_number)
+        page = doc[page_number - 1]
+        try:
+            mx0, my0, mx1, my1 = page.get_mediabox()
+            cx0, cy0, cx1, cy1 = page.get_cropbox()
+            rotation = page.get_rotation() % 360
+        except pdfium.PdfiumError as e:
+            raise _corrupt() from e
+        finally:
+            page.close()
+    cx0, cy0, cx1, cy1 = max(cx0, mx0), max(cy0, my0), min(cx1, mx1), min(cy1, my1)  # PDFium clips
+    width, height = mx1 - mx0, my1 - my0
+    # Crop edges in the unrotated top-left frame of the MediaBox.
+    u0, u1, t0, t1 = cx0 - mx0, cx1 - mx0, my1 - cy1, my1 - cy0
+    if rotation == 90:
+        return height - t1, u0
+    if rotation == 180:
+        return width - u1, height - t1
+    if rotation == 270:
+        return t0, width - u1
+    return u0, t0
+
+
 def extract_vector_page(data: bytes, page_number: int, dpi: float) -> VectorPage:
-    """Segments, dark filled polygons and words of one page, in pixels at `dpi` (06 §7.2)."""
+    """Segments, dark filled polygons and words of one page, in pixels at `dpi` (06 §7.2).
+
+    Coordinates are aligned with `render_pdf_page` (CropBox frame, /Rotate applied).
+    """
     k = dpi / 72.0
+    crop_dx, crop_dy = _crop_origin_pt(data, page_number)
+
+    origin = [0.0, 0.0]
+
+    def to_px(x: float, y: float) -> tuple[float, float]:
+        return (x - origin[0]) * k, (y - origin[1]) * k
+
     segments: list[VSeg] = []
     filled: list[VPolygon] = []
     with _open_plumber_page(data, page_number) as page:
-        for kind, objs in (("line", page.lines), ("rect", page.rects), ("curve", page.curves)):
+        with _pdfplumber_errors():
+            # pdfplumber's frame keeps the MediaBox origin: its bbox top-left is not (0, 0) when the
+            # MediaBox does not start at the origin.
+            origin[:] = [page.bbox[0] + crop_dx, page.bbox[1] + crop_dy]
+            objects = [("line", page.lines), ("rect", page.rects), ("curve", page.curves)]
+            words = _extract_words(page, to_px)
+        for kind, objs in objects:
             for obj in objs:
-                _add_object(obj, kind != "line" and _is_dark_fill(obj), k, segments, filled)
-        words = _extract_words(page, k)
-        return VectorPage(segments=segments, filled=filled, words=words, object_count=_object_count(page))
+                _add_object(obj, kind != "line" and _is_dark_fill(obj), to_px, k, segments, filled)
+        count = sum(len(objs) for _, objs in objects)
+    return VectorPage(segments=segments, filled=filled, words=words, object_count=count)
