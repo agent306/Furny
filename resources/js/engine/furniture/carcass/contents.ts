@@ -18,6 +18,7 @@ import type { Content } from '../schema';
 import type { GenContext, Part } from '../types';
 import { coveringFront, type Envelope } from './envelope';
 import { recordEndJoints, type SectionBoxInfo } from './layout';
+import type { FurnitureIssueCode } from '../validate';
 
 type ContentOf<T extends Content['type']> = Extract<Content, { type: T }>;
 
@@ -52,9 +53,10 @@ const leafDepth = (ctx: GenContext, leaf: SectionBoxInfo): number =>
     contentDepth(ctx, { interior: leaf.box }, leaf.id);
 
 /**
- * Adds a hardware line for `roleKey`'s catalog default, or `code` when given.
- * Without any code the line is omitted and `furniture.no_default_hardware`
- * names the hardware key (07 §1.5).
+ * Adds a hardware line for `roleKey`'s catalog default, or `code` when given,
+ * keyed `{prefix}.{name}` (default prefix `section.{S}`) with the leaf as
+ * its section (none when `sectionId` is null). Without any code the line is
+ * omitted and `furniture.no_default_hardware` names the hardware key (07 §1.5).
  */
 function addLine(
     ctx: GenContext,
@@ -66,9 +68,11 @@ function addLine(
         qty: number;
         reasonKey: string;
         reasonParams?: Record<string, string | number>;
+        prefix?: string;
+        sectionId?: string | null;
     },
 ): void {
-    const key = `section.${leaf.id}.${line.name}`;
+    const key = `${line.prefix ?? `section.${leaf.id}`}.${line.name}`;
     const resolved = code ?? ctx.idx.defaultHardware(roleKey)?.code;
     if (resolved === undefined) {
         ctx.issue('furniture.no_default_hardware', 'warning', { roleKey }, [
@@ -83,11 +87,14 @@ function addLine(
         reasonKey: line.reasonKey,
         reasonParams: line.reasonParams ?? {},
         frontId: null,
-        sectionId: leaf.id,
+        sectionId: line.sectionId === undefined ? leaf.id : line.sectionId,
         source: 'generated',
         overridden: false,
     });
 }
+
+/** Vertical panels that bound leaves: carcass and desk cabinet sides, partitions. */
+const BOUNDING_VERTICAL = /^(carcass|table\.cabinet)\.side\.|\.partition\.\d+$/;
 
 /**
  * The vertical panels (sides, partitions) whose faces bound the leaf on the
@@ -105,7 +112,7 @@ export function boundingVerticals(
         atX: number,
         side: 'max' | 'min',
     ): boolean => {
-        if (!/^carcass\.side\.|\.partition\.\d+$/.test(part.key)) return false;
+        if (!BOUNDING_VERTICAL.test(part.key)) return false;
         const g = part.geometry;
         if (g.kind !== 'box') return false;
         const face =
@@ -128,6 +135,17 @@ export function boundingVerticals(
     };
 }
 
+/** How `shelvesFor` keys the shelves of a leaf. */
+export interface ShelfLeafOptions {
+    /** Prefix of `{prefix}.shelf.{i}` and `{prefix}.shelf_supports`; default `section.{S}`. */
+    keyPrefix?: string;
+    /**
+     * False when the leaf is no carcass section (a desk cabinet, 07 §3.13):
+     * the issue and the supports line then name no section. Default true.
+     */
+    inSection?: boolean;
+}
+
 /**
  * Loose shelves (07 §3.9): `count` shelves evenly spaced in the leaf, from
  * the top. Adjustable ones rest on pins (4 per shelf, System 32 holes in the
@@ -137,7 +155,10 @@ export function shelvesFor(
     ctx: GenContext,
     leaf: SectionBoxInfo,
     content: ContentOf<'shelves'>,
+    options: ShelfLeafOptions = {},
 ): void {
+    const prefix = options.keyPrefix ?? `section.${leaf.id}`;
+    const inSection = options.inSection !== false;
     const [x0, , z0] = leaf.box.min;
     const [w, h] = leaf.box.size;
     const y1 = leaf.box.min[1] + h;
@@ -153,8 +174,8 @@ export function shelvesFor(
         ctx.issue(
             'furniture.shelves_dont_fit',
             'error',
-            { sectionId: leaf.id },
-            [leaf.id],
+            inSection ? { sectionId: leaf.id } : {},
+            inSection ? [leaf.id] : [],
         );
         return;
     }
@@ -163,7 +184,7 @@ export function shelvesFor(
         const top = y1 - i * gap - (i - 1) * ts;
         const shelf = makePart(
             {
-                key: `section.${leaf.id}.shelf.${i}`,
+                key: `${prefix}.shelf.${i}`,
                 nameKey: 'parts.shelf',
                 nameParams: { n: i },
                 role: 'shelf',
@@ -189,6 +210,8 @@ export function shelvesFor(
         qty: 4 * n,
         reasonKey: 'hardware.reason.shelf_supports',
         reasonParams: { shelves: n },
+        prefix,
+        sectionId: inSection ? leaf.id : null,
     });
     // Two rows of holes (front and back) in each bounding vertical.
     const rows =
@@ -233,7 +256,10 @@ export function rodFor(
         reasonKey: 'hardware.reason.rod_supports',
     });
 
-    const warn = (code: string, params: Record<string, number> = {}) =>
+    const warn = (
+        code: FurnitureIssueCode,
+        params: Record<string, number> = {},
+    ) =>
         ctx.issue(code, 'warning', { sectionId: leaf.id, ...params }, [
             leaf.id,
         ]);

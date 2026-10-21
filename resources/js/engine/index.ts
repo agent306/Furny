@@ -518,7 +518,7 @@ export type {
 export { createGenContext } from './furniture/context';
 export { generateFurniture } from './furniture/generate';
 export { codeIssues, referencedCodes } from './furniture/codes';
-export type { CodeKind, CodeRef } from './furniture/codes';
+export type { CodeIssueOptions, CodeKind, CodeRef } from './furniture/codes';
 export {
     CRITICAL_WARNING_CODES,
     FURNITURE_ISSUE_CODES,
@@ -541,7 +541,17 @@ export {
     drawersFor,
     selectSlide,
 } from './furniture/carcass/drawers';
-export type { SlideRequest, SlideSelection } from './furniture/carcass/drawers';
+export type {
+    DrawerLeafOptions,
+    SlideRequest,
+    SlideSelection,
+} from './furniture/carcass/drawers';
+export { tableParts } from './furniture/table/generateTable';
+export {
+    circleOutline,
+    ellipseOutline,
+    roundedRectOutline,
+} from './furniture/table/outlines';
 export { makePart, mapEdges, mapGrain } from './furniture/parts';
 export { PART_NAMES_EN, partNameEn } from './furniture/partNames';
 export {

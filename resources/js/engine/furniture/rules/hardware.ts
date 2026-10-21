@@ -121,17 +121,26 @@ export interface HingedLeaf {
     edgeClass: EdgeClass;
 }
 
+/** Where the hinge lines of a front go: `{base}.hinges`, `.hinges.shared`, `.hinge_plates`. */
+export interface HingeLines {
+    base: string;
+    frontId: string | null;
+}
+
 /**
  * Hinges and plates of one front (07 §6.2). `front.{F}.hinges` holds the
  * leaves on the front's primary type (that of an outer edge); leaves hinged
  * on a shared edge whose code differs go to `front.{F}.hinges.shared`.
  * Plates count every hinge whose item has no integrated plate. `hingeCode`
- * null means no hinges, plates or cups.
+ * null means no hinges, plates or cups. `lines` replaces the `front.{F}`
+ * base and the lines' front id (the desk cabinet door: `table.cabinet.door`,
+ * no front).
  */
 export function hingesFor(
     ctx: GenContext,
-    front: Front,
+    front: Pick<Front, 'id' | 'hingeCode' | 'overlay'>,
     leaves: readonly HingedLeaf[],
+    lines: HingeLines = { base: `front.${front.id}`, frontId: front.id },
 ): void {
     if (front.hingeCode === null) return;
     const explicit = front.hingeCode === 'auto' ? null : front.hingeCode;
@@ -164,7 +173,7 @@ export function hingesFor(
         if (ctx.idx.hardware(code)?.specs.integratedPlate !== true) plates += n;
     }
 
-    const base = `front.${front.id}.hinges`;
+    const base = `${lines.base}.hinges`;
     for (const roleKey of missing) {
         ctx.issue('furniture.no_default_hardware', 'warning', { roleKey }, [
             base,
@@ -182,18 +191,18 @@ export function hingesFor(
                 qty: group.qty,
                 reasonKey: 'hardware.reason.hinges_for_door',
                 reasonParams: { leaves: group.leaves },
-                frontId: front.id,
+                frontId: lines.frontId,
                 sectionId: null,
             }),
         );
     }
     if (plates > 0) {
         addHardwareLine(ctx, {
-            key: `front.${front.id}.hinge_plates`,
+            key: `${lines.base}.hinge_plates`,
             roleKey: 'hinge_plate.default',
             qty: plates,
             reasonKey: 'hardware.reason.hinge_plates',
-            frontId: front.id,
+            frontId: lines.frontId,
             sectionId: null,
         });
     }

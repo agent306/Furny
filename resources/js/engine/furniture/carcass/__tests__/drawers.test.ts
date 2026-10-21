@@ -858,9 +858,15 @@ describe('drawer heights and slots (07 §3.12)', () => {
             { sectionId: ROOT, drawer: 1 },
             { sectionId: ROOT, drawer: 2 },
         ]);
+        // the drawer key keeps each drawer distinct after deduplication (Task 37 M2)
+        expect(
+            issuesOf(ctx, 'furniture.drawer_too_low').map((i) => i.entityIds),
+        ).toEqual([
+            [ROOT, P(1)],
+            [ROOT, P(2)],
+        ]);
         expect(issuesOf(ctx, 'furniture.drawer_too_low')[0]).toMatchObject({
             severity: 'error',
-            entityIds: [ROOT],
         });
         expect(partsOf(ctx, 'section.')).toEqual([]);
         expect(ctx.hardware).toEqual([]);
@@ -1238,14 +1244,9 @@ describe('slide screws on partitions and key prefixes', () => {
         const run = runCarcass(drawerTestBox(), catalog, { fronts: true });
         const leaf = run.layout.byId.get(ROOT);
         if (!leaf) throw new Error('no leaf');
-        drawersFor(
-            run.ctx,
-            run.env,
-            run.layout,
-            leaf,
-            drawers({ count: 2 }),
-            'table.drawer',
-        );
+        drawersFor(run.ctx, run.env, run.layout, leaf, drawers({ count: 2 }), {
+            keyPrefix: 'table.drawer',
+        });
         expect(
             run.ctx.parts
                 .filter((p) => p.key.startsWith('table.drawer.'))

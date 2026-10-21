@@ -4,11 +4,17 @@ import { indexCatalog } from '../catalogIndex';
 import { codeIssues, referencedCodes } from '../codes';
 import { generateFurniture } from '../generate';
 import type { FurnitureDocument } from '../schema';
-import { archived, withoutHardware } from '../testing/catalogs';
+import {
+    archived,
+    withoutEdgeBand,
+    withoutHardware,
+} from '../testing/catalogs';
 import {
     assign,
     boxDocument,
+    countertopBox,
     drawerTestBox,
+    studyDesk,
     wardrobeFixture,
 } from '../testing/docs';
 import type { FurnitureModel } from '../types';
@@ -308,6 +314,102 @@ describe('codeIssues', () => {
             indexCatalog(archived('PB18-WHITE')),
         );
         expect(issues).toHaveLength(1);
+    });
+
+    const bandIssues = (
+        doc: FurnitureDocument,
+        cat = withoutEdgeBand('EB08-WHITE'),
+        options?: Parameters<typeof codeIssues>[2],
+    ) =>
+        codeIssues(doc, indexCatalog(cat), options)
+            .filter(
+                (i) =>
+                    i.params.kind === 'edge_band' ||
+                    i.code === 'furniture.archived_code',
+            )
+            .map((i) => i.params);
+
+    it('derives a default band once, however many roles derive it (Task 37 M4)', () => {
+        expect(bandIssues(wardrobeFixture())).toEqual([
+            { code: 'EB08-WHITE', kind: 'edge_band' },
+        ]);
+    });
+
+    it('does not repeat a derived band that is also explicit (Task 37 M4)', () => {
+        const doc = wardrobeFixture((d) => {
+            d.materials.carcass.edgeBandCode = 'EB08-WHITE';
+        });
+        expect(bandIssues(doc)).toEqual([
+            { code: 'EB08-WHITE', kind: 'edge_band' },
+        ]);
+    });
+
+    it('derives the band of the role default for an unknown material (Task 37 M4)', () => {
+        const doc = wardrobeFixture((d) => {
+            for (const role of ['carcass', 'shelf', 'top', 'plinth'] as const) {
+                d.materials[role].edgeBandCode = 'EB08-ANTH';
+            }
+            d.materials.front = assign('GONE-01');
+        });
+        const fallback = indexCatalog(catalog).defaultMaterialFor('front');
+        expect(fallback?.defaultEdgeBandCode).toBe('EB08-WHITE');
+        expect(bandIssues(doc)).toEqual([
+            { code: 'EB08-WHITE', kind: 'edge_band' },
+        ]);
+    });
+
+    it('checks derived bands only for the roles in bandRoles (Task 37 M3)', () => {
+        expect(
+            bandIssues(wardrobeFixture(), undefined, {
+                bandRoles: new Set(['back', 'drawer_box']),
+            }),
+        ).toEqual([]);
+        expect(
+            bandIssues(wardrobeFixture(), undefined, {
+                bandRoles: new Set(['front']),
+            }),
+        ).toEqual([{ code: 'EB08-WHITE', kind: 'edge_band' }]);
+    });
+
+    it('generation checks the default band of a role no part uses: never (Task 37 M3)', () => {
+        // MDF18-GLOSS-WHITE bands with EB20-WHITE; the top role is only used by a countertop
+        const cat = archived('EB20-WHITE');
+        const glossTop = (doc: FurnitureDocument): FurnitureDocument => ({
+            ...doc,
+            materials: { ...doc.materials, top: assign('MDF18-GLOSS-WHITE') },
+        });
+        const archivedBands = (doc: FurnitureDocument) =>
+            issuesOf(
+                generateFurniture(glossTop(doc), cat),
+                'furniture.archived_code',
+            ).map((i) => i.params);
+        expect(archivedBands(drawerTestBox())).toEqual([]);
+        expect(archivedBands(countertopBox())).toEqual([
+            { code: 'EB20-WHITE' },
+        ]);
+    });
+
+    it('reports a non-slide slide code once, however many drawers name it (Task 37 M4)', () => {
+        const doc = studyDesk((d) => {
+            d.table.storage.drawers = {
+                count: 1,
+                side: 'front',
+                slideCode: 'HDL-BAR-320',
+            };
+            d.table.storage.endCabinets = {
+                width: 400,
+                content: {
+                    type: 'drawers',
+                    count: 3,
+                    frontHeights: 'equal',
+                    slideCode: 'HDL-BAR-320',
+                    behindDoor: false,
+                },
+            };
+        });
+        expect(
+            codeIssues(doc, indexCatalog(catalog)).map((i) => i.params),
+        ).toEqual([{ code: 'HDL-BAR-320', kind: 'hardware' }]);
     });
 
     it('reports a code that names a row of another kind as unknown', () => {

@@ -17,6 +17,7 @@ import {
     type MaterialAssignments,
     type Section,
     type SectionChild,
+    type TableSpec,
 } from '../schema';
 
 const WARDROBE_FIXTURE = new URL(
@@ -303,4 +304,115 @@ export function slidingWardrobe(
             },
         },
     });
+}
+
+/** The dining table spec of 07 §2.4.15 with its defaults (four legs, solid, apron 90 inset 15). */
+export function diningTableSpec(): TableSpec {
+    return {
+        top: {
+            shape: 'rectangle',
+            thickness: 'material',
+            cornerRadius: 0,
+            overhang: 50,
+        },
+        base: {
+            type: 'four_legs',
+            legSource: 'solid',
+            legCode: null,
+            legSection: 50,
+            apron: { enabled: true, height: 90, inset: 15 },
+            stretcher: false,
+        },
+        storage: { drawers: null, lowerShelf: false, endCabinets: null },
+    };
+}
+
+/**
+ * The study desk spec of 07 §2.4.14 with its defaults: cabinet ends with a
+ * 400 mm cabinet of three drawers, hardware legs, stretcher (modesty) on.
+ */
+export function studyDeskSpec(): TableSpec {
+    return {
+        top: {
+            shape: 'rectangle',
+            thickness: 'material',
+            cornerRadius: 0,
+            overhang: 0,
+        },
+        base: {
+            type: 'cabinet_ends',
+            legSource: 'hardware',
+            legCode: null,
+            legSection: 50,
+            apron: { enabled: false, height: 80, inset: 15 },
+            stretcher: true,
+        },
+        storage: {
+            drawers: null,
+            lowerShelf: false,
+            endCabinets: {
+                width: 400,
+                content: {
+                    type: 'drawers',
+                    count: 3,
+                    frontHeights: 'equal',
+                    slideCode: null,
+                    behindDoor: false,
+                },
+            },
+        },
+    };
+}
+
+/** A table-family document of `width x height x depth`; top PB25-WHITE, legs SW50-RUBBER. */
+export function tableDocument(
+    dims: { width: number; height: number; depth: number },
+    table: TableSpec,
+    templateKey: FurnitureDocument['templateKey'] = 'dining_table',
+): FurnitureDocument {
+    return {
+        schemaVersion: 1,
+        templateKey,
+        family: 'table',
+        dims,
+        materials: {
+            ...defaultMaterials(),
+            top: assign('PB25-WHITE'),
+            leg: assign('SW50-RUBBER'),
+        },
+        carcass: null,
+        table,
+        overrides: {
+            parts: {},
+            extraParts: [],
+            hardware: {},
+            extraHardware: [],
+        },
+        notes: null,
+    };
+}
+
+/** 07 §2.4.15 defaults: 1800 x 750 x 900 dining table; `patch` may edit it. */
+export function diningTable(
+    patch: (doc: FurnitureDocument & { table: TableSpec }) => void = () => {},
+): FurnitureDocument & { table: TableSpec } {
+    const doc = tableDocument(
+        { width: 1800, height: 750, depth: 900 },
+        diningTableSpec(),
+    ) as FurnitureDocument & { table: TableSpec };
+    patch(doc);
+    return doc;
+}
+
+/** 07 §2.4.14 defaults: 1200 x 750 x 600 study desk; `patch` may edit it. */
+export function studyDesk(
+    patch: (doc: FurnitureDocument & { table: TableSpec }) => void = () => {},
+): FurnitureDocument & { table: TableSpec } {
+    const doc = tableDocument(
+        { width: 1200, height: 750, depth: 600 },
+        studyDeskSpec(),
+        'study_desk',
+    ) as FurnitureDocument & { table: TableSpec };
+    patch(doc);
+    return doc;
 }

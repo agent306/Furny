@@ -24,6 +24,12 @@ export interface OpeningEdge {
     cls: EdgeClass;
     /** Thickness of the panel the edge lies on (`t_c` for the carcass). */
     tp: number;
+    /**
+     * A fixed cover that replaces the overlay rule of `coverFor`: the top
+     * edge of a desk cabinet stops 2 mm under the table top (cover -2,
+     * 07 §3.13). Carcass openings never set it.
+     */
+    cover?: number;
 }
 
 /** A rectangle in the front elevation (local x/y, y up). */
@@ -146,10 +152,12 @@ export function coverFor(overlay: Overlay, cls: EdgeClass, tp: number): number {
     return tp / 2 - DOOR_GAP / 2;
 }
 
-/** The front rectangle `[X0, X1] x [Y0, Y1]` of an opening (07 §4.1). */
+/** The front rectangle `[X0, X1] x [Y0, Y1]` of an opening (07 §4.1); an edge's fixed `cover` wins. */
 export function frontRect(opening: OpeningRect, overlay: Overlay): Rect {
-    const cv = (edge: EdgeName) =>
-        coverFor(overlay, opening.edges[edge].cls, opening.edges[edge].tp);
+    const cv = (edge: EdgeName) => {
+        const { cls, tp, cover } = opening.edges[edge];
+        return cover ?? coverFor(overlay, cls, tp);
+    };
     return {
         x0: opening.x0 - cv('left'),
         x1: opening.x1 + cv('right'),

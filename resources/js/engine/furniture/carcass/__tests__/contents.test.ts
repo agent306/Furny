@@ -185,6 +185,37 @@ describe('shelvesFor', () => {
         expect(codes(over.ctx)).toEqual(['furniture.shelves_dont_fit']);
     });
 
+    it('an adjustable shelf in a 2 mm leaf would be 0 wide: does not fit; 3 mm gives a 1 mm shelf (Task 37 M4)', () => {
+        const narrow = (w: number) => {
+            const { ctx, layout } = runCarcass(leafBox(shelves({ count: 1 })));
+            const root = layout.byId.get(ROOT);
+            if (!root) throw new Error('no leaf');
+            const before = ctx.issues.length;
+            shelvesFor(
+                ctx,
+                {
+                    ...root,
+                    box: {
+                        min: root.box.min,
+                        size: [w, root.box.size[1], root.box.size[2]],
+                    },
+                },
+                shelves({ count: 1, adjustable: true }) as Shelves,
+                { keyPrefix: 'test' },
+            );
+            return {
+                codes: ctx.issues.slice(before).map((i) => i.code),
+                shelf: ctx.parts.find((p) => p.key === 'test.shelf.1'),
+            };
+        };
+        expect(narrow(2)).toEqual({
+            codes: ['furniture.shelves_dont_fit'],
+            shelf: undefined,
+        });
+        expect(narrow(3).codes).toEqual([]);
+        expect(narrow(3).shelf?.width).toBe(1);
+    });
+
     it('a shelf is never deeper than the content: depth <= 0 does not fit', () => {
         const { ctx } = runCarcass(
             leafBox(shelves({ frontSetback: 547 }), { cd: 547 }),

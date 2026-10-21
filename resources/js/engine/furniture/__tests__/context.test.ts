@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { EngineInputError } from '../../errors';
 import { mutateCatalog, seedCatalog } from '../../testing/seedCatalog';
 import { indexCatalog } from '../catalogIndex';
-import { createGenContext } from '../context';
+import { createGenContext, furnitureIssue } from '../context';
 import { migrateFurniture } from '../migrate';
 import type { FurnitureDocument } from '../schema';
 
@@ -119,6 +119,22 @@ describe('createGenContext', () => {
         expect(ctx.issue('furniture.back_split', 'info')).toMatchObject({
             params: {},
             entityIds: [],
+        });
+    });
+
+    it('accepts only catalogued issue codes (Task 37 M5, checked by vue-tsc)', () => {
+        const ctx = createGenContext(doc(), seedCatalog());
+        const typed = (): void => {
+            // @ts-expect-error not a furniture issue code of 07 §7.3
+            furnitureIssue('furniture.not_a_code', 'info');
+            // @ts-expect-error not a furniture issue code of 07 §7.3
+            ctx.issue('furniture.shelf_sagging', 'warning');
+        };
+        expect(typed).not.toThrow();
+        expect(
+            furnitureIssue('furniture.weight_estimate', 'info'),
+        ).toMatchObject({
+            messageKey: 'engine.furniture.issue.weight_estimate',
         });
     });
 

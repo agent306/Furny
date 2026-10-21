@@ -34,6 +34,7 @@ import {
     dedupeIssues,
     isSaveBlocking,
     validateFurniture,
+    type FurnitureIssueCode,
 } from '../validate';
 
 const catalog = seedCatalog();
@@ -885,7 +886,7 @@ describe('save blocking (03 §2.4, 07 §7.1)', () => {
         'furniture.front_overlap',
         'furniture.unknown_code',
         'furniture.too_many_parts',
-    ];
+    ] satisfies FurnitureIssueCode[] as FurnitureIssueCode[];
 
     it('SAVE_BLOCKING_CODES is exactly the nine codes of 03 §2.4', () => {
         expect([...SAVE_BLOCKING_CODES].sort()).toEqual([...NINE].sort());
@@ -946,7 +947,7 @@ describe('save blocking (03 §2.4, 07 §7.1)', () => {
 
 describe('dedupeIssues (07 §7.1)', () => {
     const issue = (
-        code: string,
+        code: FurnitureIssueCode,
         entityIds: string[],
         params: Issue['params'] = {},
     ) => furnitureIssue(code, 'warning', params, entityIds);
@@ -1087,6 +1088,31 @@ describe('FURNITURE_ISSUE_CODES (07 §7.3)', () => {
         }
         expect(found).toBeGreaterThan(50);
         expect(unknown).toEqual([]);
+    });
+});
+
+describe('drawer issues survive deduplication (Task 37 M2)', () => {
+    it('keeps four drawer_too_low issues for four short drawers', () => {
+        // 300 mm behind a door: 4 slots of 75 -> boxes of 30 < 60
+        const doc = boxDocument({
+            width: 600,
+            height: 336,
+            depth: 560,
+            content: {
+                type: 'drawers',
+                count: 4,
+                frontHeights: 'equal',
+                slideCode: null,
+                behindDoor: true,
+            },
+        });
+        const issues = only(validate(doc), 'furniture.drawer_too_low');
+        expect(issues.map((i) => i.params)).toEqual(
+            [1, 2, 3, 4].map((drawer) => ({ sectionId: ROOT, drawer })),
+        );
+        expect(issues.map((i) => i.entityIds)).toEqual(
+            [1, 2, 3, 4].map((j) => [ROOT, `section.${ROOT}.drawer.${j}`]),
+        );
     });
 });
 

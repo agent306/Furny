@@ -8,6 +8,7 @@ import type { Issue } from '../plan/types';
 import { indexCatalog, type CatalogIndex } from './catalogIndex';
 import type { FurnitureDocument } from './schema';
 import type { GenContext } from './types';
+import type { FurnitureIssueCode } from './validate';
 
 /** Furniture issues are `furniture.<name>`; the key drops the domain prefix, like the plan ones. */
 const ISSUE_KEY_PREFIX = 'engine.furniture.issue.';
@@ -17,7 +18,7 @@ const ISSUE_KEY_PREFIX = 'engine.furniture.issue.';
  * for pure checks that run without a generation context.
  */
 export function furnitureIssue(
-    code: string,
+    code: FurnitureIssueCode,
     severity: Issue['severity'],
     params: Issue['params'] = {},
     entityIds: string[] = [],

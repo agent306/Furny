@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { seedCatalog } from '../../../testing/seedCatalog';
+import { createGenContext } from '../../context';
 import { generateFurniture } from '../../generate';
+import { makePart } from '../../parts';
 import type { ExtraPart, FurnitureDocument } from '../../schema';
 import { withThickness } from '../../testing/catalogs';
 import {
@@ -12,6 +14,7 @@ import {
     wardrobeFixture,
 } from '../../testing/docs';
 import type { FurnitureModel } from '../../types';
+import { modelRules } from '../model';
 
 /**
  * The model-level rules of 07 §7.3 that `modelRules` adds to a generation:
@@ -121,6 +124,57 @@ describe('part_exceeds_sheet (07 §7.3, §3.4.1 fit)', () => {
         };
         expect(big('GLASS5-CLEAR')).toEqual([]);
         expect(big('PB18-WHITE')).toHaveLength(1);
+    });
+
+    it('counts the trim: a 2430 side does not fit the 2420 usable length (Task 37 M4)', () => {
+        const model = run(
+            boxDocument({ width: 600, height: 2430, depth: 560 }),
+        );
+        expect(
+            only(model, 'furniture.part_exceeds_sheet').map((i) => i.entityIds),
+        ).toEqual([['carcass.side.left'], ['carcass.side.right']]);
+    });
+
+    it('checks an extra part of role back: only generated backs are skipped (Task 37 M4)', () => {
+        const doc = wardrobeFixture();
+        doc.overrides.extraParts = [
+            extraPart({
+                role: 'back',
+                materialCode: 'HDF3-WHITE',
+                length: 2500,
+                width: 600,
+            }),
+        ];
+        expect(
+            only(run(doc), 'furniture.part_exceeds_sheet').map(
+                (i) => i.entityIds[0],
+            ),
+        ).toEqual(['extra.p_0000000001']);
+    });
+
+    it("measures a part with an unknown material against its role's material (Task 37 M4)", () => {
+        const ctx = createGenContext(drawerTestBox(), catalog);
+        const part = makePart(
+            {
+                key: 'test.part',
+                nameKey: 'parts.extra',
+                role: 'carcass',
+                materialCode: 'PB18-WHITE',
+                box: { min: [0, 0, 0], size: [18, 2500, 500] },
+                thicknessAxis: 'x',
+                grainAxis: 'y',
+                banded: [],
+                visibleFaces: 0,
+            },
+            ctx,
+        );
+        ctx.parts.push({ ...part, materialCode: 'GONE-01' });
+        modelRules(ctx);
+        expect(
+            ctx.issues.filter((i) => i.code === 'furniture.part_exceeds_sheet'),
+        ).toMatchObject([
+            { params: { partKey: 'test.part', materialCode: 'PB18-WHITE' } },
+        ]);
     });
 
     it('falls back to the role default material for an unknown code, without throwing', () => {

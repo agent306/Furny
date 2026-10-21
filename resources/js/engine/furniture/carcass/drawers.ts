@@ -68,14 +68,24 @@ const num = (v: unknown): number | undefined =>
 const sum = (values: readonly number[]): number =>
     values.reduce((total, v) => total + v, 0);
 
-/** The `sectionId` param and entity of a drawer issue; both empty without a section. */
-function sectionRef(sectionId: string | undefined): {
+/** What a drawer issue names: its section (param and entity) and drawer keys (entities). */
+export interface DrawerIssueRef {
     params: Record<string, string>;
     entityIds: string[];
-} {
+}
+
+/**
+ * The `sectionId` param and entity of a drawer issue (both absent without a
+ * section, e.g. on a table), followed by the drawer `keys` as entities, so
+ * that issues of different drawers stay distinct after deduplication.
+ */
+export function drawerIssueRef(
+    sectionId: string | undefined,
+    ...keys: string[]
+): DrawerIssueRef {
     return sectionId === undefined
-        ? { params: {}, entityIds: [] }
-        : { params: { sectionId }, entityIds: [sectionId] };
+        ? { params: {}, entityIds: keys }
+        : { params: { sectionId }, entityIds: [sectionId, ...keys] };
 }
 
 /** What `selectSlide` needs to know about the room for the slide. */
@@ -88,6 +98,8 @@ export interface SlideRequest {
     family?: string;
     /** Named by the issues (`sectionId` param and entity). */
     sectionId?: string;
+    /** Named by the issues as an entity after the section: the drawer key, e.g. `table.drawer.1`. */
+    drawerKey?: string;
     /** Reported by `drawer_no_slide` as `availableDepth`. */
     availableDepth?: number;
 }
@@ -117,7 +129,10 @@ export function selectSlide(
 ): SlideSelection {
     const { maxLen } = request;
     const issues: Issue[] = [];
-    const { params: sectionParams, entityIds } = sectionRef(request.sectionId);
+    const { params: sectionParams, entityIds } = drawerIssueRef(
+        request.sectionId,
+        ...(request.drawerKey === undefined ? [] : [request.drawerKey]),
+    );
     const noSlide = (): SlideSelection => {
         issues.push(
             furnitureIssue(
@@ -219,7 +234,7 @@ function givenHeights(
     const heights = content.frontHeights;
     if (heights === 'equal') return null;
     if (heights.length === content.count) return heights;
-    const { params, entityIds } = sectionRef(sectionId);
+    const { params, entityIds } = drawerIssueRef(sectionId);
     ctx.issue('furniture.drawer_heights_invalid', 'warning', params, entityIds);
     return null;
 }
@@ -260,7 +275,7 @@ export function drawerFrontRects(
     const given = givenHeights(ctx, content, sectionId);
     const heights = divide(block.y1 - block.y0, n, DRAWER_FRONT_GAP, given);
     if (given && (heights[n - 1] ?? 0) < MIN_DRAWER_FRONT_HEIGHT) {
-        const { params, entityIds } = sectionRef(sectionId);
+        const { params, entityIds } = drawerIssueRef(sectionId);
         ctx.issue(
             'furniture.drawer_heights_invalid',
             'error',
@@ -279,8 +294,9 @@ export function drawerFrontRects(
 }
 
 /** The box geometry shared by every drawer of one leaf (07 §3.12 box table). */
-interface LeafBoxes {
-    sectionId: string;
+export interface LeafBoxes {
+    /** The carcass section of the drawers; absent on a table (no `sectionId` in issues and lines). */
+    sectionId: string | undefined;
     behind: boolean;
     slide: CatalogHardware | null;
     undermount: boolean;
@@ -298,21 +314,21 @@ interface LeafBoxes {
     tbt: number;
     /** False when no box can be made (no slide length, or no inner width / length). */
     canBuild: boolean;
-    /** Side panels or partitions that take the slide screws. */
+    /** Side panels, partitions or runners that take the slide screws. */
     verticals: Array<Part | undefined>;
 }
 
 /**
  * Widths and length of the boxes (07 §3.12 box table) for slide `slide` of
- * length `Ls` in an opening `Wo` wide; warns `drawer_side_too_thick` when the
- * box sides are too thick for an undermount slide.
+ * length `Ls` in an opening `Wo` wide; warns `drawer_side_too_thick` (naming
+ * `ref`) when the box sides are too thick for an undermount slide.
  */
-function boxSizes(
+export function boxSizes(
     ctx: GenContext,
     slide: CatalogHardware | null,
     Ls: number,
     Wo: number,
-    sectionId: string,
+    ref: DrawerIssueRef,
 ): Pick<LeafBoxes, 'undermount' | 'Wb' | 'Win' | 'Lb' | 'bo'> {
     const tdb = ctx.t('drawer_box');
     const specs = slide?.specs ?? {};
@@ -324,8 +340,8 @@ function boxSizes(
             ctx.issue(
                 'furniture.drawer_side_too_thick',
                 'warning',
-                { sectionId },
-                [sectionId],
+                ref.params,
+                ref.entityIds,
             );
         }
         const Win =
@@ -353,11 +369,12 @@ function boxSizes(
 
 /**
  * Drawer `j` (1 = top) of a leaf in the slot `[slotY0, slotY1]`: the box
- * (sides, back, bottom, and an inner front behind a door), its slides and
- * the slide screws in the bounding verticals. A box lower than 60 mm is error
- * `drawer_too_low` and is not built.
+ * (sides, back, bottom, and an inner front behind a door) keyed `{prefix}.…`,
+ * its slides `{prefix}.slides` and the slide screws in the bounding verticals.
+ * A box lower than 60 mm is error `drawer_too_low` (naming the section and
+ * the drawer `prefix`) and is not built.
  */
-function drawerBox(
+export function drawerBox(
     ctx: GenContext,
     boxes: LeafBoxes,
     prefix: string,
@@ -371,11 +388,12 @@ function drawerBox(
         fl((slotH - DRAWER_BOX_VERTICAL_CLEARANCE) / DRAWER_BOX_HEIGHT_STEP) *
         DRAWER_BOX_HEIGHT_STEP;
     if (Hb < DRAWER_MIN_BOX_HEIGHT) {
+        const ref = drawerIssueRef(sectionId, prefix);
         ctx.issue(
             'furniture.drawer_too_low',
             'error',
-            { sectionId, drawer: j },
-            [sectionId],
+            { ...ref.params, drawer: j },
+            ref.entityIds,
         );
         return;
     }
@@ -465,7 +483,7 @@ function drawerBox(
             reasonKey: 'hardware.reason.slides_for_drawer',
             reasonParams: { length: boxes.slideLength },
             frontId: null,
-            sectionId,
+            sectionId: sectionId ?? null,
         });
     }
     for (const vertical of boxes.verticals) {
@@ -475,8 +493,8 @@ function drawerBox(
 
 /**
  * The front of external drawer `j` over `rect` (07 §4.4): a solid leaf in
- * the drawer overlay's z range, its model front and its handles
- * (`carcass.handles.code`, horizontal by default).
+ * the drawer overlay's z range, its model front and its handles (`handleCode`,
+ * horizontal by default).
  */
 function externalDrawerFront(
     ctx: GenContext,
@@ -484,7 +502,8 @@ function externalDrawerFront(
     rect: Rect,
     prefix: string,
     j: number,
-    sectionId: string,
+    sectionId: string | undefined,
+    handleCode: string | null,
 ): void {
     const fw = fl(rect.x1 - rect.x0);
     const fh = fl(rect.y1 - rect.y0);
@@ -509,11 +528,11 @@ function externalDrawerFront(
         {
             key: `${prefix}.handle`,
             frontId: null,
-            sectionId,
+            sectionId: sectionId ?? null,
             reasonKey: 'hardware.reason.handle_for_drawer',
             entityId: key,
         },
-        ctx.doc.carcass?.handles.code ?? null,
+        handleCode,
         [
             {
                 part: front.edgePart('top'),
@@ -526,34 +545,57 @@ function externalDrawerFront(
     );
 }
 
+/** How `drawersFor` keys and equips the drawers of a leaf. */
+export interface DrawerLeafOptions {
+    /** Key prefix of parts and hardware; default `section.{S}.drawer`. */
+    keyPrefix?: string;
+    /**
+     * Opening of external drawers. Default: the leaf's opening from
+     * `openingsOf` (carcass documents only); a table cabinet passes its own.
+     */
+    opening?: OpeningRect;
+    /** Handle code of external fronts; default `carcass.handles.code`. */
+    handleCode?: string | null;
+    /**
+     * False when the leaf is no carcass section (a desk cabinet, 07 §3.13):
+     * issues and hardware lines then name no section. Default true.
+     */
+    inSection?: boolean;
+}
+
 /**
  * Drawers of one leaf (07 §3.12): fronts (external) or inner fronts (behind a
  * door), the box of every drawer with its slides, slide screws and handles.
  * Parts and hardware are keyed `{keyPrefix}.{j}.…`, `j` = 1 for the top
  * drawer; the default prefix is `section.{S}.drawer` (`S` = the leaf id).
  *
- * External drawers take their opening from `openingsOf` (the openings of
- * the generation, computed once), which holds
- * every external drawer leaf of a carcass document; a document without a
- * carcass has none, so the table family (Task 38) needs its own opening.
+ * External drawers take `options.opening`, or else their opening from
+ * `openingsOf` (the openings of the generation, computed once), which holds
+ * every external drawer leaf of a carcass. Without either (no layout, or
+ * no carcass spec) it throws: a table cabinet must pass its opening.
  */
 export function drawersFor(
     ctx: GenContext,
     env: Pick<Envelope, 'Dc' | 'drawerStyle' | 'interior'>,
-    layout: SectionLayout,
+    layout: SectionLayout | null,
     leaf: SectionBoxInfo,
     content: DrawersContent,
-    keyPrefix: string = `section.${leaf.id}.drawer`,
+    options: DrawerLeafOptions = {},
 ): void {
-    const sectionId = leaf.id;
-    const cover = coveringFront(ctx.doc, sectionId);
+    const keyPrefix = options.keyPrefix ?? `section.${leaf.id}.drawer`;
+    const sectionId = options.inSection === false ? undefined : leaf.id;
+    const handleCode =
+        options.handleCode !== undefined
+            ? options.handleCode
+            : (ctx.doc.carcass?.handles.code ?? null);
+    const cover = coveringFront(ctx.doc, leaf.id);
     const behind = content.behindDoor || cover !== undefined;
     if (cover && !content.behindDoor) {
         ctx.issue(
             'furniture.drawers_forced_behind_door',
             'warning',
-            { sectionId },
-            [sectionId],
+            { sectionId: leaf.id },
+            [leaf.id],
         );
     }
 
@@ -574,10 +616,12 @@ export function drawersFor(
             return slot;
         });
     } else {
-        const opening = openingsOf(ctx, env, layout).get(sectionId);
+        const opening =
+            options.opening ??
+            (layout ? openingsOf(ctx, env, layout).get(leaf.id) : undefined);
         if (!opening) {
             throw new Error(
-                `drawersFor: no opening for the external drawers of ${sectionId}`,
+                `drawersFor: no opening for the external drawers of ${leaf.id}`,
             );
         }
         rects = drawerFrontRects(
@@ -592,7 +636,7 @@ export function drawersFor(
 
     // Depth and slide: `cd` includes the inset reduction, also for inset external fronts.
     const cd =
-        contentDepth(ctx, { interior: leaf.box }, sectionId) -
+        contentDepth(ctx, { interior: leaf.box }, leaf.id) -
         (!behind && env.drawerStyle === 'inset' ? ctx.t('front') : 0);
     const insetReduction = depth - cd;
     const available = cd - (behind ? BEHIND_DOOR_DEPTH_CLEARANCE : 0);
@@ -609,7 +653,13 @@ export function drawersFor(
         behind && cover && PACKED_COVERS.has(cover.kind)
             ? 2 * BEHIND_DOOR_SIDE_PACKER
             : 0;
-    const sizes = boxSizes(ctx, selection.slide, Ls, w - packers, sectionId);
+    const sizes = boxSizes(
+        ctx,
+        selection.slide,
+        Ls,
+        w - packers,
+        drawerIssueRef(sectionId),
+    );
     const verticals = boundingVerticals(ctx, leaf);
     const boxes: LeafBoxes = {
         sectionId,
@@ -635,7 +685,15 @@ export function drawersFor(
         drawerBox(ctx, boxes, prefix, j, slot);
         const rect = rects[index];
         if (!behind && rect) {
-            externalDrawerFront(ctx, env, rect, prefix, j, sectionId);
+            externalDrawerFront(
+                ctx,
+                env,
+                rect,
+                prefix,
+                j,
+                sectionId,
+                handleCode,
+            );
         }
     });
 }

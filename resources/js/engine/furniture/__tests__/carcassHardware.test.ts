@@ -441,6 +441,55 @@ describe('connectors (07 §6.9)', () => {
         expect(ctx.hardware).toEqual([]);
     });
 
+    it('merges into existing table connector lines: each key once (Task 38 carry 1)', () => {
+        const ctx = contextWithParts(2);
+        // a table base's own dowels and cams (07 §3.13), added first
+        for (const [key, code, qty, reasonKey] of [
+            [
+                'table.connectors.dowel',
+                'CON-DOWEL-8',
+                8,
+                'hardware.reason.dowels',
+            ],
+            [
+                'table.connectors.cam',
+                'CON-CAM-15',
+                4,
+                'hardware.reason.cam_locks',
+            ],
+        ] as const) {
+            ctx.addHardware({
+                key,
+                code,
+                qty,
+                reasonKey,
+                reasonParams: { joints: qty / 2 },
+                frontId: null,
+                sectionId: null,
+                source: 'generated',
+                overridden: false,
+            });
+        }
+        ctx.joints.push(
+            { member: 'test.part.1', other: 'test.part.2', length: 700 },
+            { member: 'test.part.2', other: 'test.part.1', length: 300 },
+        );
+        connectorsForJoints(ctx, 'table');
+        expect(ctx.hardware.map((h) => h.key)).toEqual([
+            'table.connectors.dowel',
+            'table.connectors.cam',
+        ]);
+        expect(hardwareOf(ctx, 'table.connectors.dowel')).toMatchObject({
+            code: 'CON-DOWEL-8',
+            qty: 8 + 5,
+            reasonParams: { joints: 4 + 2 },
+        });
+        expect(hardwareOf(ctx, 'table.connectors.cam')).toMatchObject({
+            qty: 4 + 5,
+            reasonParams: { joints: 2 + 2 },
+        });
+    });
+
     it('gives the §12.3 drawer box 8 cams and 8 dowels (4 joints of 542) and no anti-tip', () => {
         const model = generateFurniture(drawerTestBox(), catalog);
         expect(lineOf(model, 'carcass.connectors.cam')?.qty).toBe(8);

@@ -24,6 +24,7 @@ import {
     type Content,
     type EdgeId,
     type FurnitureDocument,
+    type MaterialRole,
     type Section,
 } from './schema';
 
@@ -164,13 +165,18 @@ function lookup(
 
 /**
  * Default edge band codes the document's roles fall back on (07 §5.1): the
- * `defaultEdgeBandCode` of the material of each role without an explicit
- * band, where an unknown material counts as its role default, as in
+ * `defaultEdgeBandCode` of the material of each role in `roles` without an
+ * explicit band, where an unknown material counts as its role default, as in
  * generation. In role order, each code once.
  */
-function derivedEdgeBands(doc: FurnitureDocument, idx: CatalogIndex): string[] {
+function derivedEdgeBands(
+    doc: FurnitureDocument,
+    idx: CatalogIndex,
+    roles: ReadonlySet<MaterialRole> | undefined,
+): string[] {
     const codes: string[] = [];
     for (const role of MATERIAL_ROLES) {
+        if (roles && !roles.has(role)) continue;
         const assignment = doc.materials[role];
         if (assignment.edgeBandCode !== null) continue;
         const material =
@@ -182,15 +188,29 @@ function derivedEdgeBands(doc: FurnitureDocument, idx: CatalogIndex): string[] {
     return codes;
 }
 
+/** Options of `codeIssues`. */
+export interface CodeIssueOptions {
+    /**
+     * Roles whose default edge band is checked (the roles of the generated
+     * parts: a band no part can use is not reported). Default: every role.
+     */
+    bandRoles?: ReadonlySet<MaterialRole>;
+}
+
 /**
  * `furniture.unknown_code` (error, `{ code, kind }`) for every referenced
  * code missing from the catalog and `furniture.archived_code` (warning,
  * `{ code }`) for every inactive one, in `referencedCodes` order; then the
- * same for default edge bands no explicit reference names, and
- * `unknown_code` (kind `hardware`) for each explicit slide code that is a
- * catalog item but no drawer slide. Each code is reported once. Pure.
+ * same for default edge bands (of `options.bandRoles`) no explicit reference
+ * names, and `unknown_code` (kind `hardware`) for each explicit slide code
+ * that is a catalog item but no drawer slide. Each code is reported once.
+ * Pure.
  */
-export function codeIssues(doc: FurnitureDocument, idx: CatalogIndex): Issue[] {
+export function codeIssues(
+    doc: FurnitureDocument,
+    idx: CatalogIndex,
+    options: CodeIssueOptions = {},
+): Issue[] {
     const issues: Issue[] = [];
     const refs = referencedCodes(doc);
     const report = (ref: CodeRef): void => {
@@ -216,7 +236,7 @@ export function codeIssues(doc: FurnitureDocument, idx: CatalogIndex): Issue[] {
     const named = new Set(
         refs.filter((r) => r.kind === 'edge_band').map((r) => r.code),
     );
-    for (const code of derivedEdgeBands(doc, idx)) {
+    for (const code of derivedEdgeBands(doc, idx, options.bandRoles)) {
         if (!named.has(code)) report({ code, kind: 'edge_band' });
     }
 

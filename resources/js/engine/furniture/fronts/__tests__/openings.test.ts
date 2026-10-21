@@ -301,6 +301,29 @@ describe('frontRect (07 §4.1)', () => {
             y1: 2080,
         });
     });
+
+    it('uses an edge fixed cover over the overlay rule (desk cabinet top: -2)', () => {
+        const outer = { cls: 'outer' as const, tp: 18 };
+        const opening = {
+            x0: 818,
+            x1: 1182,
+            y0: 18,
+            y1: 725,
+            edges: {
+                left: outer,
+                right: outer,
+                bottom: outer,
+                top: { ...outer, cover: -2 },
+            },
+        };
+        expect(frontRect(opening, 'full')).toEqual({
+            x0: 801.5,
+            x1: 1198.5,
+            y0: 1.5,
+            y1: 723,
+        });
+        expect(frontRect(opening, 'inset').y1).toBe(723);
+    });
 });
 
 describe('frontCoverageIssues (07 §4.1, for validateFurniture)', () => {

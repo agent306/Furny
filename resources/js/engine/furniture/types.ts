@@ -6,6 +6,7 @@ import type { CatalogMaterial, MaterialRole } from '../catalog/snapshot';
 import type { Issue } from '../plan/types';
 import type { CatalogIndex } from './catalogIndex';
 import type { EdgeId, FurnitureDocument, HardwareKey, PartKey } from './schema';
+import type { FurnitureIssueCode } from './validate';
 
 /** Millimetre box in furniture local space (07 §1.1). */
 export interface Box3 {
@@ -151,7 +152,7 @@ export interface GenContext {
     roleBand(role: MaterialRole): string | null;
     /** Records an issue (the `messageKey` is derived from `code`) and returns it. */
     issue(
-        code: string,
+        code: FurnitureIssueCode,
         severity: Issue['severity'],
         params?: Issue['params'],
         entityIds?: string[],

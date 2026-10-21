@@ -19,6 +19,7 @@ import type { GenContext } from '../types';
 import { glassFeasible } from './glass';
 import { leafBody } from './leaf';
 import { frontRect, type OpeningRect, type Overlay } from './openings';
+import type { FurnitureIssueCode } from '../validate';
 
 /** Smallest leaf width / height (07 §4.2 `front_too_small`). */
 export const MIN_FRONT_SIZE = 100;
@@ -89,7 +90,7 @@ export function hingedLeaves(
 
     const lw = (rect.x1 - rect.x0 - (n - 1) * DOOR_GAP) / n;
     const lh = rect.y1 - rect.y0;
-    const warn = (code: string, params: Record<string, number>) =>
+    const warn = (code: FurnitureIssueCode, params: Record<string, number>) =>
         ctx.issue(code, 'warning', { frontId: front.id, ...params }, [
             front.id,
         ]);

@@ -422,6 +422,19 @@ describe('shelf sag for table shelves (07 §7.2: table lower and cabinet shelves
             .map((i) => [i.code, i.params.limit]);
     };
 
+    it('floors a fractional span (800.6 is 800: not above the warn limit)', () => {
+        const loose = tableDoc({
+            type: 'shelves',
+            count: 1,
+            adjustable: true,
+            frontSetback: 20,
+        });
+        expect(rulesFor(loose, 'table.cabinet.shelf.1', 800.6)).toEqual([]);
+        expect(rulesFor(loose, 'table.cabinet.shelf.1', 801.2)).toEqual([
+            ['furniture.shelf_sag', 800],
+        ]);
+    });
+
     it('treats the lower shelf as fixed (clamped limits)', () => {
         expect(rulesFor(tableDoc(), 'table.shelf', 1200)).toEqual([]);
         expect(rulesFor(tableDoc(), 'table.shelf', 1201)).toEqual([

@@ -27,6 +27,7 @@ import type { GenContext } from '../types';
 import { glassFeasible } from './glass';
 import { leafBody } from './leaf';
 import type { OpeningRect } from './openings';
+import type { FurnitureIssueCode } from '../validate';
 
 /** Leaves stand this far above the interior bottom (07 §4.6: bottom 15, top 25). */
 const SLIDING_BOTTOM_CLEARANCE = 15;
@@ -86,7 +87,10 @@ export function slidingFront(
 
     const lw = (Wo + (n - 1) * SLIDING_OVERLAP) / n;
     const lh = Ho - SLIDING_HEIGHT_DEDUCTION;
-    const warn = (code: string, params: Record<string, number> = {}) =>
+    const warn = (
+        code: FurnitureIssueCode,
+        params: Record<string, number> = {},
+    ) =>
         ctx.issue(code, 'warning', { frontId: front.id, ...params }, [
             front.id,
         ]);

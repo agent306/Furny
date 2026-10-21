@@ -30,7 +30,13 @@ import {
 import { connectorsForJoints } from './rules/connectors';
 import { modelRules } from './rules/model';
 import { leafWeightKg, roundKg } from './rules/weight';
-import type { Content, FurnitureDocument, Section } from './schema';
+import type {
+    Content,
+    FurnitureDocument,
+    MaterialRole,
+    Section,
+} from './schema';
+import { tableParts } from './table/generateTable';
 import type { FurnitureModel, GenContext, ModelFront } from './types';
 
 /** The content of every section of `root`, by id. */
@@ -119,16 +125,17 @@ export function generateFurniture(
     // 1. Context.
     const idx = indexCatalog(catalog);
     const ctx = createGenContext(doc, idx);
-    // 2. Code check; unknown materials fall back to the role default in `ctx.mat`.
-    ctx.issues.push(...codeIssues(doc, idx));
-    // 3. Carcass family (a family without its spec is reported by
-    // validateFurniture and generates nothing).
-    let generated = true;
-    if (doc.family === 'carcass') {
-        generated =
-            doc.carcass !== null && generateCarcass(ctx, doc.carcass.interior);
-    }
-    // 4. Table family: `tableParts` (Task 38).
+    // 3. Carcass family, 4. table family (a family without its spec is
+    // reported by validateFurniture and generates nothing).
+    const generated =
+        doc.family === 'carcass'
+            ? doc.carcass !== null && generateCarcass(ctx, doc.carcass.interior)
+            : tableParts(ctx);
+    // 2. Code check, listed first. Pure, so it runs once the parts are known:
+    // a role's default edge band is checked only when some part has the
+    // role. Unknown materials fall back to the role default in `ctx.mat`.
+    const bandRoles = new Set<MaterialRole>(ctx.parts.map((p) => p.role));
+    ctx.issues.unshift(...codeIssues(doc, idx, { bandRoles }));
     // 5. Overrides; without a model they would all be orphaned, so not reported.
     applyOverrides(ctx, { reportOrphans: generated });
     // 6. Model-level rules.

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { seedCatalog } from '../../testing/seedCatalog';
 import { generateFurniture } from '../generate';
 import type { ExtraHardware, ExtraPart, FurnitureDocument } from '../schema';
-import { assign, wardrobeFixture } from '../testing/docs';
+import { assign, diningTable, wardrobeFixture } from '../testing/docs';
 import type { FurnitureModel, Part } from '../types';
 
 const catalog = seedCatalog();
@@ -300,6 +300,36 @@ describe('overrides and the generation steps', () => {
         expect(issuesOf(model, 'furniture.envelope_too_small')).toHaveLength(1);
         expect(issuesOf(model, 'furniture.override_orphaned')).toEqual([]);
         expect(model.parts.map((p) => p.key)).toEqual(['extra.p_0000000001']);
+    });
+
+    it('reports no orphaned overrides for a carcass document without its carcass spec', () => {
+        const model = generate((d) => {
+            d.carcass = null;
+            d.overrides.parts['carcass.top'] = { removed: true };
+            d.overrides.hardware['carcass.screws'] = { qtyDelta: 1 };
+            d.overrides.extraParts.push(extraPart());
+        });
+        expect(issuesOf(model, 'furniture.override_orphaned')).toEqual([]);
+        expect(model.parts.map((p) => p.key)).toEqual(['extra.p_0000000001']);
+    });
+
+    it('reports no orphaned overrides for a table document without its table spec (carry 3)', () => {
+        const doc = diningTable((d) => {
+            d.overrides.parts['table.top'] = { grain: 'width' };
+            d.overrides.hardware['table.screws'] = { qtyDelta: 1 };
+            d.overrides.extraParts.push(extraPart());
+        });
+        const model = generateFurniture({ ...doc, table: null }, catalog);
+        expect(issuesOf(model, 'furniture.override_orphaned')).toEqual([]);
+        expect(model.parts.map((p) => p.key)).toEqual(['extra.p_0000000001']);
+        // with its spec the same document reports a missing key
+        doc.overrides.parts['table.nope'] = { removed: true };
+        expect(
+            issuesOf(
+                generateFurniture(doc, catalog),
+                'furniture.override_orphaned',
+            ).map((i) => i.params),
+        ).toEqual([{ key: 'table.nope' }]);
     });
 });
 
