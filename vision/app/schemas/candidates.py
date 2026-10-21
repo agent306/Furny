@@ -1,12 +1,13 @@
 """Intermediate (pre-assembly) candidate types shared by the pipeline stages (06 section 7-8).
 
-Extended task by task; this module currently holds ``ParsedText`` and ``TextToken``.
+Extended task by task; this module currently holds ``ParsedText``, ``TextToken`` and ``Segment``.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Literal
 
-from app.utils.geometry import Pt
+from app.utils.geometry import Pt, seg_angle_deg
 
 TextKind = Literal[
     "mm_number",
@@ -56,3 +57,31 @@ class TextToken:
     score: float
     height_px: float
     parsed: ParsedText
+
+
+SegmentSource = Literal["lsd", "hough", "vector"]
+
+
+@dataclass(frozen=True, slots=True)
+class Segment:
+    """A straight line stroke in normalized-page pixels (06 section 7.9).
+
+    ``width_px`` is the stroke width (``2 x dt`` for raster pages, the PDF line width for vector pages);
+    ``is_thin`` marks line work (``width_px <= 1.8 x t_thin``) as opposed to wall-scale strokes.
+    """
+
+    id: str
+    p0: Pt
+    p1: Pt
+    width_px: float
+    is_thin: bool
+    source: SegmentSource
+
+    @property
+    def length(self) -> float:
+        return math.hypot(self.p1[0] - self.p0[0], self.p1[1] - self.p0[1])
+
+    @property
+    def angle_deg(self) -> float:
+        """Undirected angle in [0, 180), image axes (y down)."""
+        return seg_angle_deg(self.p0[0], self.p0[1], self.p1[0], self.p1[1])
