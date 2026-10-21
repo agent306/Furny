@@ -125,3 +125,51 @@ export type {
     FixtureMaterialKey,
     FixturePrimitive,
 } from './plan/fixtures';
+export { EngineInputError } from './errors';
+export type { EngineInputErrorCode } from './errors';
+export { IssueSchema } from './plan/types';
+export type { DeriveIssue, EngineMessage, Issue, Result } from './plan/types';
+export {
+    BackgroundImageSchema,
+    DOOR_TYPES,
+    DimensionAnnotationSchema,
+    DoorTypeSchema,
+    FLOOR_FINISHES,
+    FixtureSchema,
+    FurniturePlacementSchema,
+    OpeningSchema,
+    PlanDocumentSchema,
+    PlanMetaSchema,
+    PointSchema,
+    RoomMetaSchema,
+    TextLabelSchema,
+    ViewStateSchema,
+    WALL_KINDS,
+    WALL_MATERIALS,
+    WINDOW_TYPES,
+    WallNodeSchema,
+    WallSchema,
+    WindowTypeSchema,
+} from './plan/schema';
+export type {
+    BackgroundImage,
+    DimensionAnnotation,
+    DoorType,
+    Fixture,
+    FurniturePlacement,
+    Opening,
+    PlanDocument,
+    PlanMeta,
+    Point,
+    RoomMeta,
+    TextLabel,
+    ViewState,
+    Wall,
+    WallNode,
+    WindowType,
+} from './plan/schema';
+export {
+    PLAN_MIGRATIONS,
+    PLAN_SCHEMA_VERSION,
+    migratePlan,
+} from './plan/migrate';
