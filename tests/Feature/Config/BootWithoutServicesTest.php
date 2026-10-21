@@ -10,7 +10,9 @@ use Symfony\Component\Process\Process;
  * Postgres or Redis, and nothing in config or service providers may touch them.
  */
 beforeEach(function (): void {
-    $this->cacheDir = sys_get_temp_dir().'/furny-boot-'.bin2hex(random_bytes(4));
+    // Inside the project, and handed to artisan relative to it: Laravel only treats a path starting with
+    // a slash as absolute, so a Windows drive path (C:\...) would be resolved against the base path.
+    $this->cacheDir = storage_path('framework/testing/furny-boot-'.bin2hex(random_bytes(4)));
     File::makeDirectory($this->cacheDir);
 });
 
@@ -21,12 +23,14 @@ afterEach(function (): void {
 /** @return array<string, string> */
 function bootWithoutServicesEnv(string $cacheDir): array
 {
+    $relative = 'storage/framework/testing/'.basename($cacheDir);
+
     return [
         'DB_HOST' => 'invalid.invalid',
         'REDIS_HOST' => 'invalid.invalid',
-        'APP_CONFIG_CACHE' => $cacheDir.'/config.php',
-        'APP_ROUTES_CACHE' => $cacheDir.'/routes.php',
-        'APP_EVENTS_CACHE' => $cacheDir.'/events.php',
+        'APP_CONFIG_CACHE' => $relative.'/config.php',
+        'APP_ROUTES_CACHE' => $relative.'/routes.php',
+        'APP_EVENTS_CACHE' => $relative.'/events.php',
     ];
 }
 
