@@ -2,11 +2,11 @@
 import { Head, router, usePage } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 import { toast } from 'vue-sonner';
+import AccountPage from '@/components/account/AccountPage.vue';
 import RecoveryCodesPanel from '@/components/account/RecoveryCodesPanel.vue';
 import OtpCodeField from '@/components/auth/OtpCodeField.vue';
 import CopyButton from '@/components/common/CopyButton.vue';
 import InputError from '@/components/common/InputError.vue';
-import PageHeader from '@/components/common/PageHeader.vue';
 import RequiredMark from '@/components/common/RequiredMark.vue';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -313,12 +313,12 @@ function codesDone(): void {
 <template>
     <Head :title="t('account.two_factor.title')" />
 
-    <div class="max-w-2xl space-y-6">
-        <PageHeader
-            :title="t('account.two_factor.title')"
-            :description="t('account.two_factor.description')"
-        />
-
+    <AccountPage
+        audience="admin"
+        :title="t('account.two_factor.title')"
+        :description="t('account.two_factor.description')"
+        :divided="false"
+    >
         <Alert v-if="enforced" role="status" data-test="enforced-banner">
             <AlertDescription>{{
                 t('account.two_factor.enforced')
@@ -544,5 +544,5 @@ function codesDone(): void {
                 </div>
             </CardContent>
         </Card>
-    </div>
+    </AccountPage>
 </template>

@@ -85,6 +85,28 @@ it('says whether the user has a password', function (): void {
         ->assertInertia(fn (Assert $page) => $page->where('hasPassword', false));
 });
 
+/** The page reads phone sign-in (10 §13.3) from the signed-in user of the shared props, so these must carry it. */
+it('carries the phone and whether it is verified for the phone sign-in section', function (): void {
+    $verified = User::factory()->phoneOnly()->create();
+    $unverified = User::factory()->create(['phone_e164' => '+919876543210', 'phone_verified_at' => null]);
+    $none = User::factory()->create(['phone_e164' => null]);
+
+    $this->actingAs($verified)->get(route('customer.account.security'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('auth.user.phoneE164', $verified->phone_e164)
+            ->where('auth.user.phoneVerified', true));
+
+    $this->actingAs($unverified)->get(route('customer.account.security'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('auth.user.phoneE164', '+919876543210')
+            ->where('auth.user.phoneVerified', false));
+
+    $this->actingAs($none)->get(route('customer.account.security'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('auth.user.phoneE164', null)
+            ->where('auth.user.phoneVerified', false));
+});
+
 it('renders the staff security page with the same props', function (): void {
     expect(route('admin.account.security', absolute: false))->toBe('/admin/account/security');
 

@@ -178,7 +178,6 @@ return [
             'connected' => 'Connected',
             'not_connected' => 'Not connected',
             'disconnect' => 'Disconnect',
-            'connect' => 'Connect Google',
         ],
         'phone' => [
             'title' => 'Phone sign-in',
@@ -191,7 +190,6 @@ return [
             'title' => 'Devices',
             'description' => 'The devices that are signed in to your account.',
             'this_device' => 'This device',
-            'last_active' => 'Active {when}',
             'method' => '{method, select, password {Password} otp {Phone code} google {Google} remember {Remembered} other {Signed in}}',
             'sign_out' => 'Sign out',
             'sign_out_label' => 'Sign out {device}',

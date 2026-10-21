@@ -224,7 +224,11 @@ function resend(): void {
                     autocomplete="email"
                     :aria-invalid="form.errors.email ? 'true' : undefined"
                     :aria-describedby="
-                        form.errors.email ? 'email-error' : 'email-hint'
+                        form.errors.email
+                            ? 'email-error'
+                            : emailChanged
+                              ? 'email-hint'
+                              : undefined
                     "
                 />
                 <p

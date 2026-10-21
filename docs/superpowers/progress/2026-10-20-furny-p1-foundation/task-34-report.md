@@ -66,3 +66,34 @@ Vitest GREEN for the two required files: `AccountNav.test.ts` (5 tests: customer
 - The browser runner (pest-plugin-browser) never returns the response to a non-GET Inertia visit: the existing logout button hangs the same way (`inertia:start` fires, nothing finishes). So no browser test saves a form; saves are covered by Feature tests and the form logic by vitest. Not caused by this task.
 - Unverified in a real browser: uploading a photo end to end, the Google connect round trip, `PhoneVerifyDialog` from the profile page (components built earlier, only mounted here), sign out of a device.
 - The sticky save bar of the customer forms is lifted above the phone tab bar with a class (`max-md:bottom-[calc(4rem+env(safe-area-inset-bottom))]`); that was not looked at on a real phone.
+
+---
+
+# Fix report, round 1
+
+## Changes
+1. **Phone sign-in section (IMPORTANT).** New `components/account/PhoneSignInCard.vue` (FormSection; badge `data-test="phone-signin-status"` "On: {phone}" when the number is verified, else "Off"; outline button link `data-test="phone-signin-link"` to `{customer.account.profile}#phone`, using the `account.security.phone.*` keys). `Customer/Account/Security.vue` renders it between Google and Devices. Decision on the props: 10 §13.3 and 14 §9 fix `AccountSecurityProps` to `{hasPassword, googleLinked, googleEnabled, sessions}`, so the Data class is unchanged; the card reads `phoneE164` and `phoneVerified` from the signed-in user (`auth.user`, `AuthUserData`), which every page already carries. A Feature test pins that those two fields are on the Security page for a verified phone, an unverified phone and no phone. Staff: 11 §18 lists password, Google and devices for Security and no phone sign-in (staff sign in with their email, `auth.errors.staff_use_email`), so `Admin/Account/Security.vue` is unchanged and a vitest test says it has no such section.
+2. **Unused keys:** removed `account.security.google.connect` (the Connect button is the shared `GoogleButton`, labelled "Continue with Google") and `account.security.devices.last_active` (the device row shows `RelativeTime`). I scanned every `account.*` key against `resources/js` and `app`; the only other unreferenced ones are built with template literals (`length_unit.*`, `units.*`) or belong to Task 31's two-factor page.
+3. **TwoFactor page frame (MINOR).** `Admin/Account/TwoFactor.vue` now renders inside `AccountPage` (new prop `divided=false`: cards keep their `space-y-6`, `max-w-2xl`), so it has the AccountNav and its h1 from `AccountPage`; Two-factor is the `aria-current="page"` item (the nav ignores the query string).
+4. **ProfileForm (MINOR).** `aria-describedby` of the email input is `email-error` when there is an error, `email-hint` only while `emailChanged` shows the hint, else absent.
+5. **Found by the browser run, fixed:** the AccountNav pills used negative margins sized for the customer layout, and the grid item could not shrink, so the admin pages overflowed horizontally at 375 and 820 px (also on the two-factor page). Removed the negative margins and made the frame `grid-cols-1`. My earlier browser test only looked at staff pages at 1280 px; it now runs the four staff pages at 375, 820 and 1280.
+6. `TwoFactor.test.ts` download test stubbed `URL` with a plain object; the page now builds nav links with `URL`, so the stub extends the real class.
+
+## Covering tests (RED then GREEN)
+RED, before the implementation: `yarn vitest run resources/js/components/account resources/js/pages` -> 5 failed (3 in `Customer/Account/Security.test.ts`, `Admin/Account/TwoFactor.test.ts > is framed by the account nav`, `ProfileForm.test.ts > is described by nothing while no hint is shown`) and `PhoneSignInCard.test.ts` failed to resolve its component.
+GREEN: same command, 20 files, 240 tests passed.
+- `components/account/__tests__/PhoneSignInCard.test.ts` (3): on with number, off for unverified or no number, link to `/account/profile#phone`.
+- `pages/Customer/Account/__tests__/Security.test.ts` (4): customer section order Password, Google, Phone sign-in, Devices; status and link from the signed-in user; off without a verified phone; staff page has Password, Google, Devices only.
+- `components/account/__tests__/ProfileForm.test.ts` (2): no dangling `aria-describedby`; points at the hint once it is rendered.
+- `pages/Admin/Account/__tests__/TwoFactor.test.ts`: AccountNav with four items and exactly one `aria-current` (Two-factor), one h1.
+- `tests/Feature/Account/SecurityPageTest.php`: shared `auth.user.phoneE164/phoneVerified` for verified, unverified and no phone (a characterisation test: it passed before the change, since the props were already shared).
+- `tests/Browser/AccountPagesTest.php`: staff pages (now including two-factor) at 375/820/1280 without horizontal scroll or script errors; the two-factor page's own `TwoFactorPagesTest` failed on the overflow above before the CSS fix and passes after.
+
+## Commands and results
+- `vendor/bin/pest tests/Feature/Account`: passes (within the full run below).
+- Vitest, touched files: `components/account`, `pages`, `layouts`: 0 failures.
+- Gates-Gen (`typescript:transform && i18n:export`): the only generated change is `resources/js/lang/generated/*` for the two removed keys, committed here; clean afterwards.
+- `vendor/bin/pint --test`: pass. `vendor/bin/phpstan analyse`: no errors. `yarn lint`, `yarn format:check`, `yarn typecheck`: clean.
+- `yarn vitest run`: 206 files, 5072 tests, 0 failures.
+- `yarn vite build && vendor/bin/pest tests/Browser`: 118 passed (306 assertions).
+- Full `vendor/bin/pest tests/Unit tests/Feature`: 3924 passed, 0 failed (17165 assertions; 3923 before this round, +1).

@@ -146,6 +146,25 @@ afterEach(() => {
 });
 
 describe('Admin/Account/TwoFactor (11 §18, 13 §5.10)', () => {
+    it('is framed by the account nav, with Two-factor the current section', () => {
+        answer();
+        page.url = '/admin/account/two-factor';
+        const wrapper = twoFactor();
+
+        const nav = wrapper.get('[data-test="account-nav"]');
+        const current = nav.findAll('a[aria-current="page"]');
+
+        expect(nav.findAll('a').map((link) => link.text())).toEqual([
+            'Profile',
+            'Security',
+            'Two-factor',
+            'Preferences',
+        ]);
+        expect(current).toHaveLength(1);
+        expect(current[0]?.text()).toBe('Two-factor');
+        expect(wrapper.findAll('h1')).toHaveLength(1);
+    });
+
     describe('before the setup', () => {
         it('has one h1 and the enrolment banner while 2fa.enrolled keeps the admin area shut', () => {
             answer();
@@ -377,7 +396,14 @@ describe('Admin/Account/TwoFactor (11 §18, 13 §5.10)', () => {
                 return 'blob:codes';
             });
             const revokeObjectURL = vi.fn();
-            vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+            // Still a URL class: the account nav of the page builds links with it.
+            vi.stubGlobal(
+                'URL',
+                class extends URL {
+                    static createObjectURL = createObjectURL;
+                    static revokeObjectURL = revokeObjectURL;
+                },
+            );
             const clicked: HTMLAnchorElement[] = [];
             const click = vi
                 .spyOn(HTMLAnchorElement.prototype, 'click')

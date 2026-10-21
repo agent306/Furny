@@ -24,16 +24,16 @@ it('shows the customer account pages without horizontal scroll or script errors'
         ->assertNoJavaScriptErrors();
 })->with(['/account/profile', '/account/security', '/account/preferences'])->with('account widths');
 
-it('shows the staff account pages with the two-factor section in the nav', function (string $path): void {
+it('shows the staff account pages with the two-factor section in the nav', function (string $path, int $width): void {
     $this->actingAs(User::factory()->admin()->create(['name' => 'Ada Admin']));
 
     visit($path)
-        ->resize(1280, 800)
+        ->resize($width, 800)
         ->assertSee('Two-factor')
         ->assertScript('document.querySelector("[data-test=account-nav] [aria-current=page]") !== null')
         ->assertScript(ACCOUNT_NO_HORIZONTAL_SCROLL)
         ->assertNoJavaScriptErrors();
-})->with(['/admin/account/profile', '/admin/account/security', '/admin/account/preferences']);
+})->with(['/admin/account/profile', '/admin/account/security', '/admin/account/preferences', '/admin/account/two-factor'])->with('account widths');
 
 it('reaches the account from the account menu and the phone tab bar', function (): void {
     $this->actingAs(User::factory()->create());

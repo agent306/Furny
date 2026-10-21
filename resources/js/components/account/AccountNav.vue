@@ -24,7 +24,7 @@ const items = computed(() => accountNavItems(props.audience));
         class="lg:w-[220px] lg:shrink-0"
     >
         <ul
-            class="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:-mx-6 sm:px-6 lg:mx-0 lg:flex-col lg:gap-1 lg:overflow-visible lg:px-0 lg:pb-0"
+            class="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:gap-1 lg:overflow-visible lg:pb-0"
         >
             <li v-for="item in items" :key="item.key" class="shrink-0">
                 <Link
