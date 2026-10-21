@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from app.api.errors import VisionError
+from app.pipeline import wall_candidates as candmod
 from app.pipeline import walls as wallmod
 from app.pipeline.binarize import Preprocessed, preprocess
 from app.pipeline.dimensions import find_dimension_lines
@@ -701,9 +702,9 @@ def test_extension_line_rule(x: int, top: int, seg_top: float, expected: bool) -
     ink[top:300, x - 1 : x + 1] = 255
     dim = DimensionLine("L1", (100.0, 99.5), (500.0, 99.5), [0.0, 200.0, 400.0], "S1")
     seg = _seg("S2", (x - 0.5, seg_top), (x - 0.5, 299.5))
-    assert wallmod._is_extension(seg, dim, 2.0, ink) is expected
+    assert candmod.is_extension(seg, dim, 2.0, ink) is expected
     tilted = _seg("S3", (x - 0.5, seg_top), (x + 70.0, 290.0))  # 20 degrees off perpendicular
-    assert wallmod._is_extension(tilted, dim, 2.0, ink) is False
+    assert candmod.is_extension(tilted, dim, 2.0, ink) is False
 
 
 def test_extension_lines_do_not_pair_into_walls() -> None:
@@ -735,7 +736,7 @@ def test_wall_face_taken_for_a_dimension_line_stays_a_wall(monkeypatch: pytest.M
     dim = DimensionLine("L1", face.p0, face.p1, [0.0, face.length], face.id)
     ext = extract_walls(r.page, r.pre, r.segments, [dim], make_ctx(), ink=r.pre.ink)
     assert_plan_topology(walls_to_graph(ext, r.pre.region))
-    monkeypatch.setattr(wallmod, "_wall_face_dims", lambda *a, **k: set())
+    monkeypatch.setattr(wallmod, "wall_face_dims", lambda *a, **k: set())
     ext = extract_walls(r.page, r.pre, r.segments, [dim], make_ctx(), ink=r.pre.ink)
     assert len(walls_to_graph(ext, r.pre.region).walls) < 7
 
