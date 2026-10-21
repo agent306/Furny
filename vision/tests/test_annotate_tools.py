@@ -612,3 +612,22 @@ def test_tool_schemas_exact() -> None:
         "required": ["kind", "region"],
         "additionalProperties": False,
     }
+
+
+def test_crop_sliver_after_clamping_is_rejected() -> None:
+    page, cs = half_scale_scene()
+    ex, ov = executor(page, cs, max_px=1000)
+    res = ex.execute(crop_call(x=ov.width - 8, y=0, w=100, h=100))  # only 8 px remain inside the overview
+    assert res.is_error
+    assert ex.crops_used == 0
+    assert ex.execute(crop_call("c2", x=-90, y=0, w=100, h=100)).is_error  # 10 px remain on the left
+
+
+def test_list_candidates_rejects_empty_or_negative_region() -> None:
+    page, cs = small_scene()
+    ex, _ = executor(page, cs)
+    for region in ({"x": 0, "y": 0, "w": 0, "h": 10}, {"x": 0, "y": 0, "w": 10, "h": -5}):
+        res = ex.execute(list_call(kind="walls", region=region))
+        assert res.is_error
+        assert isinstance(res.content[0], TextPart)
+        assert "region" in res.content[0].text

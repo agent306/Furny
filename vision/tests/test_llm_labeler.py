@@ -343,10 +343,12 @@ def test_call_timeout_is_capped_by_the_stage_budget() -> None:
 
 
 def test_agentic_mode_is_selected_for_tool_providers() -> None:
-    page, cs = scene()
-    labeler = LlmLabeler(FakeProvider([]), options(agentic_crops=True))
-    with pytest.raises(NotImplementedError):
-        labeler.label(page, cs, RecognizeHints(), make_ctx())
+    _, cs = scene()
+    provider = FakeProvider([reply(full_result(cs))])
+    outcome, _ = run(provider, agentic_crops=True)
+    assert outcome.fallback_reason is None
+    assert provider.calls[0]["tool_choice"] == "auto"  # the agent loop, not the single pass
+    assert [t.name for t in provider.calls[0]["tools"]] == ["crop_image", "list_candidates"]
 
 
 def test_agentic_flag_without_tool_support_stays_single_pass() -> None:

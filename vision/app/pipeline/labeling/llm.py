@@ -3,19 +3,20 @@
 Single pass: one structured call, at most one repair round for providers without a native JSON schema, then
 ``sanitize``. Any provider failure, an answer that stays invalid, or one that sanitize mostly drops degrades
 to the heuristic labeler (06 section 9.6: labeling degrades instead of failing) unless the options forbid it.
-The agent loop (Task 27) plugs in at ``LlmLabeler._agent``.
+Agentic mode (``labeling/agent.py``, Task 27) runs the multi-turn crop loop and degrades the same way.
 
 Never logged or returned: prompts, model responses, image bytes.
 """
 
 import contextvars
 import json
+import logging
 import re
 import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -31,6 +32,7 @@ from app.pipeline.labeling.prompts import (
     SYSTEM_PROMPT_LABELING,
     build_user_prompt,
 )
+from app.pipeline.labeling.tools import INVALID_JSON_SENTINEL, ToolExecutor
 from app.pipeline.normalize import NormalizedPage
 from app.providers.base import (
     Effort,
@@ -39,6 +41,8 @@ from app.providers.base import (
     Message,
     Part,
     TextPart,
+    ToolCall,
+    ToolSpec,
     TurnResult,
     UsageCall,
     UserMessage,
@@ -93,6 +97,13 @@ class LabelerOptions:
 # --- one provider call, one JSON answer ------------------------------------------------------------------
 
 
+MAX_ABANDONED_CALLS = 4  # abandoned (timed-out) provider calls still in flight before the LLM is skipped
+
+log = logging.getLogger("furny.vision.llm")
+_abandoned = 0  # abandoned calls whose daemon thread has not finished; guarded by ``_abandoned_lock``
+_abandoned_lock = threading.Lock()
+
+
 def _complete(
     provider: LLMProvider,
     conversation: list[Message],
@@ -103,22 +114,32 @@ def _complete(
     max_output_tokens: int,
     timeout_s: float,
     purpose: str,
+    tools: Sequence[ToolSpec] = (),
+    tool_choice: Literal["auto", "none"] = "none",
 ) -> TurnResult:
     """``provider.complete`` under the caller's own deadline.
 
     Some adapters ignore a shorter ``timeout_s`` (the compatible adapter always uses its configured one), so
     the call runs in a daemon thread and is abandoned after ``timeout_s`` plus a grace period; the SDK's own
-    timeout ends the abandoned thread later. The usage of an abandoned call is lost.
+    timeout ends the abandoned thread later. The usage of an abandoned call is lost, except that its token
+    counts are logged (never its text) if it completes late. At most ``MAX_ABANDONED_CALLS`` abandoned calls
+    may be in flight; beyond that no new call is made. A non-``ProviderError`` failure becomes
+    ``ProviderError(code="llm_error")`` so labeling degrades instead of failing the request (06 section 9.6).
     """
-    box: dict[str, Any] = {}
+    global _abandoned
+    with _abandoned_lock:
+        if _abandoned >= MAX_ABANDONED_CALLS:
+            raise ProviderError("Too many model calls are still running.", code="llm_error", retryable=True)
+    box: dict[str, Any] = {"done": False, "abandoned": False}
 
     def target() -> None:
+        global _abandoned
         try:
-            box["turn"] = provider.complete(
+            turn = provider.complete(
                 conversation,
                 system=system,
-                tools=[],
-                tool_choice="none",
+                tools=list(tools),
+                tool_choice=tool_choice,
                 output_schema=schema,
                 effort=effort,
                 max_output_tokens=max_output_tokens,
@@ -127,14 +148,36 @@ def _complete(
             )
         except BaseException as exc:  # handed to the caller's thread
             box["error"] = exc
+        else:
+            box["turn"] = turn
+        with _abandoned_lock:
+            box["done"] = True
+            if box["abandoned"]:
+                _abandoned -= 1
+                if "turn" in box:
+                    usage = box["turn"].usage
+                    log.info(
+                        "abandoned model call finished late",
+                        extra={
+                            "purpose": purpose,
+                            "inputTokens": usage.input_tokens,
+                            "outputTokens": usage.output_tokens,
+                        },
+                    )
 
     worker = threading.Thread(target=contextvars.copy_context().run, args=(target,), daemon=True)
     worker.start()
     worker.join(timeout_s + DEADLINE_GRACE_S)
-    if worker.is_alive():
-        raise ProviderTimeout("The model did not answer in time.")
+    with _abandoned_lock:
+        if not box["done"]:
+            box["abandoned"] = True
+            _abandoned += 1
+            raise ProviderTimeout("The model did not answer in time.")
     if "error" in box:
-        raise box["error"]
+        err = box["error"]
+        if isinstance(err, ProviderError) or not isinstance(err, Exception):
+            raise err
+        raise ProviderError("The model call failed unexpectedly.", code="llm_error", retryable=True) from err
     turn: TurnResult = box["turn"]
     return turn
 
@@ -357,18 +400,18 @@ def _to_normalized(result: LabelingResult, ov: Overview) -> LabelingResult:
 # --- the labeler ------------------------------------------------------------------------------------------
 
 
-def _transcript(calls: list[UsageCall]) -> list[dict[str, Any]]:
-    """One summary entry per model call; tool calls are added by the agent loop (Task 27)."""
-    return [
-        {
-            "purpose": c.purpose,
-            "stopReason": c.stop_reason,
-            "status": c.status,
-            "images": c.images,
-            "toolCalls": [],
-        }
-        for c in calls
-    ]
+def transcript_entry(usage: UsageCall, tool_calls: Sequence[ToolCall] = ()) -> dict[str, Any]:
+    """One debug-transcript line per model call: no prompts, no answers, no images (06 section 13)."""
+    return {
+        "purpose": usage.purpose,
+        "stopReason": usage.stop_reason,
+        "status": usage.status,
+        "images": usage.images,
+        "toolCalls": [
+            {"name": c.name, "arguments": {} if INVALID_JSON_SENTINEL in c.arguments else c.arguments}
+            for c in tool_calls
+        ],
+    }
 
 
 class LlmLabeler:
@@ -386,13 +429,18 @@ class LlmLabeler:
             outcome = HeuristicLabeler().label(page, candidates, hints, ctx)
             return replace(outcome, fallback_reason="vision_unsupported")
         agentic = self.options.agentic_crops and caps.supports_tools
-        if agentic:
-            raise NotImplementedError("agentic labeling arrives with Task 27 (labeling/agent.py)")
 
         overview = build_overview(page, candidates, max_image_px=caps.max_image_px, ctx=ctx)
-        deadline = min(ctx.deadline - LLM_STAGE_RESERVE_S, time.monotonic() + self.options.stage_budget_s)
+        transcript: list[dict[str, Any]] = []
         try:
-            raw, calls, repaired = self._single_pass(overview, hints, ctx, deadline)
+            if agentic:
+                raw, calls, repaired = self._agent(page, candidates, overview, hints, ctx, transcript)
+            else:
+                deadline = min(
+                    ctx.deadline - LLM_STAGE_RESERVE_S, time.monotonic() + self.options.stage_budget_s
+                )
+                raw, calls, repaired = self._single_pass(overview, hints, ctx, deadline)
+                transcript = [transcript_entry(c) for c in calls]
             # A scratch context: this pass only fills what the model left out, its warnings are not ours.
             scratch = PipelineContext(ctx.deadline, ctx.io, DebugSink(False), ctx.request_id)
             heuristic = HeuristicLabeler().label(page, candidates, hints, scratch)
@@ -400,7 +448,15 @@ class LlmLabeler:
             if dropped > MAX_DROPPED_RATIO:
                 raise ProviderInvalidOutput("The model answer mostly refers to unknown ids.", usage=calls)
         except ProviderError as err:
-            return self._fallback(page, candidates, hints, ctx, fallback_reason_for(err), err.usage)
+            # An agent run that timed out after at least one answered turn ends "partial" (06 section 9.6 3).
+            partial = (
+                agentic
+                and isinstance(err, ProviderTimeout)
+                and any(c.status == "succeeded" for c in err.usage)
+            )
+            return self._fallback(
+                page, candidates, hints, ctx, fallback_reason_for(err), err.usage, partial, transcript
+            )
         if repaired:
             ctx.warn("llm_output_repaired")
         return LabelingOutcome(
@@ -410,25 +466,25 @@ class LlmLabeler:
             fallback_reason=None,
             calls=calls,
             partial=False,
-            transcript=_transcript(calls),
+            transcript=transcript,
         )
+
+    def _user_parts(self, overview: Overview, hints: RecognizeHints, *, tools: bool) -> list[Part]:
+        two_images = self.provider.capabilities.max_images_per_request >= 2
+        parts: list[Part] = [to_image_part(overview.clean)] if two_images else []
+        parts.append(to_image_part(overview.marked))
+        prompt = build_user_prompt(
+            overview, hints, two_images=two_images, tools=tools, max_crops=self.options.max_crops
+        )
+        parts.append(TextPart(prompt))
+        return parts
 
     def _single_pass(
         self, overview: Overview, hints: RecognizeHints, ctx: PipelineContext, deadline: float
     ) -> tuple[LabelingResult, list[UsageCall], bool]:
-        two_images = self.provider.capabilities.max_images_per_request >= 2
-        parts: list[Part] = [to_image_part(overview.clean)] if two_images else []
-        parts.append(to_image_part(overview.marked))
-        parts.append(
-            TextPart(
-                build_user_prompt(
-                    overview, hints, two_images=two_images, tools=False, max_crops=self.options.max_crops
-                )
-            )
-        )
         return complete_json(
             self.provider,
-            [UserMessage(parts)],
+            [UserMessage(self._user_parts(overview, hints, tools=False))],
             system=SYSTEM_PROMPT_LABELING,
             schema_model=LabelingResult,
             effort=self.options.effort,
@@ -439,6 +495,41 @@ class LlmLabeler:
             deadline=deadline,
         )
 
+    def _agent(
+        self,
+        page: NormalizedPage,
+        candidates: CandidateSet,
+        overview: Overview,
+        hints: RecognizeHints,
+        ctx: PipelineContext,
+        transcript: list[dict[str, Any]],
+    ) -> tuple[LabelingResult, list[UsageCall], bool]:
+        from app.pipeline.labeling.agent import run_agent  # agent.py imports this module
+
+        o = self.options
+        executor = ToolExecutor(
+            page,
+            overview,
+            candidates,
+            max_image_px=self.provider.capabilities.max_image_px,
+            max_crops=o.max_crops,
+        )
+        return run_agent(
+            self.provider,
+            SYSTEM_PROMPT_LABELING,
+            self._user_parts(overview, hints, tools=True),
+            executor,
+            LabelingResult,
+            o.effort,
+            ctx,
+            max_turns=o.max_turns,
+            max_crops=o.max_crops,
+            call_timeout_s=o.call_timeout_s,
+            stage_budget_s=o.stage_budget_s,
+            max_output_tokens=o.max_output_tokens,
+            transcript=transcript,
+        )
+
     def _fallback(
         self,
         page: NormalizedPage,
@@ -447,6 +538,8 @@ class LlmLabeler:
         ctx: PipelineContext,
         reason: FallbackReason,
         calls: list[UsageCall],
+        partial: bool,
+        transcript: list[dict[str, Any]],
     ) -> LabelingOutcome:
         if not self.options.fallback_to_none:
             model = calls[-1].model if calls else self.provider.model
@@ -458,7 +551,13 @@ class LlmLabeler:
                 usage=build_usage(self.provider.name, model, calls, True),
             )
         ctx.warn("llm_failed_fallback_none", {"reason": reason})
+        if partial:
+            ctx.warn("llm_partial")
         outcome = HeuristicLabeler().label(page, candidates, hints, ctx)
         return replace(
-            outcome, fallback_reason=reason, calls=calls, transcript=_transcript(calls), partial=False
+            outcome,
+            fallback_reason=reason,
+            calls=calls,
+            transcript=transcript or [transcript_entry(c) for c in calls],
+            partial=partial,
         )

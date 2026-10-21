@@ -150,8 +150,6 @@ class ToolExecutor:
             a = _CropArgs.model_validate(call.arguments)
         except ValidationError as exc:
             return _error(call, _problems(exc))
-        if a.w < MIN_CROP_PX or a.h < MIN_CROP_PX:
-            return _error(call, f"w and h must be at least {MIN_CROP_PX}")
         scale = min(MAX_CROP_SCALE, max(1.0, a.scale))
         ov = self.overview
         x0, y0 = max(0, a.x), max(0, a.y)
@@ -159,6 +157,10 @@ class ToolExecutor:
         if x1 <= x0 or y1 <= y0:
             return _error(call, f"region lies outside the {ov.width}x{ov.height} overview")
         w, h = x1 - x0, y1 - y0
+        if w < MIN_CROP_PX or h < MIN_CROP_PX:  # after clamping: an edge sliver is no crop (06 9.5)
+            return _error(
+                call, f"the region inside the overview must be at least {MIN_CROP_PX}x{MIN_CROP_PX}"
+            )
 
         # Source rectangle in normalized px = overview rect / s + offset.
         height, width = self.page.image.shape[:2]
@@ -189,6 +191,8 @@ class ToolExecutor:
             a = _ListArgs.model_validate(call.arguments)
         except ValidationError as exc:
             return _error(call, _problems(exc))
+        if a.region is not None and (a.region.w <= 0 or a.region.h <= 0):
+            return _error(call, "region w and h must be positive")
         kind: Kind = a.kind
         region = Rect(a.region.x, a.region.y, a.region.w, a.region.h) if a.region else None
         found, total = entries(kind, self.candidates, self.overview, limit=LIST_LIMIT, region=region)
