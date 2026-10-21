@@ -21,6 +21,10 @@ final class RevokeSessions
 
     public const string REASON_OTHERS = 'signed_out_others';
 
+    public const string REASON_PASSWORD_CHANGED = 'password_changed';
+
+    public const string REASON_PASSWORD_RESET = 'password_reset';
+
     public function __construct(private readonly SessionRegistry $registry) {}
 
     /**

@@ -3,11 +3,15 @@
 declare(strict_types=1);
 
 use App\Actions\Fortify\ApplyRememberPolicy;
+use App\Actions\Fortify\ResetUserPassword;
+use App\Actions\Fortify\UpdateUserPassword;
+use App\Actions\Fortify\UpdateUserProfileInformation;
 use App\Domain\Identity\Events\CustomerRegistered;
 use App\Domain\Identity\Models\User;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Middleware\FortifyRouteGuards;
 use App\Http\Middleware\TrackSession;
+use App\Http\Responses\GenericPasswordResetLinkResponse;
 use App\Http\Responses\LoginResponse;
 use App\Http\Responses\LogoutResponse;
 use App\Http\Responses\RegisterResponse;
@@ -20,16 +24,22 @@ use Illuminate\Auth\Events\Logout;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Route;
 use Inertia\Testing\AssertableInertia as Assert;
 use Laravel\Fortify\Actions\AttemptToAuthenticate;
 use Laravel\Fortify\Actions\EnsureLoginIsNotThrottled;
 use Laravel\Fortify\Actions\PrepareAuthenticatedSession;
 use Laravel\Fortify\Actions\RedirectIfTwoFactorAuthenticatable;
+use Laravel\Fortify\Contracts\FailedPasswordResetLinkRequestResponse;
 use Laravel\Fortify\Contracts\LoginResponse as LoginResponseContract;
 use Laravel\Fortify\Contracts\LogoutResponse as LogoutResponseContract;
 use Laravel\Fortify\Contracts\RegisterResponse as RegisterResponseContract;
+use Laravel\Fortify\Contracts\ResetsUserPasswords;
+use Laravel\Fortify\Contracts\SuccessfulPasswordResetLinkRequestResponse;
 use Laravel\Fortify\Contracts\TwoFactorLoginResponse as TwoFactorLoginResponseContract;
+use Laravel\Fortify\Contracts\UpdatesUserPasswords;
+use Laravel\Fortify\Contracts\UpdatesUserProfileInformation;
 use Laravel\Fortify\Features;
 use Laravel\Fortify\Fortify;
 
@@ -49,15 +59,26 @@ it('configures Fortify as 13 section 2 says', function (): void {
             Features::registration(),
             Features::resetPasswords(),
             Features::emailVerification(),
+            Features::updateProfileInformation(),
+            Features::updatePasswords(),
             Features::twoFactorAuthentication(['confirm' => true, 'confirmPassword' => true, 'window' => 1]),
         ]);
 });
 
-it('leaves the profile and password updates off until their Actions exist', function (): void {
-    expect(Features::enabled(Features::updateProfileInformation()))->toBeFalse()
-        ->and(Features::enabled(Features::updatePasswords()))->toBeFalse()
-        ->and(Route::has('user-profile-information.update'))->toBeFalse()
-        ->and(Route::has('user-password.update'))->toBeFalse();
+it('turns the profile and password updates on, with the Actions of the app behind them', function (): void {
+    expect(Features::enabled(Features::updateProfileInformation()))->toBeTrue()
+        ->and(Features::enabled(Features::updatePasswords()))->toBeTrue()
+        ->and(Route::has('user-profile-information.update'))->toBeTrue()
+        ->and(Route::has('user-password.update'))->toBeTrue()
+        ->and(app(UpdatesUserProfileInformation::class))->toBeInstanceOf(UpdateUserProfileInformation::class)
+        ->and(app(UpdatesUserPasswords::class))->toBeInstanceOf(UpdateUserPassword::class)
+        ->and(app(ResetsUserPasswords::class))->toBeInstanceOf(ResetUserPassword::class);
+});
+
+it('answers the reset link request the same way whatever happened', function (): void {
+    expect(app(SuccessfulPasswordResetLinkRequestResponse::class, ['status' => Password::RESET_LINK_SENT]))->toBeInstanceOf(GenericPasswordResetLinkResponse::class)
+        ->and(app(FailedPasswordResetLinkRequestResponse::class, ['status' => Password::INVALID_USER]))->toBeInstanceOf(GenericPasswordResetLinkResponse::class)
+        ->and(app(FailedPasswordResetLinkRequestResponse::class, ['status' => Password::RESET_THROTTLED]))->toBeInstanceOf(GenericPasswordResetLinkResponse::class);
 });
 
 it('runs the login pipeline of 13 section 2: the remember policy first, no throttle step of Fortify', function (): void {

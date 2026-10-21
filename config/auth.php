@@ -108,14 +108,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Password Confirmation Timeout
+    | Email Verification Link
     |--------------------------------------------------------------------------
     |
-    | Here you may define the number of seconds before a password confirmation
-    | window expires and users are asked to re-enter their password via the
-    | confirmation screen. By default, the timeout lasts for three hours.
+    | The number of minutes a signed verification link works (13 §2, §13). The verification notification reads it.
     |
     */
+
+    'verification' => [
+        'expire' => 60,
+    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -130,6 +132,29 @@ return [
 
     'login_timebox_microseconds' => 200_000,
 
-    'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
+    /*
+    |--------------------------------------------------------------------------
+    | Password reset time box
+    |--------------------------------------------------------------------------
+    |
+    | A request for a reset link takes at least this long, whether the email has an account, the link was sent or
+    | the hourly limit swallowed the request, so the time it takes says nothing about the account (13 §5.5). The
+    | mail is sent while the request waits, so this is longer than the login box. Microseconds. Tests set it to 0.
+    |
+    */
+
+    'password_reset_timebox_microseconds' => 1_500_000,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Password Confirmation Timeout
+    |--------------------------------------------------------------------------
+    |
+    | The number of seconds a password confirmation counts for before the user is asked again: 10 minutes (13 §2,
+    | §6.4).
+    |
+    */
+
+    'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 600),
 
 ];

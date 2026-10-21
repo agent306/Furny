@@ -39,12 +39,14 @@ trait ProfileValidationRules
      * Get the validation rules used to validate user emails. The address must be unused, soft-deleted users
      * included: their email stays taken until they are anonymised (13 §9).
      *
+     * A phone-only customer has no email, so the profile form can leave it empty (`$required = false`).
+     *
      * @return array<int, ValidationRule|Stringable|array<mixed>|string>
      */
-    protected function emailRules(?string $userId = null): array
+    protected function emailRules(?string $userId = null, bool $required = true): array
     {
         return [
-            'required',
+            $required ? 'required' : 'nullable',
             'string',
             'email:rfc',
             'max:254',

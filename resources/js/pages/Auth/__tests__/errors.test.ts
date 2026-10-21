@@ -46,8 +46,11 @@ vi.mock('@/lib/turnstile', () => ({
 }));
 
 import { Form } from '@inertiajs/vue3';
+import ConfirmPassword from '@/pages/Auth/ConfirmPassword.vue';
+import ForgotPassword from '@/pages/Auth/ForgotPassword.vue';
 import Login from '@/pages/Auth/Login.vue';
 import Register from '@/pages/Auth/Register.vue';
+import ResetPassword from '@/pages/Auth/ResetPassword.vue';
 import { page, resetPage } from '@/test/inertiaPage';
 import type { FeatureFlags } from '@/types/inertia';
 
@@ -77,6 +80,8 @@ const registerProps = {
     turnstileSiteKey: null,
     passwordRules: 'minlength: 8; maxlength: 128;',
 };
+
+const recoveryProps = { canRegister: true, features, turnstileSiteKey: null };
 
 type FailingForm = { fail: (errors: Record<string, string>) => void };
 
@@ -333,6 +338,101 @@ describe('too many attempts (10 §4)', () => {
 
         expect(wrapper.find('[data-test="throttle-notice"]').exists()).toBe(
             false,
+        );
+    });
+});
+
+describe('ForgotPassword after a failed submit (15 §10.1)', () => {
+    it('focuses the email field', async () => {
+        const wrapper = mount(ForgotPassword, {
+            props: { status: null, ...recoveryProps },
+            attachTo: document.body,
+        });
+
+        await fail(wrapper, { email: 'Enter a valid email address.' });
+
+        expect(document.activeElement).toBe(wrapper.get('#email').element);
+        expect(wrapper.get('#email').attributes('aria-describedby')).toBe(
+            'email-error',
+        );
+    });
+
+    it('resets the Turnstile widget and links the captcha error to it', async () => {
+        resetPage({
+            auth: { user: null },
+            features: { ...features, captcha: true },
+        });
+        const wrapper = mount(ForgotPassword, {
+            props: {
+                status: null,
+                ...recoveryProps,
+                turnstileSiteKey: 'site-key',
+            },
+            attachTo: document.body,
+        });
+        await flushPromises();
+
+        await fail(wrapper, { cf_turnstile_response: 'Not confirmed.' });
+
+        expect(turnstile.reset).toHaveBeenCalledWith('widget-1');
+        expect(wrapper.get('#captcha-error').text()).toBe('Not confirmed.');
+    });
+});
+
+describe('ResetPassword after a failed submit (15 §10.1)', () => {
+    const props = {
+        email: 'asha@example.com',
+        token: 'the-token',
+        passwordRules: 'minlength: 8; maxlength: 128;',
+        ...recoveryProps,
+    };
+
+    it('focuses the password field and describes it by the error and the hint', async () => {
+        const wrapper = mount(ResetPassword, {
+            props,
+            attachTo: document.body,
+        });
+
+        await fail(wrapper, { password: 'Too short.' });
+
+        expect(document.activeElement).toBe(wrapper.get('#password').element);
+        expect(wrapper.get('#password').attributes('aria-describedby')).toBe(
+            'password-error password-hint',
+        );
+    });
+
+    it('shows a used-up link as an error of the email, with the way to ask again', async () => {
+        const wrapper = mount(ResetPassword, {
+            props,
+            attachTo: document.body,
+        });
+
+        await fail(wrapper, { email: 'This password reset token is invalid.' });
+
+        expect(wrapper.get('#email-error').text()).toBe(
+            'This password reset token is invalid.',
+        );
+        expect(
+            wrapper.get('[data-test="request-new-link"]').attributes('href'),
+        ).toBe('/forgot-password');
+        expect(document.activeElement).toBe(wrapper.get('#email').element);
+    });
+});
+
+describe('ConfirmPassword after a failed submit (15 §10.1)', () => {
+    it('focuses the password field', async () => {
+        const wrapper = mount(ConfirmPassword, {
+            props: recoveryProps,
+            attachTo: document.body,
+        });
+
+        await fail(wrapper, {
+            password: 'The provided password was incorrect.',
+        });
+
+        expect(document.activeElement).toBe(wrapper.get('#password').element);
+        expect(wrapper.get('#password-error').text()).toBe(
+            'The provided password was incorrect.',
         );
     });
 });

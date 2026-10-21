@@ -10,9 +10,12 @@ use App\Domain\Identity\Enums\OwnerGate;
 use App\Domain\Identity\Enums\StaffRole;
 use App\Domain\Identity\Enums\UnitSystem;
 use App\Domain\Identity\Enums\UserType;
+use App\Domain\Identity\Support\ContactVerification;
 use App\Domain\Orders\Models\Order;
 use App\Domain\Projects\Models\Project;
 use App\Domain\Shared\Models\UploadIntent;
+use App\Notifications\Auth\ResetPassword;
+use App\Notifications\Auth\VerifyEmail;
 use Carbon\CarbonImmutable;
 use Database\Factories\Domain\Identity\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
@@ -29,6 +32,7 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Gate;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 use NotificationChannels\WebPush\HasPushSubscriptions;
+use SensitiveParameter;
 use Spatie\Image\Enums\Fit;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
@@ -213,6 +217,34 @@ final class User extends Authenticatable implements HasLocalePreference, HasMedi
     public function hasPassword(): bool
     {
         return $this->password !== null;
+    }
+
+    /** The mail with the link to choose a new password (13 §2); the broker passes the token. */
+    public function sendPasswordResetNotification(#[SensitiveParameter] $token): void
+    {
+        $this->notify(new ResetPassword((string) $token));
+    }
+
+    /** The mail with the link that verifies the address; there is nothing to verify, and nobody to mail, without one. */
+    public function sendEmailVerificationNotification(): void
+    {
+        if ($this->email === null) {
+            return;
+        }
+
+        $this->notify(new VerifyEmail);
+    }
+
+    /** Verifies the email through `ContactVerification`, which also tells the app when it is the first verified contact. */
+    public function markEmailAsVerified(): bool
+    {
+        if ($this->email === null) {
+            return false;
+        }
+
+        app(ContactVerification::class)->markEmailVerified($this);
+
+        return true;
     }
 
     /**

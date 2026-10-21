@@ -33,4 +33,9 @@ return [
     'captcha_failed' => "We couldn't confirm you are not a robot. Please try again.",
     'captcha_unavailable' => 'The check that you are not a robot is not available right now. Please try again in a moment.',
 
+    // Error codes of the account flows (13 §5, 10 §13.2).
+    'errors' => [
+        'last_login_method' => 'You need at least one way to sign in.',
+    ],
+
 ];

@@ -7,10 +7,10 @@ namespace App\Http\Controllers\Account;
 use App\Domain\Identity\Actions\RevokeSessions;
 use App\Domain\Identity\Models\User;
 use App\Http\Controllers\Controller;
+use App\Support\Auth\RememberCookie;
 use App\Support\Auth\SessionKey;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 
 /** Remote sign-out from the device list (13 §6.3). */
@@ -38,20 +38,11 @@ final class SessionController extends Controller
     public function destroyOthers(Request $request, RevokeSessions $revoke): RedirectResponse
     {
         $user = $this->user($request);
-        $guard = Auth::guard('web');
 
         $count = $revoke->others($user, $request->session()->getId());
 
         // The remember token was rotated: this browser's remember cookie holds the old one and would stop working.
-        // Queue the new cookie as the guard does at login, without logging in again (no `Login` event, no new
-        // session id).
-        if ($request->cookies->has($guard->getRecallerName())) {
-            $guard->getCookieJar()->queue($guard->getCookieJar()->make(
-                $guard->getRecallerName(),
-                $user->getAuthIdentifier().'|'.$user->getRememberToken().'|'.$guard->hashPasswordForCookie($user->getAuthPassword()),
-                (int) config('auth.guards.web.remember'),
-            ));
-        }
+        RememberCookie::renew($request, $user);
 
         Inertia::flash('success', trans_icu('account.toasts.sessions_revoked', ['count' => $count]));
 

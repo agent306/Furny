@@ -56,4 +56,40 @@ return [
         'have_account' => 'Already have an account?',
         'log_in' => 'Log in',
     ],
+
+    // 10 §4.5. The answer to the form is `passwords.sent_generic`, a Laravel-format sentence the server sends as `status`.
+    'forgot' => [
+        'title' => 'Forgot your password?',
+        'description' => "Enter your email address and we'll send you a link to choose a new one.",
+        'email' => 'Email address',
+        'submit' => 'Email reset link',
+        'back_to_login' => 'Back to log in',
+    ],
+
+    'reset' => [
+        'title' => 'Choose a new password',
+        'description' => 'Enter a new password for your account.',
+        'email' => 'Email address',
+        'password' => 'New password',
+        'password_confirmation' => 'Confirm new password',
+        'submit' => 'Reset password',
+        'request_new' => 'Request a new link',
+    ],
+
+    // 10 §4.6
+    'verify' => [
+        'title' => 'Verify your email',
+        'description' => 'We sent a verification link to {email}. Open it to finish.',
+        'resent' => 'A new verification link is on its way to {email}.',
+        'resend' => 'Resend email',
+        'continue' => 'Continue to the app',
+    ],
+
+    // 10 §4.8. The re-authentication page of passwordless users comes with the phone sign-in.
+    'confirm' => [
+        'title' => 'Confirm your password',
+        'description' => 'This is a secure area. Please confirm your password before continuing.',
+        'password' => 'Password',
+        'submit' => 'Confirm',
+    ],
 ];

@@ -20,8 +20,11 @@ use Inertia\Inertia;
  */
 final class RateLimitedResponse
 {
-    /** Route names of forms that show the wait on the page itself. The password reset form joins with its task. */
-    public const array INLINE_ROUTES = ['login.store', 'register.store'];
+    /**
+     * Route names of forms that show the wait on the page itself. The password reset form is not here: its limit is
+     * silent (13 §5.5), so it never answers 429. The resend button is the verification page's own form.
+     */
+    public const array INLINE_ROUTES = ['login.store', 'register.store', 'verification.send'];
 
     /** The validation error that carries the wait, in seconds, to the page. */
     public const string INLINE_ERROR = 'rate_limited';
