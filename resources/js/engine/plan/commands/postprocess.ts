@@ -17,9 +17,10 @@ import {
     type Vec2,
 } from '../../geometry/vec2';
 import type { CommandOutput } from '../../commands/types';
-import type { DerivedPlan, DerivedWall } from '../derive';
+import type { DerivedPlan, DerivedRoom, DerivedWall } from '../derive';
 import type { FootprintProvider } from '../footprint';
 import { reconcileRoomMetas } from '../reconcile';
+import { isAnchorInsideRoom } from '../rooms';
 import type { PlanDocument } from '../schema';
 
 export interface PostProcessInfo {
@@ -38,7 +39,10 @@ export interface PostProcessInfo {
 }
 
 interface Related {
+    /** Walls the command changed or that touch a changed node. */
     walls: ReadonlySet<string>;
+    /** `walls` plus the walls that share a node with them (one hop). */
+    reach: ReadonlySet<string>;
     nodes: ReadonlySet<string>;
 }
 
@@ -47,7 +51,9 @@ const has = (record: object, id: string): boolean => Object.hasOwn(record, id);
 /**
  * The walls the command changed or that touch a changed node, and their
  * nodes. Walls and nodes the command removed count too (read from `prevDoc`),
- * so the nodes a deleted wall leaves behind are found.
+ * so the nodes a deleted wall leaves behind are found. `reach` adds one hop:
+ * a neighbour's faces and joins change with a wall's thickness, presence or
+ * ends, so what hangs on a neighbour has to be recomputed too.
  */
 function relatedEntities(info: PostProcessInfo): Related {
     const { doc, prevDoc, changed } = info;
@@ -58,7 +64,7 @@ function relatedEntities(info: PostProcessInfo): Related {
             Object.keys(d.walls).forEach((id) => walls.add(id));
             Object.keys(d.nodes).forEach((id) => nodes.add(id));
         }
-        return { walls, nodes };
+        return { walls, reach: walls, nodes };
     }
     for (const id of changed) {
         if (has(doc.walls, id) || has(prevDoc.walls, id)) walls.add(id);
@@ -75,7 +81,51 @@ function relatedEntities(info: PostProcessInfo): Related {
             nodes.add(wall.b);
         }
     }
-    return { walls, nodes };
+    const reach = new Set(walls);
+    for (const wall of Object.values(doc.walls)) {
+        if (nodes.has(wall.a) || nodes.has(wall.b)) reach.add(wall.id);
+    }
+    return { walls, reach, nodes };
+}
+
+/**
+ * The faceKeys of the rooms the command affected (04 §4.4 b scope): a face
+ * that exists in only one of the two geometries, a face bounded by a related
+ * wall, and the faces of a RoomMeta the command itself changed. `undefined`
+ * (everything) when the command replaced a whole collection.
+ */
+function affectedFaceKeys(
+    info: PostProcessInfo,
+    related: Related,
+): ReadonlySet<string> | undefined {
+    const { doc, prevDoc, prevGeom, geom, changed } = info;
+    if (changed.has('*')) return undefined;
+    const keys = new Set<string>();
+    const prevKeys = new Set(prevGeom.rooms.map((r) => r.faceKey));
+    const nextKeys = new Set(geom.rooms.map((r) => r.faceKey));
+    const mark = (rooms: DerivedRoom[], other: Set<string>): void => {
+        for (const room of rooms) {
+            if (
+                !other.has(room.faceKey) ||
+                room.wallIds.some((id) => related.walls.has(id))
+            ) {
+                keys.add(room.faceKey);
+            }
+        }
+    };
+    mark(prevGeom.rooms, nextKeys);
+    mark(geom.rooms, prevKeys);
+    for (const id of changed) {
+        if (!has(doc.rooms, id) && !has(prevDoc.rooms, id)) continue;
+        const owned = prevGeom.rooms.find((r) => r.metaId === id);
+        if (owned !== undefined) keys.add(owned.faceKey);
+        const meta = doc.rooms[id];
+        if (meta === undefined) continue;
+        for (const room of geom.rooms) {
+            if (isAnchorInsideRoom(meta.anchor, room)) keys.add(room.faceKey);
+        }
+    }
+    return keys;
 }
 
 /** `roundMm` without a negative zero. */
@@ -130,7 +180,7 @@ function followDimensions(
     const gone: string[] = [];
     for (const dim of Object.values(info.doc.annotations.dimensions)) {
         const attached = dim.attachedTo;
-        if (attached === null || !related.walls.has(attached.wallId)) continue;
+        if (attached === null || !related.reach.has(attached.wallId)) continue;
         if (!has(info.doc.walls, attached.wallId)) {
             delete draft.annotations.dimensions[dim.id];
             gone.push(dim.id);
@@ -163,7 +213,7 @@ function followPlacements(
 ): void {
     for (const p of Object.values(info.doc.placements)) {
         const attachment = p.wallAttachment;
-        if (attachment === null || !related.walls.has(attachment.wallId)) {
+        if (attachment === null || !related.reach.has(attachment.wallId)) {
             continue;
         }
         const target = draft.placements[p.id]!;
@@ -220,6 +270,7 @@ export function postProcess(
         draft,
         info.prevGeom,
         info.geom,
+        affectedFaceKeys(info, related),
     );
     pushDeleted(out, deletedMetaIds);
 }

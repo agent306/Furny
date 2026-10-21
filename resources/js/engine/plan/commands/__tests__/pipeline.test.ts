@@ -17,6 +17,8 @@ import type {
     Wall,
 } from '../../schema';
 import { makeDirtyPlan, makeRectPlan } from '../../testing/fixtures';
+import { metaFactory, strip } from '../../testing/strip';
+import { roundMm } from '../../../geometry/tolerance';
 import { CommandAbort } from '../../../commands/types';
 import { definePlanCommand } from '../define';
 import { planPathToEntityId } from '../paths';
@@ -291,14 +293,30 @@ describe('PLAN_COMMAND_ERROR_CODES', () => {
     it('lists the 22 codes of 04 §6.7 once each', () => {
         expect(PLAN_COMMAND_ERROR_CODES).toHaveLength(22);
         expect(new Set(PLAN_COMMAND_ERROR_CODES).size).toBe(22);
-        expect(PLAN_COMMAND_ERROR_CODES).toEqual(
-            expect.arrayContaining([
-                'invalid_params',
-                'introduces_error',
-                'fragment_opening_dropped',
-                'wall_duplicate',
-            ]),
-        );
+        expect([...PLAN_COMMAND_ERROR_CODES]).toEqual([
+            'not_found',
+            'out_of_range',
+            'too_large',
+            'wall_too_short',
+            'wall_duplicate',
+            'split_through_opening',
+            'opening_no_fit',
+            'opening_overlap',
+            'opening_too_tall',
+            'type_mismatch',
+            'not_collinear',
+            'props_differ',
+            'design_unknown',
+            'fixture_unknown',
+            'dimension_too_short',
+            'text_length',
+            'background_missing',
+            'background_locked',
+            'calibration_too_short',
+            'introduces_error',
+            'fragment_opening_dropped',
+            'invalid_params',
+        ]);
     });
 });
 
@@ -373,32 +391,28 @@ describe('executePlanCommand: phases and patches', () => {
         expect(out.doc.nodes[n.tl]).toBeDefined();
     });
 
-    it('recomputes a dimension attached to a face from the derived wall', () => {
+    it('recomputes a dimension attached to a face from the derived wall, rounded to mm', () => {
         const { doc, n, w } = rect();
         const dims = [
             dimension('d_left00001', w.top, 'left'),
             dimension('d_right0001', w.top, 'right'),
             dimension('d_center001', w.top, 'center'),
         ];
-        // an unrelated dimension with stale numbers must stay untouched
-        const stale = dimension('d_stale0001', w.bottom, 'left');
         const start = edit(doc, (d) => {
-            for (const x of [...dims, stale])
-                d.annotations.dimensions[x.id] = x;
+            for (const x of dims) d.annotations.dimensions[x.id] = x;
         });
+        // a slanted wall: the faces have fractional coordinates
         const moved = ok(
             run(start, moveNodes, {
-                moves: [
-                    { id: n.tl, x: 0, y: 300 },
-                    { id: n.tr, x: 5000, y: 300 },
-                ],
+                moves: [{ id: n.tr, x: 5000, y: 537 }],
             }),
         );
         const wall = derivePlanGeometry(moved.doc).walls[w.top]!;
         const r = (p: { x: number; y: number }) => ({
-            x: Math.round(p.x),
-            y: Math.round(p.y),
+            x: roundMm(p.x) + 0,
+            y: roundMm(p.y) + 0,
         });
+        expect(wall.leftFace[0].y % 1).not.toBe(0);
         const got = moved.doc.annotations.dimensions;
         expect([got.d_left00001!.a, got.d_left00001!.b]).toEqual([
             r(wall.leftFace[0]),
@@ -412,8 +426,103 @@ describe('executePlanCommand: phases and patches', () => {
             r(wall.centerline[0]),
             r(wall.centerline[1]),
         ]);
+        for (const d of Object.values(got)) {
+            for (const p of [d.a, d.b]) {
+                expect(Number.isInteger(p.x) && Number.isInteger(p.y)).toBe(
+                    true,
+                );
+            }
+        }
         expect(got.d_left00001!.offset).toBe(300);
-        expect(got.d_stale0001).toBe(start.annotations.dimensions.d_stale0001);
+    });
+
+    it('leaves dimensions and placements on walls two hops away alone', () => {
+        const s = strip(12000, 4000, [4000, 8000]);
+        const start = edit(s.doc, (d) => {
+            d.annotations.dimensions.d_stale0001 = dimension(
+                'd_stale0001',
+                s.sides.right,
+                'left',
+            );
+            // deliberately off the face: only a related wall re-snaps it
+            d.placements.f_sofa00001 = placement(
+                'f_sofa00001',
+                s.sides.right,
+                'right',
+                11000,
+                1500,
+                90,
+            );
+        });
+        const out = ok(
+            run(start, moveNodes, {
+                moves: [{ id: s.node['0,0']!, x: 0, y: 300 }],
+            }),
+        );
+        expect(out.doc.annotations.dimensions.d_stale0001).toBe(
+            start.annotations.dimensions.d_stale0001,
+        );
+        expect(out.doc.placements.f_sofa00001).toBe(
+            start.placements.f_sofa00001,
+        );
+    });
+
+    describe('neighbouring walls (one hop)', () => {
+        /** A dimension and a placement that start exactly on the faces of the top wall. */
+        function onTopWall() {
+            const base = rect();
+            const geom = derivePlanGeometry(base.doc).walls[base.w.top]!;
+            const r = (p: { x: number; y: number }) => ({
+                x: roundMm(p.x) + 0,
+                y: roundMm(p.y) + 0,
+            });
+            const start = edit(base.doc, (d) => {
+                d.annotations.dimensions.d_left00001 = {
+                    ...dimension('d_left00001', base.w.top, 'left'),
+                    a: r(geom.leftFace[0]),
+                    b: r(geom.leftFace[1]),
+                };
+                d.placements.f_sofa00001 = placement(
+                    'f_sofa00001',
+                    base.w.top,
+                    'right',
+                    4350,
+                    100,
+                    0,
+                );
+            });
+            return { ...base, start, r };
+        }
+
+        it('recomputes them when a side wall gets thicker', () => {
+            const { start, w, r } = onTopWall();
+            const thicker = definePlanCommand<{ id: string; t: number }>({
+                type: 'test.setThickness',
+                labelKey: 'x',
+                validate: () => null,
+                run(draft, p) {
+                    draft.walls[p.id]!.thickness = p.t;
+                },
+                touchesGeometry: true,
+            });
+            const out = ok(run(start, thicker, { id: w.right, t: 400 }));
+            const face = derivePlanGeometry(out.doc).walls[w.top]!.leftFace;
+            const dim = out.doc.annotations.dimensions.d_left00001!;
+            expect([dim.a, dim.b]).toEqual([r(face[0]), r(face[1])]);
+            expect(dim).not.toEqual(start.annotations.dimensions.d_left00001);
+            // the placement, 4350 along a 4800 face, no longer fits at the end
+            const p = out.doc.placements.f_sofa00001!;
+            expect(p.x).toBe(4300);
+        });
+
+        it('recomputes them when a side wall is deleted', () => {
+            const { start, w, r } = onTopWall();
+            const out = ok(run(start, removeWall, { id: w.right }));
+            const face = derivePlanGeometry(out.doc).walls[w.top]!.leftFace;
+            const dim = out.doc.annotations.dimensions.d_left00001!;
+            expect([dim.a, dim.b]).toEqual([r(face[0]), r(face[1])]);
+            expect(dim).not.toEqual(start.annotations.dimensions.d_left00001);
+        });
     });
 
     it('deletes a dimension whose wall was deleted and lists it in deletedIds', () => {
@@ -569,32 +678,6 @@ describe('executePlanCommand: phases and patches', () => {
         expect([p.x, p.y, p.rotation]).toEqual([2500, 100, 0]);
     });
 
-    it('leaves placements on unrelated walls alone', () => {
-        const { doc, n, w } = rect();
-        const start = edit(doc, (d) => {
-            d.placements.f_sofa00001 = placement(
-                'f_sofa00001',
-                w.bottom,
-                'right',
-                2500,
-                3500, // deliberately off the face: only a related wall re-snaps it
-                180,
-            );
-        });
-        // only the top wall's nodes move: the bottom wall is not related
-        const out = ok(
-            run(start, moveNodes, {
-                moves: [
-                    { id: n.tl, x: 0, y: 300 },
-                    { id: n.tr, x: 5000, y: 300 },
-                ],
-            }),
-        );
-        expect(out.doc.placements.f_sofa00001).toBe(
-            start.placements.f_sofa00001,
-        );
-    });
-
     it('skips post-processing for a command that does not touch geometry', () => {
         const { doc, n, w } = rect();
         const start = edit(doc, (d) => {
@@ -643,6 +726,137 @@ describe('executePlanCommand: phases and patches', () => {
             run(doc, moveNodes, { moves: [{ id: n.br, x: 5100, y: 4000 }] }),
         );
         expect(Object.isFrozen(out.doc)).toBe(true);
+    });
+});
+
+describe('executePlanCommand: room metas', () => {
+    const meta = metaFactory();
+
+    it('deletes the merge loser, reports it in deletedIds and restores it on undo', () => {
+        const s = strip(9000, 4000, [3000]);
+        const small = meta(1500, 2000);
+        const large = meta(6000, 2000);
+        const start = edit(s.doc, (d) => {
+            d.rooms[small.id] = small;
+            d.rooms[large.id] = large;
+        });
+        const out = ok(run(start, removeWall, { id: s.cutWall[3000]! }));
+        expect(out.deletedIds).toEqual([small.id]);
+        expect(Object.keys(out.doc.rooms)).toEqual([large.id]);
+        expect(
+            out.patches.map((p) => planPathToEntityId(p.path as never)),
+        ).toEqual([s.cutWall[3000], small.id]);
+        const undone = apply(out.doc, out.inversePatches);
+        expect(undone).toEqual(start);
+        expect(Object.keys(undone.rooms).sort()).toEqual(
+            [small.id, large.id].sort(),
+        );
+    });
+
+    it('leaves the metas of rooms the command did not touch byte-identical', () => {
+        const s = strip(9000, 4000, [3000, 6000]);
+        const a = meta(1500, 2000);
+        // too close to the net edge, and an offset label outside the room
+        const b = meta(3100, 2000);
+        const c = meta(7500, 2000, { labelOffset: { x: 5000, y: 0 } });
+        const start = edit(s.doc, (d) => {
+            for (const m of [a, b, c]) d.rooms[m.id] = m;
+        });
+        const out = ok(
+            run(start, moveNodes, {
+                moves: [{ id: s.node['0,0']!, x: 0, y: 1 }],
+            }),
+        );
+        expect(out.doc.rooms[b.id]).toBe(start.rooms[b.id]);
+        expect(out.doc.rooms[c.id]).toBe(start.rooms[c.id]);
+        const touched = out.patches.map((p) =>
+            planPathToEntityId(p.path as never),
+        );
+        expect(touched).not.toContain(b.id);
+        expect(touched).not.toContain(c.id);
+    });
+
+    it('deletes no duplicate meta when a corner of a room with three metas moves', () => {
+        const s = strip(9000, 4000, []);
+        const metas = [meta(1500, 2000), meta(4500, 2000), meta(7500, 2000)];
+        const start = edit(s.doc, (d) => {
+            for (const m of metas) d.rooms[m.id] = m;
+        });
+        const out = ok(
+            run(start, moveNodes, {
+                moves: [{ id: s.node['9000,0']!, x: 9000, y: 1 }],
+            }),
+        );
+        expect(out.deletedIds).toEqual([]);
+        expect(out.doc.rooms).toEqual(start.rooms);
+    });
+
+    it('treats the face of a meta the command itself changed as affected', () => {
+        const s = strip(9000, 4000, [4500]);
+        const left = meta(2000, 2000);
+        const start = edit(s.doc, (d) => {
+            d.rooms[left.id] = left;
+        });
+        const setOffset = definePlanCommand<{ id: string }>({
+            type: 'test.setOffset',
+            labelKey: 'x',
+            validate: () => null,
+            run(draft, p) {
+                // pushes the label out of the room; no wall is touched
+                draft.rooms[p.id]!.labelOffset = { x: 8000, y: 0 };
+            },
+            touchesGeometry: true,
+        });
+        const out = ok(run(start, setOffset, { id: left.id }));
+        expect(out.doc.rooms[left.id]!.labelOffset).toBeNull();
+    });
+
+    it('re-anchors a meta of a face the command changed', () => {
+        const s = strip(9000, 4000, [4500]);
+        const near = meta(100, 2000); // 42.5 mm from the net edge
+        const start = edit(s.doc, (d) => {
+            d.rooms[near.id] = near;
+        });
+        const out = ok(
+            run(start, moveNodes, {
+                moves: [{ id: s.node['0,0']!, x: 0, y: 1 }],
+            }),
+        );
+        expect(out.doc.rooms[near.id]!.anchor).not.toEqual(near.anchor);
+    });
+});
+
+describe('executePlanCommand: deletedIds', () => {
+    it('lists an id once when the command and phase 2 both report it', () => {
+        const { doc, n } = rect();
+        const withStub = edit(doc, (d) => {
+            d.nodes.n_stub000001 = { id: 'n_stub000001', x: -1000, y: 0 };
+            d.walls.w_stub000001 = {
+                id: 'w_stub000001',
+                a: n.tl,
+                b: 'n_stub000001',
+                thickness: 115,
+                height: 2700,
+                kind: 'interior',
+                justification: 'center',
+                material: 'brick',
+                colorHex: null,
+            };
+        });
+        const declaring = definePlanCommand<{ id: string }>({
+            type: 'test.removeStubDeclaring',
+            labelKey: 'x',
+            validate: () => null,
+            run(draft, p, _ctx, out) {
+                delete draft.walls[p.id];
+                // the command names the node, but only phase 2 deletes it
+                out.deletedIds.push('n_stub000001');
+            },
+            touchesGeometry: true,
+        });
+        const out = ok(run(withStub, declaring, { id: 'w_stub000001' }));
+        expect(out.doc.nodes.n_stub000001).toBeUndefined();
+        expect(out.deletedIds).toEqual(['n_stub000001']);
     });
 });
 
@@ -776,5 +990,54 @@ describe('createPlanBus', () => {
         });
         expect(bus.getDoc()).toBe(doc);
         expect(bus.canUndo()).toBe(false);
+    });
+
+    it('deletes a meta mid-drag, restores it when the drag moves back, and undoes in one step', () => {
+        const s = strip(9000, 4000, [3000]);
+        const meta = metaFactory();
+        const small = meta(1500, 2000);
+        const large = meta(6000, 2000);
+        const start = edit(s.doc, (d) => {
+            d.rooms[small.id] = small;
+            d.rooms[large.id] = large;
+        });
+        // an absolute drag: a far enough pull removes the wall between the rooms
+        const pull = definePlanCommand<{ dy: number }>({
+            type: 'test.pull',
+            labelKey: 'x',
+            validate: () => null,
+            run(draft, p) {
+                draft.nodes[s.node['0,0']!]!.y = p.dy;
+                if (p.dy >= 100) delete draft.walls[s.cutWall[3000]!];
+            },
+            mergeKey: () => 'pull',
+            touchesGeometry: true,
+        });
+        const bus = createPlanBus({
+            initial: start,
+            footprints,
+            newId: freshIds(),
+            registry: { pull },
+        });
+        const step = (dy: number) =>
+            bus.execute('pull', { dy }, { merge: true });
+
+        expect(step(10).ok).toBe(true);
+        expect(Object.keys(bus.getDoc().rooms)).toHaveLength(2);
+        const mid = step(150);
+        expect(mid).toMatchObject({ ok: true, deletedIds: [small.id] });
+        expect(Object.keys(bus.getDoc().rooms)).toEqual([large.id]);
+        // back above the threshold: the base is re-run, both metas are back
+        expect(step(20).ok).toBe(true);
+        expect(Object.keys(bus.getDoc().rooms).sort()).toEqual(
+            [small.id, large.id].sort(),
+        );
+        expect(step(200)).toMatchObject({ ok: true, deletedIds: [small.id] });
+        expect(bus.history().undo).toHaveLength(1);
+
+        expect(bus.undo()).toBe(true);
+        expect(bus.getDoc()).toEqual(start);
+        expect(bus.redo()).toBe(true);
+        expect(Object.keys(bus.getDoc().rooms)).toEqual([large.id]);
     });
 });

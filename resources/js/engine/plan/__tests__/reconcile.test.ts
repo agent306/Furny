@@ -2,81 +2,13 @@ import { create } from 'mutative';
 import { describe, expect, it } from 'vitest';
 import { pointInPolygon, signedDistToPolygon } from '../../geometry/polygon';
 import { ANCHOR_MIN_CLEARANCE } from '../../geometry/tolerance';
-import { testIds } from '../../testing/ids';
 import { derivePlanGeometry, type DerivedPlan } from '../derive';
 import { reconcileRoomMetas } from '../reconcile';
-import type { PlanDocument, RoomMeta, Wall } from '../schema';
+import type { PlanDocument, RoomMeta } from '../schema';
 import { emptyPlan } from '../testing/fixtures';
+import { metaFactory, strip } from '../testing/strip';
 
-/**
- * A `width` x `height` strip of rooms: exterior walls around it and one
- * interior wall at every x in `cuts`. Every wall is 115 mm thick, so the net
- * face of a room is its centre-line face shrunk by 57.5 mm on each side.
- */
-interface Strip {
-    doc: PlanDocument;
-    /** Interior wall id by cut x. */
-    cutWall: Record<number, string>;
-    /** Node id by `x,y`. */
-    node: Record<string, string>;
-}
-
-function strip(width: number, height: number, cuts: number[]): Strip {
-    const newId = testIds();
-    const doc = emptyPlan();
-    const node: Record<string, string> = {};
-    const addNode = (x: number, y: number): string => {
-        const id = newId('n');
-        doc.nodes[id] = { id, x, y };
-        node[`${x},${y}`] = id;
-        return id;
-    };
-    const addWall = (a: string, b: string, kind: Wall['kind']): string => {
-        const id = newId('w');
-        doc.walls[id] = {
-            id,
-            a,
-            b,
-            thickness: 115,
-            height: 2700,
-            kind,
-            justification: 'center',
-            material: 'brick',
-            colorHex: null,
-        };
-        return id;
-    };
-    const xs = [0, ...cuts, width];
-    const top = xs.map((x) => addNode(x, 0));
-    const bottom = xs.map((x) => addNode(x, height));
-    for (let i = 0; i + 1 < xs.length; i += 1) {
-        addWall(top[i]!, top[i + 1]!, 'exterior');
-        addWall(bottom[i]!, bottom[i + 1]!, 'exterior');
-    }
-    addWall(top[0]!, bottom[0]!, 'exterior');
-    addWall(top.at(-1)!, bottom.at(-1)!, 'exterior');
-    const cutWall: Record<number, string> = {};
-    cuts.forEach((x, i) => {
-        cutWall[x] = addWall(top[i + 1]!, bottom[i + 1]!, 'interior');
-    });
-    return { doc, cutWall, node };
-}
-
-const rId = testIds();
-function meta(x: number, y: number, patch: Partial<RoomMeta> = {}): RoomMeta {
-    const id = rId('r');
-    return {
-        id,
-        anchor: { x, y },
-        name: id,
-        type: 'bedroom',
-        floorFinish: 'tile',
-        floorColorHex: null,
-        labelOffset: null,
-        showArea: true,
-        ...patch,
-    };
-}
+const meta = metaFactory();
 
 /** `doc` with `metas` added (keyed by id). */
 function withMetas(doc: PlanDocument, ...metas: RoomMeta[]): PlanDocument {
@@ -103,14 +35,18 @@ interface Run {
 }
 
 /** Derives both documents and reconciles the metas of `after` against `before`. */
-function run(before: PlanDocument, after: PlanDocument): Run {
+function run(
+    before: PlanDocument,
+    after: PlanDocument,
+    affected?: ReadonlySet<string>,
+): Run {
     const prevGeom = derivePlanGeometry(before);
     const nextGeom = derivePlanGeometry(after);
     let result!: ReturnType<typeof reconcileRoomMetas>;
     const [doc, patches] = create(
         after,
         (d) => {
-            result = reconcileRoomMetas(d, prevGeom, nextGeom);
+            result = reconcileRoomMetas(d, prevGeom, nextGeom, affected);
         },
         { enablePatches: true },
     );
@@ -393,11 +329,19 @@ describe('reconcileRoomMetas', () => {
         const outer = meta(1000, 1000);
         const inner = meta(4500, 3000);
         expect(outer.id < inner.id).toBe(true);
-        // open island: one face holds both anchors, the outer meta wins
-        const before = withMetas(island(3), outer, inner);
-        expect(derivePlanGeometry(before).rooms).toHaveLength(1);
-        // closing the island makes the surrounding room a face with a hole
+        // nothing is closed yet (open island, top wall missing): both are orphans
+        const topWall = s.doc.walls[s.sides.top[0]!]!;
+        const before = withMetas(
+            edit(island(3), (d) => {
+                delete d.walls[topWall.id];
+            }),
+            outer,
+            inner,
+        );
+        expect(derivePlanGeometry(before).rooms).toHaveLength(0);
+        // one command closes the room and the island: a face with a hole
         const after = edit(before, (d) => {
+            d.walls[topWall.id] = { ...topWall };
             d.walls[wallIds[3]!] = { ...island(4).walls[wallIds[3]!]! };
         });
         const r = run(before, after);
@@ -406,5 +350,196 @@ describe('reconcileRoomMetas', () => {
         expect(r.next.rooms.map((room) => room.metaId).sort()).toEqual(
             [outer.id, inner.id].sort(),
         );
+    });
+
+    describe('scope (affected faces)', () => {
+        /** Three rooms side by side; B and C carry anchors that item 6 would move. */
+        function threeRooms() {
+            const s = strip(9000, 4000, [3000, 6000]);
+            const a = meta(1500, 2000);
+            // 42.5 mm from the net edge: too close
+            const b = meta(3100, 2000);
+            // an offset label far outside the net polygon
+            const c = meta(7500, 2000, { labelOffset: { x: 5000, y: 0 } });
+            const before = withMetas(s.doc, a, b, c);
+            const after = edit(before, (d) => {
+                d.nodes[s.node['0,0']!]!.y = 1;
+            });
+            return { s, a, b, c, before, after };
+        }
+        const keyOf = (doc: PlanDocument, metaId: string): string => {
+            const geom = derivePlanGeometry(doc);
+            return roomOf(geom, metaId)!.faceKey;
+        };
+
+        it('with the 3-argument form every face is affected', () => {
+            const { b, c, before, after } = threeRooms();
+            const r = run(before, after);
+            expect(r.result.movedAnchors).toEqual([b.id]);
+            expect(r.doc.rooms[c.id]!.labelOffset).toBeNull();
+        });
+
+        it('leaves metas in unaffected faces byte-identical', () => {
+            const { a, b, c, before, after } = threeRooms();
+            const r = run(before, after, new Set([keyOf(before, a.id)]));
+            expect(r.result).toEqual({ deletedMetaIds: [], movedAnchors: [] });
+            expect(r.doc.rooms[b.id]).toBe(before.rooms[b.id]);
+            expect(r.doc.rooms[c.id]).toBe(before.rooms[c.id]);
+        });
+
+        it('still maintains the metas of an affected face', () => {
+            const { b, c, before, after } = threeRooms();
+            const r = run(
+                before,
+                after,
+                new Set([keyOf(before, b.id), keyOf(before, c.id)]),
+            );
+            expect(r.result.movedAnchors).toEqual([b.id]);
+            expect(r.doc.rooms[c.id]!.labelOffset).toBeNull();
+        });
+
+        it('never deletes a derive-level duplicate (a meta that lost its room to a smaller id)', () => {
+            const s = strip(9000, 4000, []);
+            const one = meta(1500, 2000);
+            const two = meta(4500, 2000);
+            const three = meta(7500, 2000);
+            const before = withMetas(s.doc, one, two, three);
+            const after = edit(before, (d) => {
+                d.nodes[s.node['9000,0']!]!.y = 1;
+            });
+            expect(derivePlanGeometry(before).rooms[0]!.metaId).toBe(one.id);
+            const r = run(before, after);
+            expect(r.result.deletedMetaIds).toEqual([]);
+            expect(Object.keys(r.doc.rooms).sort()).toEqual(
+                [one.id, two.id, three.id].sort(),
+            );
+            expect(r.doc.rooms[two.id]).toBe(before.rooms[two.id]);
+            expect(r.doc.rooms[three.id]).toBe(before.rooms[three.id]);
+        });
+    });
+
+    describe('following a vanished face', () => {
+        /** After-document with other ids, so no faceKey survives. */
+        const reId = () => {
+            let n = 0;
+            return (prefix: string) =>
+                `${prefix}_z${String((n += 1)).padStart(9, '0')}`;
+        };
+
+        it('orphans a meta whose best overlap is below 20% of the smaller face', () => {
+            const named = meta(1000, 2000);
+            const before = withMetas(strip(6000, 4000, []).doc, named);
+            // the new room starts at x=5000: 1000 of 6000 overlap = 16.7%
+            const after = withMetas(
+                strip(6000, 4000, [], { originX: 5000, newId: reId() }).doc,
+                named,
+            );
+            const r = run(before, after);
+            expect(r.result).toEqual({ deletedMetaIds: [], movedAnchors: [] });
+            expect(r.patchCount).toBe(0);
+            expect(r.next.rooms.every((room) => room.metaId === null)).toBe(
+                true,
+            );
+        });
+
+        it('follows an overlap of at least 20% (the anchor ends up inside)', () => {
+            const named = meta(1000, 2000);
+            const before = withMetas(strip(6000, 4000, []).doc, named);
+            // 1500 of 6000 overlap = 25%
+            const after = withMetas(
+                strip(6000, 4000, [], { originX: 4500, newId: reId() }).doc,
+                named,
+            );
+            const r = run(before, after);
+            expect(r.result.movedAnchors).toEqual([named.id]);
+            expect(r.next.rooms[0]!.metaId).toBe(named.id);
+        });
+
+        it.each([false, true])(
+            'breaks an equal overlap by the smaller faceKey (mirrored: %s)',
+            (mirrored) => {
+                // the anchor sits on the new wall: in neither half
+                const named = meta(4500, 2000);
+                const before = withMetas(strip(9000, 4000, []).doc, named);
+                const ids = reId();
+                const next = strip(9000, 4000, [4500], { newId: ids });
+                // mirrored: the ids of the two halves swap places
+                const after = withMetas(
+                    mirrored
+                        ? edit(next.doc, (d) => {
+                              for (const n of Object.values(d.nodes)) {
+                                  n.x = 9000 - n.x;
+                              }
+                          })
+                        : next.doc,
+                    named,
+                );
+                const nextGeom = derivePlanGeometry(after);
+                expect(nextGeom.rooms).toHaveLength(2);
+                const smaller = nextGeom.rooms
+                    .map((room) => room.faceKey)
+                    .sort()[0]!;
+                const r = run(before, after);
+                expect(roomOf(r.next, named.id)!.faceKey).toBe(smaller);
+            },
+        );
+    });
+
+    it('moves an anchor that sits in the thick-wall band even when 100 mm or more from the net edge', () => {
+        // 600 mm walls: the net edge is 300 mm in from the centre line
+        const s = strip(9000, 4000, [], { thickness: 600 });
+        const inBand = meta(150, 2000);
+        const before = withMetas(s.doc, inBand);
+        const after = edit(before, (d) => {
+            d.nodes[s.node['9000,0']!]!.y = 1;
+        });
+        const r = run(before, after);
+        expect(r.result.movedAnchors).toEqual([inBand.id]);
+        const room = roomOf(r.next, inBand.id)!;
+        expect(
+            signedDistToPolygon(r.doc.rooms[inBand.id]!.anchor, {
+                outer: room.polygon,
+                holes: room.holes,
+            }),
+        ).toBeGreaterThanOrEqual(ANCHOR_MIN_CLEARANCE);
+    });
+
+    it('writes a moved anchor without a negative zero', () => {
+        // a trapezoid whose label point is (-0.27, -28.17): x rounds to -0
+        const pts: Array<[number, number]> = [
+            [-2000, -1500],
+            [2000, -1500],
+            [1060, 1500],
+            [-1060, 1500],
+        ];
+        const doc = emptyPlan();
+        const ids = pts.map((_, i) => `n_trap${i}`);
+        pts.forEach(([x, y], i) => {
+            doc.nodes[ids[i]!] = { id: ids[i]!, x, y };
+        });
+        ids.forEach((a, i) => {
+            const id = `w_trap${i}`;
+            doc.walls[id] = {
+                id,
+                a,
+                b: ids[(i + 1) % ids.length]!,
+                thickness: 115,
+                height: 2700,
+                kind: 'exterior',
+                justification: 'center',
+                material: 'brick',
+                colorHex: null,
+            };
+        });
+        const m = meta(0, 1400); // 42.5 mm from the net edge: moved
+        const withMeta = withMetas(doc, m);
+        const pole = derivePlanGeometry(doc).rooms[0]!.labelPoint;
+        expect(pole.x).toBeLessThan(0);
+        expect(pole.x).toBeGreaterThan(-0.5);
+        const r = run(withMeta, withMeta);
+        expect(r.result.movedAnchors).toEqual([m.id]);
+        const { x, y } = r.doc.rooms[m.id]!.anchor;
+        expect(Object.is(x, 0)).toBe(true);
+        expect(y).toBe(-28);
     });
 });

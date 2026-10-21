@@ -18,6 +18,7 @@ import { roundPoint, type Vec2 } from '../geometry/vec2';
 import type { DerivedPlan, DerivedRoom } from './derive';
 import { isAnchorInsideRoom } from './rooms';
 import type { PlanDocument } from './schema';
+import { cmpId } from '../compare';
 
 export interface ReconcileResult {
     /** Metas removed by the merge rule, sorted by id. */
@@ -30,8 +31,6 @@ export interface ReconcileResult {
 const MIN_OVERLAP_RATIO = 0.2;
 /** Overlap areas closer than this (mm²) count as equal. */
 const AREA_TIE = 1;
-
-const cmpId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 interface Target {
     room: DerivedRoom;
@@ -62,6 +61,11 @@ const bboxesOverlap = (a: BBox, b: BBox): boolean =>
  *   closer than `ANCHOR_MIN_CLEARANCE` to the edge of the net polygon, and a
  *   `labelOffset` that would put the label outside the net polygon is cleared.
  *
+ * Only metas in affected faces are touched. `affected` holds the faceKeys of
+ * the faces the command changed (see `postProcess`); omitted, every face is
+ * affected. A meta that lost its room to another meta already in
+ * `prevGeom` (a derive-level duplicate) is never deleted or moved here.
+ *
  * `nextGeom` is derived from the document before this call, so its
  * `metaId`s describe the old anchors; derive again afterwards.
  */
@@ -69,6 +73,7 @@ export function reconcileRoomMetas(
     draft: Draft<PlanDocument>,
     prevGeom: DerivedPlan,
     nextGeom: DerivedPlan,
+    affected?: ReadonlySet<string>,
 ): ReconcileResult {
     const result: ReconcileResult = { deletedMetaIds: [], movedAnchors: [] };
     const metaIds = Object.keys(draft.rooms).sort(cmpId);
@@ -131,16 +136,31 @@ export function reconcileRoomMetas(
         return best?.room ?? null;
     }
 
-    // Items 1-3: the target face of every meta.
+    const isAffected = (faceKey: string): boolean =>
+        affected === undefined || affected.has(faceKey);
+    /** A derive-level loser: its anchor is in a previous room another meta owns. */
+    const lostToOwner = (id: string, anchor: Vec2): boolean =>
+        prevGeom.rooms.some(
+            (r) =>
+                r.metaId !== null &&
+                r.metaId !== id &&
+                isAnchorInsideRoom(anchor, r),
+        );
+
+    // Items 1-3: the target face of every meta in an affected face.
     const targets = new Map<string, Target>();
     for (const id of metaIds) {
         const anchor = draft.rooms[id]!.anchor;
         const prev = prevByMeta.get(id);
         let room: DerivedRoom | null | undefined;
         if (prev === undefined) {
+            if (lostToOwner(id, anchor)) continue;
             room = nextGeom.rooms.find((r) => isAnchorInsideRoom(anchor, r));
+            if (room && !isAffected(room.faceKey)) continue;
         } else {
-            room = nextByKey.get(prev.faceKey) ?? follow(prev, anchor);
+            const same = nextByKey.get(prev.faceKey);
+            if (same !== undefined && !isAffected(prev.faceKey)) continue;
+            room = same ?? follow(prev, anchor);
         }
         if (room) {
             targets.set(id, {
@@ -187,7 +207,9 @@ export function reconcileRoomMetas(
             isAnchorInsideRoom(anchor, room) &&
             signedDistToPolygon(anchor, net) >= ANCHOR_MIN_CLEARANCE;
         if (!placed) {
-            const to = roundPoint(polylabel(net).point);
+            const pole = roundPoint(polylabel(net).point);
+            // `+ 0` turns a rounded -0 into 0
+            const to = { x: pole.x + 0, y: pole.y + 0 };
             if (to.x !== anchor.x || to.y !== anchor.y) {
                 meta.anchor = to;
                 result.movedAnchors.push(id);
