@@ -85,12 +85,33 @@ function sector(
     return signedArea(ring) >= 0 ? ring : [clean(hinge), ...arc.reverse()];
 }
 
-/** Swing sectors of one door (one polygon per leaf). */
-function leafSectors(
+/**
+ * One leaf of a door: where it is hinged and which way it lies closed and
+ * open. The swing sectors here and the leaf and arc symbols of the plan
+ * drawing (`drawing/openings.ts`) are both built from these frames, so the
+ * symbol always matches the clearance zone.
+ */
+export interface DoorLeafFrame {
+    /** Hinge point on the swing face. */
+    hinge: Vec2;
+    /** Unit vector along the wall from the hinge towards the leaf's other end. */
+    closedDir: Vec2;
+    /** Unit vector the open leaf points along (`swingSign * normal`). */
+    openDir: Vec2;
+    /** Leaf length (the clear width, or half of it for two-leaf doors). */
+    radius: number;
+}
+
+/**
+ * Leaf frames of one door: one for a single-leaf door (hinged at
+ * `o.hinge`), two for `double_swing` and `french_window` (hinged at both
+ * jambs). Valid for any opening type; the caller decides which types swing.
+ */
+export function doorLeafFrames(
     o: Opening,
     d: DerivedOpening,
     wall: DerivedWall,
-): Vec2[][] {
+): DoorLeafFrame[] {
     const width = d.u1 - d.u0;
     const openDir = scale(wall.normal, d.swingSign);
     const faceOf = (jamb: { left: Vec2; right: Vec2 }): Vec2 =>
@@ -100,13 +121,36 @@ function leafSectors(
     if (TWO_LEAF_TYPES.has(o.type)) {
         const half = width / 2;
         return [
-            sector(fromStart, wall.dir, openDir, half),
-            sector(fromEnd, scale(wall.dir, -1), openDir, half),
+            { hinge: fromStart, closedDir: wall.dir, openDir, radius: half },
+            {
+                hinge: fromEnd,
+                closedDir: scale(wall.dir, -1),
+                openDir,
+                radius: half,
+            },
         ];
     }
     return o.hinge === 'start'
-        ? [sector(fromStart, wall.dir, openDir, width)]
-        : [sector(fromEnd, scale(wall.dir, -1), openDir, width)];
+        ? [{ hinge: fromStart, closedDir: wall.dir, openDir, radius: width }]
+        : [
+              {
+                  hinge: fromEnd,
+                  closedDir: scale(wall.dir, -1),
+                  openDir,
+                  radius: width,
+              },
+          ];
+}
+
+/** Swing sectors of one door (one polygon per leaf). */
+function leafSectors(
+    o: Opening,
+    d: DerivedOpening,
+    wall: DerivedWall,
+): Vec2[][] {
+    return doorLeafFrames(o, d, wall).map((f) =>
+        sector(f.hinge, f.closedDir, f.openDir, f.radius),
+    );
 }
 
 /**

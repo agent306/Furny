@@ -258,3 +258,26 @@ export type {
     SnapSettings,
     SnapWallItem,
 } from './plan/snapping';
+export {
+    LAYER_ORDER,
+    ROOM_FILL,
+    STYLE_KEYS,
+    autoDimensions,
+    buildPlanDrawing,
+    drawDimension,
+    drawFixture,
+    drawLabel,
+    drawOpening,
+    drawPlacement,
+    drawRoom,
+    drawWall,
+    drawWallOutline,
+} from './plan/drawing';
+export type {
+    DrawGroup,
+    DrawItem,
+    DrawingOptions,
+    LayerName,
+    PlanDrawing,
+    StyleKey,
+} from './plan/drawing';
