@@ -157,6 +157,18 @@ return [
             'tap' => [TapRedaction::class],
         ],
 
+        // The local development log of verification codes (LogOtpDelivery writes the full message here). It exists
+        // only in a local environment, so no other environment can write a code to a file.
+        ...(env('APP_ENV') === 'local' ? [
+            'otp-dev' => [
+                'driver' => 'single',
+                'path' => storage_path('logs/otp-dev.log'),
+                'level' => 'debug',
+                'replace_placeholders' => true,
+                'tap' => [TapRedaction::class],
+            ],
+        ] : []),
+
         // Not tapped, on purpose: the emergency logger (used only when logging itself fails) is built by Laravel
         // from this path alone, and Log::stack([...]) builds an ad hoc logger without a tap. Log::stack still
         // writes through its children's handlers, whose formatters are masking (TapRedaction); the processor

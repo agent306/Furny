@@ -22,6 +22,10 @@ return [
 
     // 12 §3.3, P1-D5: the transactional mails of the sign-in flows. `minutes` is how long the link works.
     'auth' => [
+        // 12 §3.7: the last line is the WebOTP origin-bound format (`@host #code`, 13 §4.4).
+        'otp' => [
+            'sms' => "{code} is your {appName} verification code. It expires in 10 minutes. Do not share it.\n\n@{domain} #{code}",
+        ],
         'password_reset' => [
             'subject' => 'Reset your {appName} password',
             'title' => 'Reset your password',

@@ -83,7 +83,13 @@ final class RateLimitKey
     /** IPv4 as it is; IPv6 as its /64, since one subscriber holds a whole /64 and could otherwise rotate addresses. */
     private static function ip(Request $request): string
     {
-        $ip = $request->ip() ?? 'unknown';
+        return self::forIp($request->ip());
+    }
+
+    /** The same normalisation for an address that did not come from a request (an action given the IP). */
+    public static function forIp(?string $ip): string
+    {
+        $ip ??= 'unknown';
         $packed = filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) === false ? false : inet_pton($ip);
 
         if ($packed === false) {

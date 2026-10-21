@@ -169,6 +169,7 @@
     "notifications.auth.email_verification.body": "Confirm that this address is yours to finish setting up your {appName} account. The link works for {minutes, plural, one {# minute} other {# minutes}}.",
     "notifications.auth.email_verification.subject": "Verify your email for {appName}",
     "notifications.auth.email_verification.title": "Verify your email address",
+    "notifications.auth.otp.sms": "{code} is your {appName} verification code. It expires in 10 minutes. Do not share it.\n\n@{domain} #{code}",
     "notifications.auth.password_reset.action": "Choose a new password",
     "notifications.auth.password_reset.body": "We got a request to reset the password of your {appName} account. The link works for {minutes, plural, one {# minute} other {# minutes}}. If it was not you, you can ignore this email: your password stays as it is.",
     "notifications.auth.password_reset.subject": "Reset your {appName} password",

@@ -36,6 +36,12 @@ final class OtpCode extends Model
     /** @use HasFactory<OtpCodeFactory> */
     use HasFactory, HasUlids;
 
+    /** How long a code can be used (13 §4.1). */
+    public const int LIFETIME_MINUTES = 10;
+
+    /** Wrong guesses a code survives; the next attempt kills it. */
+    public const int MAX_ATTEMPTS = 5;
+
     /**
      * @return array<string, string>
      */

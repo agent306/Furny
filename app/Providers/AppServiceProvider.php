@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Domain\Identity\Models\User;
+use App\Domain\Identity\Otp\LogOtpDelivery;
+use App\Domain\Identity\Otp\OtpDelivery;
 use App\Support\MorphMap;
 use App\Support\Settings\Settings;
 use Carbon\CarbonImmutable;
@@ -25,6 +27,9 @@ final class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(Settings::class);
+
+        // Until the WhatsApp and SMS channels exist the codes are only logged (masked); the Feature suite binds the array one.
+        $this->app->bind(OtpDelivery::class, LogOtpDelivery::class);
 
         // Telescope is kept out of package discovery (composer.json) and runs only where the
         // dev dependency is installed and TELESCOPE_ENABLED is on (17 §5.11 item 10).

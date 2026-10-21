@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Domain\Identity\Otp\ArrayOtpDelivery;
+use App\Domain\Identity\Otp\OtpDelivery;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Symfony\Component\Process\Process;
@@ -18,6 +20,8 @@ pest()->extend(TestCase::class)->use(LazilyRefreshDatabase::class)->beforeEach(f
     $this->withoutVite();
     // The login time box (13 §2) would slow every sign-in down by its minimum; its own tests switch it on.
     config(['auth.login_timebox_microseconds' => 0]);
+    // Codes are kept in memory, where the tests read them (a singleton, so the test and the action share it).
+    $this->app->singleton(OtpDelivery::class, ArrayOtpDelivery::class);
 })->in('Feature');
 pest()->extend(TestCase::class)->use(RefreshDatabase::class)->in('Browser');
 pest()->extend(TestCase::class)->in('Unit');
