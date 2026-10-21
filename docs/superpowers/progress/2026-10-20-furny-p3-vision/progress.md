@@ -190,3 +190,8 @@ Task 22: review df18134: spec ✅ (6 carries met; Adapter(settings, resolved_mod
 Carry Task 24/25: _scrub (api/providers.py:194) removes only full secret values — also scrub masked keys echoed in provider 401 text (e.g. `sk-[\w*-]{6,}`); wrap the provider-test call in anyio.fail_after(timeout) so a hung adapter can't pin a worker.
 Task 22: minor (deferred): max_tokens branch + presigned-query scrub untested (providers.py:291, :194); jsonSchemaVerified = capability flag, not observed native path.
 Task 22: complete (commits e4ed2a7..df18134, review clean)
+Task 23: impl aef574b (DONE; 23 new, 1246 full). Decisions: draw_marks extra kw origin/all_walls; parsed kinds extended (size_pair, area, scale_note, opening_tag, numeric); truncation priority per kind; list_candidates reads full set; from_overview inverse exposed; __invalid_json__ checked first (K16).
+Task 23: review aef574b: spec ✅ (candidate JSON, §9.5 tool schemas verbatim, crop text, K16 first), quality Approved; all 6 implementer decisions accepted.
+Carry Task 27: crop w,h ≥16 check must run after clamping (06 §9.5; tools.py:646 runs before clamp → sliver crops succeed); confirm max_turns bounds invalid-crop retries (invalid crops don't consume budget, tools.py:640); list_candidates should reject zero/negative region (tools.py:686).
+Task 23: minor (deferred): truncated JSON can reference dropped ids (containsTextIds/nearTextIds/wallId) — prompt note; openings on unknown wall excluded from totals silently (annotate.py:330); `_parsed` "room_name:" empty (annotate.py:191); tests: only texts truncation tested, annotated-crop mark positions unchecked, from_overview non-zero offset untested.
+Task 23: complete (commits 920f604..aef574b, review clean)
