@@ -22,6 +22,7 @@ import { derivePlanGeometry, type DerivedPlan } from './derive';
 import { isAnchorInsideRoom } from './rooms';
 import type { PlanDocument } from './schema';
 import type { Issue } from './types';
+import { cmpId } from '../compare';
 
 export const PLAN_ISSUE_CODES = [
     'plan.node_missing',
@@ -54,7 +55,6 @@ const CACHE_SIZE = 4;
 /** mm; collinear walls overlapping by no more than this are not reported. */
 const MIN_OVERLAP = 1;
 
-const cmpId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const sortedIds = (record: Record<string, unknown>): string[] =>
     Object.keys(record).sort(cmpId);
 /** Rounds to integer mm and normalises `-0`. */

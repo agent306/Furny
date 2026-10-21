@@ -30,6 +30,7 @@ import {
 import { distPointLine } from '../geometry/segment';
 import type { PlanDocument, Wall } from './schema';
 import type { DeriveIssue } from './types';
+import { cmpId } from '../compare';
 
 /** Short codes of every `DeriveIssue`; message key is `engine.plan.derive.<code>`. */
 export const DERIVE_ISSUE_CODES = [
@@ -81,7 +82,6 @@ const CROSS_TOL = 1e-9;
 /** `-0` -> `0`. */
 const z = (n: number): number => (n === 0 ? 0 : n);
 const clean = (p: Vec2): Vec2 => ({ x: z(p.x), y: z(p.y) });
-const cmpId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 function skipped(
     wallId: string,

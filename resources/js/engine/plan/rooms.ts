@@ -34,6 +34,7 @@ import type { DerivedRoom, DerivedWall } from './derive';
 import type { PlanDocument } from './schema';
 import type { DeriveIssue } from './types';
 import type { WallGraph } from './walls';
+import { cmpId } from '../compare';
 
 /** Net polygon and metrics of one face (04 §4.5 steps 2-6), before keys and labels. */
 export interface RoomNet {
@@ -67,14 +68,13 @@ export interface RoomAnalysis {
 
 const z = (n: number): number => (n === 0 ? 0 : n);
 const clean = (p: Vec2): Vec2 => ({ x: z(p.x), y: z(p.y) });
-const cmpStr = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * `'fk_' + cyrb53(sorted unique ids joined '|').toString(36)` (04 §4.6).
  * Collision suffixes are added by `detectRooms`.
  */
 export function faceKeyFor(wallIds: string[]): string {
-    const ids = [...new Set(wallIds)].sort(cmpStr);
+    const ids = [...new Set(wallIds)].sort(cmpId);
     return `fk_${cyrb53(ids.join('|')).toString(36)}`;
 }
 
@@ -158,7 +158,7 @@ function outerCycleWallIds(pg: PlanarGraph, face: RawFace): string[] {
     for (const h of face.halfEdges.slice(0, face.ring.length)) {
         for (const id of pg.edges[h >> 1]!.wallIds) ids.add(id);
     }
-    return [...ids].sort(cmpStr);
+    return [...ids].sort(cmpId);
 }
 
 interface Candidate {
@@ -244,11 +244,11 @@ export function analyzeRooms(
             facePolygon,
             labelPoint: clean(label.point),
             labelRadius: label.distance,
-            wallIds: [...face.wallIds].sort(cmpStr),
+            wallIds: [...face.wallIds].sort(cmpId),
             netRect: net.netRect,
         };
     });
-    rooms.sort((p, q) => cmpStr(p.faceKey, q.faceKey));
+    rooms.sort((p, q) => cmpId(p.faceKey, q.faceKey));
 
     // Room on the right of every half-edge (04 §4.2).
     const faceOfHalfEdge = new Map<number, number>();
@@ -346,7 +346,7 @@ export function associateRoomMetas(
     doc: PlanDocument,
 ): { rooms: DerivedRoom[]; issues: DeriveIssue[] } {
     const issues: DeriveIssue[] = [];
-    const metaIds = Object.keys(doc.rooms).sort(cmpStr);
+    const metaIds = Object.keys(doc.rooms).sort(cmpId);
     const inside = rooms.map(() => [] as string[]);
     for (const id of metaIds) {
         const anchor = doc.rooms[id]!.anchor;

@@ -49,6 +49,7 @@ import {
     type WallGraph,
     type WallInfo,
 } from './walls';
+import { cmpId } from '../compare';
 
 /** A room found by room detection (04 §4.5). */
 export interface DerivedRoom {
@@ -140,7 +141,6 @@ const U_TOL = 1e-6;
 
 const z = (n: number): number => (n === 0 ? 0 : n);
 const clean = (p: Vec2): Vec2 => ({ x: z(p.x), y: z(p.y) });
-const cmpId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 const issue = (
     code: string,
