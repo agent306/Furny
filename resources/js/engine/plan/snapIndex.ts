@@ -75,7 +75,7 @@ export interface SnapIndex {
     wallsAtNode: ReadonlyMap<string, readonly string[]>;
 }
 
-function buildClass<T>(
+export function buildClass<T>(
     items: T[],
     boxOf: (item: T) => Box,
 ): SnapItemIndex<T> | null {
@@ -89,14 +89,14 @@ function buildClass<T>(
     return { tree, items };
 }
 
-const segBox = (a: Vec2, b: Vec2): Box => [
+export const segBox = (a: Vec2, b: Vec2): Box => [
     Math.min(a.x, b.x),
     Math.min(a.y, b.y),
     Math.max(a.x, b.x),
     Math.max(a.y, b.y),
 ];
 
-const ringBox = (corners: readonly Vec2[]): Box => {
+export const ringBox = (corners: readonly Vec2[]): Box => {
     let x0 = Infinity;
     let y0 = Infinity;
     let x1 = -Infinity;

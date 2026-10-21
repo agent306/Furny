@@ -11,7 +11,7 @@ import { line, poly, text } from './shared';
 import type { DrawGroup, DrawItem, DrawingOptions } from './types';
 
 /** Side of the square drawn for a placement whose design is unknown (mm). */
-const MISSING_SIZE = 600;
+export const MISSING_SIZE = 600;
 /** Front-edge arrow: base and height (mm). */
 const ARROW_BASE = 150;
 const ARROW_HEIGHT = 100;

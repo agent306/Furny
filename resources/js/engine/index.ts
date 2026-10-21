@@ -272,6 +272,7 @@ export {
     drawWall,
     drawWallOutline,
     roomTypeToColorKey,
+    svgFromDrawing,
 } from './plan/drawing';
 export type {
     DrawGroup,
@@ -281,4 +282,8 @@ export type {
     PlanDrawing,
     RoomColorKey,
     StyleKey,
+    SvgExportOptions,
+    SvgStyle,
 } from './plan/drawing';
+export { buildHitIndex, hitTest, hitTestRect } from './plan/hitIndex';
+export type { Hit, HitIndex, HitKind, HitLayerMask } from './plan/hitIndex';
