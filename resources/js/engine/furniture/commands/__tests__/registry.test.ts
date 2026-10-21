@@ -734,6 +734,23 @@ describe('changedIds across several patches', () => {
         for (const e of seen) expect(e.ids, e.kind).toContain(S.rod);
     });
 
+    it('reads later patches against the document an earlier whole-collection patch produced', () => {
+        const base = wardrobeFixture();
+        const swapped = structuredClone(base.carcass!);
+        swapped.fronts.reverse();
+        // after the first patch fronts[0] is fr_2, not fr_1
+        expect(
+            furnitureEntityIdsOf(base, [
+                { op: 'replace', path: ['carcass'], value: swapped },
+                {
+                    op: 'replace',
+                    path: ['carcass', 'fronts', 0, 'overlay'],
+                    value: 'half',
+                },
+            ]),
+        ).toEqual(new Set(['*', FR.right]));
+    });
+
     it('reports nothing for no patch and * for a patch outside the tree', () => {
         expect(furnitureEntityIdsOf(wardrobeFixture(), [])).toEqual(new Set());
         expect(

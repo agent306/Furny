@@ -408,16 +408,24 @@ const mergeSections = defineFurnitureCommand<MergeSectionsParams>({
 
         const renamed = new Map(removed.map((id) => [id, section.id]));
         pushDeleted(out, ...rewireFronts(carcass.fronts, new Set(), renamed));
-        // Two fronts on one section: the later one goes (07 §9).
+        // Two fronts on one section: the later one gives it up (07 §9 deletes
+        // the whole front; ruling for spec 19: only the merged id leaves its
+        // covers, so the sections it also covered keep their door whatever
+        // the order of the fronts), and goes when nothing is left.
         const covering = carcass.fronts
             .filter((f) => f.covers.includes(section.id))
             .map((f) => f.id);
         for (const id of covering.slice(1)) {
-            carcass.fronts.splice(
-                carcass.fronts.findIndex((f) => f.id === id),
-                1,
+            const at = carcass.fronts.findIndex((f) => f.id === id);
+            const rest = carcass.fronts[at]!.covers.filter(
+                (c) => c !== section.id,
             );
-            pushDeleted(out, id);
+            if (rest.length === 0) {
+                carcass.fronts.splice(at, 1);
+                pushDeleted(out, id);
+            } else {
+                assign(carcass.fronts[at]!, 'covers', rest);
+            }
         }
         syncBehindDoor(d);
     },

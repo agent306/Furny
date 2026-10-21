@@ -591,6 +591,107 @@ describe('mergeSections and drawers', () => {
     });
 });
 
+describe('mergeSections and a front that reaches beyond the merge', () => {
+    /**
+     * s_4 is split in s_6 / s_7. One front covers s_6, the other covers s_7
+     * and s_5 (outside the merge), in either order. Merging s_4 puts both
+     * fronts on s_4; s_5 keeps its door whichever front comes first.
+     */
+    function setup(pairFirst: boolean) {
+        const bus = furnitureBus();
+        ok(bus.execute('furniture.removeFront', { frontId: FR.right }));
+        ok(
+            bus.execute('furniture.splitSection', {
+                sectionId: S.empty,
+                direction: 'rows',
+                count: 2,
+            }),
+        );
+        const front = (covers: string[]) => ({
+            kind: 'hinged' as const,
+            covers,
+            leaves: 1 as const,
+            hingeSide: 'left' as const,
+            overlay: 'full' as const,
+            glass: false,
+            handleCode: 'inherit',
+            hingeCode: 'auto',
+            slidingTrackCode: null,
+        });
+        const single = front(['s_0000000006']);
+        const pair = front(['s_0000000007', S.rod]);
+        for (const covers of pairFirst ? [pair, single] : [single, pair]) {
+            ok(bus.execute('furniture.addFront', covers));
+        }
+        bus.seal();
+        return bus;
+    }
+
+    it.each([false, true])(
+        'keeps the door of s_5 (pair front first: %s)',
+        (pairFirst) => {
+            const bus = setup(pairFirst);
+            const before = bus.getDoc();
+            const merged = ok(
+                bus.execute('furniture.mergeSections', { sectionId: S.empty }),
+            );
+            const fronts = frontsOf(bus.getDoc());
+            const coverOf = (id: string) =>
+                fronts.filter((f) => f.covers.includes(id));
+            // s_5 keeps its door, s_4 is covered exactly once
+            expect(coverOf(S.rod)).toHaveLength(1);
+            expect(coverOf(S.empty)).toHaveLength(1);
+            // the front without s_5 survives only if it is the one that holds s_4
+            expect(fronts).toHaveLength(pairFirst ? 2 : 3);
+            const pair = frontsOf(before).find((f) =>
+                f.covers.includes(S.rod),
+            )!;
+            // the patches name the section and the front whose covers changed
+            expect(merged.changedIds).toContain(S.empty);
+            expect(merged.changedIds).toContain(pair.id);
+            expect(merged.deletedIds).toHaveLength(
+                // s_6 / s_7 and, when the single front comes second, that front
+                pairFirst ? 3 : 2,
+            );
+            bus.undo();
+            expect(bus.getDoc()).toEqual(before);
+        },
+    );
+
+    it('removes only the merged id from a later front that has other sections', () => {
+        const doc = wardrobeFixture((d) => {
+            const root = sectionOf(d, S.empty);
+            root.split = 'rows';
+            root.content = null;
+            root.children = [6, 7].map((n) => ({
+                size: { mode: 'flex' as const, weight: 1 },
+                section: {
+                    id: `s_${String(n).padStart(10, '0')}`,
+                    split: 'none' as const,
+                    children: [],
+                    content: { type: 'empty' as const },
+                },
+            }));
+            d.carcass!.fronts[1]!.covers = ['s_0000000006'];
+            d.carcass!.fronts.push({
+                ...d.carcass!.fronts[0]!,
+                id: 'fr_0000000003',
+                covers: ['s_0000000007', S.rod],
+            });
+        });
+        const { after } = roundTrip(
+            'furniture.mergeSections',
+            { sectionId: S.empty },
+            doc,
+        );
+        expect(frontsOf(after).map((f) => [f.id, f.covers])).toEqual([
+            [FR.left, [S.shelves]],
+            [FR.right, [S.empty]],
+            ['fr_0000000003', [S.rod]],
+        ]);
+    });
+});
+
 describe('setContent', () => {
     it('replaces the content of a leaf; undo restores', () => {
         const content: Content = {

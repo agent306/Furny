@@ -110,12 +110,23 @@ export function furniturePathToEntityId(
     return section.id;
 }
 
-/** The patch paths that can name a section, front or extra item: the only ones whose meaning depends on the doc. */
-const indexed = (path: (string | number)[]): boolean =>
-    path[0] === 'carcass'
-        ? path[1] === 'interior' || path[1] === 'fronts'
-        : path[0] === 'overrides' &&
-          (path[1] === 'extraParts' || path[1] === 'extraHardware');
+/**
+ * The patch paths whose application can change what a later index path means:
+ * anything under `carcass.interior`, `carcass.fronts` and
+ * `overrides.extraParts / extraHardware`, and a patch that replaces one of
+ * their ancestors (`[]`, `['carcass']`, `['overrides']`).
+ */
+const indexed = (path: (string | number)[]): boolean => {
+    const [head, second] = path;
+    if (path.length <= 1) {
+        return head === undefined || head === 'carcass' || head === 'overrides';
+    }
+    if (head === 'carcass') return second === 'interior' || second === 'fronts';
+    return (
+        head === 'overrides' &&
+        (second === 'extraParts' || second === 'extraHardware')
+    );
+};
 
 /**
  * The entity ids `patches` touch, for the bus' `entityIdsOf`: each patch is
