@@ -642,6 +642,7 @@ export type {
 } from './bom/nesting/guillotine';
 export { BOM_ISSUE_CODES, nestSheets } from './bom/nesting';
 export { estimateFurniture } from './bom/estimate';
+export { CUT_LIST_CSV_COLUMNS, csvField, cutListCsv } from './bom/exportCsv';
 export { LABOUR_KEYS_ORDER, displayUnitPrice, priceBom } from './bom/pricing';
 export type { PriceBreakdown, PriceLine, PriceOptions } from './bom/pricing';
 export type {
