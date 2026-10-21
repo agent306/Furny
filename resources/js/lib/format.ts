@@ -181,7 +181,7 @@ export function minorToMajorString(minor: number, currency: string): string {
 export type NumberSeparators = {
     /** Between the integer and fraction digits (`.` or `,`). */
     decimal: string;
-    /** Between thousands (`,`, `.`, NBSP, narrow NBSP, `’`). */
+    /** Between thousands (`,`, `.`, NBSP, narrow NBSP, `’` or `'`). */
     group: string;
 };
 
@@ -280,13 +280,16 @@ function toAsciiDigits(text: string): string {
 }
 
 // Typing a plain space, NBSP or narrow NBSP is the same as the locale's
-// space-like group; the keyboard apostrophe stands for `’`.
+// space-like group; the keyboard apostrophe and `’` stand for each other, as
+// CLDR 48 (ICU 78) spells the de-CH group `'` where older data has `’`.
 function normaliseGroup(text: string, group: string): string {
     if (/^\s$/.test(group)) {
         return text.replace(/[ \u00a0\u202f]/g, group);
     }
 
-    return group === '\u2019' ? text.replaceAll("'", group) : text;
+    return group === '\u2019' || group === "'"
+        ? text.replace(/['\u2019]/g, group)
+        : text;
 }
 
 /**
