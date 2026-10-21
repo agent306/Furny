@@ -273,6 +273,37 @@ describe('svgFromDrawing structure (04 §8.3)', () => {
         expect(xml).toContain('<circle cx="10" cy="20" r="30"');
         expect(xml).toContain('<line x1="0" y1="0" x2="5" y2="6"');
     });
+
+    describe('circle fill', () => {
+        const circle = (style: StyleKey = 'fixture'): PlanDrawing =>
+            drawingWith(
+                'FIXTURES',
+                group([{ t: 'circle', c: { x: 10, y: 20 }, r: 30, style }]),
+            );
+        const withFill = (fill: string | null) => ({
+            styles: {
+                ...TEST_STYLES,
+                fixture: { ...TEST_STYLES.fixture, fill },
+            },
+        });
+
+        it('resolves the style fill token through the palette', () => {
+            const xml = svg(circle());
+            expect(xml).toMatch(/<circle [^>]*fill="#FFFFFF"/);
+            expect(xml).not.toMatch(/<circle [^>]*fill="cFFFFFF"/);
+        });
+
+        it('writes fill none for a style without a fill', () => {
+            const xml = svg(circle(), withFill(null));
+            expect(xml).toMatch(/<circle [^>]*fill="none"/);
+        });
+
+        it('throws on a fill token that is not a palette key', () => {
+            expect(() => svg(circle(), withFill('nope'))).toThrow(
+                /no palette entry for colour "nope"/,
+            );
+        });
+    });
 });
 
 describe('svgFromDrawing text', () => {
@@ -338,6 +369,14 @@ describe('svgFromDrawing text', () => {
         );
     });
 
+    it('throws a clear error on an unknown text baseline', () => {
+        const bad = drawingWith(
+            'TEXT',
+            group([textItem({ baseline: 'sideways' as never })]),
+        );
+        expect(() => svg(bad)).toThrow(/unknown text baseline "sideways"/);
+    });
+
     it('writes alignment-baseline next to dominant-baseline', () => {
         for (const baseline of ['middle', 'top', 'bottom'] as const) {
             const xml = svg(
@@ -362,6 +401,16 @@ describe('svgFromDrawing text', () => {
         );
         assertWellFormedXml(xml);
         expect(xml).toContain('>abcd</text>');
+    });
+
+    it('drops U+FFFE and U+FFFF from text and attribute values', () => {
+        const xml = svg(
+            drawingWith('TEXT', group([textItem({ text: 'a￾b￿c' })], 'w_￾1￿2')),
+        );
+        assertWellFormedXml(xml);
+        expect(xml).toContain('>abc</text>');
+        expect(xml).toContain('data-entity="w_12"');
+        expect(xml).not.toMatch(/[￾￿]/);
     });
 });
 

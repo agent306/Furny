@@ -178,6 +178,22 @@ function entry(
     return { ...none, id, kind, shapes, box, ...extra };
 }
 
+/** The y of a text box top relative to its anchor, by baseline; unknown values throw. */
+function baselineOffset(baseline: string, height: number): number {
+    switch (baseline) {
+        case 'top':
+            return 0;
+        case 'middle':
+            return -height / 2;
+        case 'bottom':
+            return -height;
+        default:
+            throw new Error(
+                `buildHitIndex: unknown text baseline ${JSON.stringify(baseline)}`,
+            );
+    }
+}
+
 /** The estimated oriented box of a text item as a CW ring; `null` for empty text. */
 function textRing(item: Extract<DrawItem, { t: 'text' }>): Shape | null {
     const chars = [...item.text].length;
@@ -186,13 +202,7 @@ function textRing(item: Extract<DrawItem, { t: 'text' }>): Shape | null {
     const h = item.sizeMm;
     const x0 =
         item.anchor === 'start' ? 0 : item.anchor === 'middle' ? -w / 2 : -w;
-    const y0 =
-        (item.baseline === 'top'
-            ? 0
-            : item.baseline === 'middle'
-              ? -h / 2
-              : -h) +
-        item.dyEm * item.sizeMm;
+    const y0 = baselineOffset(item.baseline, h) + item.dyEm * item.sizeMm;
     const rad = (item.rotationDeg * Math.PI) / 180;
     const corner = (x: number, y: number): Vec2 => {
         const r = rot({ x, y }, rad);

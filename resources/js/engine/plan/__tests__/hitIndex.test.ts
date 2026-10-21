@@ -296,7 +296,7 @@ describe('hitTest priority (04 §5.12)', () => {
         expect(kinds(at(w, { x: 2000, y: 1700 }))).not.toContain('placement');
     });
 
-    it('puts a text label above placements, and a room label above a label', () => {
+    it('puts a text label above placements', () => {
         const doc = makeRectPlan(5000, 4000, 230);
         addPlacement(doc, 'f_0000000001', 'sofa', 1400, 900);
         doc.annotations.labels['t_0000000001'] = {
@@ -315,6 +315,31 @@ describe('hitTest priority (04 §5.12)', () => {
         ).toEqual(['label', 'placement']);
         expect(at(w, { x: 1200, y: 1000 })[0]!.id).toBe('t_0000000001');
         expect(kinds(at(w, { x: 1200, y: 1200 }))).not.toContain('label');
+    });
+
+    it('puts a text label above a room label it overlaps (04 §5.12)', () => {
+        const r = roomPlan();
+        const group = r.drawing.layers.TEXT.find(
+            (g) => g.entityKind === 'room',
+        )!;
+        const name = textsOf(group, 'room_name')[0]!;
+        const p = { x: name.at.x, y: name.at.y + name.dyEm * name.sizeMm };
+        // a 300 mm label whose box (x - 50 .. x + 790, y +- 150) covers `p`
+        r.doc.annotations.labels['t_0000000001'] = {
+            id: 't_0000000001',
+            position: { x: p.x - 50, y: p.y },
+            text: 'Hello',
+            fontSize: 300,
+            rotation: 0,
+        };
+        const w = world(r.doc);
+        const hits = at(w, p);
+        expect(hits[0]).toMatchObject({ kind: 'label', id: 't_0000000001' });
+        expect(kinds(hits)).toEqual(['label', 'room_label', 'room']);
+        // away from the label box the room label is still reachable
+        const away = at(w, { x: p.x - 200, y: p.y });
+        expect(kinds(away)).not.toContain('label');
+        expect(kinds(away)[0]).toBe('room_label');
     });
 
     it('hits a rotated label box', () => {
@@ -979,6 +1004,19 @@ describe('hit shapes (fix round 1)', () => {
         // two code points: 112 wide, not 224
         expect(labelIds(w, { x: 600, y: 500 })).toEqual(['t_emoji']);
         expect(labelIds(w, { x: 650, y: 500 })).toEqual([]);
+    });
+
+    it('throws a clear error on an unknown text baseline', () => {
+        expect(() =>
+            labelWorld([
+                {
+                    id: 't_bad',
+                    at: { x: 2000, y: 2000 },
+                    anchor: 'start',
+                    baseline: 'sideways' as never,
+                },
+            ]),
+        ).toThrow(/unknown text baseline "sideways"/);
     });
 
     it('skips empty text', () => {

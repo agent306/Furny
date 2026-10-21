@@ -5,10 +5,10 @@
  * drawing order, numbers via `num`) and safe to embed: every text and
  * attribute value is XML-escaped, no script or foreign content is ever
  * written, and the only external reference is the background image `href`,
- * which must be a `data:image` URI or an http(s) URL (anything else drops the
- * image). The engine stays theme-free: room fill tokens and style colours are
- * resolved through `SvgExportOptions.palette`, which the caller fills from the
- * light export palette.
+ * which must be a data:image URI, or http(s) when allowRemoteHref (anything
+ * else drops the image). The engine stays theme-free: room fill tokens and
+ * style colours are resolved through `SvgExportOptions.palette`, which the
+ * caller fills from the light export palette.
  */
 import type { Vec2 } from '../../geometry/vec2';
 import {
@@ -238,6 +238,7 @@ class Writer {
 
     private text(item: Extract<DrawItem, { t: 'text' }>): string {
         const s = this.style(item.style);
+        const baseline = svgBaseline(item.baseline);
         const transform =
             item.rotationDeg === 0
                 ? `translate(${num(item.at.x)} ${num(item.at.y)})`
@@ -247,8 +248,8 @@ class Writer {
             ...(item.dyEm === 0 ? [] : [nattr('dy', item.dyEm * item.sizeMm)]),
             attr('text-anchor', item.anchor),
             // svg2pdf.js reads alignment-baseline, browsers dominant-baseline.
-            attr('dominant-baseline', BASELINE[item.baseline]),
-            attr('alignment-baseline', BASELINE[item.baseline]),
+            attr('dominant-baseline', baseline),
+            attr('alignment-baseline', baseline),
             nattr('font-size', item.sizeMm),
             attr('font-family', this.o.fontFamily),
             ...(s.fontWeight === undefined
@@ -352,6 +353,16 @@ const BASELINE = {
     top: 'hanging',
     bottom: 'alphabetic',
 } as const;
+
+/** The SVG baseline keyword of a drawing baseline; anything else throws. */
+function svgBaseline(baseline: string): string {
+    if (!Object.hasOwn(BASELINE, baseline)) {
+        throw new Error(
+            `svgFromDrawing: unknown text baseline ${JSON.stringify(baseline)}`,
+        );
+    }
+    return BASELINE[baseline as keyof typeof BASELINE];
+}
 
 function ring(pts: Vec2[], close: boolean): string {
     const cmds = pts.map(
