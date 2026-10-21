@@ -5,6 +5,18 @@
  * edit), take every new id from `ctx.newId`, and write every coordinate
  * rounded to integer millimetres (never as -0). A refusal is a `CommandAbort`
  * carrying an `engine.plan.command.*` message.
+ *
+ * Rulings carried by these helpers (logged in spec 19):
+ * - After a split, dimensions attached to the original wall stay attached to
+ *   it, so they follow the head part (`a -> N`) only; 04 §6.5 says "stay
+ *   attached" and nothing re-attaches them to the tail.
+ * - A wall a new segment crosses is never left unsplit: where the crossing is
+ *   folded into a nearby node (see `dedupeCuts`) the wall is split at that
+ *   node if it lies within `NODE_MERGE_TOL` of the wall, else the command
+ *   aborts `wall_too_short` (`walls_intersect` is a plan issue, not one of
+ *   the 22 command codes).
+ * - No wall shorter than `MIN_WALL_LENGTH` is made: cuts, crossings and
+ *   splits keep at least that distance from the ends they meet.
  */
 import type { Draft } from 'mutative';
 import { CommandAbort, type CommandOutput } from '../../commands/types';
@@ -208,7 +220,8 @@ function splitAtNode(d: Doc, wallId: string, nodeId: string, ctx: Ids): string {
 /**
  * Splits `wallId` where `point` projects onto its centre line (04 §6.5):
  * returns the new node's id. A cut strictly inside an opening aborts with
- * `split_through_opening`. The caller passes a point inside the wall.
+ * `split_through_opening`; a point projecting outside the open interval
+ * `(MIN_WALL_LENGTH, length - MIN_WALL_LENGTH)` aborts `wall_too_short`.
  */
 export function splitWallAt(
     d: Doc,
@@ -221,16 +234,12 @@ export function splitWallAt(
     const wall = wallOf(d, wallId);
     const { a, b } = segmentOf(d, wall);
     const length = dist(a, b);
-    const u =
-        length < 1e-9
-            ? 0
-            : Math.min(
-                  length,
-                  Math.max(0, dot(sub(point, a), sub(b, a)) / length),
-              );
-    const at = roundedPoint(
-        length < 1e-9 ? a : add(a, scale(sub(b, a), u / length)),
-    );
+    const u = length < 1e-9 ? 0 : dot(sub(point, a), sub(b, a)) / length;
+    // never a zero-length wall or a node on top of an end
+    if (!(u > MIN_WALL_LENGTH && u < length - MIN_WALL_LENGTH)) {
+        fail('wall_too_short', { wallId, length: mm(length) });
+    }
+    const at = roundedPoint(add(a, scale(sub(b, a), u / length)));
     const nodeId = ctx.newId('n');
     d.nodes[nodeId] = { id: nodeId, x: at.x, y: at.y };
     splitAtNode(d, wallId, nodeId, ctx);
@@ -269,7 +278,14 @@ export function resolveEndpoint(
 
     let onWall: { id: string; distance: number; at: Vec2 } | null = null;
     for (const id of sortedIds(d.walls)) {
-        const seg = segmentOf(d, d.walls[id]!);
+        const wall = d.walls[id]!;
+        if (
+            !Object.hasOwn(d.nodes, wall.a) ||
+            !Object.hasOwn(d.nodes, wall.b)
+        ) {
+            continue; // a dangling wall is not a snap target
+        }
+        const seg = segmentOf(d, wall);
         const length = dist(seg.a, seg.b);
         const hit = closestPointOnSeg(point, seg);
         const u = hit.t * length;
@@ -290,46 +306,188 @@ export function resolveEndpoint(
     return id;
 }
 
-// ---- insertWallSegment -------------------------------------------------------
+// ---- cutting a segment at the graph --------------------------------------------
 
-/** A point where the new segment gets cut (04 §6.5 `insertWallSegment` step 2). */
-interface SplitPoint {
-    /** Parameter on the segment, 0 at `from`. */
+/**
+ * Cuts closer than this to a neighbouring cut (or to the segment's ends) are
+ * folded into it, so no wall shorter than `MIN_WALL_LENGTH` is made.
+ */
+const STUB = Math.max(NODE_MERGE_TOL, MIN_WALL_LENGTH);
+
+/** A point where a segment gets cut (04 §6.5 `insertWallSegment` step 2). */
+interface Cut {
+    /** Parameter on the segment, 0 at its first end. */
     t: number;
     /** 0: the segment's own end; 1: an existing node; 2: a wall to split. */
     rank: 0 | 1 | 2;
     /** The node (rank 0 and 1; set after the split for rank 2). */
     nodeId: string | null;
-    /** The wall to split and where (rank 2). */
-    wallId?: string;
+    /** The wall this cut stands for where it crosses the segment. */
+    viaWall?: string;
+    /** Where that wall is split (rank 2). */
     point?: Vec2;
 }
 
-const splitOrder = (p: SplitPoint, q: SplitPoint): number =>
+/** A crossing wall whose own cut was folded into `into`: it is split there. */
+interface Folded {
+    wallId: string;
+    into: Cut;
+}
+
+const cutOrder = (p: Cut, q: Cut): number =>
     p.t - q.t ||
     p.rank - q.rank ||
-    cmpId(p.nodeId ?? p.wallId ?? '', q.nodeId ?? q.wallId ?? '');
+    cmpId(p.nodeId ?? p.viaWall ?? '', q.nodeId ?? q.viaWall ?? '');
 
 /**
- * Sorts split points along the segment and drops those closer than
- * `NODE_MERGE_TOL` to the previous one; the stronger kind (end, existing node,
- * wall split) wins.
+ * Sorts the cuts along the segment and folds those closer than `STUB` to the
+ * previous one into it; the stronger kind (end, existing node, wall split)
+ * wins. A folded cut that stood for a crossing wall is reported, so the wall
+ * is still split (at the surviving cut) and never left crossing unsplit.
  */
-function dedupeSplitPoints(points: SplitPoint[], length: number): SplitPoint[] {
-    const kept: SplitPoint[] = [];
-    for (const point of [...points].sort(splitOrder)) {
-        const last = kept.at(-1);
+function dedupeCuts(
+    points: Cut[],
+    length: number,
+): { kept: Cut[]; folded: Folded[] } {
+    const kept: Cut[] = [];
+    const folded: Folded[] = [];
+    const fold = (lose: Cut, win: Cut): void => {
+        for (const f of folded) if (f.into === lose) f.into = win;
         if (
-            last !== undefined &&
-            (point.t - last.t) * length < NODE_MERGE_TOL
+            lose.viaWall !== undefined &&
+            (lose.nodeId === null || lose.nodeId !== win.nodeId)
         ) {
-            if (point.rank < last.rank) kept[kept.length - 1] = point;
+            folded.push({ wallId: lose.viaWall, into: win });
+        }
+    };
+    for (const point of [...points].sort(cutOrder)) {
+        kept.push(point);
+        while (kept.length >= 2) {
+            const q = kept[kept.length - 1]!;
+            const p = kept[kept.length - 2]!;
+            if ((q.t - p.t) * length >= STUB) break;
+            const [win, lose] = q.rank < p.rank ? [q, p] : [p, q];
+            fold(lose, win);
+            kept.splice(kept.length - 2, 2, win);
+        }
+    }
+    return { kept, folded };
+}
+
+/** What a segment meets in the graph, as cuts (before folding). */
+function collectCuts(
+    d: Doc,
+    seg: Seg,
+    ends: { a: string; b: string },
+    selfWall: string | null,
+    withCoverage: boolean,
+): { points: Cut[]; covered: Array<[number, number]> } {
+    const points: Cut[] = [
+        { t: 0, rank: 0, nodeId: ends.a },
+        { t: 1, rank: 0, nodeId: ends.b },
+    ];
+    const covered: Array<[number, number]> = [];
+
+    // existing nodes near the interior
+    for (const id of sortedIds(d.nodes)) {
+        if (id === ends.a || id === ends.b) continue;
+        const p = nodePoint(d, id);
+        const t = projectParam(p, seg);
+        if (t <= 0 || t >= 1) continue;
+        if (closestPointOnSeg(p, seg).dist <= NODE_MERGE_TOL) {
+            points.push({ t, rank: 1, nodeId: id });
+        }
+    }
+
+    // crossing and (for a new wall) collinear walls
+    for (const id of sortedIds(d.walls)) {
+        if (id === selfWall) continue;
+        const wall = d.walls[id]!;
+        if (
+            !Object.hasOwn(d.nodes, wall.a) ||
+            !Object.hasOwn(d.nodes, wall.b)
+        ) {
+            continue; // a dangling wall cannot be crossed
+        }
+        const hit = intersectSegments(seg, segmentOf(d, wall), NODE_MERGE_TOL);
+        if (hit.kind === 'overlap') {
+            if (withCoverage) covered.push([hit.t0, hit.t1]);
             continue;
         }
-        kept.push(point);
+        if (hit.kind !== 'point') continue;
+        if (hit.t <= 0 || hit.t >= 1 || hit.u <= 0 || hit.u >= 1) continue;
+        // A crossing within STUB of one of the wall's own nodes goes through
+        // that node, so the wall is not cut into a stub.
+        let near: { id: string; distance: number } | null = null;
+        for (const nodeId of [wall.a, wall.b]) {
+            const distance = dist(hit.point, nodePoint(d, nodeId));
+            if (
+                distance <= STUB &&
+                (near === null || distance < near.distance)
+            ) {
+                near = { id: nodeId, distance };
+            }
+        }
+        if (near === null) {
+            points.push({
+                t: hit.t,
+                rank: 2,
+                nodeId: null,
+                viaWall: id,
+                point: hit.point,
+            });
+        } else if (near.id !== ends.a && near.id !== ends.b) {
+            const t = Math.min(
+                1,
+                Math.max(0, projectParam(nodePoint(d, near.id), seg)),
+            );
+            points.push({ t, rank: 1, nodeId: near.id, viaWall: id });
+        }
     }
-    return kept;
+    return { points, covered };
 }
+
+/**
+ * Splits the crossed walls: those with a wall-split cut get their new node,
+ * and those whose cut was folded are split at the node they were folded into
+ * (it must lie within `NODE_MERGE_TOL` of the wall and leave both parts at
+ * least `MIN_WALL_LENGTH` long, else `wall_too_short`). Cuts are processed
+ * along the segment, so the new ids are deterministic.
+ */
+function splitCrossedWalls(
+    d: Doc,
+    kept: Cut[],
+    folded: Folded[],
+    ctx: Ids,
+    out: Out,
+): void {
+    for (const cut of kept) {
+        if (cut.rank === 2) {
+            cut.nodeId = splitWallAt(d, cut.viaWall!, cut.point!, ctx, out);
+        }
+    }
+    const order = new Map(kept.map((c, i) => [c, i]));
+    for (const { wallId, into } of [...folded].sort(
+        (p, q) => (order.get(p.into) ?? 0) - (order.get(q.into) ?? 0),
+    )) {
+        const wall = d.walls[wallId]!;
+        if (wall.a === into.nodeId || wall.b === into.nodeId) continue;
+        const seg = segmentOf(d, wall);
+        const length = dist(seg.a, seg.b);
+        const hit = closestPointOnSeg(nodePoint(d, into.nodeId!), seg);
+        const u = hit.t * length;
+        if (
+            hit.dist > NODE_MERGE_TOL ||
+            u < MIN_WALL_LENGTH ||
+            length - u < MIN_WALL_LENGTH
+        ) {
+            fail('wall_too_short', { wallId, length: mm(length) });
+        }
+        splitAtNode(d, wallId, into.nodeId!, ctx);
+    }
+}
+
+// ---- insertWallSegment -------------------------------------------------------
 
 /**
  * Draws the wall `from -> to` into the graph (04 §6.5): the segment is cut at
@@ -355,70 +513,15 @@ export function insertWallSegment(
     if (length < MIN_WALL_LENGTH)
         fail('wall_too_short', { length: mm(length) });
 
-    const points: SplitPoint[] = [
-        { t: 0, rank: 0, nodeId: fromNodeId },
-        { t: 1, rank: 0, nodeId: toNodeId },
-    ];
-    const covered: Array<[number, number]> = [];
-
-    // existing nodes near the interior
-    for (const id of sortedIds(d.nodes)) {
-        if (id === fromNodeId || id === toNodeId) continue;
-        const p = nodePoint(d, id);
-        const t = projectParam(p, seg);
-        if (t <= 0 || t >= 1) continue;
-        if (closestPointOnSeg(p, seg).dist <= NODE_MERGE_TOL) {
-            points.push({ t, rank: 1, nodeId: id });
-        }
-    }
-
-    // crossing and collinear walls
-    for (const id of sortedIds(d.walls)) {
-        const wall = d.walls[id]!;
-        if (
-            !Object.hasOwn(d.nodes, wall.a) ||
-            !Object.hasOwn(d.nodes, wall.b)
-        ) {
-            continue;
-        }
-        const wallSeg = segmentOf(d, wall);
-        const hit = intersectSegments(seg, wallSeg, NODE_MERGE_TOL);
-        if (hit.kind === 'overlap') {
-            covered.push([hit.t0, hit.t1]);
-            for (const nodeId of [wall.a, wall.b]) {
-                if (nodeId === fromNodeId || nodeId === toNodeId) continue;
-                const t = projectParam(nodePoint(d, nodeId), seg);
-                if (t > 0 && t < 1) points.push({ t, rank: 1, nodeId });
-            }
-            continue;
-        }
-        if (hit.kind !== 'point') continue;
-        if (hit.t <= 0 || hit.t >= 1 || hit.u <= 0 || hit.u >= 1) continue;
-        const near = [wall.a, wall.b].find(
-            (nodeId) => dist(hit.point, nodePoint(d, nodeId)) <= NODE_MERGE_TOL,
-        );
-        if (near === undefined) {
-            points.push({
-                t: hit.t,
-                rank: 2,
-                nodeId: null,
-                wallId: id,
-                point: hit.point,
-            });
-            continue;
-        }
-        const t = projectParam(nodePoint(d, near), seg);
-        if (t > 0 && t < 1 && near !== fromNodeId && near !== toNodeId) {
-            points.push({ t, rank: 1, nodeId: near });
-        }
-    }
-
-    const cuts = dedupeSplitPoints(points, length);
-    for (const cut of cuts) {
-        if (cut.rank === 2) {
-            cut.nodeId = splitWallAt(d, cut.wallId!, cut.point!, ctx, out);
-        }
-    }
+    const { points, covered } = collectCuts(
+        d,
+        seg,
+        { a: fromNodeId, b: toNodeId },
+        null,
+        true,
+    );
+    const { kept: cuts, folded } = dedupeCuts(points, length);
+    splitCrossedWalls(d, cuts, folded, ctx, out);
 
     const joined = new Set(
         Object.values(d.walls).map((w) => pairKey(w.a, w.b)),
@@ -444,20 +547,13 @@ export function insertWallSegment(
 
 // ---- splitIntersections --------------------------------------------------------
 
-interface CutEvent {
-    t: number;
-    rank: 1 | 2;
-    nodeId: string | null;
-    /** The crossing wall to split first (rank 2). */
-    otherId?: string;
-    point?: Vec2;
-}
-
 /**
  * Splits `wallId` and the walls it properly crosses at the crossings (nodes
  * within `NODE_MERGE_TOL` are reused), and splits it at every node within
- * `NODE_MERGE_TOL` of its interior (04 §6.5). Walls are cut in order along
- * the wall, so the new ids are deterministic.
+ * `NODE_MERGE_TOL` of its interior (04 §6.5). Cuts closer than
+ * `MIN_WALL_LENGTH` to each other or to the wall's ends are folded together
+ * (see `dedupeCuts`). Walls are cut in order along the wall, so the new ids
+ * are deterministic.
  */
 export function splitIntersections(
     d: Doc,
@@ -468,79 +564,24 @@ export function splitIntersections(
     const wall = wallOf(d, wallId);
     const seg = segmentOf(d, wall);
     const length = dist(seg.a, seg.b);
-    if (length < 1e-9) return;
+    if (length < MIN_WALL_LENGTH) return;
 
-    const events: CutEvent[] = [];
-    for (const id of sortedIds(d.nodes)) {
-        if (id === wall.a || id === wall.b) continue;
-        const p = nodePoint(d, id);
-        const t = projectParam(p, seg);
-        if (
-            t > 0 &&
-            t < 1 &&
-            closestPointOnSeg(p, seg).dist <= NODE_MERGE_TOL
-        ) {
-            events.push({ t, rank: 1, nodeId: id });
-        }
-    }
-    for (const id of sortedIds(d.walls)) {
-        if (id === wallId) continue;
-        const other = d.walls[id]!;
-        if (
-            !Object.hasOwn(d.nodes, other.a) ||
-            !Object.hasOwn(d.nodes, other.b)
-        ) {
-            continue;
-        }
-        const hit = intersectSegments(seg, segmentOf(d, other), NODE_MERGE_TOL);
-        if (hit.kind !== 'point') continue;
-        if (hit.t <= 0 || hit.t >= 1 || hit.u <= 0 || hit.u >= 1) continue;
-        const near = [other.a, other.b].find(
-            (nodeId) => dist(hit.point, nodePoint(d, nodeId)) <= NODE_MERGE_TOL,
-        );
-        if (near === undefined) {
-            events.push({
-                t: hit.t,
-                rank: 2,
-                nodeId: null,
-                otherId: id,
-                point: hit.point,
-            });
-        } else if (near !== wall.a && near !== wall.b) {
-            const t = projectParam(nodePoint(d, near), seg);
-            if (t > 0 && t < 1) events.push({ t, rank: 1, nodeId: near });
-        }
-    }
-
-    const order = (p: CutEvent, q: CutEvent): number =>
-        p.t - q.t ||
-        p.rank - q.rank ||
-        cmpId(p.nodeId ?? p.otherId ?? '', q.nodeId ?? q.otherId ?? '');
-    const cuts: CutEvent[] = [];
-    for (const event of events.sort(order)) {
-        const last = cuts.at(-1);
-        const tooClose = (t: number): boolean =>
-            t * length < NODE_MERGE_TOL || (1 - t) * length < NODE_MERGE_TOL;
-        if (tooClose(event.t)) continue;
-        if (
-            last !== undefined &&
-            (event.t - last.t) * length < NODE_MERGE_TOL
-        ) {
-            if (event.rank < last.rank) cuts[cuts.length - 1] = event;
-            continue;
-        }
-        cuts.push(event);
-    }
+    const { points } = collectCuts(
+        d,
+        seg,
+        { a: wall.a, b: wall.b },
+        wallId,
+        false,
+    );
+    const { kept, folded } = dedupeCuts(points, length);
+    splitCrossedWalls(d, kept, folded, ctx, out);
 
     // The wall keeps its id and always ends at the next cut; the rest of it
     // moves to the new wall each time, so the next cut splits that tail.
     let tail = wallId;
-    for (const cut of cuts) {
-        const nodeId =
-            cut.rank === 2
-                ? splitWallAt(d, cut.otherId!, cut.point!, ctx, out)
-                : cut.nodeId!;
-        tail = splitAtNode(d, tail, nodeId, ctx);
+    for (const cut of kept) {
+        if (cut.rank === 0) continue;
+        tail = splitAtNode(d, tail, cut.nodeId!, ctx);
     }
 }
 
@@ -634,6 +675,23 @@ export function mergeNodeInto(
                     o.swing = o.swing === 'left' ? 'right' : 'left';
                 }
             }
+            // what hung on the loser follows the keeper (flipped sides if reversed)
+            const flip = (side: 'left' | 'right'): 'left' | 'right' =>
+                reversed ? (side === 'left' ? 'right' : 'left') : side;
+            for (const placement of Object.values(d.placements)) {
+                const attachment = placement.wallAttachment;
+                if (attachment?.wallId !== loserId) continue;
+                attachment.wallId = keeper.id;
+                attachment.side = flip(attachment.side);
+            }
+            for (const dimension of Object.values(d.annotations.dimensions)) {
+                const attached = dimension.attachedTo;
+                if (attached?.wallId !== loserId) continue;
+                attached.wallId = keeper.id;
+                if (attached.face !== 'center') {
+                    attached.face = flip(attached.face);
+                }
+            }
             deleteWall(d, loserId, out);
         }
     }
@@ -644,12 +702,17 @@ export function mergeNodeInto(
 
 // ---- reclampOpenings ---------------------------------------------------------------
 
+/** Two openings overlap when their spans share more than a point (doubled coordinates keep half millimetres integral). */
+const overlaps = (o1: number, w1: number, o2: number, w2: number): boolean =>
+    2 * o1 + w1 > 2 * o2 - w2 && 2 * o2 + w2 > 2 * o1 - w1;
+
 /**
  * Re-fits the openings of a wall whose length changed (04 §6.5): after node
  * `a` moved an opening keeps its distance to `b`, otherwise it keeps its
  * offset; then it is clamped into the wall. Aborts `opening_no_fit` when an
  * opening is wider than the wall and `opening_overlap` when two openings
- * collide after clamping.
+ * collide after clamping; collisions that were already there before the edit
+ * are ignored.
  */
 export function reclampOpenings(
     d: Doc,
@@ -673,21 +736,34 @@ export function reclampOpenings(
         return { opening: o, offset };
     });
 
-    fitted.sort(
-        (p, q) => p.offset - q.offset || cmpId(p.opening.id, q.opening.id),
-    );
-    for (let i = 1; i < fitted.length; i += 1) {
-        const prev = fitted[i - 1]!;
-        const next = fitted[i]!;
-        if (
-            2 * prev.offset + prev.opening.width >
-            2 * next.offset - next.opening.width
-        ) {
-            fail('opening_overlap', {
-                wallId,
-                openingId: prev.opening.id,
-                otherId: next.opening.id,
-            });
+    // Only collisions the clamp makes count: a pair that already overlapped
+    // before the edit (a dirty import) does not block it.
+    for (let i = 0; i < fitted.length; i += 1) {
+        for (let j = i + 1; j < fitted.length; j += 1) {
+            const p = fitted[i]!;
+            const q = fitted[j]!;
+            if (
+                overlaps(
+                    p.offset,
+                    p.opening.width,
+                    q.offset,
+                    q.opening.width,
+                ) &&
+                !overlaps(
+                    p.opening.offset,
+                    p.opening.width,
+                    q.opening.offset,
+                    q.opening.width,
+                )
+            ) {
+                const [first, second] =
+                    cmpId(p.opening.id, q.opening.id) <= 0 ? [p, q] : [q, p];
+                fail('opening_overlap', {
+                    wallId,
+                    openingId: first.opening.id,
+                    otherId: second.opening.id,
+                });
+            }
         }
     }
     for (const { opening, offset } of fitted) {

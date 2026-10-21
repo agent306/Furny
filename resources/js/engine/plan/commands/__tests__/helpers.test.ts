@@ -1101,3 +1101,439 @@ describe('helpers in a command', () => {
         expect(doc.nodes[created[0]!.a]).toMatchObject({ x: 5000, y: 0 });
     });
 });
+
+// ---- fix round 1 ---------------------------------------------------------------------
+
+describe('tolerance boundaries (5 mm)', () => {
+    it('reuses a node at exactly 5 mm and not at 5.001 mm', () => {
+        const g = new Graph();
+        const n = g.node(0, 0);
+        const reuse = (x: number) =>
+            g.run((d, c, o) => resolveEndpoint(d, { point: { x, y: 0 } }, c, o))
+                .value;
+        expect(reuse(5)).toBe(n);
+        expect(reuse(5.001)).not.toBe(n);
+        expect(reuse(-5)).toBe(n);
+    });
+
+    it('snaps to a wall at exactly 5 mm and not at 5.001 mm', () => {
+        const { g, w } = oneWall();
+        const snap = (y: number) =>
+            g.run((d, c, o) =>
+                resolveEndpoint(d, { point: { x: 2500, y } }, c, o),
+            ).doc;
+        expect(Object.keys(snap(5).walls)).toHaveLength(2);
+        expect(snap(5).walls[w]!.b).not.toBe(g.doc.walls[w]!.b);
+        expect(Object.keys(snap(5.001).walls)).toHaveLength(1);
+        expect(Object.keys(snap(-5).walls)).toHaveLength(2);
+    });
+
+    it('treats a projection under 5 mm from the wall end as no wall snap, and refuses a split under 10 mm', () => {
+        const { g } = oneWall();
+        const at = (x: number) =>
+            g.run((d, c, o) => resolveEndpoint(d, { point: { x, y: 4 } }, c, o))
+                .doc;
+        // x = 4.9: u < 5, a plain node and no split
+        expect(Object.keys(at(4.9).walls)).toHaveLength(1);
+        // u = 5 is inside the snap margin but would leave a stub: refused
+        expect(
+            g.abortOf((d, c, o) =>
+                resolveEndpoint(d, { point: { x: 5, y: 4 } }, c, o),
+            ).code,
+        ).toBe('wall_too_short');
+        expect(
+            g.abortOf((d, c, o) =>
+                resolveEndpoint(d, { point: { x: 4995, y: 4 } }, c, o),
+            ).code,
+        ).toBe('wall_too_short');
+        // 4.001 mm beyond the node tolerance of the end, over 10 mm in
+        expect(Object.keys(at(10.5).walls)).toHaveLength(2);
+    });
+
+    it('joins a node at exactly 5 mm from the segment interior and not at 5.001 mm', () => {
+        const join = (offset: number) => {
+            const g = new Graph();
+            const from = g.node(0, 0);
+            const to = g.node(4000, 0);
+            const node = g.node(2000, offset);
+            const { doc, value } = g.run((d, c, o) =>
+                insertWallSegment(d, from, to, PROPS, c, o),
+            );
+            return {
+                walls: value.wallIds.length,
+                used: Object.values(doc.walls).some(
+                    (w) => w.a === node || w.b === node,
+                ),
+            };
+        };
+        expect(join(5)).toEqual({ walls: 2, used: true });
+        expect(join(-5)).toEqual({ walls: 2, used: true });
+        expect(join(5.001)).toEqual({ walls: 1, used: false });
+    });
+});
+
+describe('crossings are never left unsplit', () => {
+    it('splits the crossed wall at a node within tolerance of the crossing, and S passes through it', () => {
+        const g = new Graph();
+        const w = g.wall(g.node(2000, -1000), g.node(2000, 1000));
+        const q = g.node(2004, 0);
+        g.wall(q, g.node(2004, 1500)); // V ends at Q
+        const from = g.node(0, 0);
+        const to = g.node(4000, 0);
+        const { doc, value } = g.run((d, c, o) =>
+            insertWallSegment(d, from, to, PROPS, c, o),
+        );
+        expect(value.wallIds.map((id) => endsOf(doc, id))).toEqual([
+            '0,0>2004,0',
+            '2004,0>4000,0',
+        ]);
+        expect(doc.walls[w]).toMatchObject({ b: q });
+        const tail = wallsOf(doc).find((x) => x.a === q && x.b !== to)!;
+        expect(Object.values(doc.nodes)).toHaveLength(6); // no new node
+        expect(doc.walls[w]!.b).toBe(q);
+        expect(tail).toBeDefined();
+    });
+
+    it("splits the crossed wall at S's end when the crossing is within 5 mm of it", () => {
+        const g = new Graph();
+        const w = g.wall(g.node(3996, -1000), g.node(3996, 1000));
+        const from = g.node(0, 0);
+        const to = g.node(4000, 0);
+        const { doc, value } = g.run((d, c, o) =>
+            insertWallSegment(d, from, to, PROPS, c, o),
+        );
+        expect(value.wallIds).toHaveLength(1);
+        expect(doc.walls[w]!.b).toBe(to);
+        expect(
+            wallsOf(doc).filter((x) => x.a === to || x.b === to),
+        ).toHaveLength(3);
+    });
+
+    it('aborts wall_too_short when the surviving node is not within 5 mm of the crossed wall', () => {
+        const g = new Graph();
+        g.wall(g.node(7, -1000), g.node(7, 1000));
+        const from = g.node(0, 0);
+        const to = g.node(4000, 0);
+        expect(
+            g.abortOf((d, c, o) => insertWallSegment(d, from, to, PROPS, c, o))
+                .code,
+        ).toBe('wall_too_short');
+    });
+
+    it('applies to splitIntersections: a crossing within 5 mm of the wall end splits the other wall at the end node', () => {
+        const g = new Graph();
+        const a = g.node(0, 0);
+        const h = g.wall(a, g.node(4000, 0));
+        const v = g.wall(g.node(4, -1000), g.node(4, 1000));
+        const { doc } = g.run((d, c, o) => splitIntersections(d, h, c, o));
+        expect(wallsOf(doc)).toHaveLength(3);
+        expect(doc.walls[v]!.b).toBe(a);
+        expect(endsOf(doc, h)).toBe('0,0>4000,0');
+    });
+
+    it('applies the 10 mm margin at the ends of splitIntersections: 10 mm is cut, 9 mm is refused', () => {
+        const build = (x: number) => {
+            const g = new Graph();
+            const h = g.wall(g.node(0, 0), g.node(4000, 0));
+            g.wall(g.node(x, -1000), g.node(x, 1000));
+            return { g, h };
+        };
+        const ten = build(10);
+        const { doc } = ten.g.run((d, c, o) =>
+            splitIntersections(d, ten.h, c, o),
+        );
+        expect(wallsOf(doc)).toHaveLength(4);
+        expect(endsOf(doc, ten.h)).toBe('0,0>10,0');
+        const nine = build(9);
+        expect(
+            nine.g.abortOf((d, c, o) => splitIntersections(d, nine.h, c, o))
+                .code,
+        ).toBe('wall_too_short');
+    });
+
+    it('prefers an existing node over a wall split within reach (rank 1 beats rank 2)', () => {
+        const g = new Graph();
+        const h = g.wall(g.node(0, 0), g.node(4000, 0));
+        g.wall(g.node(2000, -1000), g.node(2000, 1000));
+        const q = g.node(1996, 3);
+        const { doc } = g.run((d, c, o) => splitIntersections(d, h, c, o));
+        // h is cut at Q, the vertical is split at Q as well; no node at 2000,0
+        expect(doc.walls[h]!.b).toBe(q);
+        expect(
+            Object.values(doc.nodes).some((n) => n.x === 2000 && n.y === 0),
+        ).toBe(false);
+        expect(Object.keys(doc.nodes)).toHaveLength(5);
+        expect(wallsOf(doc)).toHaveLength(4);
+    });
+});
+
+describe('no short stubs', () => {
+    it('drops a node 6 mm from `from`: one wall, `from` connected', () => {
+        const g = new Graph();
+        const from = g.node(0, 0);
+        const to = g.node(4000, 0);
+        g.node(6, 0);
+        const { doc, value } = g.run((d, c, o) =>
+            insertWallSegment(d, from, to, PROPS, c, o),
+        );
+        expect(value.wallIds.map((id) => endsOf(doc, id))).toEqual([
+            '0,0>4000,0',
+        ]);
+    });
+
+    it('keeps two nodes 6 mm apart from making a 6 mm gap or stub', () => {
+        const g = new Graph();
+        const from = g.node(0, 0);
+        const to = g.node(4000, 0);
+        g.node(2000, 0);
+        g.node(2006, 0);
+        const { doc, value } = g.run((d, c, o) =>
+            insertWallSegment(d, from, to, PROPS, c, o),
+        );
+        expect(value.wallIds.map((id) => endsOf(doc, id))).toEqual([
+            '0,0>2000,0',
+            '2000,0>4000,0',
+        ]);
+        for (const w of Object.values(doc.walls)) {
+            expect(
+                dist(
+                    { x: doc.nodes[w.a]!.x, y: doc.nodes[w.a]!.y },
+                    { x: doc.nodes[w.b]!.x, y: doc.nodes[w.b]!.y },
+                ),
+            ).toBeGreaterThanOrEqual(10);
+        }
+    });
+
+    it.each([6, 9, 10])(
+        "routes S through the crossed wall's own node %s mm from the crossing",
+        (gap) => {
+            const g = new Graph();
+            const x = g.node(2000, -gap);
+            const w = g.wall(x, g.node(2000, 1000));
+            const from = g.node(0, 0);
+            const to = g.node(4000, 0);
+            const { doc, value } = g.run((d, c, o) =>
+                insertWallSegment(d, from, to, PROPS, c, o),
+            );
+            expect(value.wallIds).toHaveLength(2);
+            expect(doc.walls[value.wallIds[0]!]).toMatchObject({
+                a: from,
+                b: x,
+            });
+            expect(doc.walls[value.wallIds[1]!]).toMatchObject({ a: x, b: to });
+            expect(doc.walls[w]).toBe(g.doc.walls[w]); // not split
+            expect(wallsOf(doc)).toHaveLength(3);
+        },
+    );
+
+    it('splits the crossed wall normally 11 mm from its node', () => {
+        const g = new Graph();
+        const w = g.wall(g.node(2000, -11), g.node(2000, 1000));
+        const from = g.node(0, 0);
+        const to = g.node(4000, 0);
+        const { doc } = g.run((d, c, o) =>
+            insertWallSegment(d, from, to, PROPS, c, o),
+        );
+        expect(wallsOf(doc)).toHaveLength(4);
+        expect(doc.walls[w]!.b).not.toBe(g.doc.walls[w]!.b);
+    });
+});
+
+describe('segment already joined, and dangling walls', () => {
+    it('skips a part whose two nodes a wall already joins', () => {
+        const g = new Graph();
+        const from = g.node(0, 0);
+        const to = g.node(4000, 0);
+        const mid = g.node(300, 4); // 0.76 degrees off S: not collinear
+        const existing = g.wall(from, mid);
+        const { doc, value } = g.run((d, c, o) =>
+            insertWallSegment(d, from, to, PROPS, c, o),
+        );
+        expect(value.wallIds.map((id) => endsOf(doc, id))).toEqual([
+            '300,4>4000,0',
+        ]);
+        expect(doc.walls[existing]).toBe(g.doc.walls[existing]);
+    });
+
+    it('ignores walls with a missing node when resolving a point, instead of aborting', () => {
+        const { g } = oneWall();
+        g.doc.walls.w_dangling01 = {
+            ...PROPS,
+            id: 'w_dangling01',
+            a: 'n_missing001',
+            b: 'n_missing002',
+        };
+        const { doc, value } = g.run((d, c, o) =>
+            resolveEndpoint(d, { point: { x: 2500, y: 2 } }, c, o),
+        );
+        expect(doc.nodes[value]).toMatchObject({ x: 2500, y: 0 });
+        expect(doc.walls.w_dangling01).toBe(g.doc.walls.w_dangling01);
+    });
+});
+
+describe('splitWallAt guard', () => {
+    it('refuses a point within 10 mm of either end, and one outside the wall', () => {
+        const { g, w } = oneWall();
+        for (const x of [0, 5, 10, 4990, 5000, 5010, -300]) {
+            expect(
+                g.abortOf((d, c, o) => splitWallAt(d, w, { x, y: 0 }, c, o))
+                    .code,
+            ).toBe('wall_too_short');
+        }
+        for (const x of [10.001, 4989.999]) {
+            expect(() =>
+                g.run((d, c, o) => splitWallAt(d, w, { x, y: 0 }, c, o)),
+            ).not.toThrow();
+        }
+    });
+});
+
+describe('mergeNodeInto: pre-existing duplicates and re-attachment', () => {
+    it('merges only duplicate groups that contain a moved wall', () => {
+        const g = new Graph();
+        const dst = g.node(0, 0);
+        const z = g.node(3000, 0);
+        const first = g.wall(dst, z);
+        const second = g.wall(z, dst); // a duplicate that was already there
+        const src = g.node(0, 500);
+        const other = g.wall(src, g.node(0, 3000));
+        const { doc } = g.run((d, c, o) => mergeNodeInto(d, src, dst, c, o));
+        expect(first in doc.walls).toBe(true);
+        expect(second in doc.walls).toBe(true);
+        expect(doc.walls[other]!.a).toBe(dst);
+    });
+
+    it('re-attaches placements and dimensions of the deleted loser to the keeper, same side', () => {
+        const g = new Graph();
+        const a = g.node(0, 0);
+        const b = g.node(5000, 0);
+        const src = g.node(3000, 4000);
+        const keeper = g.wall(a, b);
+        const loser = g.wall(a, src);
+        const p = g.placement(loser, 'right', 100, 100);
+        const dim = g.dimension(loser); // face left
+        const { doc, out } = g.run((d, c, o) => mergeNodeInto(d, src, b, c, o));
+        expect(loser in doc.walls).toBe(false);
+        expect(doc.placements[p]!.wallAttachment).toEqual({
+            wallId: keeper,
+            side: 'right',
+        });
+        expect(doc.annotations.dimensions[dim]!.attachedTo).toEqual({
+            kind: 'wall',
+            wallId: keeper,
+            face: 'left',
+        });
+        expect(out.deletedIds).not.toContain(dim);
+    });
+
+    it('flips the side when the walls run in opposite directions', () => {
+        const g = new Graph();
+        const a = g.node(0, 0);
+        const b = g.node(5000, 0);
+        const src = g.node(3000, 4000);
+        const keeper = g.wall(a, src);
+        const loser = g.wall(b, a);
+        const p = g.placement(loser, 'right', 100, 100);
+        const dim = g.dimension(loser); // face left
+        const { doc } = g.run((d, c, o) => mergeNodeInto(d, src, b, c, o));
+        expect(Object.keys(doc.walls)).toEqual([keeper]);
+        expect(doc.placements[p]!.wallAttachment).toEqual({
+            wallId: keeper,
+            side: 'left',
+        });
+        expect(doc.annotations.dimensions[dim]!.attachedTo!.face).toBe('right');
+    });
+
+    it('survives the pipeline: nothing is nulled or deleted by post-processing', () => {
+        const g = new Graph();
+        const a = g.node(0, 0);
+        const b = g.node(5000, 0);
+        const src = g.node(3000, 4000);
+        g.wall(a, b);
+        const loser = g.wall(a, src);
+        const p = g.placement(loser, 'right', 100, 100);
+        const dim = g.dimension(loser);
+        const merge = definePlanCommand<{ src: string; dst: string }>({
+            type: 'test.merge',
+            labelKey: 'test.label.merge',
+            validate: () => null,
+            run(draft, params, ctx, out) {
+                mergeNodeInto(draft, params.src, params.dst, ctx, out);
+            },
+            touchesGeometry: true,
+        });
+        const bus = createPlanBus({
+            initial: g.doc,
+            footprints: () => ({ width: 1000, depth: 500, height: 700 }),
+            newId: g.ids,
+            registry: { merge },
+        });
+        const r = bus.execute('merge', { src, dst: b });
+        expect(r.ok).toBe(true);
+        const doc = bus.getDoc();
+        expect(doc.placements[p]!.wallAttachment).not.toBeNull();
+        expect(doc.annotations.dimensions[dim]).toBeDefined();
+    });
+});
+
+describe('reclampOpenings: pre-existing overlaps', () => {
+    it('ignores a pair that overlapped before the edit and still aborts for a new one', () => {
+        const g = new Graph();
+        const b = g.node(4000, 0);
+        const w = g.wall(g.node(0, 0), b);
+        const x = g.opening(w, 1000, 900);
+        const y = g.opening(w, 1300, 900); // overlaps x already
+        const z = g.opening(w, 3500, 600);
+        // shorten from b: z stays clear of the dirty pair
+        const { doc } = g.run((d) => {
+            d.nodes[b]!.x = 3900;
+            reclampOpenings(d, w, 'b', 4000);
+        });
+        expect(doc.openings[x]!.offset).toBe(1000);
+        expect(doc.openings[y]!.offset).toBe(1300);
+        expect(doc.openings[z]!.offset).toBe(3500);
+        // pulling z into the dirty pair is a new collision
+        expect(
+            g.abortOf((d) => {
+                d.nodes[b]!.x = 2000;
+                reclampOpenings(d, w, 'b', 4000);
+            }).code,
+        ).toBe('opening_overlap');
+    });
+});
+
+describe('folded crossings', () => {
+    it('splits every wall folded into a cut that a node then replaces', () => {
+        const g = new Graph();
+        const w1 = g.wall(g.node(2000, -1000), g.node(2000, 1000));
+        const w2 = g.wall(g.node(2004, -1000), g.node(2004, 1000));
+        const q = g.node(2005, 2);
+        const from = g.node(0, 0);
+        const to = g.node(4000, 0);
+        const { doc, value } = g.run((d, c, o) =>
+            insertWallSegment(d, from, to, PROPS, c, o),
+        );
+        expect(doc.walls[w1]!.b).toBe(q);
+        expect(doc.walls[w2]!.b).toBe(q);
+        expect(value.wallIds.map((id) => endsOf(doc, id))).toEqual([
+            '0,0>2005,2',
+            '2005,2>4000,0',
+        ]);
+        expect(wallsOf(doc)).toHaveLength(6);
+    });
+
+    it('never makes a wall under 10 mm when rounding moves a cut node closer to the end', () => {
+        const g = new Graph();
+        // crosses S (the diagonal) at 7.1875, 7.1875: 10.16 mm from `from`,
+        // but the rounded node (7, 7) is only 9.9 mm away
+        g.wall(g.node(-5, -31), g.node(100, 299));
+        const from = g.node(0, 0);
+        const to = g.node(4000, 4000);
+        const { doc, value } = g.run((d, c, o) =>
+            insertWallSegment(d, from, to, PROPS, c, o),
+        );
+        expect(value.wallIds.map((id) => endsOf(doc, id))).toEqual([
+            '7,7>4000,4000',
+        ]);
+    });
+});
