@@ -43,6 +43,7 @@ return [
         'oauth_failed' => "We couldn't sign you in with Google. Please try again in a moment.",
         'google_email_unverified' => 'Google has not verified the email address of that account, so we cannot use it.',
         'google_email_mismatch' => 'That Google account uses a different email address than the one expected here.',
+        'recent_auth_required' => 'Please confirm it is you first, then connect Google again.',
         'google_in_use' => 'That Google account is already connected to another account.',
         'email_unavailable' => "This email can't be used with your account. Try another Google account.",
         'account_pending_deletion' => 'This account is scheduled for deletion. Contact us to restore it.',

@@ -73,7 +73,7 @@ final class PhoneController extends Controller
      */
     private function requireRecentAuthentication(Request $request, User $user): void
     {
-        if ($user->hasSignInCredential() && ! RecentAuthentication::passes($request)) {
+        if (RecentAuthentication::missingFor($user, $request)) {
             throw new RecentAuthenticationRequired;
         }
     }

@@ -46,6 +46,14 @@ const { focusFirstError } = useFocusFirstError(
 );
 const { remaining, restart } = useCountdown();
 
+/**
+ * Whether a visit took the user to another page: the routes send a user whose sign-in is too old to the password
+ * confirmation or the re-authentication page (13 §6.4), which Inertia counts as a success. Nothing was sent or verified.
+ */
+function leftThePage(visited: { component: string }, from: string): boolean {
+    return visited.component !== from;
+}
+
 const step = ref<'phone' | 'code'>('phone');
 const phone = ref<string | null>(props.initialPhone ?? null);
 const code = ref('');
@@ -89,6 +97,8 @@ function sendCode(): void {
         return;
     }
 
+    const from = page.component;
+
     router.post(
         send.url(),
         { phone: phone.value },
@@ -98,8 +108,8 @@ function sendCode(): void {
             onStart: () => (sending.value = true),
             onFinish: () => (sending.value = false),
             onSuccess: (visited) => {
-                // A refusal that came back as a toast is not a sent code.
-                if (visited.flash?.error) {
+                // A refusal that came back as a toast, or a trip to re-authenticate, is not a sent code.
+                if (visited.flash?.error || leftThePage(visited, from)) {
                     return;
                 }
 
@@ -117,6 +127,8 @@ function verifyCode(typed: string): void {
         return;
     }
 
+    const from = page.component;
+
     router.post(
         verify.url(),
         { code: typed },
@@ -126,6 +138,13 @@ function verifyCode(typed: string): void {
             onStart: () => (verifying.value = true),
             onFinish: () => (verifying.value = false),
             onSuccess: (visited) => {
+                // A trip to re-authenticate is not a verified number; the dialog has nothing left to do here.
+                if (leftThePage(visited, from)) {
+                    emit('update:open', false);
+
+                    return;
+                }
+
                 // A refusal that came back as a toast is not a verified number.
                 if (visited.flash?.error) {
                     code.value = '';

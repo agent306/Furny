@@ -104,7 +104,8 @@ beforeEach(function (): void {
     $this->callback = function (string $intent = 'login', array $session = [], string $query = '', ?User $as = null) {
         $test = $as === null ? $this : $this->actingAs($as);
 
-        return $test->withSession(['oauth.intent' => $intent, 'oauth.user' => $as?->getKey(), ...$session])
+        // A signed-in user has just signed in, unless the test says the session is older.
+        return $test->withSession(['oauth.intent' => $intent, 'oauth.user' => $as?->getKey(), ...($as === null ? [] : ['auth.login_at' => now()->getTimestamp()]), ...$session])
             ->get(route('auth.google.callback').$query);
     };
     // The flash of the page the visitor lands on.
@@ -194,7 +195,7 @@ describe('the redirect to Google', function (): void {
         Socialite::shouldReceive('driver')->andReturn($provider);
         $user = User::factory()->create();
 
-        $this->actingAs($user)->get(route('auth.google.redirect', ['intent' => $intent]))->assertRedirect('https://accounts.google.com/o/oauth2/auth');
+        $this->actingAs($user)->withSession(['auth.login_at' => now()->getTimestamp()])->get(route('auth.google.redirect', ['intent' => $intent]))->assertRedirect('https://accounts.google.com/o/oauth2/auth');
 
         expect(session('oauth.intent'))->toBe($intent)->and(session('oauth.user'))->toBe($user->getKey());
     })->with(['link', 'reauthenticate']);
@@ -818,7 +819,7 @@ describe('intent link', function (): void {
         $user = User::factory()->create(['email' => 'asha@example.com']);
         googleAnswers(googleProfile(id: '444'));
 
-        $this->actingAs($user)->withSession(['oauth.intent' => 'link', 'oauth.user' => $user->getKey()])->get(route('auth.google.callback'));
+        $this->actingAs($user)->withSession(['oauth.intent' => 'link', 'oauth.user' => $user->getKey(), 'auth.login_at' => now()->getTimestamp()])->get(route('auth.google.callback'));
 
         expect($this->get(route('customer.dashboard'), InertiaRequest::headers())->json('flash.success'))->toBe(trans_icu('account.toasts.google_linked'));
     });
@@ -933,15 +934,91 @@ describe('intent link', function (): void {
         expect($this->get(route('customer.dashboard'), InertiaRequest::headers())->json('flash.error'))->toBe(trans_icu('auth.errors.oauth_cancelled'));
     });
 
-    it('does not ask for a recent authentication', function (): void {
-        $user = User::factory()->create(['email' => 'asha@example.com']);
-        googleAnswers(googleProfile(id: '444'));
+    describe('a recent authentication (13 section 6.4; a ruling beyond 13 section 5.3 step 6)', function (): void {
+        // Linking Google gives a way to sign in and to confirm one's identity (`reauthenticate`), and sets the email of
+        // a user who has none. A thief with a stolen session must not be able to put in their own Google account and
+        // confirm themselves with it.
+        beforeEach(function (): void {
+            $this->aged = ['auth.login_at' => now()->subHours(5)->getTimestamp()];
+        });
 
-        $this->actingAs($user)->withSession([
-            'oauth.intent' => 'link', 'oauth.user' => $user->getKey(), 'auth.login_at' => now()->subHours(5)->getTimestamp(),
-        ])->get(route('auth.google.callback'))->assertRedirect(route('customer.dashboard'));
+        it('is asked of a user with a password, who is sent to confirm it, at the redirect', function (): void {
+            googleIsNotAsked();
+            $user = User::factory()->create();
 
-        expect($user->refresh()->google_id)->toBe('444');
+            $this->actingAs($user)->withSession($this->aged)->get(route('auth.google.redirect', ['intent' => 'link']))
+                ->assertRedirectToRoute('password.confirm');
+
+            expect(session('oauth.intent'))->toBeNull()
+                ->and(session('url.intended'))->toBe(route('auth.google.redirect', ['intent' => 'link']));
+        });
+
+        it('is asked of a user without a password, who is sent to re-authenticate', function (): void {
+            googleIsNotAsked();
+            $user = User::factory()->phoneOnly()->create();
+
+            $this->actingAs($user)->withSession($this->aged)->get(route('auth.google.redirect', ['intent' => 'link']))
+                ->assertRedirectToRoute('auth.reauthenticate');
+        });
+
+        it('lets a recent sign-in or confirmation through at the redirect', function (array $session): void {
+            $provider = Mockery::mock(GoogleProvider::class);
+            $provider->shouldReceive('scopes')->andReturnSelf();
+            $provider->shouldReceive('with')->andReturnSelf();
+            $provider->shouldReceive('redirect')->andReturn(redirect('https://accounts.google.com/o/oauth2/auth'));
+            Socialite::shouldReceive('driver')->andReturn($provider);
+
+            $this->actingAs(User::factory()->phoneOnly()->create())->withSession($session)
+                ->get(route('auth.google.redirect', ['intent' => 'link']))
+                ->assertRedirect('https://accounts.google.com/o/oauth2/auth');
+        })->with([
+            'a sign-in 5 minutes ago' => fn () => ['auth.login_at' => now()->subMinutes(5)->getTimestamp()],
+            'a confirmation 5 minutes ago' => fn () => ['auth.login_at' => now()->subHours(5)->getTimestamp(), 'auth.password_confirmed_at' => now()->subMinutes(5)->getTimestamp()],
+        ]);
+
+        it('is asked again at the callback, which cannot link without it', function (): void {
+            $user = User::factory()->create(['email' => 'asha@example.com']);
+            googleIsNotAsked();
+
+            ($this->callback)('link', $this->aged, as: $user)->assertRedirect(route('customer.dashboard'));
+
+            expect($user->refresh()->google_id)->toBeNull()
+                ->and($this->get(route('customer.dashboard'), InertiaRequest::headers())->json('flash.error'))->toBe(trans_icu('auth.errors.recent_auth_required'));
+        });
+
+        it('stops a thief from putting in their Google account to confirm themselves (probe E)', function (): void {
+            // A phone-only customer, session hours old, no email: linking would set the thief's address on the account.
+            $victim = User::factory()->phoneOnly()->create();
+            googleIsNotAsked();
+
+            ($this->callback)('link', $this->aged, as: $victim)->assertRedirect();
+
+            expect($victim->refresh()->google_id)->toBeNull()->and($victim->email)->toBeNull();
+
+            // So Google cannot confirm anybody either: no Google account is linked to match.
+            googleAnswers(googleProfile(id: '999000999', email: 'thief@example.com'));
+            ($this->callback)('reauthenticate', $this->aged, as: $victim);
+
+            expect(session(RecentAuthentication::CONFIRMED_KEY))->toBeNull();
+        });
+
+        it('does not ask a user who has no way to prove who they are yet', function (): void {
+            $user = User::factory()->passwordless()->unverified()->create(['email' => 'asha@example.com']);
+            googleAnswers(googleProfile(id: '444', email: 'asha@example.com'));
+
+            ($this->callback)('link', $this->aged, as: $user);
+
+            expect($user->refresh()->google_id)->toBe('444');
+        });
+
+        it('lets a user whose session was confirmed in the last ten minutes link', function (): void {
+            $user = User::factory()->create(['email' => 'asha@example.com']);
+            googleAnswers(googleProfile(id: '444'));
+
+            ($this->callback)('link', [...$this->aged, 'auth.password_confirmed_at' => now()->subMinutes(5)->getTimestamp()], as: $user);
+
+            expect($user->refresh()->google_id)->toBe('444');
+        });
     });
 });
 
@@ -1400,7 +1477,7 @@ describe('linking Google rotates the remember token (13 section 6.3)', function 
 
         $response = $this->withCookie(Auth::guard('web')->getRecallerName(), $old)
             ->actingAs($this->user)
-            ->withSession(['oauth.intent' => 'link', 'oauth.user' => $this->user->getKey()])
+            ->withSession(['oauth.intent' => 'link', 'oauth.user' => $this->user->getKey(), 'auth.login_at' => now()->getTimestamp()])
             ->get(route('auth.google.callback'));
 
         $user = $this->user->refresh();
@@ -1425,7 +1502,7 @@ describe('linking Google rotates the remember token (13 section 6.3)', function 
 
         $response = $this->withCookie(Auth::guard('web')->getRecallerName(), $old)
             ->actingAs($verified)
-            ->withSession(['oauth.intent' => 'link', 'oauth.user' => $verified->getKey()])
+            ->withSession(['oauth.intent' => 'link', 'oauth.user' => $verified->getKey(), 'auth.login_at' => now()->getTimestamp()])
             ->get(route('auth.google.callback'));
 
         expect($verified->refresh()->google_id)->toBe('555')->and(googleRecaller($response))->toBeNull();

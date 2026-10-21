@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support\Auth;
 
+use App\Domain\Identity\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Throwable;
@@ -24,6 +25,17 @@ final class RecentAuthentication
 
     /** Clock skew tolerated for a stamp that lies ahead of now; a stamp further ahead is treated as unreadable. */
     public const int SKEW_SECONDS = 60;
+
+    /**
+     * Whether a sensitive change to the user's sign-in methods (a phone number, a Google link) has to wait for a recent
+     * authentication: the user has a way to prove who they are (a password, a verified phone, a linked Google account)
+     * and has not done so in the last 10 minutes. A user with none is adding their first and is not asked. Without this
+     * a stolen session could swap in its own phone or Google account and confirm itself with that (13 §6.4).
+     */
+    public static function missingFor(User $user, Request $request): bool
+    {
+        return $user->hasSignInCredential() && ! self::passes($request);
+    }
 
     public static function passes(Request $request): bool
     {

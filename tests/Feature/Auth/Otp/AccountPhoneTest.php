@@ -236,6 +236,15 @@ describe('recent authentication (a ruling beyond 13 section 5.7, 13 section 6.4)
         expect($this->delivery->sent())->toBe([])->and($this->user->refresh()->phone_e164)->toBeNull();
     });
 
+    it('sends an Inertia visit to confirm and remembers the page it came from, which is what the dialog leaves for', function (): void {
+        $headers = [...InertiaRequest::headers(), 'Referer' => url('/account/profile')];
+
+        $this->actingAs($this->user)->withSession($this->old)->withHeaders($headers)
+            ->post(route('account.phone.verify'), ['code' => '123456'])->assertRedirectToRoute('password.confirm');
+
+        expect(session('url.intended'))->toBe('/account/profile');
+    });
+
     it('is asked of a user with a verified phone and no password, who is sent to re-authenticate', function (): void {
         $user = User::factory()->phoneOnly()->create();
 

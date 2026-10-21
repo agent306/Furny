@@ -279,6 +279,46 @@ describe('PhoneVerifyDialog (10 §13.2.3)', () => {
         expect(q('[data-test="code-step"]')).toBeNull();
     });
 
+    /** The next visit ends on another page, as when the session is too old and the server sends the user to confirm. */
+    function answerByLeaving(): void {
+        post.mockImplementation(
+            (_url: string, _data: unknown, options: Visit) => {
+                options.onStart?.();
+                queueMicrotask(() => {
+                    page.component = 'Auth/ConfirmPassword';
+                    options.onSuccess?.(page);
+                    options.onFinish?.();
+                });
+            },
+        );
+    }
+
+    it('does not take a trip to re-authenticate for a sent code', async () => {
+        answerByLeaving();
+        dialog();
+        await flushPromises();
+
+        button('send-code-button')?.click();
+        await flushPromises();
+
+        expect(q('[data-test="code-step"]')).toBeNull();
+    });
+
+    it('does not take a trip to re-authenticate for a verified number, and closes', async () => {
+        answerWith('success', { channel: 'sms', maskedPhone: '+91******3210' });
+        const wrapper = dialog();
+        await flushPromises();
+        button('send-code-button')?.click();
+        await flushPromises();
+        answerByLeaving();
+
+        await type('123456');
+        await flushPromises();
+
+        expect(wrapper.emitted('verified')).toBeUndefined();
+        expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    });
+
     it('holds the resend button for 60 seconds after a send', async () => {
         answerWith('success', { channel: 'sms', maskedPhone: '+91******3210' });
         dialog();

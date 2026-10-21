@@ -10,6 +10,7 @@ use App\Domain\Identity\Enums\GoogleIntent;
 use App\Domain\Identity\Models\StaffInvitation;
 use App\Domain\Identity\Models\User;
 use App\Domain\Identity\Support\GoogleAccountException;
+use App\Exceptions\RecentAuthenticationRequired;
 use App\Http\Controllers\Controller;
 use App\Listeners\ApplyPendingGoogleLink;
 use App\Listeners\RecordSuccessfulLogin;
@@ -87,6 +88,12 @@ final class GoogleController extends Controller
             throw new AuthenticationException;
         }
 
+        // Linking Google gives a way to sign in and to confirm one's identity, so it waits for a recent authentication
+        // when the user already has a way to prove who they are (the same rule as changing the phone number).
+        if ($intent === GoogleIntent::Link && $user !== null && RecentAuthentication::missingFor($user, $request)) {
+            throw new RecentAuthenticationRequired;
+        }
+
         // Somebody who is signed in cannot take the invitation: the page asks them to sign out first.
         abort_if($intent === GoogleIntent::Invitation && ($user !== null || $this->pendingInvitation($request) === null), 403);
 
@@ -126,6 +133,11 @@ final class GoogleController extends Controller
 
         if ($intent === GoogleIntent::Login && $user !== null) {
             return IntendedRedirect::response($request);
+        }
+
+        // Again here: the session may have aged during the round trip, and a callback can be made without the redirect.
+        if ($intent === GoogleIntent::Link && $user !== null && RecentAuthentication::missingFor($user, $request)) {
+            return $this->fail($request, $intent, 'auth.errors.recent_auth_required');
         }
 
         try {
