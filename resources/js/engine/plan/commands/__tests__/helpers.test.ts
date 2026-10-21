@@ -17,6 +17,7 @@ import {
     type WallProps,
 } from '../helpers';
 import { createPlanBus } from '../registry';
+import { validatePlan } from '../../validate';
 import {
     Graph,
     oneWall,
@@ -540,6 +541,67 @@ describe('insertWallSegment', () => {
 // ---- splitIntersections ----------------------------------------------------------
 
 describe('splitIntersections', () => {
+    it('folds a piece that joins the nodes of an existing wall into that wall, and keeps cutting it', () => {
+        const g = new Graph();
+        const a = g.node(0, 0);
+        const b = g.node(6000, 0);
+        const h = g.wall(a, b);
+        const c1 = g.node(2000, 0);
+        // the existing wall runs the other way, b -> c1
+        const e = g.wall(b, c1, { thickness: 200 });
+        const loose = g.node(4000, 2);
+        const door = g.opening(h, 3000, 600);
+        const placement = g.placement(h, 'left', 3000, -100);
+        const dim = g.dimension(h, 'left');
+        const { doc, out } = g.run((d, c, o) => splitIntersections(d, h, c, o));
+        // h: a -> c1; its tail c1 -> b folded into e; e cut again at `loose`
+        expect(wallsOf(doc)).toHaveLength(3);
+        expect([doc.walls[h]!.a, doc.walls[h]!.b]).toEqual([a, c1]);
+        expect([doc.walls[e]!.a, doc.walls[e]!.b]).toEqual([b, loose]);
+        const rest = wallsOf(doc).find((w) => w.id !== h && w.id !== e)!;
+        expect([rest.a, rest.b]).toEqual([loose, c1]);
+        // the kept wall's properties win, and the new piece copies them
+        expect(doc.walls[e]!.thickness).toBe(200);
+        expect(rest.thickness).toBe(200);
+        // the folded tail is gone; what hung on it moved, flipped
+        const tail = out.deletedIds.filter((id) => id.startsWith('w_'));
+        expect(tail).toHaveLength(1);
+        expect(doc.walls[tail[0]!]).toBeUndefined();
+        expect(doc.openings[door]).toMatchObject({
+            wallId: rest.id,
+            offset: 1000,
+            hinge: 'end',
+            swing: 'right',
+        });
+        expect(doc.placements[placement]!.wallAttachment).toEqual({
+            wallId: rest.id,
+            side: 'right',
+        });
+        expect(doc.annotations.dimensions[dim]!.attachedTo!.wallId).toBe(h);
+        expect(
+            validatePlan(doc).filter((i) => i.code === 'plan.wall_duplicate'),
+        ).toEqual([]);
+    });
+
+    it('refuses opening_overlap when a folded piece brings an opening onto one of the existing wall', () => {
+        const g = new Graph();
+        const h = g.wall(g.node(0, 0), g.node(6000, 0));
+        const c1 = g.node(2000, 0);
+        const c2 = g.node(4000, 0);
+        const e = g.wall(c1, c2);
+        const mine = g.opening(h, 3000, 900);
+        const theirs = g.opening(e, 1000, 900);
+        expect(g.abortOf((d, c, o) => splitIntersections(d, h, c, o))).toEqual({
+            code: 'opening_overlap',
+            messageKey: 'engine.plan.command.opening_overlap',
+            params: {
+                wallId: e,
+                openingId: mine < theirs ? mine : theirs,
+                otherId: mine < theirs ? theirs : mine,
+            },
+        });
+    });
+
     it('splits both crossing walls at the crossing', () => {
         const g = new Graph();
         const h = g.wall(g.node(0, 0), g.node(4000, 0));

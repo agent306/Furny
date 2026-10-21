@@ -1860,6 +1860,31 @@ describe('moveWall', () => {
 // ---- setWallLength -----------------------------------------------------------
 
 describe('setWallLength', () => {
+    it('folds the piece a long setWallLength lays over a collinear neighbour into it (property test, sequence 46)', () => {
+        const ids = testIds();
+        const start = makeGridPlan(3, 3, 3000, ids);
+        const bus = planBus(start, ids);
+        ok(bus.execute('deleteNode', { nodeId: 'n_0000000002' }));
+        const before = bus.getDoc();
+        // w11 (3000,9000)-(6000,9000): its `a` end moves out past (0,9000),
+        // so the wall now runs over w10, which joins the same two nodes
+        ok(
+            bus.execute('setWallLength', {
+                wallId: 'w_0000000011',
+                length: 6827,
+                anchor: 'b',
+            }),
+        );
+        const doc = bus.getDoc();
+        const known = planErrorKeys(validatePlan(before));
+        expect(
+            [...planErrorKeys(validatePlan(doc))].filter((k) => !known.has(k)),
+        ).toEqual([]);
+        expect(doc.walls.w_0000000010).toBeDefined();
+        expect(bus.undo()).toBe(true);
+        expect(bus.getDoc()).toEqual(before);
+    });
+
     it("anchor 'a' keeps a and moves b; anchor 'b' keeps b and moves a", () => {
         const { g, a, b, w } = oneWall();
         const bus = busOf(g);

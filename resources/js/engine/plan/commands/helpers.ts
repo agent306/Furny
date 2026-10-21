@@ -17,6 +17,12 @@
  *   the 22 command codes).
  * - No wall shorter than `MIN_WALL_LENGTH` is made: cuts, crossings and
  *   splits keep at least that distance from the ends they meet.
+ * - A split piece that joins two nodes another wall already joins (a wall
+ *   split where a collinear wall overlaps it) is folded into that wall
+ *   (controller ruling, ledgered for the spec 19 reconciliation): the
+ *   existing wall keeps its id and properties and takes the piece's
+ *   openings, placements and dimensions; an opening that would overlap one
+ *   already there refuses the split with `opening_overlap`.
  */
 import type { Draft } from 'mutative';
 import { CommandAbort, type CommandOutput } from '../../commands/types';
@@ -170,7 +176,13 @@ export function wallLength(d: Doc, wallId: string): number {
  * properties. Openings and attached placements beyond the cut move to the new
  * wall. Returns the new wall's id.
  */
-function splitAtNode(d: Doc, wallId: string, nodeId: string, ctx: Ids): string {
+function splitAtNode(
+    d: Doc,
+    wallId: string,
+    nodeId: string,
+    ctx: Ids,
+    out: Out,
+): void {
     const wall = wallOf(d, wallId);
     const a = nodePoint(d, wall.a);
     const b = nodePoint(d, wall.b);
@@ -214,7 +226,110 @@ function splitAtNode(d: Doc, wallId: string, nodeId: string, ctx: Ids): string {
             }
         }
     }
-    return tailId;
+    // a piece that joins two nodes another wall already joins goes into it
+    for (const piece of [wallId, tailId]) {
+        if (!Object.hasOwn(d.walls, piece)) continue;
+        const { a: pa, b: pb } = d.walls[piece]!;
+        const existing = wallJoining(d, pa, pb, piece);
+        if (existing !== null) {
+            foldWall(d, piece, existing, out, { conflict: 'refuse' });
+        }
+    }
+}
+
+/** The wall (smallest id) joining nodes `p` and `q` other than `except`, or `null`. */
+function wallJoining(
+    d: Doc,
+    p: string,
+    q: string,
+    except: string | null = null,
+): string | null {
+    for (const id of sortedIds(d.walls)) {
+        if (id === except) continue;
+        const w = d.walls[id]!;
+        if ((w.a === p && w.b === q) || (w.a === q && w.b === p)) return id;
+    }
+    return null;
+}
+
+/**
+ * Folds wall `dropId` into wall `keepId`, which joins the same two nodes:
+ * the kept wall keeps its id and properties and takes the dropped wall's
+ * openings (their centres re-projected; hinge and swing flipped when the two
+ * run opposite ways), placements and dimensions (sides and faces flipped
+ * likewise); then the dropped wall is deleted. An opening that does not fit
+ * or overlaps one already there is deleted (`conflict: 'delete'`, the
+ * `mergeNodeInto` rule) or refused (`conflict: 'refuse'`, `opening_overlap`;
+ * an opening that is already out of bounds is clamped where it can be and
+ * otherwise kept as it is). `centres` gives opening centres measured before
+ * the caller moved a node.
+ */
+function foldWall(
+    d: Doc,
+    dropId: string,
+    keepId: string,
+    out: Out,
+    opts: { conflict: 'delete' | 'refuse'; centres?: Map<string, Vec2> },
+): void {
+    const keeper = d.walls[keepId]!;
+    const loser = d.walls[dropId]!;
+    const keeperSeg = segmentOf(d, keeper);
+    const keeperLength = dist(keeperSeg.a, keeperSeg.b);
+    const keeperDir =
+        keeperLength < 1e-9
+            ? { x: 1, y: 0 }
+            : scale(sub(keeperSeg.b, keeperSeg.a), 1 / keeperLength);
+    const reversed = loser.a !== keeper.a;
+    const flip = (side: 'left' | 'right'): 'left' | 'right' =>
+        reversed ? (side === 'left' ? 'right' : 'left') : side;
+    for (const o of openingsOf(d, dropId)) {
+        const centre =
+            opts.centres?.get(o.id) ?? pointAlong(d, loser, o.offset);
+        const projected = mm(dot(sub(centre, keeperSeg.a), keeperDir));
+        const fitted = fitOffset(projected, o.width, keeperLength);
+        const offset =
+            opts.conflict === 'refuse' ? (fitted ?? projected) : projected;
+        const inside = fitted === offset;
+        const blocking = openingsOf(d, keepId).find((other) =>
+            overlaps(offset, o.width, other.offset, other.width),
+        );
+        if (opts.conflict === 'refuse' && blocking !== undefined) {
+            const [first, second] =
+                cmpId(o.id, blocking.id) <= 0
+                    ? [o.id, blocking.id]
+                    : [blocking.id, o.id];
+            fail('opening_overlap', {
+                wallId: keepId,
+                openingId: first,
+                otherId: second,
+            });
+        }
+        if (opts.conflict === 'delete' && (!inside || blocking !== undefined)) {
+            delete d.openings[o.id];
+            pushDeleted(out, o.id);
+            continue;
+        }
+        o.wallId = keepId;
+        o.offset = offset;
+        if (reversed) {
+            o.hinge = o.hinge === 'start' ? 'end' : 'start';
+            o.swing = o.swing === 'left' ? 'right' : 'left';
+        }
+    }
+    // what hung on the dropped wall follows the kept one
+    for (const placement of Object.values(d.placements)) {
+        const attachment = placement.wallAttachment;
+        if (attachment?.wallId !== dropId) continue;
+        attachment.wallId = keepId;
+        attachment.side = flip(attachment.side);
+    }
+    for (const dimension of Object.values(d.annotations.dimensions)) {
+        const attached = dimension.attachedTo;
+        if (attached?.wallId !== dropId) continue;
+        attached.wallId = keepId;
+        if (attached.face !== 'center') attached.face = flip(attached.face);
+    }
+    deleteWall(d, dropId, out);
 }
 
 /**
@@ -233,7 +348,7 @@ export function splitWallAt(
     wallId: string,
     point: Vec2,
     ctx: Ids,
-    _out: Out,
+    out: Out,
     opts: { inclusive?: boolean } = {},
 ): string {
     const wall = wallOf(d, wallId);
@@ -255,7 +370,7 @@ export function splitWallAt(
     }
     const nodeId = ctx.newId('n');
     d.nodes[nodeId] = { id: nodeId, x: at.x, y: at.y };
-    splitAtNode(d, wallId, nodeId, ctx);
+    splitAtNode(d, wallId, nodeId, ctx, out);
     return nodeId;
 }
 
@@ -512,6 +627,9 @@ function splitCrossedWalls(
     for (const { wallId, into } of [...folded].sort(
         (p, q) => (order.get(p.into) ?? 0) - (order.get(q.into) ?? 0),
     )) {
+        // folded into another wall by an earlier split: that split went
+        // through the node this one wanted
+        if (!Object.hasOwn(d.walls, wallId)) continue;
         const wall = d.walls[wallId]!;
         if (wall.a === into.nodeId || wall.b === into.nodeId) continue;
         const seg = segmentOf(d, wall);
@@ -525,7 +643,7 @@ function splitCrossedWalls(
         ) {
             fail('wall_too_short', { wallId, length: mm(length) });
         }
-        splitAtNode(d, wallId, into.nodeId!, ctx);
+        splitAtNode(d, wallId, into.nodeId!, ctx, out);
     }
 }
 
@@ -665,12 +783,16 @@ export function splitIntersections(
     splitCrossedWalls(d, kept, folded, ctx, out);
     settleRoundedCuts(d, kept, ctx, out);
 
-    // The wall keeps its id and always ends at the next cut; the rest of it
-    // moves to the new wall each time, so the next cut splits that tail.
-    let tail = wallId;
+    // Cut along the wall from `a`: what is left to cut is always the wall
+    // joining the last cut to the far end `b` (the new tail, or the wall a
+    // duplicate tail was folded into, whichever way that one runs).
+    const far = wall.b;
+    let rest: string | null = wallId;
     for (const cut of kept) {
         if (cut.rank === 0) continue;
-        tail = splitAtNode(d, tail, cut.nodeId!, ctx);
+        if (rest === null) break;
+        splitAtNode(d, rest, cut.nodeId!, ctx, out);
+        rest = wallJoining(d, cut.nodeId!, far);
     }
 }
 
@@ -730,58 +852,8 @@ export function mergeNodeInto(
     }
     for (const ids of groups.values()) {
         if (ids.length < 2 || !ids.some((id) => moved.has(id))) continue;
-        const keeper = d.walls[ids[0]!]!;
-        const keeperSeg = segmentOf(d, keeper);
-        const keeperLength = dist(keeperSeg.a, keeperSeg.b);
-        const keeperDir =
-            keeperLength < 1e-9
-                ? { x: 1, y: 0 }
-                : scale(sub(keeperSeg.b, keeperSeg.a), 1 / keeperLength);
         for (const loserId of ids.slice(1)) {
-            const loser = d.walls[loserId]!;
-            const reversed = loser.a !== keeper.a;
-            for (const o of openingsOf(d, loserId)) {
-                const centre =
-                    centres.get(o.id) ?? pointAlong(d, loser, o.offset);
-                const offset = mm(dot(sub(centre, keeperSeg.a), keeperDir));
-                const inside =
-                    fitOffset(offset, o.width, keeperLength) === offset;
-                const clear = openingsOf(d, keeper.id).every(
-                    (other) =>
-                        2 * offset + o.width <=
-                            2 * other.offset - other.width ||
-                        2 * offset - o.width >= 2 * other.offset + other.width,
-                );
-                if (!inside || !clear) {
-                    delete d.openings[o.id];
-                    pushDeleted(out, o.id);
-                    continue;
-                }
-                o.wallId = keeper.id;
-                o.offset = offset;
-                if (reversed) {
-                    o.hinge = o.hinge === 'start' ? 'end' : 'start';
-                    o.swing = o.swing === 'left' ? 'right' : 'left';
-                }
-            }
-            // what hung on the loser follows the keeper (flipped sides if reversed)
-            const flip = (side: 'left' | 'right'): 'left' | 'right' =>
-                reversed ? (side === 'left' ? 'right' : 'left') : side;
-            for (const placement of Object.values(d.placements)) {
-                const attachment = placement.wallAttachment;
-                if (attachment?.wallId !== loserId) continue;
-                attachment.wallId = keeper.id;
-                attachment.side = flip(attachment.side);
-            }
-            for (const dimension of Object.values(d.annotations.dimensions)) {
-                const attached = dimension.attachedTo;
-                if (attached?.wallId !== loserId) continue;
-                attached.wallId = keeper.id;
-                if (attached.face !== 'center') {
-                    attached.face = flip(attached.face);
-                }
-            }
-            deleteWall(d, loserId, out);
+            foldWall(d, loserId, ids[0]!, out, { conflict: 'delete', centres });
         }
     }
 

@@ -26,7 +26,7 @@ import type { PlanDocument } from '../../schema';
 import { makeGridPlan } from '../../testing/fixtures';
 import { planBus } from '../../testing/graph';
 import { planErrorKeys, validatePlan } from '../../validate';
-import type { PlanFragment } from '../entities';
+import type { PlanFragment } from '../fragment';
 import { PLAN_COMMANDS, type PlanCommandType } from '../registry';
 
 const SEED = 1234;
@@ -34,6 +34,8 @@ const SEQUENCES = 500;
 const MAX_LENGTH = 8;
 const HISTORY_CAP = 200;
 const MAX_COORD = 1_000_000;
+/** Fewest document-changing successes every command must have in the random phase. */
+const MIN_CHANGES = 5;
 
 // ---- random values -------------------------------------------------------------
 
@@ -208,7 +210,7 @@ function fragmentOf(doc: PlanDocument, r: Rand): PlanFragment {
         max: number,
     ): Record<string, T> => {
         const keys = Object.keys(record).sort();
-        if (keys.length === 0 || r.chance(0.4)) return {};
+        if (keys.length === 0 || r.chance(0.3)) return {};
         return Object.fromEntries(
             r.some(keys, max).map((k) => [k, record[k]!]),
         );
@@ -235,6 +237,135 @@ function fragmentOf(doc: PlanDocument, r: Rand): PlanFragment {
     };
 }
 
+/** Nodes joining exactly two walls that run straight on (what `mergeCollinearWalls` merges at). */
+function straightNodes(doc: PlanDocument): string[] {
+    const at = new Map<string, string[]>();
+    for (const w of Object.values(doc.walls)) {
+        for (const id of [w.a, w.b]) at.set(id, [...(at.get(id) ?? []), w.id]);
+    }
+    const out: string[] = [];
+    for (const [nodeId, wallIds] of at) {
+        if (wallIds.length !== 2 || !doc.nodes[nodeId]) continue;
+        const dirs = wallIds.map((id) => {
+            const w = doc.walls[id]!;
+            const far = doc.nodes[w.a === nodeId ? w.b : w.a];
+            const here = doc.nodes[nodeId]!;
+            return far ? { x: far.x - here.x, y: far.y - here.y } : null;
+        });
+        const [p, q] = dirs;
+        if (!p || !q) continue;
+        const cos =
+            (p.x * q.x + p.y * q.y) /
+            (Math.hypot(p.x, p.y) * Math.hypot(q.x, q.y));
+        if (cos < -0.9999) out.push(nodeId);
+    }
+    return out.sort();
+}
+
+/**
+ * Setup steps every sequence starts with (inside the invariant, like any
+ * other step): something for every entity command to act on, and a split
+ * wall for `mergeCollinearWalls`. The bus' footprint provider knows every
+ * design id.
+ */
+const SETUP: Array<[PlanCommandType, Gen]> = [
+    [
+        'setBackground',
+        (_doc, r) => ({
+            background: {
+                importId: null,
+                mediaUuid: 'media-1',
+                pixelWidth: r.int(500, 3000),
+                pixelHeight: r.int(500, 3000),
+                mmPerPixel: r.real(2, 10),
+                position: { x: r.mm(-2000, 0), y: r.mm(-2000, 0) },
+                rotation: 0,
+                opacity: 0.5,
+                visible: true,
+                locked: false,
+            },
+        }),
+    ],
+    [
+        'addPlacement',
+        (_doc, r) => ({
+            designId: 'des_x',
+            x: r.mm(500, 8500),
+            y: r.mm(500, 8500),
+            rotation: r.real(0, 360),
+        }),
+    ],
+    [
+        'addPlacement',
+        (doc, r) => ({
+            designId: 'des_y',
+            x: r.mm(500, 8500),
+            y: r.mm(500, 8500),
+            rotation: 0,
+            wallAttachment: {
+                wallId: r.pick(Object.keys(doc.walls).sort()),
+                side: r.pick(['left', 'right'] as const),
+            },
+        }),
+    ],
+    [
+        'addFixture',
+        (_doc, r) => ({
+            libraryKey: r.pick(FIXTURE_KEYS),
+            x: r.mm(500, 8500),
+            y: r.mm(500, 8500),
+        }),
+    ],
+    [
+        'addDimension',
+        (_doc, r) => {
+            const a = { x: r.mm(0, 9000), y: r.mm(-1500, -500) };
+            return {
+                a,
+                b: { x: a.x + r.mm(500, 3000), y: a.y },
+                offset: r.mm(-1000, 1000),
+                attachedTo: null,
+            };
+        },
+    ],
+    [
+        'addDimension',
+        (doc, r) => ({
+            a: { x: 0, y: 0 },
+            b: { x: 1000, y: 0 },
+            offset: 300,
+            attachedTo: {
+                kind: 'wall',
+                wallId: r.pick(Object.keys(doc.walls).sort()),
+                face: r.pick(['left', 'right', 'center'] as const),
+            },
+        }),
+    ],
+    [
+        'addLabel',
+        (_doc, r) => ({
+            position: { x: r.mm(0, 9000), y: r.mm(0, 9000) },
+            text: r.text(1, 30).trim() || 'Room',
+        }),
+    ],
+    [
+        'setRoomMeta',
+        (doc, r) => ({
+            faceKey: r.pick(derivePlanGeometry(doc).rooms).faceKey,
+            props: { name: r.text(1, 20) },
+        }),
+    ],
+    [
+        'splitWall',
+        (doc, r) => {
+            const wallId = r.pick(Object.keys(doc.walls).sort());
+            const length = lengthOf(doc, wallId);
+            // clear of the door centred on the first interior walls
+            return { wallId, at: r.chance(0.5) ? 500 : length - 500 };
+        },
+    ],
+];
+
 const GENERATORS: Record<PlanCommandType, Gen> = {
     addWall: (doc, r) => ({
         from: endpoint(doc, r),
@@ -253,17 +384,11 @@ const GENERATORS: Record<PlanCommandType, Gen> = {
         return { wallId, at: r.mm(0, lengthOf(doc, wallId)) };
     },
     mergeCollinearWalls: (doc, r) => {
-        // mostly nodes with two walls, the only ones it can merge at
-        const degree = new Map<string, number>();
-        for (const w of Object.values(doc.walls)) {
-            for (const id of [w.a, w.b])
-                degree.set(id, (degree.get(id) ?? 0) + 1);
-        }
-        const two = [...degree].filter(([, n]) => n === 2).map(([id]) => id);
+        const straight = straightNodes(doc);
         return {
             nodeId:
-                two.length > 0 && r.chance(0.8)
-                    ? r.pick(two.sort())
+                straight.length > 0 && r.chance(0.9)
+                    ? r.pick(straight)
                     : idOf(r, doc.nodes, 'n'),
         };
     },
@@ -401,13 +526,19 @@ const GENERATORS: Record<PlanCommandType, Gen> = {
         rotation: r.real(-360, 720),
         pivot: r.pick(['center', 'back_center'] as const),
     }),
-    setPlacementProps: (doc, r) => ({
-        placementIds: idsOf(r, doc.placements, 'f'),
-        props: defined({
-            elevation: r.maybe(() => r.mm(0, 10_000)),
-            mirrored: r.maybe(() => r.chance(0.5)),
-        }),
-    }),
+    setPlacementProps: (doc, r) => {
+        const placementIds = idsOf(r, doc.placements, 'f');
+        const first = doc.placements[placementIds[0]!];
+        return {
+            placementIds,
+            props: r.chance(0.5)
+                ? { mirrored: !(first?.mirrored ?? false) }
+                : defined({
+                      elevation: r.mm(0, 10_000),
+                      mirrored: r.maybe(() => r.chance(0.5)),
+                  }),
+        };
+    },
     deletePlacements: (doc, r) => ({
         placementIds: idsOf(r, doc.placements, 'f'),
     }),
@@ -625,7 +756,8 @@ describe('command invariants (04 §6.8)', () => {
     it('500 random sequences on makeGridPlan(3,3): no command adds a validatePlan error, documents stay plans, history stays capped and undo restores the start', () => {
         const r = new Rand(SEED);
         const failures: string[] = [];
-        const succeeded = new Map<string, number>();
+        /** Random-phase successes that changed the document, per command. */
+        const changed = new Map<string, number>(COMMANDS.map((t) => [t, 0]));
 
         for (let n = 0; n < SEQUENCES; n += 1) {
             const ids = testIds();
@@ -640,16 +772,15 @@ describe('command invariants (04 §6.8)', () => {
                 );
             };
 
-            const length = r.int(1, MAX_LENGTH);
-            for (let s = 0; s < length && !failed; s += 1) {
-                const type = drawCommand(r, bus.getDoc());
-                const params = GENERATORS[type](bus.getDoc(), r);
-                const merge =
-                    PLAN_COMMANDS[type].mergeKey !== undefined && r.chance(0.5);
-                const sealed = r.chance(0.2);
+            /** Runs one step and checks the invariants; whether it changed the document. */
+            const step = (
+                type: PlanCommandType,
+                params: unknown,
+                merge: boolean,
+                sealed: boolean,
+            ): boolean => {
                 trace.push({ type, params, merge, sealed });
                 if (sealed) bus.seal();
-
                 const before = bus.getDoc();
                 const known = planErrorKeys(validatePlan(before));
                 let result;
@@ -657,11 +788,9 @@ describe('command invariants (04 §6.8)', () => {
                     result = bus.execute(type, params as never, { merge });
                 } catch (error) {
                     fail(`${type} threw ${String(error)}`);
-                    break;
+                    return false;
                 }
-                if (!result.ok) continue;
-                succeeded.set(type, (succeeded.get(type) ?? 0) + 1);
-
+                if (!result.ok) return false;
                 const after = bus.getDoc();
                 const added = [...planErrorKeys(validatePlan(after))].filter(
                     (key) => !known.has(key),
@@ -675,6 +804,22 @@ describe('command invariants (04 §6.8)', () => {
                 }
                 if (bus.history().undo.length > HISTORY_CAP) {
                     fail(`history holds ${bus.history().undo.length}`);
+                }
+                return after !== before;
+            };
+
+            for (const [type, make] of SETUP) {
+                if (failed) break;
+                step(type, make(bus.getDoc(), r), false, false);
+            }
+            const length = r.int(1, MAX_LENGTH);
+            for (let s = 0; s < length && !failed; s += 1) {
+                const type = drawCommand(r, bus.getDoc());
+                const params = GENERATORS[type](bus.getDoc(), r);
+                const merge =
+                    PLAN_COMMANDS[type].mergeKey !== undefined && r.chance(0.5);
+                if (step(type, params, merge, r.chance(0.2)) && !failed) {
+                    changed.set(type, changed.get(type)! + 1);
                 }
             }
             if (failed) continue;
@@ -690,12 +835,10 @@ describe('command invariants (04 §6.8)', () => {
         }
 
         expect(failures).toEqual([]);
-        // the test is not vacuous: most commands got through at least once
-        const never = COMMANDS.filter((type) => !succeeded.has(type));
-        expect(
-            never.length,
-            `never succeeded: ${never.join(', ')}`,
-        ).toBeLessThanOrEqual(3);
+        // not vacuous: every command changed the document several times
+        const table = COMMANDS.map((t) => `${t} ${changed.get(t)}`).join(', ');
+        const thin = COMMANDS.filter((t) => changed.get(t)! < MIN_CHANGES);
+        expect(thin, table).toEqual([]);
     }, 60_000);
 
     it('never holds more than 200 history entries', () => {

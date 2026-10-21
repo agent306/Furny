@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { ExecuteResult } from '../../../commands/types';
 import { cyrb53 } from '../../../geometry/hash';
 import type { PlanDocument } from '../../schema';
-import { Graph, busOf, ok, refused } from '../../testing/graph';
-import type { PlanFragment } from '../entities';
-import { PLAN_COMMANDS } from '../registry';
+import { FOOTPRINT, Graph, busOf, ok, refused } from '../../testing/graph';
+import { definePlanCommand } from '../define';
+import type { PlanFragment } from '../fragment';
+import { PLAN_COMMANDS, createPlanBus } from '../registry';
 
 // ---- fixtures ----------------------------------------------------------------
 
@@ -262,6 +263,80 @@ describe('translateEntities', () => {
         expect(doc.background!.position).toEqual({ x: 110, y: -30 });
         expect(doc.nodes).toEqual(start.nodes);
         expectUndoRestores(bus, start);
+    });
+
+    it('moves a RoomMeta anchor with a merged drag of its whole room, measured from the drag start each step', () => {
+        const r = room();
+        const meta = r.g.meta('Living', 2500, 1500);
+        const bus = busOf(r.g);
+        const start = bus.getDoc();
+        for (const dx of [100, 250, 400]) {
+            ok(
+                bus.execute(
+                    'translateEntities',
+                    { ids: [...r.walls], dx, dy: 0, finalize: dx === 400 },
+                    { merge: true },
+                ),
+            );
+            // a replace re-run on the start document: not 100 + 250 + ...
+            expect(bus.getDoc().rooms[meta]!.anchor).toEqual({
+                x: 2500 + dx,
+                y: 1500,
+            });
+        }
+        expect(bus.history().undo).toHaveLength(1);
+        expectUndoRestores(bus, start);
+    });
+
+    it('gives a replace re-run the geometry of the drag start (ctx.geometry of the base document)', () => {
+        const r = room();
+        const seen: PlanDocument[] = [];
+        const probe = definePlanCommand<{ v: number }>({
+            type: 'probe',
+            labelKey: 'probe',
+            validate: () => null,
+            run(d, p, ctx) {
+                seen.push(ctx.geometry.docRef);
+                d.meta.floorThickness = p.v;
+            },
+            mergeKey: () => 'probe',
+            mergeMode: 'replace',
+            touchesGeometry: false,
+        });
+        const bus = createPlanBus({
+            initial: r.g.doc,
+            footprints: () => FOOTPRINT,
+            newId: r.g.ids,
+            registry: { ...PLAN_COMMANDS, probe },
+        });
+        const start = bus.getDoc();
+        for (const v of [10, 20, 30]) {
+            ok(bus.execute('probe', { v }, { merge: true }));
+        }
+        expect(seen).toHaveLength(3);
+        expect(seen[0]).toBe(start);
+        // the re-runs see the drag start again, not the previous step
+        for (const doc of seen.slice(1)) expect(doc).toEqual(start);
+    });
+
+    it('moves only the unattached dimensions of a selection; an attached one stays with its wall', () => {
+        const r = room();
+        // a wall of its own, away from the room the selection moves
+        const far = r.g.wall(r.g.node(10_000, 0), r.g.node(14_000, 0));
+        const attached = r.g.dimension(far, 'left');
+        const bus = busOf(r.g);
+        const before = bus.getDoc();
+        ok(
+            bus.execute('translateEntities', {
+                ids: [attached, r.top],
+                dx: 0,
+                dy: -500,
+                finalize: false,
+            }),
+        );
+        expect(bus.getDoc().annotations.dimensions[attached]).toEqual(
+            before.annotations.dimensions[attached],
+        );
     });
 
     it('leaves a locked background where it is', () => {

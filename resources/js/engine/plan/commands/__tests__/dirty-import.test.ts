@@ -106,6 +106,60 @@ describe('dirty import (makeDirtyPlan)', () => {
         expect(Object.keys(bus.getDoc().walls).length).toBe(before + 2);
     });
 
+    it('moveNode: dropping a corner of the overlapped top wall folds the duplicate piece into the overlapping wall', () => {
+        for (const [x, y, to] of [
+            [0, 0, { x: -300, y: 0 }],
+            [5000, 0, { x: 5300, y: 0 }],
+        ] as const) {
+            const { doc, bus } = dirty();
+            const overlapping = wallBetween(doc, [1250, 0], [3750, 0]);
+            const corner = nodeAt(doc, x, y);
+            expectClean(bus, () =>
+                bus.execute('moveNode', {
+                    nodeId: corner,
+                    to,
+                    finalize: true,
+                }),
+            );
+            const after = bus.getDoc();
+            // the top wall now runs corner - 1250 - 3750 - corner, its middle
+            // piece being the wall that overlapped it
+            const c1 = nodeAt(doc, 1250, 0);
+            const c2 = nodeAt(doc, 3750, 0);
+            const middle = Object.values(after.walls).filter(
+                (w) => (w.a === c1 && w.b === c2) || (w.a === c2 && w.b === c1),
+            );
+            expect(middle.map((w) => w.id)).toEqual([overlapping]);
+            expect(bus.undo()).toBe(true);
+            expect(bus.getDoc()).toEqual(doc);
+        }
+    });
+
+    it('moveWall: moving the left and the right wall (neighbours of the overlapped top wall) works', () => {
+        for (const [p, q] of [
+            [
+                [0, 4000],
+                [0, 0],
+            ],
+            [
+                [5000, 0],
+                [5000, 4000],
+            ],
+        ] as const) {
+            const { doc, bus } = dirty();
+            const wallId = wallBetween(doc, [...p], [...q]);
+            expectClean(bus, () =>
+                bus.execute('moveWall', {
+                    wallId,
+                    distance: 100,
+                    finalize: true,
+                }),
+            );
+            expect(bus.undo()).toBe(true);
+            expect(bus.getDoc()).toEqual(doc);
+        }
+    });
+
     it('addWall: a wall across the room through the crossing works', () => {
         const { bus } = dirty();
         expectClean(bus, () =>

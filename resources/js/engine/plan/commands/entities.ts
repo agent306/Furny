@@ -1,8 +1,8 @@
 /**
- * Selection-wide commands (04 §6.6): `translateEntities`, `nudgeEntities`,
- * `insertFragment` and `deleteEntities`. They take a mixed selection of ids
- * and recognise each id by its prefix (`n_`, `w_`, `o_`, `r_`, `f_`, `x_`,
- * `d_`, `t_`) or as `'background'`.
+ * Selection-wide commands (04 §6.6): `translateEntities`, `nudgeEntities` and
+ * `deleteEntities` (`insertFragment` is in `fragment.ts`). They take a mixed
+ * selection of ids and recognise each id by its prefix (`n_`, `w_`, `o_`,
+ * `r_`, `f_`, `x_`, `d_`, `t_`) or as `'background'`.
  *
  * Rulings carried by this file (ledgered for the spec 19 reconciliation):
  * - Every id of a selection must name an existing entity, else `not_found`;
@@ -24,24 +24,9 @@
  *   id) and merges it into it, re-fits the openings of the walls whose
  *   length changed, then runs `splitIntersections` on every remaining wall
  *   at a moved node.
- * - `insertFragment` resolves each pasted node the way `addWall` resolves an
- *   endpoint (`resolveEndpoint`): onto an existing node within
- *   `NODE_MERGE_TOL`, else a T node splitting a wall, else a new node. So a
- *   pasted wall joins what it touches and `idMap` maps such a node to the
- *   existing node's id. A fragment node no pasted wall uses is not pasted.
- *   As with `addWall`, only the parts of a wall no existing wall covers are
- *   pasted; a fragment wall that existing walls cover end to end (or whose
- *   ends resolve to one node) is not pasted at all, the walls under it are
- *   not split, and it has no `idMap` entry. A pasted wall cut into several
- *   walls maps to its first piece.
- * - A pasted opening goes on the pasted wall piece that holds its centre;
- *   it is dropped with the `fragment_opening_dropped` warning when there is
- *   none, when it does not fit there (more than `NODE_MERGE_TOL` of clamp
- *   needed) or when it would overlap an opening already on that piece. A
- *   dropped opening has no `idMap` entry.
- * - Placement and dimension attachments to a fragment wall move to the
- *   pasted piece nearest them (sides swapped if the piece runs the other
- *   way); attachments to any other wall are cleared.
+ * - `hash(ids)` of the merge keys is cyrb53 of the sorted ids joined by
+ *   `,` after dropping duplicates (04 §6.6 does not dedupe): a selection is
+ *   a set, so `[a, b, a]` and `[a, b]` drag as one.
  * - `deleteEntities` deletes the walls of selected nodes as `deleteNode`
  *   does, together with the selected walls, in one `deleteWalls` pass.
  */
@@ -50,42 +35,22 @@ import type { Draft } from 'mutative';
 import { CommandAbort, type CommandOutput } from '../../commands/types';
 import { cmpId } from '../../compare';
 import { cyrb53 } from '../../geometry/hash';
-import {
-    closestPointOnSeg,
-    intersectSegments,
-    projectParam,
-    type Seg,
-} from '../../geometry/segment';
 import { MIN_WALL_LENGTH, NODE_MERGE_TOL } from '../../geometry/tolerance';
-import { add, dist, dot, scale, sub, type Vec2 } from '../../geometry/vec2';
+import { dist, type Vec2 } from '../../geometry/vec2';
 import type { DerivedPlan } from '../derive';
-import {
-    MAX_FIXTURES,
-    MAX_OPENINGS,
-    MAX_PLACEMENTS,
-    MAX_WALLS,
-} from '../limits';
-import { PlanDocumentSchema } from '../schema';
-import type { Opening, PlanDocument, Wall } from '../schema';
-import type { EngineMessage } from '../types';
+import type { PlanDocument, Wall } from '../schema';
 import { definePlanCommand } from './define';
 import {
-    fitOffset,
-    insertWallSegment,
     mergeNodeInto,
-    overlaps,
     pushDeleted,
     reclampOpenings,
-    resolveEndpoint,
     splitIntersections,
     wallLength,
-    type WallProps,
 } from './helpers';
 import type { PlanCommandContext } from './pipeline';
 import {
     MAX_SPAN,
     type Planned,
-    assertWallCapacity,
     checkPoint,
     checkRange,
     has,
@@ -100,35 +65,6 @@ import { removeWalls } from './walls';
 type Doc = Draft<PlanDocument>;
 type Out = CommandOutput<unknown>;
 type Point = { x: number; y: number };
-
-// ---- PlanFragment ---------------------------------------------------------------------------
-
-/**
- * What the editor copies (04 §6.6 `insertFragment`, 05 §7.14): a subset of a
- * plan with the original ids.
- */
-export type PlanFragment = Pick<
-    PlanDocument,
-    'nodes' | 'walls' | 'openings' | 'placements' | 'fixtures'
-> & {
-    dimensions: PlanDocument['annotations']['dimensions'];
-    labels: PlanDocument['annotations']['labels'];
-    rooms: PlanDocument['rooms'];
-};
-
-const docShape = PlanDocumentSchema.shape;
-
-/** The document's own record schemas: entity shape and key = id. */
-const PlanFragmentSchema = z.object({
-    nodes: docShape.nodes,
-    walls: docShape.walls,
-    openings: docShape.openings,
-    placements: docShape.placements,
-    fixtures: docShape.fixtures,
-    dimensions: docShape.annotations.shape.dimensions,
-    labels: docShape.annotations.shape.labels,
-    rooms: docShape.rooms,
-});
 
 // ---- params schemas -------------------------------------------------------------------------
 
@@ -148,17 +84,6 @@ const NudgeSchema = z.object({
     dy: z.number(),
 });
 type NudgeParams = z.infer<typeof NudgeSchema>;
-
-interface InsertFragmentParams {
-    fragment: PlanFragment;
-    dx: number;
-    dy: number;
-}
-const InsertFragmentSchema: z.ZodType<InsertFragmentParams> = z.object({
-    fragment: PlanFragmentSchema,
-    dx: z.number(),
-    dy: z.number(),
-});
 
 const DeleteEntitiesSchema = z.object({ ids: IdsSchema });
 type DeleteEntitiesParams = z.infer<typeof DeleteEntitiesSchema>;
@@ -514,410 +439,6 @@ const nudgeEntities = definePlanCommand<NudgeParams>({
     touchesGeometry: true,
 });
 
-// ---- insertFragment: validation ------------------------------------------------------------------
-
-/** `too_large` when `adding` more `kind` entities would not fit in `record`. */
-function checkRoomFor(
-    record: object,
-    adding: number,
-    kind: string,
-    max: number,
-): EngineMessage | null {
-    const count = Object.keys(record).length;
-    return adding > 0 && count + adding > max
-        ? message('too_large', { kind, count, max })
-        : null;
-}
-
-function checkFragment(
-    doc: PlanDocument,
-    p: InsertFragmentParams,
-): EngineMessage | null {
-    const f = p.fragment;
-    const dx = mm(p.dx);
-    const dy = mm(p.dy);
-    const range =
-        checkRange('dx', dx, -MAX_SPAN, MAX_SPAN) ??
-        checkRange('dy', dy, -MAX_SPAN, MAX_SPAN);
-    if (range !== null) return range;
-    for (const wall of Object.values(f.walls)) {
-        for (const end of [wall.a, wall.b]) {
-            if (!has(f.nodes, end)) return notFound(end);
-        }
-    }
-    const points: Point[] = [
-        ...Object.values(f.nodes),
-        ...Object.values(f.placements),
-        ...Object.values(f.fixtures),
-        ...Object.values(f.labels).map((t) => t.position),
-        ...Object.values(f.dimensions).flatMap((dim) => [dim.a, dim.b]),
-        ...Object.values(f.rooms).map((m) => m.anchor),
-    ];
-    for (const point of points) {
-        const refusal = checkPoint('position', {
-            x: point.x + dx,
-            y: point.y + dy,
-        });
-        if (refusal !== null) return refusal;
-    }
-    const count = (record: object): number => Object.keys(record).length;
-    return (
-        checkRoomFor(doc.walls, count(f.walls), 'walls', MAX_WALLS) ??
-        checkRoomFor(
-            doc.openings,
-            count(f.openings),
-            'openings',
-            MAX_OPENINGS,
-        ) ??
-        checkRoomFor(
-            doc.placements,
-            count(f.placements),
-            'placements',
-            MAX_PLACEMENTS,
-        ) ??
-        checkRoomFor(doc.fixtures, count(f.fixtures), 'fixtures', MAX_FIXTURES)
-    );
-}
-
-// ---- insertFragment: the walls -------------------------------------------------------------------
-
-/** A wall's properties, copied. */
-const wallProps = (wall: Wall): WallProps => ({
-    thickness: wall.thickness,
-    height: wall.height,
-    kind: wall.kind,
-    justification: wall.justification,
-    material: wall.material,
-    colorHex: wall.colorHex,
-});
-
-/** A pasted fragment wall: where it lands and what existing walls covered of it. */
-interface Line {
-    seg: Seg;
-    /** Parameter spans of `seg` that walls already covered before it was pasted. */
-    covered: Array<[number, number]>;
-}
-
-/** The parameter spans of `seg` that walls of the draft cover (collinear overlaps), in order. */
-function coveredSpans(d: Doc, seg: Seg): Array<[number, number]> {
-    const spans: Array<[number, number]> = [];
-    for (const wall of Object.values(d.walls)) {
-        if (!hasEnds(d, wall)) continue;
-        const hit = intersectSegments(
-            seg,
-            { a: pointOf(d, wall.a), b: pointOf(d, wall.b) },
-            NODE_MERGE_TOL,
-        );
-        if (hit.kind === 'overlap') spans.push([hit.t0, hit.t1]);
-    }
-    return spans.sort((p, q) => p[0] - q[0]);
-}
-
-/** Whether `spans` cover a segment of `length` end to end, leaving no gap of `MIN_WALL_LENGTH`. */
-function coversAll(spans: Array<[number, number]>, length: number): boolean {
-    if (length < MIN_WALL_LENGTH) return false;
-    let reach = 0;
-    for (const [t0, t1] of spans) {
-        if ((t0 - reach) * length >= MIN_WALL_LENGTH) return false;
-        reach = Math.max(reach, t1);
-    }
-    return (1 - reach) * length < MIN_WALL_LENGTH;
-}
-
-/** A wall the paste made, lying along a pasted fragment wall. */
-interface Piece {
-    id: string;
-    seg: Seg;
-    length: number;
-    /** Runs against the fragment wall's `a -> b`. */
-    reversed: boolean;
-}
-
-/**
- * The walls made by this paste that lie along a pasted fragment wall, in id
- * order: not in `before`, both ends within `NODE_MERGE_TOL` of it, and not on
- * a part existing walls covered (where a wall split by the paste may lie).
- */
-function piecesAlong(d: Doc, line: Line, before: ReadonlySet<string>): Piece[] {
-    const { seg } = line;
-    const dir = sub(seg.b, seg.a);
-    const pieces: Piece[] = [];
-    for (const id of Object.keys(d.walls).sort(cmpId)) {
-        if (before.has(id)) continue;
-        const wall = d.walls[id]!;
-        if (!hasEnds(d, wall)) continue;
-        const piece = { a: pointOf(d, wall.a), b: pointOf(d, wall.b) };
-        if (
-            closestPointOnSeg(piece.a, seg).dist > NODE_MERGE_TOL ||
-            closestPointOnSeg(piece.b, seg).dist > NODE_MERGE_TOL
-        ) {
-            continue;
-        }
-        const mid = projectParam(scale(add(piece.a, piece.b), 0.5), seg);
-        if (line.covered.some(([t0, t1]) => mid >= t0 && mid <= t1)) continue;
-        const length = dist(piece.a, piece.b);
-        if (length < 1e-9) continue;
-        pieces.push({
-            id,
-            seg: piece,
-            length,
-            reversed: dot(sub(piece.b, piece.a), dir) < 0,
-        });
-    }
-    return pieces;
-}
-
-/** Distance along a piece from its `a` end to the projection of `point`. */
-const along = (piece: Piece, point: Vec2): number =>
-    dot(
-        sub(point, piece.seg.a),
-        scale(sub(piece.seg.b, piece.seg.a), 1 / piece.length),
-    );
-
-/**
- * Where a pasted opening goes: the piece holding its centre, at the offset of
- * the centre, when it fits there (at most `NODE_MERGE_TOL` of clamp) and
- * overlaps no opening already on that piece; else `null`.
- */
-function placeOpening(
-    d: Doc,
-    o: Opening,
-    seg: Seg,
-    pieces: readonly Piece[],
-): { piece: Piece; offset: number } | null {
-    const length = dist(seg.a, seg.b);
-    if (length < 1e-9) return null;
-    const centre = add(seg.a, scale(sub(seg.b, seg.a), o.offset / length));
-    for (const piece of pieces) {
-        const u = along(piece, centre);
-        if (u < 0 || u > piece.length) continue;
-        const offset = fitOffset(u, o.width, piece.length);
-        if (offset === null || Math.abs(offset - u) > NODE_MERGE_TOL) {
-            continue;
-        }
-        const clear = Object.values(d.openings).every(
-            (other) =>
-                other.wallId !== piece.id ||
-                !overlaps(offset, o.width, other.offset, other.width),
-        );
-        return clear ? { piece, offset } : null;
-    }
-    return null;
-}
-
-/** The piece nearest `point` (ties by id), or `null` when there is none. */
-function nearestPiece(pieces: readonly Piece[], point: Vec2): Piece | null {
-    let best: { piece: Piece; distance: number } | null = null;
-    for (const piece of pieces) {
-        const distance = closestPointOnSeg(point, piece.seg).dist;
-        if (best === null || distance < best.distance) {
-            best = { piece, distance };
-        }
-    }
-    return best?.piece ?? null;
-}
-
-const flipSide = (side: 'left' | 'right'): 'left' | 'right' =>
-    side === 'left' ? 'right' : 'left';
-
-// ---- insertFragment -------------------------------------------------------------------------------
-
-export interface InsertFragmentResult {
-    /** Fragment id -> id in the document (see the header for the gaps). */
-    idMap: Record<string, string>;
-}
-
-const sortedValues = <T extends { id: string }>(
-    record: Record<string, T>,
-): T[] => Object.values(record).sort((p, q) => cmpId(p.id, q.id));
-
-function pasteFragment(
-    d: Doc,
-    p: InsertFragmentParams,
-    ctx: PlanCommandContext,
-    out: Out,
-): Record<string, string> {
-    const f = p.fragment;
-    const dx = mm(p.dx);
-    const dy = mm(p.dy);
-    const shift = (q: Point): Point => ({ x: mm(q.x + dx), y: mm(q.y + dy) });
-    const idMap: Record<string, string> = {};
-    const before = new Set(Object.keys(d.walls));
-
-    // walls, resolving their nodes on first use
-    const nodeOf = (id: string): string =>
-        (idMap[id] ??= resolveEndpoint(
-            d,
-            { point: shift(f.nodes[id]!) },
-            ctx,
-            out,
-        ));
-    const lines = new Map<string, Line>();
-    for (const wall of sortedValues(f.walls)) {
-        const seg = { a: shift(f.nodes[wall.a]!), b: shift(f.nodes[wall.b]!) };
-        const covered = coveredSpans(d, seg);
-        if (coversAll(covered, dist(seg.a, seg.b))) continue;
-        const from = nodeOf(wall.a);
-        const to = nodeOf(wall.b);
-        if (from === to) continue;
-        lines.set(wall.id, { seg, covered });
-        try {
-            const { wallIds } = insertWallSegment(
-                d,
-                from,
-                to,
-                wallProps(wall),
-                ctx,
-                out,
-            );
-            idMap[wall.id] = wallIds[0]!;
-        } catch (error) {
-            // already built where it lands: nothing to paste
-            if (
-                !(error instanceof CommandAbort) ||
-                error.reason.code !== 'wall_duplicate'
-            ) {
-                throw error;
-            }
-        }
-    }
-    assertWallCapacity(d);
-    const pieceCache = new Map<string, Piece[]>();
-    const piecesOf = (wallId: string): Piece[] => {
-        const line = lines.get(wallId);
-        if (line === undefined) return [];
-        let pieces = pieceCache.get(wallId);
-        if (pieces === undefined) {
-            pieces = piecesAlong(d, line, before);
-            pieceCache.set(wallId, pieces);
-        }
-        return pieces;
-    };
-
-    for (const o of sortedValues(f.openings)) {
-        const line = lines.get(o.wallId);
-        const placed =
-            line === undefined
-                ? null
-                : placeOpening(d, o, line.seg, piecesOf(o.wallId));
-        if (placed === null) {
-            out.warnings.push(
-                message('fragment_opening_dropped', { openingId: o.id }),
-            );
-            continue;
-        }
-        const id = ctx.newId('o');
-        const { reversed } = placed.piece;
-        d.openings[id] = {
-            ...o,
-            id,
-            wallId: placed.piece.id,
-            offset: placed.offset,
-            hinge: reversed ? (o.hinge === 'start' ? 'end' : 'start') : o.hinge,
-            swing: reversed ? flipSide(o.swing) : o.swing,
-        };
-        idMap[o.id] = id;
-    }
-
-    for (const meta of sortedValues(f.rooms)) {
-        const id = ctx.newId('r');
-        d.rooms[id] = {
-            ...meta,
-            id,
-            anchor: shift(meta.anchor),
-            labelOffset:
-                meta.labelOffset === null ? null : { ...meta.labelOffset },
-        };
-        idMap[meta.id] = id;
-    }
-    for (const placement of sortedValues(f.placements)) {
-        const id = ctx.newId('f');
-        const at = shift(placement);
-        const attachment = placement.wallAttachment;
-        const piece =
-            attachment === null
-                ? null
-                : nearestPiece(piecesOf(attachment.wallId), at);
-        d.placements[id] = {
-            ...placement,
-            id,
-            x: at.x,
-            y: at.y,
-            wallAttachment:
-                attachment === null || piece === null
-                    ? null
-                    : {
-                          wallId: piece.id,
-                          side: piece.reversed
-                              ? flipSide(attachment.side)
-                              : attachment.side,
-                      },
-        };
-        idMap[placement.id] = id;
-    }
-    for (const fixture of sortedValues(f.fixtures)) {
-        const id = ctx.newId('x');
-        const at = shift(fixture);
-        d.fixtures[id] = { ...fixture, id, x: at.x, y: at.y };
-        idMap[fixture.id] = id;
-    }
-    for (const dim of sortedValues(f.dimensions)) {
-        const id = ctx.newId('d');
-        const a = shift(dim.a);
-        const b = shift(dim.b);
-        const attached = dim.attachedTo;
-        const piece =
-            attached === null
-                ? null
-                : nearestPiece(
-                      piecesOf(attached.wallId),
-                      scale(add(a, b), 0.5),
-                  );
-        d.annotations.dimensions[id] = {
-            ...dim,
-            id,
-            a,
-            b,
-            attachedTo:
-                attached === null || piece === null
-                    ? null
-                    : {
-                          kind: 'wall',
-                          wallId: piece.id,
-                          face:
-                              piece.reversed && attached.face !== 'center'
-                                  ? flipSide(attached.face)
-                                  : attached.face,
-                      },
-        };
-        idMap[dim.id] = id;
-    }
-    for (const label of sortedValues(f.labels)) {
-        const id = ctx.newId('t');
-        d.annotations.labels[id] = {
-            ...label,
-            id,
-            position: shift(label.position),
-        };
-        idMap[label.id] = id;
-    }
-    return idMap;
-}
-
-const insertFragment = definePlanCommand<
-    InsertFragmentParams,
-    InsertFragmentResult
->({
-    type: 'insertFragment',
-    labelKey: 'engine.plan.command.label.insert_fragment',
-    paramsSchema: InsertFragmentSchema,
-    validate: (doc, p) => checkFragment(doc, p),
-    run(d, p, ctx, out) {
-        out.result = { idMap: pasteFragment(d, p, ctx, out) };
-    },
-    touchesGeometry: true,
-});
-
 // ---- deleteEntities -------------------------------------------------------------------------------
 
 export interface DeleteEntitiesResult {
@@ -977,6 +498,5 @@ const deleteEntities = definePlanCommand<
 export const ENTITY_COMMANDS = {
     translateEntities,
     nudgeEntities,
-    insertFragment,
     deleteEntities,
 };
