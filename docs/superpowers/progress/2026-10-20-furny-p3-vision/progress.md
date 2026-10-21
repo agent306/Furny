@@ -173,3 +173,8 @@ Task 20: fix round 1 9dca9d7 (1128 passed). M3 declined (spec §8.2 step 3, log 
 Task 20: re-review 1 APPROVED. Carry Task 21 (assemble/validate): reject implausible scale samples at collection (min span length; plausibility band on mm/px → scale_guessed), keep ±1e6 mm clamp as backstop; check assembly/validation for the absurd-scale path (coords beyond ±1e6 fail the document). Carry spec 19/Task 34: M3 — §8.2 step 3 discards a single labelled dimension on heuristic runs (no LLM confidence) for the 12 m guess; recommend a ruling.
 Task 20: complete (commits 69ede71..9dca9d7)
 STOP: user wrap-up — Task 21 NOT dispatched. Resume P3 at Task 21.
+RESUME 2026-10-22 (new controller, Windows host; worktree D:/Dev/Furny.worktrees/p3-vision, branch build/p3-vision recreated from main 7b40ce4). Env notes for subagents: D:/Dev/Furny.worktrees/_ctl/ENV.md.
+Ruling: vision gates run in WSL Ubuntu (uv, Python 3.12, venv $HOME/.venvs/furny-vision-p3), not native Windows — Windows fails 3 tests on platform artifacts (file:// path parse in LocalIO, wheel-dependent vector digest, perf bound) while Linux matches CI/prod; main baseline under WSL = 1128 passed — cost if wrong: Windows-only LocalIO bug stays unfixed (dev-only path).
+Ruling: commit trailer is the single line `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`; the plan's `Claude-Session:` line (previous session URL) is dropped — current attribution instructions — cost if wrong: cosmetic.
+Ruling: P3 resumes before the PHP/JS baseline finishes — vision gates verified green on main independently and P3 touches only vision/ — cost if wrong: none (P1/P2 still wait for their baseline).
+Task 21 carries → task-21-carries.md.
