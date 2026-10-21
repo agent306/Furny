@@ -116,3 +116,7 @@ it('stores push subscriptions against the user under the morph alias', function 
         ->and($subscription->subscribable_id)->toBe($user->id)
         ->and($user->pushSubscriptions)->toHaveCount(1);
 });
+
+it('keeps a null media model id null', function (): void {
+    expect((new Media)->model_id)->toBeNull();
+});

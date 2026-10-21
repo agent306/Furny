@@ -14,10 +14,10 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media as BaseMedia;
 final class Media extends BaseMedia
 {
     /**
-     * @return Attribute<string, string>
+     * @return Attribute<string|null, string|null>
      */
     protected function modelId(): Attribute
     {
-        return Attribute::get(static fn (mixed $value): string => rtrim((string) $value));
+        return Attribute::get(static fn (?string $value): ?string => $value === null ? null : rtrim($value));
     }
 }

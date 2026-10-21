@@ -129,3 +129,7 @@ it('takes the Pulse ingest driver from the environment', function (): void {
 
     expect($pulse['ingest']['driver'])->toBe('redis');
 });
+
+it('lets the media library accept the largest collection file (40 MB, 02 §10)', function (): void {
+    expect(config('media-library.max_file_size'))->toBeGreaterThanOrEqual(40 * 1024 * 1024);
+});
