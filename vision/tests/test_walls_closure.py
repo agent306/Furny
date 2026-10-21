@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from app.pipeline import walls as wallmod
+from app.pipeline.opening_evidence import door_arc
 from app.schemas.candidates import WallGraph
 from tests.support.synth import SDoor, SGap, SWall, render_plan
 from tests.test_segments_walls import BOLD_DIMS, SIZE, plan, run
@@ -490,11 +491,7 @@ def test_door_arc_check_costs_little_per_candidate_at_a_1000_px_gap() -> None:
     best = float("inf")
     for _ in range(3):
         start = time.perf_counter()
-        found = [
-            wallmod._door_arc(ink, hinge, toward, out * side, 1000.0, 30.0)
-            for side in (1, -1)
-            for _ in range(4)
-        ]
+        found = [door_arc(ink, hinge, toward, out * side, 1000.0, 30.0) for side in (1, -1) for _ in range(4)]
         best = min(best, time.perf_counter() - start)
     assert not any(found)
     assert best <= 0.15
