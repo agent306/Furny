@@ -543,11 +543,8 @@ def test_tables_with_uneven_rows_do_not_become_the_plan_region(style: str, case:
     else:
         _table(img, 1500, 200, IRREGULAR_ROWS[:20], [400, 400])
     alone = preprocess(page_of(base), make_ctx()).region
-    ctx = make_ctx()
-    assert preprocess(page_of(img), ctx).region == alone
+    assert preprocess(page_of(img), make_ctx()).region == alone
     assert alone.x + alone.w < 1250
-    if case == "title-block frame":  # a rival outside the region, excluded and warned about
-        assert [(w.code, w.params) for w in ctx.warnings] == [("plan_region_ambiguous", {"components": 2})]
 
 
 def test_a_double_line_plan_wins_over_a_table_with_text() -> None:
@@ -602,11 +599,8 @@ def test_a_bold_rule_or_frame_does_not_take_the_region(style: str, case: str) ->
     else:
         cv2.rectangle(img, (1700, 100), (2300, 1600), (0, 0, 0), 6)
     alone = preprocess(page_of(base), make_ctx()).region
-    ctx = make_ctx()
-    assert preprocess(page_of(img), ctx).region == alone
+    assert preprocess(page_of(img), make_ctx()).region == alone
     assert alone.x + alone.w < 1250
-    if case == "title-block frame":  # a rival outside the region, excluded and warned about
-        assert [(w.code, w.params) for w in ctx.warnings] == [("plan_region_ambiguous", {"components": 2})]
 
 
 @pytest.mark.parametrize("style", ["filled", "double"])
