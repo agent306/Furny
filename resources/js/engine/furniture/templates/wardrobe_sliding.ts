@@ -7,6 +7,7 @@ import {
     DEFAULT_ROD_TOP_CLEARANCE,
     DEFAULT_SHELF_FRONT_SETBACK,
     MAX_SLIDING_LEAF_WIDTH,
+    SLIDING_OVERLAP,
 } from '../constants';
 import type { FurnitureDocument, Section } from '../schema';
 import {
@@ -19,6 +20,7 @@ import {
     interiorHeight,
     intField,
     leaf,
+    leafFitsSheet,
     lengthField,
     otherFront,
     resolveDefaultMaterials,
@@ -32,10 +34,15 @@ const SHELF_PITCH = 400;
 const HANGING_ZONE_TOP = 350;
 const LEAVES_MIN = 2;
 const LEAVES_MAX = 4;
+/**
+ * 07 §2.4.2 allows 2700; the sides (height - plinth, plinth down to 0) must
+ * fit the 2420 mm usable length of the seed boards (spec 19, R40-2).
+ */
+const HEIGHT_MAX = 2420;
 
 export const wardrobeSlidingParamsSchema = z.object({
     width: z.number().int().min(1200).max(3600),
-    height: z.number().int().min(1800).max(2700),
+    height: z.number().int().min(1800).max(HEIGHT_MAX),
     depth: z.number().int().min(550).max(750),
     leaves: z.union([
         z.literal('auto'),
@@ -70,7 +77,7 @@ export const wardrobeSliding: TemplateDefinition<WardrobeSlidingParams> = {
     descriptionKey: 'templates.wardrobe_sliding.description',
     thumbnail: '/images/templates/wardrobe_sliding.svg',
     fields: [
-        ...dimensionFields([1200, 3600], [1800, 2700], [550, 750]),
+        ...dimensionFields([1200, 3600], [1800, HEIGHT_MAX], [550, 750]),
         intField('leaves', LEAVES_MIN, LEAVES_MAX, { allowAuto: true }),
         lengthField('plinthHeight', 0, 150, { advanced: true }),
     ],
@@ -78,7 +85,18 @@ export const wardrobeSliding: TemplateDefinition<WardrobeSlidingParams> = {
     paramsSchema: wardrobeSlidingParamsSchema,
 
     generate(params, ctx): FurnitureDocument {
-        const leaves = slidingLeafCount(params);
+        const materials = resolveDefaultMaterials(wardrobeSliding, ctx);
+        // More leaves when a leaf, (W + (n - 1) x overlap) / n wide, would
+        // exceed a sheet (spec 19, Task 40).
+        const fits = leafFitsSheet(ctx, materials.front.materialCode);
+        const requested = slidingLeafCount(params);
+        const leafFits = (n: number) =>
+            fits((params.width + (n - 1) * SLIDING_OVERLAP) / n, params.height);
+        const leaves =
+            Array.from(
+                { length: LEAVES_MAX - requested + 1 },
+                (_, i) => requested + i,
+            ).find(leafFits) ?? requested;
         const ih = interiorHeight(params.height, params.plinthHeight);
 
         // Odd columns hold shelves, even columns the hanging zone.
@@ -124,7 +142,7 @@ export const wardrobeSliding: TemplateDefinition<WardrobeSlidingParams> = {
         return carcassDocument(
             'wardrobe_sliding',
             { width: params.width, height: params.height, depth: params.depth },
-            resolveDefaultMaterials(wardrobeSliding, ctx),
+            materials,
             {
                 ...common,
                 // Setback 0: the bottom track sits on the carcass bottom.

@@ -18,9 +18,11 @@ import {
     hingedFront,
     intField,
     leaf,
+    leafFitsSheet,
     otherFront,
     resolveDefaultMaterials,
     selectField,
+    sheetDoors,
     split,
 } from './common';
 import type { TemplateDefinition } from './types';
@@ -64,8 +66,20 @@ export const loftCabinet: TemplateDefinition<LoftCabinetParams> = {
             params.doors === 'auto'
                 ? autoDoorCount(params.width)
                 : params.doors;
-        // Fewer doors when the width cannot give each one 100 mm.
-        const doors = fitDoors(requested, params.width - 2 * BOARD_THICKNESS);
+        const materials = resolveDefaultMaterials(loftCabinet, ctx);
+        // More doors when a leaf (a flap spans its column) would exceed a
+        // sheet (spec 19, Task 40); fewer when the width cannot give each
+        // one 100 mm.
+        const doors = fitDoors(
+            sheetDoors(
+                requested,
+                params.width,
+                params.height,
+                leafFitsSheet(ctx, materials.front.materialCode),
+                params.frontKind === 'flap_up',
+            ),
+            params.width - 2 * BOARD_THICKNESS,
+        );
         const columns = columnsFromDoors(doors);
 
         const sections: Section[] = [];
@@ -94,7 +108,7 @@ export const loftCabinet: TemplateDefinition<LoftCabinetParams> = {
         return carcassDocument(
             'loft_cabinet',
             { width: params.width, height: params.height, depth: params.depth },
-            resolveDefaultMaterials(loftCabinet, ctx),
+            materials,
             {
                 ...commonCarcass(ctx),
                 mounting: 'loft',

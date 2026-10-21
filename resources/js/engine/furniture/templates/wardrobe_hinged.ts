@@ -9,6 +9,9 @@ import {
     autoDoorCount,
     BOARD_THICKNESS,
     DOORS_MAX,
+    fitDoors,
+    leafFitsSheet,
+    sheetDoors,
     outerHingeSide,
     tracked,
     columnsFromDoors,
@@ -24,6 +27,11 @@ import {
 import type { ParamField, TemplateDefinition } from './types';
 
 const SHELF_PITCH = 400;
+/**
+ * 07 §2.4.1 allows 2700; the sides (height - plinth, plinth down to 0) must
+ * fit the 2420 mm usable length of the seed boards (spec 19, R40-2).
+ */
+const HEIGHT_MAX = 2420;
 /** Height of one internal drawer including its share of the divider. */
 const INTERNAL_DRAWER_HEIGHT = 180;
 const HANGING_ZONE_TOP = 350;
@@ -37,7 +45,7 @@ const SIDES = ['left', 'right'] as const;
 
 export const wardrobeHingedParamsSchema = z.object({
     width: z.number().int().min(600).max(3600),
-    height: z.number().int().min(1500).max(2700),
+    height: z.number().int().min(1500).max(HEIGHT_MAX),
     depth: z.number().int().min(450).max(750),
     doors: z.union([z.literal('auto'), z.number().int().min(1).max(DOORS_MAX)]),
     singleColumnSide: z.enum(SIDES),
@@ -65,7 +73,7 @@ const fields: ParamField[] = [
         kind: 'length',
         labelKey: 'templates.fields.height',
         min: 1500,
-        max: 2700,
+        max: HEIGHT_MAX,
         step: 10,
     },
     {
@@ -154,7 +162,18 @@ export const wardrobeHinged: TemplateDefinition<WardrobeHingedParams> = {
     paramsSchema: wardrobeHingedParamsSchema,
 
     generate(params, ctx): FurnitureDocument {
-        const doors = wardrobeDoorCount(params);
+        const materials = resolveDefaultMaterials(wardrobeHinged, ctx);
+        // More doors when a leaf would exceed a sheet, fewer when a door
+        // would get less than 100 mm (spec 19, Task 40).
+        const doors = fitDoors(
+            sheetDoors(
+                wardrobeDoorCount(params),
+                params.width,
+                params.height,
+                leafFitsSheet(ctx, materials.front.materialCode),
+            ),
+            params.width - 2 * BOARD_THICKNESS,
+        );
         const columns = columnsFromDoors(doors, params.singleColumnSide);
         const ih = interiorHeight(params.height, params.plinthHeight);
 
@@ -232,7 +251,11 @@ export const wardrobeHinged: TemplateDefinition<WardrobeHingedParams> = {
                 ),
             ],
         );
-        const interior = split('columns', columnBuilders, ctx);
+        // A divided section needs two children: one column is the root itself.
+        const interior =
+            columnBuilders.length > 1
+                ? split('columns', columnBuilders, ctx)
+                : (columnBuilders[0] as SectionBuilders[number])[1]();
 
         const fronts: Front[] = columns.map((doorsInColumn, index) =>
             hingedFront(
@@ -252,7 +275,7 @@ export const wardrobeHinged: TemplateDefinition<WardrobeHingedParams> = {
                 height: params.height,
                 depth: params.depth,
             },
-            materials: resolveDefaultMaterials(wardrobeHinged, ctx),
+            materials,
             carcass: {
                 ...commonCarcass(ctx),
                 plinth:

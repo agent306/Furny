@@ -9,6 +9,7 @@
 import { MATERIAL_ROLES, type MaterialRole } from '../../catalog/snapshot';
 import { EngineInputError } from '../../errors';
 import { DEFAULT_SHELF_FRONT_SETBACK } from '../constants';
+import { fitsSheet } from '../sheetFit';
 import type {
     CarcassSpec,
     Content,
@@ -18,9 +19,15 @@ import type {
     Overrides,
     Section,
     SectionChild,
+    TableSpec,
     TemplateKey,
 } from '../schema';
-import type { ParamField, TemplateContext, TemplateDefinition } from './types';
+import type {
+    Condition,
+    ParamField,
+    TemplateContext,
+    TemplateDefinition,
+} from './types';
 
 /** Board thickness of the count heuristics and clamps (the seed boards are 18 mm). */
 export const BOARD_THICKNESS = 18;
@@ -278,6 +285,55 @@ export function fitDrawers(count: number, height: number): number {
 }
 
 /**
+ * Whether a `w x h` front leaf (grain along its height) fits one sheet of the
+ * material `frontCode` (07 §3.4.1 fit); true when the catalog lacks it.
+ */
+export function leafFitsSheet(
+    ctx: TemplateContext,
+    frontCode: string,
+): (w: number, h: number) => boolean {
+    const material = ctx.catalog.material(frontCode);
+    const trim = ctx.catalog.snapshot.pricing.sheetTrimMm;
+    if (!material) return () => true;
+    return (w, h) =>
+        fitsSheet(
+            w,
+            h,
+            material,
+            material.hasGrain ? (h >= w ? 'length' : 'width') : 'none',
+            trim,
+        );
+}
+
+/**
+ * The fewest doors, from `doors` up to 12, whose leaves fit one sheet (spec
+ * 19, Task 40): a wide front with few doors has leaves larger than a sheet.
+ * Leaves are estimated `width x doorsInColumn / n` (+ one board of overlay)
+ * wide per column of `columnsFromDoors(n)`, divided among the column's
+ * leaves unless the column is one flap, and `height` high. `doors` itself
+ * when no count fits (the height alone exceeds the sheet).
+ */
+export function sheetDoors(
+    doors: number,
+    width: number,
+    height: number,
+    fits: (w: number, h: number) => boolean,
+    onePerColumn = false,
+): number {
+    for (let n = doors; n <= DOORS_MAX; n++) {
+        const ok = columnsFromDoors(n).every((inColumn) =>
+            fits(
+                (width * (onePerColumn ? inColumn : 1)) / n + BOARD_THICKNESS,
+                height,
+            ),
+        );
+        if (ok) return n;
+    }
+    // No count helps (the height alone exceeds the sheet): keep the request.
+    return doors;
+}
+
+/**
  * Deep copy of `doc` with fresh section and front ids (preset start, 07 §2.5).
  * New ids are drawn sections first (pre-order), then fronts in listed order;
  * `covers` and every override key that contains an old id are rewritten.
@@ -447,6 +503,84 @@ export function carcassDocument(
         overrides: emptyOverrides(),
         notes: null,
     };
+}
+
+/** A table-family document with no overrides and no notes. */
+export function tableDocument(
+    key: TemplateKey,
+    dims: FurnitureDocument['dims'],
+    materials: MaterialAssignments,
+    table: TableSpec,
+): FurnitureDocument {
+    return {
+        schemaVersion: 1,
+        templateKey: key,
+        family: 'table',
+        dims,
+        materials,
+        carcass: null,
+        table,
+        overrides: emptyOverrides(),
+        notes: null,
+    };
+}
+
+// --- Table helpers (07 §2.4.14-§2.4.17) ---------------------------------------
+
+export const TABLE_SHAPES = [
+    'rectangle',
+    'rounded_rectangle',
+    'round',
+    'oval',
+] as const;
+export type TableShape = (typeof TABLE_SHAPES)[number];
+
+/** A round top's depth follows its width, so the depth field hides for it. */
+export const NOT_ROUND: Condition = {
+    key: 'shape',
+    equals: TABLE_SHAPES.filter((shape) => shape !== 'round'),
+};
+
+/** Corner radius of a `rounded_rectangle` top (07 §2.4.15). */
+const ROUNDED_CORNER_RADIUS = 100;
+
+/** A one-layer top of `shape` (radius 100 when rounded) overhanging the base by `overhang`. */
+export function tableTop(
+    shape: TableShape,
+    overhang: number,
+): TableSpec['top'] {
+    return {
+        shape,
+        thickness: 'material',
+        cornerRadius: shape === 'rounded_rectangle' ? ROUNDED_CORNER_RADIUS : 0,
+        overhang,
+    };
+}
+
+/**
+ * The dims of a table template. A round top forces `depth = width` (07
+ * §2.4.15); its diameter is capped at `depthMax`, the depth field's maximum,
+ * so the depth stays in range (spec 19, Task 40: the width range goes beyond
+ * it, e.g. 3000 against the 1200 of 03 §2.4).
+ */
+export function tableDims(
+    params: {
+        width: number;
+        height: number;
+        depth: number;
+        shape?: TableShape;
+    },
+    depthMax: number,
+): FurnitureDocument['dims'] {
+    if (params.shape !== 'round') {
+        return {
+            width: params.width,
+            height: params.height,
+            depth: params.depth,
+        };
+    }
+    const diameter = Math.min(params.width, depthMax);
+    return { width: diameter, height: params.height, depth: diameter };
 }
 
 /** The catalog default slide of a type, or null when the catalog has none (07 §2.4.4, §2.4.11). */

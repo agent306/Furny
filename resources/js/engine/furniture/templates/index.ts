@@ -1,6 +1,5 @@
 /**
- * Template registry (07 §2). Templates are added as their tasks land, hence
- * the partial record until all 19 exist.
+ * Template registry (07 §2): one definition per `TemplateKey`.
  */
 import { EngineInputError } from '../../errors';
 import { newId as newIdFn } from '../../ids';
@@ -23,6 +22,10 @@ import { shoeRack } from './shoe_rack';
 import { chestOfDrawers } from './chest_of_drawers';
 import { sideboard } from './sideboard';
 import { bedsideTable } from './bedside_table';
+import { studyDesk } from './study_desk';
+import { diningTable } from './dining_table';
+import { coffeeTable } from './coffee_table';
+import { consoleTable } from './console_table';
 import { dressingUnit } from './dressing_unit';
 import { customBox } from './custom_box';
 
@@ -40,9 +43,13 @@ export const TEMPLATES = {
     chest_of_drawers: chestOfDrawers,
     sideboard,
     bedside_table: bedsideTable,
+    study_desk: studyDesk,
+    dining_table: diningTable,
+    coffee_table: coffeeTable,
+    console_table: consoleTable,
     dressing_unit: dressingUnit,
     custom_box: customBox,
-} satisfies Partial<Record<TemplateKey, TemplateDefinition>>;
+} satisfies Record<TemplateKey, TemplateDefinition>;
 
 const REGISTRY: Partial<Record<TemplateKey, TemplateDefinition>> = TEMPLATES;
 

@@ -16,6 +16,9 @@ import {
     evenSplit,
     fitDoors,
     fitDrawers,
+    leafFitsSheet,
+    sheetDoors,
+    tableDims,
     hingedFront,
     intField,
     interiorHeight,
@@ -465,6 +468,56 @@ describe('count clamps (07 gap, log 19)', () => {
         expect(fitDrawers(5, 544)).toBe(4); // 580 / 120
         expect(fitDrawers(3, 10)).toBe(1);
         expect(fitDrawers(2, 5000)).toBe(2);
+    });
+});
+
+describe('sheet clamps (spec 19, Task 40)', () => {
+    const tctx = (): TemplateContext => ({
+        catalog: indexCatalog(seedCatalog()),
+        newId: testIds(),
+    });
+
+    it('leafFitsSheet: PB18-WHITE usable 2420 x 1200 (trim 10); true for an unknown code', () => {
+        const fits = leafFitsSheet(tctx(), 'PB18-WHITE');
+        expect(fits(1200, 2420)).toBe(true);
+        expect(fits(1201, 2000)).toBe(false);
+        expect(fits(600, 2421)).toBe(false);
+        expect(fits(2420, 600)).toBe(true);
+        expect(leafFitsSheet(tctx(), 'NOPE')(9000, 9000)).toBe(true);
+    });
+
+    it('leafFitsSheet keeps a grained leaf upright (grain along its height)', () => {
+        const fits = leafFitsSheet(tctx(), 'SW50-RUBBER'); // 2440 x 300, grained
+        expect(fits(280, 2400)).toBe(true);
+        expect(fits(2400, 280)).toBe(false);
+    });
+
+    it('sheetDoors: the fewest doors from the request whose leaves fit', () => {
+        const fits = leafFitsSheet(tctx(), 'PB18-WHITE');
+        // leaf = width / n + 18 (x2 for a 2-door column when one leaf per column)
+        expect(sheetDoors(1, 1800, 2100, fits)).toBe(2); // 918
+        expect(sheetDoors(1, 3600, 2100, fits)).toBe(4); // 1218 at 3 is too wide
+        expect(sheetDoors(3, 1800, 2100, fits)).toBe(3);
+        expect(sheetDoors(1, 3600, 600, fits, true)).toBe(3); // flaps 1218 / 2418
+    });
+
+    it('sheetDoors keeps the request when no count helps (the height alone is too big)', () => {
+        const fits = leafFitsSheet(tctx(), 'PB18-WHITE');
+        expect(sheetDoors(3, 1800, 2700, fits)).toBe(3);
+    });
+
+    it('tableDims: a round top takes depth = width, capped at depthMax', () => {
+        const p = { width: 1500, height: 750, depth: 800 };
+        expect(tableDims({ ...p, shape: 'round' }, 1200)).toStrictEqual({
+            width: 1200,
+            height: 750,
+            depth: 1200,
+        });
+        expect(
+            tableDims({ ...p, shape: 'round', width: 1000 }, 1200),
+        ).toStrictEqual({ width: 1000, height: 750, depth: 1000 });
+        expect(tableDims({ ...p, shape: 'oval' }, 1200)).toStrictEqual(p);
+        expect(tableDims(p, 1200)).toStrictEqual(p);
     });
 });
 

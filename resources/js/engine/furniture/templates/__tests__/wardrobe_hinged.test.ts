@@ -12,6 +12,7 @@ import {
     type Section,
 } from '../../schema';
 import { shelfCount } from '../common';
+import { validateFurniture } from '../../validate';
 import { TEMPLATES, getTemplate, templateDefaultDocument } from '../index';
 import type { TemplateContext } from '../types';
 import { wardrobeHinged, wardrobeHingedParamsSchema } from '../wardrobe_hinged';
@@ -96,9 +97,46 @@ describe('wardrobe_hinged generation', () => {
         expect(doorsOf(1400)).toBe(2); // round(2.33); ceil would give 3
     });
 
-    it('explicit doors win over the width', () => {
-        const fronts = gen({ doors: 12, width: 600 }).carcass?.fronts ?? [];
-        expect(fronts.map((f) => f.leaves)).toEqual([2, 2, 2, 2, 2, 2]);
+    it('explicit doors win over the width while each door gets 100 mm', () => {
+        const leaves = (over: Record<string, unknown>) =>
+            (gen(over).carcass?.fronts ?? []).map((f) => f.leaves);
+        expect(leaves({ doors: 6, width: 1200 })).toEqual([2, 2, 2]);
+        // 12 doors in 564 mm: fitDoors keeps 5 (105.6 mm each)
+        expect(leaves({ doors: 12, width: 600 })).toEqual([1, 2, 2]);
+    });
+
+    it('raises the door count until each leaf fits a sheet (spec 19, Task 40)', () => {
+        const leaves = (over: Record<string, unknown>) =>
+            (gen(over).carcass?.fronts ?? []).map((f) => f.leaves);
+        // one 1818 mm leaf exceeds the 1200 mm usable sheet width: 2 doors
+        expect(leaves({ doors: 1, width: 1800 })).toEqual([2]);
+        // 3600: 3 leaves of 1218 are still too wide, 4 of 918 fit
+        expect(leaves({ doors: 1, width: 3600 })).toEqual([2, 2]);
+        expect(leaves({ doors: 1, width: 900 })).toEqual([1]);
+    });
+
+    it('one or two doors build a single column as the root (no one-child split, R40-3)', () => {
+        const one = gen({ doors: 1, width: 900 });
+        expect(one.carcass?.interior).toMatchObject({
+            id: 's_0000000001',
+            split: 'none',
+            content: { type: 'shelves' },
+        });
+        expect(one.carcass?.fronts.map((f) => f.covers)).toEqual([
+            ['s_0000000001'],
+        ]);
+        const two = gen({ doors: 2, width: 1200 });
+        expect(two.carcass?.interior.split).toBe('rows');
+        expect(two.carcass?.fronts.map((f) => [f.covers, f.leaves])).toEqual([
+            [['s_0000000001'], 2],
+        ]);
+        for (const doc of [one, two]) {
+            expect(
+                validateFurniture(doc, seedCatalog()).filter(
+                    (i) => i.severity === 'error',
+                ),
+            ).toEqual([]);
+        }
     });
 
     it('weights each column by its doors and covers it with one front', () => {
@@ -122,7 +160,7 @@ describe('wardrobe_hinged generation', () => {
             'auto',
             'right',
         ]);
-        expect(sides({ doors: 1 })).toEqual(['left']);
+        expect(sides({ doors: 1, width: 900 })).toEqual(['left']);
         expect(sides({ doors: 4 })).toEqual(['auto', 'auto']);
     });
 
@@ -256,19 +294,22 @@ describe('wardrobe_hinged generation', () => {
 
     it('shelf count follows the interior height', () => {
         const shelves = (over: Record<string, unknown>) =>
-            interiorOf({ doors: 1, ...over }).children[0]?.section.content;
+            interiorOf({ doors: 1, width: 900, ...over }).content;
         expect(shelves({ height: 1500, plinthHeight: 0 })).toMatchObject({
             count: shelfCount(1464, 400),
         });
-        expect(shelves({ height: 2700 })).toMatchObject({
-            count: shelfCount(2564, 400),
+        expect(shelves({ height: 2420 })).toMatchObject({
+            count: shelfCount(2284, 400),
         });
     });
 
     it('subtracts the two board thicknesses from the shelf heights', () => {
         // ih = 2340 - 100 - 36 = 2204 -> round(5.51) - 1 = 5 (4 with an extra 18)
-        const single = interiorOf({ doors: 1, height: 2340 }).children[0]
-            ?.section.content;
+        const single = interiorOf({
+            doors: 1,
+            width: 900,
+            height: 2340,
+        }).content;
         expect(single).toMatchObject({ type: 'shelves', count: 5 });
         // ih = 2164; 2164 - 18 - 360 = 1786 -> round(4.47) - 1 = 3 (4 without the 18)
         const column = interiorOf({ height: 2300, internalDrawers: 2 })
@@ -308,7 +349,8 @@ describe('wardrobe_hinged definition', () => {
     it('lists width, height, depth first with the 07 §2.4.1 ranges', () => {
         expect(wardrobeHinged.fields.slice(0, 3)).toMatchObject([
             { key: 'width', kind: 'length', min: 600, max: 3600, step: 10 },
-            { key: 'height', kind: 'length', min: 1500, max: 2700, step: 10 },
+            // 07 §2.4.1 says 2700; capped so the sides fit the sheet (R40-2)
+            { key: 'height', kind: 'length', min: 1500, max: 2420, step: 10 },
             {
                 key: 'depth',
                 kind: 'length',
@@ -424,7 +466,8 @@ describe('wardrobe_hinged definition', () => {
         expect(parse({ width: 590 })).toBe(false);
         expect(parse({ width: 3600 })).toBe(true);
         expect(parse({ width: 600 })).toBe(true);
-        expect(parse({ height: 2710 })).toBe(false);
+        expect(parse({ height: 2430 })).toBe(false);
+        expect(parse({ height: 2420 })).toBe(true);
         expect(parse({ height: 1490 })).toBe(false);
         expect(parse({ depth: 760 })).toBe(false);
         expect(parse({ depth: 440 })).toBe(false);
@@ -503,16 +546,15 @@ describe('template registry', () => {
         }
     });
 
-    it('getTemplate throws invalid_input for a template that is not built yet', () => {
-        const missing = TEMPLATE_KEYS.filter((k) => !(k in TEMPLATES));
-        expect(missing.length).toBeGreaterThan(0);
-        for (const key of missing) {
-            expect(() => getTemplate(key)).toThrow(EngineInputError);
-            try {
-                getTemplate(key);
-            } catch (e) {
-                expect((e as EngineInputError).code).toBe('invalid_input');
-            }
+    it('getTemplate throws invalid_input for a key that is not a template', () => {
+        // Every TemplateKey is registered (Task 40), so use a stray string.
+        expect(TEMPLATE_KEYS.filter((k) => !(k in TEMPLATES))).toEqual([]);
+        const key = 'bunk_bed' as TemplateKey;
+        expect(() => getTemplate(key)).toThrow(EngineInputError);
+        try {
+            getTemplate(key);
+        } catch (e) {
+            expect((e as EngineInputError).code).toBe('invalid_input');
         }
     });
 });

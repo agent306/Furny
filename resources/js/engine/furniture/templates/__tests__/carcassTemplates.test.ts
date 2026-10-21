@@ -19,7 +19,14 @@ const snapshot = seedCatalog();
 const catalog = indexCatalog(snapshot);
 const ctx = (): TemplateContext => ({ catalog, newId: testIds() });
 
-type CarcassKey = Exclude<keyof typeof TEMPLATES, 'wardrobe_hinged'>;
+type CarcassKey = Exclude<
+    keyof typeof TEMPLATES,
+    | 'wardrobe_hinged'
+    | 'study_desk'
+    | 'dining_table'
+    | 'coffee_table'
+    | 'console_table'
+>;
 
 const CARCASS_KEYS: CarcassKey[] = [
     'wardrobe_sliding',
@@ -181,7 +188,8 @@ function expected(
  * by the 7 mm tongue. The back against anything else (shelves, dividers,
  * drawer boxes, the plinth) must still not overlap.
  */
-const TONGUE_PARTNER = /^carcass\.(side\.(left|right)|top|bottom)$/;
+// `.n`: the pieces of a top or bottom split at seams (R40-1).
+const TONGUE_PARTNER = /^carcass\.(side\.(left|right)|top|bottom)(\.\d+)?$/;
 function overlapsOf(doc: FurnitureDocument): string[] {
     const grooved = doc.carcass?.back.type === 'grooved';
     const inGroove = (a: Part, b: Part): boolean =>
@@ -255,7 +263,8 @@ const SPEC: Record<CarcassKey, [string, unknown[]]> = {
     wardrobe_sliding: [
         'wardrobe',
         [
-            ...DIMS([1200, 3600], [1800, 2700], [550, 750]),
+            // 07 §2.4.2 says 2700; capped so the sides fit the sheet (R40-2)
+            ...DIMS([1200, 3600], [1800, 2420], [550, 750]),
             I('leaves', 2, 4, { allowAuto: true }),
             L('plinthHeight', 0, 150, { advanced: true }),
         ],
@@ -346,7 +355,9 @@ const SPEC: Record<CarcassKey, [string, unknown[]]> = {
     custom_box: [
         'other',
         [
-            ...DIMS([150, 6000], [100, 3000], [100, 1200]),
+            // 07 §2.4.19 says 100-3000: 120 keeps an 80 mm interior (R40-3),
+            // 2420 keeps the sides within the sheet (R40-2)
+            ...DIMS([150, 6000], [120, 2420], [100, 1200]),
             SEL('mounting', ['floor', 'wall', 'loft']),
         ],
     ],
@@ -507,6 +518,21 @@ describe('wardrobe_sliding (§2.4.2)', () => {
     const track = (leaves: number) =>
         front(1, 'sliding', [S(1)], leaves, 'auto');
 
+    it('raises the leaf count until each leaf fits a sheet (spec 19, Task 40)', () => {
+        const leaves = (over: Record<string, unknown>) =>
+            fronts(gen('wardrobe_sliding', over)).map((f) => f.leaves);
+        // (3600 + 30) / 2 = 1815 and (3600 + 60) / 3 = 1220 exceed 1200
+        expect(leaves({ leaves: 2, width: 3600 })).toStrictEqual([4]);
+        // (2400 + 30) / 2 = 1215 > 1200; (2400 + 60) / 3 = 820 fits
+        expect(leaves({ leaves: 2, width: 2400 })).toStrictEqual([3]);
+        expect(leaves({ leaves: 2, width: 2300 })).toStrictEqual([2]);
+        expectValid(gen('wardrobe_sliding', { leaves: 2, width: 3600 }));
+    });
+
+    it('is valid at the capped height 2420 without a plinth', () => {
+        expectValid(gen('wardrobe_sliding', { height: 2420, plinthHeight: 0 }));
+    });
+
     it('default: 3 flex columns of shelves / hanging zone / shelves, one sliding front', () => {
         expect(gen('wardrobe_sliding')).toStrictEqual(
             expected('wardrobe_sliding', [2400, 2100, 650], {
@@ -586,6 +612,25 @@ describe('wardrobe_sliding (§2.4.2)', () => {
 });
 
 describe('loft_cabinet (§2.4.3)', () => {
+    it('raises the door count until each leaf (a flap: its column) fits a sheet (spec 19)', () => {
+        const leaves = (over: Record<string, unknown>) =>
+            fronts(gen('loft_cabinet', over)).map((f) => f.leaves);
+        // one 3618 x 600 door exceeds the 2420 sheet length; two of 1818 fit
+        expect(leaves({ doors: 1, width: 3600 })).toStrictEqual([2]);
+        // flaps span their column: 3 doors -> columns of 1218 and 2418
+        expect(
+            leaves({ doors: 1, width: 3600, frontKind: 'flap_up' }),
+        ).toStrictEqual([1, 1]);
+        expectValid(gen('loft_cabinet', { doors: 1, width: 3600 }));
+        expectValid(
+            gen('loft_cabinet', {
+                doors: 1,
+                width: 3600,
+                frontKind: 'flap_up',
+            }),
+        );
+    });
+
     it('default: loft mounting, nailed back, empty columns with doors', () => {
         // 1800 -> 3 doors -> columnsFromDoors(3) = [1, 2]
         expect(gen('loft_cabinet')).toStrictEqual(
@@ -1493,6 +1538,18 @@ describe('dressing_unit (§2.4.18)', () => {
 });
 
 describe('custom_box (§2.4.19)', () => {
+    it('is valid at the range ends 120 and 2420 high, 6000 wide (top split, R40-1)', () => {
+        for (const mounting of ['floor', 'wall', 'loft']) {
+            expect(
+                errorsOf(gen('custom_box', { height: 120, mounting })),
+            ).toStrictEqual([]);
+            expect(
+                errorsOf(gen('custom_box', { height: 2420, mounting })),
+            ).toStrictEqual([]);
+        }
+        expectValid(gen('custom_box', { width: 6000, depth: 1200 }));
+    });
+
     it('default: common defaults, one empty root leaf, no fronts', () => {
         expect(gen('custom_box')).toStrictEqual(
             expected('custom_box', [600, 720, 560], {
@@ -1514,8 +1571,11 @@ describe('custom_box (§2.4.19)', () => {
 // --- Cross-cutting ------------------------------------------------------------------
 
 describe('carcass templates together', () => {
-    it('registers the wardrobe and the 14 carcass templates', () => {
-        expect(Object.keys(TEMPLATES).sort()).toStrictEqual(
+    it('registers the wardrobe and the 14 carcass templates as the carcass family', () => {
+        const carcass = Object.values(TEMPLATES)
+            .filter((t: TemplateDefinition) => t.family === 'carcass')
+            .map((t) => t.key);
+        expect(carcass.sort()).toStrictEqual(
             ['wardrobe_hinged', ...CARCASS_KEYS].sort(),
         );
     });
