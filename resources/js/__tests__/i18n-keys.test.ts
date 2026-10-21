@@ -11,9 +11,13 @@ const EXCLUDED = [
 /**
  * Dynamic key patterns of 15 §15.2 → name of the generated TS union type
  * (`types/generated.d.ts`) whose members fill `{…}`. A task adds an entry when
- * it first renders the enum, e.g. `'orders.states.{state}': 'OrderState'`.
+ * it first renders the enum, e.g. `'orders.states.{state}': 'OrderStateKey'`.
  */
-const ENUM_KEY_PATTERNS: Record<string, string> = {};
+const ENUM_KEY_PATTERNS: Record<string, string> = {
+    'orders.states.{state}': 'OrderStateKey',
+    'orders.states_customer.{state}': 'OrderStateKey',
+    'orders.states_customer_short.{state}': 'OrderStateKey',
+};
 
 const KEY_CALLS = [
     /(?<![\w$])\$?t\(\s*(['"])([\w.]+)\1/g,
