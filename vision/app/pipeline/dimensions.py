@@ -3,8 +3,8 @@
 A dimension line is a thin segment with at least two ticks and a numeric label beside it. Ticks come from
 three sources: short slanted or perpendicular strokes crossing the line, perpendicular extension lines
 touching it, and (raster pages) the strokes and blobs found in the ink around the line. LSD drops strokes
-shorter than its minimum length, and the spec's tick length range (0.005 L ... 0.03 L) reaches below that limit
-(`max(8 px, 0.008 L)`), so on raster pages the interior ticks are usually only visible in the ink.
+shorter than its minimum length, and the spec's tick length range (0.005 L ... 0.03 L) reaches below that
+limit (`max(8 px, 0.008 L)`), so on raster pages the interior ticks are usually only visible in the ink.
 """
 
 import itertools
