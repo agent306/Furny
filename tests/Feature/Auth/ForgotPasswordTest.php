@@ -4,11 +4,17 @@ declare(strict_types=1);
 
 use App\Domain\Identity\Models\User;
 use App\Notifications\Auth\ResetPassword;
+use Illuminate\Contracts\Queue\Queue as QueueContract;
 use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Notifications\ChannelManager;
+use Illuminate\Queue\Connectors\ConnectorInterface;
+use Illuminate\Queue\SyncQueue;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Support\InertiaRequest;
 
@@ -120,6 +126,36 @@ describe('who gets a link', function (): void {
 
     it('is queued and encrypted, so the token is not readable in the queue', function (): void {
         expect(new ResetPassword('t'))->toBeInstanceOf(ShouldQueue::class)->toBeInstanceOf(ShouldBeEncrypted::class);
+    });
+});
+
+describe('a queue outage (13 section 5.5)', function (): void {
+    it('reports the failure and still gives the generic answer for a known address', function (): void {
+        Exceptions::fake();
+        // The mail is queued; the connection refuses the job.
+        Queue::extend('broken', fn (): ConnectorInterface => new class implements ConnectorInterface
+        {
+            public function connect(array $config): QueueContract
+            {
+                return new class extends SyncQueue
+                {
+                    public function push($job, $data = '', $queue = null): never
+                    {
+                        throw new RuntimeException('queue is down');
+                    }
+                };
+            }
+        });
+        config(['queue.connections.broken' => ['driver' => 'broken'], 'queue.default' => 'broken']);
+        // The real notification dispatcher instead of the fake of the other tests.
+        Notification::swap(new ChannelManager(app()));
+
+        $known = ($this->send)('asha@example.com');
+        $unknown = ($this->send)('nobody@example.com');
+
+        $known->assertRedirect(route('password.request'))->assertSessionHas('status', trans('passwords.sent_generic'))->assertSessionHasNoErrors();
+        expect($known->getStatusCode())->toBe($unknown->getStatusCode());
+        Exceptions::assertReported(fn (RuntimeException $exception): bool => $exception->getMessage() === 'queue is down');
     });
 });
 

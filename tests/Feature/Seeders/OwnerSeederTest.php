@@ -39,6 +39,7 @@ it('creates the onboarded, verified owner with the configured credentials', func
         ->and($owner->roles)->toHaveCount(1)
         ->and($owner->onboarded_at)->not->toBeNull()
         ->and($owner->email_verified_at)->not->toBeNull()
+        ->and($owner->first_contact_verified_at)->not->toBeNull()
         ->and($owner->terms_accepted_at)->not->toBeNull()
         ->and($owner->timezone)->toBe('Asia/Kolkata')
         ->and(Hash::check('a-long-owner-password', (string) $owner->password))->toBeTrue();

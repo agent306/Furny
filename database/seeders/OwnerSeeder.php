@@ -74,6 +74,7 @@ final class OwnerSeeder extends Seeder
                 'timezone' => app(Settings::class)->business()->timezone,
                 'is_active' => true,
                 'email_verified_at' => now(),
+                'first_contact_verified_at' => now(),
                 'terms_accepted_at' => now(),
                 'onboarded_at' => now(),
             ])->save();
