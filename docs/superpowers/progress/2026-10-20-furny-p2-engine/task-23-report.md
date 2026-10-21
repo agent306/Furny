@@ -1,0 +1,54 @@
+# Task 23 report: wall commands
+
+Status: DONE_WITH_CONCERNS. Commit: f627092 `feat(engine): add wall drawing, splitting, merging and deletion commands`.
+
+## Implemented
+- `plan/commands/walls.ts` (new): `addWall`, `addWallChain`, `splitWall`, `mergeCollinearWalls`, `deleteWalls`, `deleteNode`, `setWallProps`, exported as `WALL_COMMANDS` and spread into `PLAN_COMMANDS` (`registry.ts`). Params/results as the 04 §6.6 table (results: `{wallIds,startNodeId,endNodeId}`, `{wallIds,nodeIds}`, `{nodeId,newWallId}`, `{keptWallId,removedWallId}`, `{deletedIds}` x2, none). Labels `engine.plan.command.label.<snake_type>`; all `touchesGeometry: true`; only `setWallProps` merges (replace, `wallProps:<sorted unique ids>`).
+- Zod `paramsSchema` per command checks types/enums/arrays only. Numeric ranges are checked in `validate` so they give `out_of_range` with `{field,min,max}` (a zod range would only give `invalid_params`). Fields are dotted paths (`thickness`, `to.point.x`, `points.2.point.x`, `props.thickness`, `at`). Ranges: coordinates +-1e6, thickness 50-1000, height 300-10000 (checked on the rounded value). `colorHex` `^#[0-9a-fA-F]{6}$|null` (zod regex, so 'red' is `invalid_params` field `props.colorHex`), lower-cased in run. Closed chain < 3 points / open < 2 points: `invalid_params` field `points` (preflight I9). `not_found {id}` for every missing id; `too_large` when the wall count would exceed 2000.
+- Everything is built on the Task 22 helpers (`resolveEndpoint`, `insertWallSegment`, `splitWallAt`). Only new wall-graph logic: `mergeAtNode` (merge of two collinear walls at a node, shared by `mergeCollinearWalls` and `deleteWalls`) and `removeWalls` (delete + orphan nodes + collinear re-merge, shared by `deleteWalls`/`deleteNode`).
+- `helpers.ts`: five small private helpers made `export` (`pointAlong`, `openingsOf`, `pushDeleted`, `fitOffset`, `deleteWall`); not re-exported from `engine/index.ts`. No behaviour change.
+- `pipeline.test.ts`: the "empty registry by default" test now asserts `PLAN_COMMANDS` contains `addWall` (the registry is no longer empty).
+- Dimension/placement cascade of `deleteWalls` and the furniture follow of `setWallProps` thickness are done by the pipeline post-process (04 §6.4 steps 2-3), same history entry; I first duplicated the cascade in the command, found by mutation it was dead code and removed it.
+
+## Decisions / rulings to log in 19
+1. `addWallChain` skips a segment an existing wall already covers (a room drawn against a room); `wall_duplicate` only when the whole chain created no wall. Spec says "runs addWall logic per pair", which would make the Room tool fail next to an existing room. Cost if wrong: a chain over existing walls succeeds instead of refusing.
+2. `setWallProps` refuses `opening_too_tall` only when it lowers the wall (new height < old) below an opening top; raising or keeping the height is never blocked by an already-too-tall opening (dirty imports; same idea as the Task 22 reclamp ruling). Spec literal would block every property edit on such a wall.
+3. `mergeCollinearWalls` at a node with degree != 2: `not_collinear` with `{nodeId, degree}` (no code in 04 §6.7 for the degree check). `props_differ` params `{nodeId, field}` (first differing field).
+4. `splitWall` range `[10, floor(length-10)]` is closed as in 04 §6.6, but `splitWallAt` (Task 22, pinned) is open at 10 mm; the command nudges the boundary values 1 micron inwards so `at = 10` and `at = length-10` work. A 20 mm wall therefore reports in range at 10 but the helper refuses `wall_too_short` (pinned in a test). `at` is rounded to whole mm before the range check.
+5. `mergeCollinearWalls` openings: K's shift by `len(R)` when K.a is replaced (rounded), R's are re-projected by centre point; when R runs against K hinge/swing, attached placement side and dimension face flip. `keptWallId` = smaller id.
+6. `deleteWalls`/`deleteNode` result `deletedIds` is the same array as `ExecuteResult.deletedIds`, so it also lists RoomMeta ids the post-process deletes.
+
+## Tests (`plan/commands/__tests__/walls.test.ts`, 75 tests)
+All brief cases through `createPlanBus` + `testIds`, each asserting undo deep-equal: cross a wall (4 walls, 1 new node), 3 mm node join, 3 mm T node, `wall_duplicate` (doc identity unchanged, no history), half overlap, defaults (230/115, 2700, brick), chain closed (1 new face) / <3 points, `splitWall at:5` (`field 'at'`), T-stem delete merges (equal props) / keeps (props differ), `not_collinear`, `props_differ`, K.a replaced shift, reversed flips, cascade delete, `setWallProps` colour/ranges/`opening_too_tall`/thickness-follow placement/dimension, merge of drags into one entry, re-association: deleting the wall between two named rooms keeps the larger meta and deletes the other in ONE entry and one undo restores both; wall splitting a named room keeps the meta in the anchor part; a dirty-plan test per command family (no new error keys); determinism (7 commands, JSON of result+doc+patches byte-identical); seeded random: 200 random wall commands on `makeGridPlan(3,3)` (seed 20261020; >60 successes, every command type succeeds at least once, no success adds a `validatePlan` error key), undo all stepwise (doc equals the previous doc each step), redo all stepwise; two more seeds. Random tests take ~3 s each (timeout 60 s set).
+
+### TDD evidence
+- RED: `yarn vitest run --project engine resources/js/engine/plan/commands/__tests__/walls.test.ts` before `walls.ts` existed: `Failed to load url ../walls ... Does the file exist?`, 1 failed file, no tests (expected: module missing).
+- GREEN: first run with the implementation 67/74 passed; the 7 failures were test-arithmetic/fixture errors (node count 5 not 7, placements not on the face so the post-process moved them, frozen doc, generator never reaching merge) plus the 20 mm boundary case (decision 4); fixed, then `Tests 75 passed (75)`.
+- Mutation checks (scratch copies, restored): flip hinge/swing, K.a shift, collinear re-merge after delete, chain duplicate tolerance, `opening_too_tall` lowering condition, colour lower-casing, boundary nudge, props_differ check, orphan node delete, dimension transfer on merge, degree check, mergeKey sorting: each fails at least one test. Two further mutants (command-level dimension delete / placement detach) survived because the post-process does the same; that code was removed.
+
+### Gates
+- `yarn vitest run --project engine`: 45 files, 1727 passed. `yarn vitest run --project engine resources/js/engine/plan`: 26 files, 1191 passed.
+- `yarn eslint --max-warnings=0 resources/js/engine`, `yarn prettier --check resources/js/engine`, `yarn vue-tsc --noEmit`: clean.
+
+## Files changed
+- resources/js/engine/plan/commands/walls.ts (new, ~700 lines after prettier)
+- resources/js/engine/plan/commands/__tests__/walls.test.ts (new, ~1900 lines after prettier)
+- resources/js/engine/plan/commands/registry.ts, helpers.ts (5 exports), __tests__/pipeline.test.ts (one assertion)
+
+## Concerns
+- Decisions 1, 2 and 4 deviate from the letter of 04 §6.6 (see above); please confirm or rule.
+- walls.ts is ~700 lines and will sit beside the opening/furniture command files; the range/not_found check helpers (`checkRange`, `checkRef`, capacity) are private to walls.ts and will likely be wanted by Tasks 24-27 (extract then).
+- The wall count limit check in `validate` only counts the walls the command directly adds; splits are covered by the pipeline's `plan.too_large` invariant.
+
+## Fix round 1 (commit 136a0d9)
+
+1. Wall-count limit: `splitWall.validate` now ends with `checkCapacity(doc, 1)`; `addWall` and `addWallChain` call `assertWallCapacity(d)` at the end of `run`, so a crossing that splits walls reports `too_large {kind:'walls', count, max}` instead of `introduces_error`. Tests (`wall count limit (2000)`): addWall at 1999 ok / at 2000 refused; a crossing at 1999 walls gives `too_large` count 2002 with the doc unchanged, the same crossing at 1997 fits exactly; crossing chain at 1998; open chains 2 and 3 points at 1999/1998, closed 3 and 4 points at 1997/1998/1996/1997; splitWall at 1999 ok, at 2000 `too_large`. Mutants (assert removed, splitWall capacity removed) fail tests.
+2. Shared validators: new `plan/commands/validators.ts` (`mm`, `has`, `message`, `fail`, `notFound`, `checkRange`, `checkRef`, `checkCapacity`, `assertWallCapacity`). The constants (MAX_WALLS/OPENINGS/PLACEMENTS/FIXTURES/JSON_BYTES, wall thickness/height ranges, opening width/sill ranges) are in a new leaf module `plan/limits.ts` rather than in validators.ts: validators.ts imports pipeline.ts, which imports validate.ts, so constants in validators.ts imported back by validate.ts would be an import cycle. `validate.ts` and `walls.ts` import them from `limits.ts`, so each is defined once.
+3. splitWall boundary: `splitWallAt` takes `opts.inclusive` (closed interval `[10, length-10]`, and the rounded node must still leave both parts >= 10 mm, else `wall_too_short`). The micron nudge is gone. Tests: 20 mm wall splits into two 10 mm walls; wall of length 1000.0005: 9 and 991 out of range (max 990), 10 and 990 split with both parts >= 10; diagonal (0,0)-(1000,1000): at 10 and 1404 refused `wall_too_short` (rounded node leaves a 9.9 mm stub, so the range is nominal on diagonals), at 12 works.
+4. mergeAtNode no longer deletes the node itself: the post-process deletes it (04 §6.4 step 1) and the existing tests (deletedIds contains the node, node gone, undo restores) pin that.
+5. Tests: the meta test is now "deletes several walls ... the metas of the lost room stay orphaned" on a plan with a meta (asserts the meta is kept, not in deletedIds, undo restores); meta deletion itself is pinned by the two-rooms test. New `key order of the document` tests (7 commands on a grid with two metas, a placement and a dimension, same result/deleted ids/document with every record's keys reversed). Rounding: 49.6 is 50 and 49.4 is out of range for addWall and setWallProps (also 1000.4/1000.6, heights 299.4/299.6). The random generator now issues setWallProps with `merge: true` on the previous walls (docs are tracked per history entry, so merged entries replace the top document); merges occur in the 200-step run (checked by a temporary counter).
+6. deletedIds aliasing: kept, contract documented on `DeleteResult.deletedIds` (same array as `ExecuteResult.deletedIds`, complete once execute returned, not to be mutated).
+7. Doc comments of mergeAtNode and removeWalls rewritten.
+- Label keys: `engine.plan.command.label.*` are not referenced anywhere outside the engine on this branch (no lang files or frontend consumers), so nothing needs registering here; translation coverage belongs to Task 51 / P4.
+
+Verification: `yarn vitest run --project engine`: 45 files, 1743 passed (walls.test.ts 91); `yarn eslint --max-warnings=0 resources/js/engine`, `yarn prettier --check resources/js/engine`, `yarn vue-tsc --noEmit` clean.

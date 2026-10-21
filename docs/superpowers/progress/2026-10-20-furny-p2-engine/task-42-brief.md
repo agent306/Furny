@@ -1,0 +1,19 @@
+### Task 42: `computeBom` — cut sizes, edge banding, cut list rows, sheets, finishing
+
+**Files:**
+- Create: `resources/js/engine/bom/types.ts`, `constants.ts`, `cutSizes.ts`, `edgeBanding.ts`, `rowKey.ts`, `bom.ts`
+- Test: `resources/js/engine/bom/__tests__/cutSizes.test.ts`, `edgeBanding.test.ts`, `rowKey.test.ts`, `bom.wardrobe.test.ts`
+
+**Spec refs:** `08 §3.1–§3.8`, `08 §10.2` (non-nesting parts), `§10.3`, `03 §3.2`
+
+**Interfaces:**
+- Consumes: Tasks 29–37 (`FurnitureModel`, `partNameEn`, `indexCatalog`), Task 2 (`ceilDiv`, `roundHalfUpDiv`).
+- Produces: `Bom`, `CutListRow`, `NestingResult`, `ComputeBomOptions` (03 §3.2 / 08 §3); `EDGE_ALLOWANCE_MM = 50`, `EDGE_WASTE_PERMILLE = 50`, `FINISH_AREA_STEP_MM2 = 10_000`; `cutSize(part, catalog, premillMm): { cutLength; cutWidth }`; `edgeBandLengths(parts, catalog): Array<{ edgeBandCode; lengthMm }>`; `fnv1a32(str): number`, `rowIdentity(part)`, `rowKeyFor(part): string`; `bomOptionsFor(doc, nesting): ComputeBomOptions`; `computeBom(model, catalog, options): Bom` (nesting wired in Task 43; with `nesting: true` before Task 43 it throws `Error('nesting not implemented')`).
+
+- [ ] **Step 1: Write the failing tests** — cut sizes (08 §3.2/§10.3): one 0.8 band → −1; two 0.8 → −2; two 2.0 → −4; two 0.4 → −1; one 0.4 → 0; pre-mill 1 + 0.8 → 0; pre-mill 1 + two 2.0 → −2 (bands on `W1/W2` shorten the length, on `L1/L2` the width). Edge banding: extruded round top Ø 1000 (64-gon) banded → raw `round(P) + 50 = 3190`, `lengthMm = 3350`. `fnv1a32('') === 0x811c9dc5`, `fnv1a32('a') === 0xe40c292c`; `rowKeyFor` matches `/^r[0-9a-f]{8}$/`; a part banded on `L2` instead of `L1` gets the same row key. Wardrobe (`generateFurniture(wardrobe, seed)`, `computeBom(model, seed, bomOptionsFor(doc, false))`): **12 rows** in order HDF3 1978 × 1180, 1978 × 598; PB18 sides `2000 × 582 → cut 1999 × 581` qty 2 name `'Left side / Right side'`; door `1997 × 606 → 1995 × 604` qty 1; doors `1997 × 593 → 1995 × 591` qty 2; partition `1964 × 569 → 1964 × 568`; plinth front `1800 × 100 → 1798 × 100` and plinth back `1800 × 100 → 1800 × 100` (compare this pair as a set); top/bottom `1764 × 582 → 1764 × 581` qty 2 `'Top / Bottom'`; fixed shelf `1164 × 569 → 1164 × 568`; shelves `580 × 549 → 580 × 548` qty 4 named `'Shelf 1 / Shelf 2 / Shelf 3 +1 more'`; plinth returns `526 × 100` qty 3. `edgeBanding = [{ edgeBandCode: 'EB08-WHITE', lengthMm: 32767 }]`. Materials: HDF3-WHITE `{ partCount: 2, netAreaMm2: 3516884, sheetsEstimated: 2, sheetsNested: null, sheetsBilled: 2, utilization: null }`, PB18-WHITE `{ partCount: 18, netAreaMm2: 11531232, sheetsEstimated: 5, sheetsNested: null, sheetsBilled: 5, utilization: null }`. Operations `{ hingeCups: 12, shelfPinHoles: 232, dowels: 16, camLocks: 16, slideScrewSets: 0, handleHoles: 6 }`. Hardware merged by code (11 codes; HNG-FO-SC 8, HNG-HO-SC 4, HNG-PLATE-0 12, HDL-BAR-160 3, SHF-PIN-5 16, ROD-OVAL-1200 1, ROD-SUP 2, CON-CAM-15 16, CON-DOWEL-8 16, SCR-PACK 1, BRK-ANTITIP 1), code asc. `finishing = []`; with `materials.front.finishCode = 'FIN-LAM-MATT'` → `[{ finishCode: 'FIN-LAM-MATT', areaMm2: 7157248 }]` (3 leaves × 2 faces). `engineVersion '1.0.0'`, `catalogVersion 1`, `nesting null`, `issues` = model issues.
+- [ ] **Step 2: Run it, expect FAIL** — `yarn vitest run resources/js/engine/bom`
+- [ ] **Step 3: Implement** — 08 §3.2 (µm arithmetic), §3.3 (extruded perimeter), §3.4 (identity string, FNV-1a over UTF-16 code units with `Math.imul`, collision suffix, row name rule, row order), §3.5 (`wasteMilli`), §3.6, §3.7, §3.8, issues dedupe.
+- [ ] **Step 4: Run tests, expect PASS** — same command.
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add resources/js/engine/bom resources/js/engine/index.ts` → `feat(engine): compute bill of materials and cut list`
+

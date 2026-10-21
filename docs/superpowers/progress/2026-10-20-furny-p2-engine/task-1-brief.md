@@ -1,0 +1,24 @@
+### Task 1: Engine scaffold, ids, version, purity guards
+
+**Files:**
+- Modify: `package.json` (dependencies `zod@^4`, `mutative@^2.0`, `clipper2-ts@2.0.1-18`, `earcut@^3.2`, `flatbush@^4.6`, `nanoid@^5`; devDependencies `@types/earcut` only if earcut 3 ships no types), `vitest.config.ts`, `eslint.config.js`
+- Create: `resources/js/engine/index.ts`, `resources/js/engine/version.ts`, `resources/js/engine/ids.ts`, `resources/js/engine/geometry/tolerance.ts`, `resources/js/engine/testing/ids.ts`, `resources/js/engine/testing/random.ts`
+- Test: `resources/js/engine/__tests__/ids.test.ts`, `resources/js/engine/__tests__/purity.test.ts`, `resources/js/engine/__tests__/lintRules.test.ts`
+
+**Spec refs:** `01 §5.1–§5.2`, `master §6.3`, `04 §0.2–§0.3`, `04 §10`, `07 §12.1`
+
+**Interfaces:**
+- Consumes: P1 Task 1 scaffold.
+- Produces: `ENGINE_VERSION: '1.0.0'`; `type IdPrefix = 'n'|'w'|'o'|'r'|'f'|'x'|'d'|'t'|'s'|'fr'|'p'|'h'`; `ID_ALPHABET`; `newId(prefix: IdPrefix): string`; `isEntityId(id: string, prefix: IdPrefix): boolean`; `geometry/tolerance.ts`: `EPS=0.5, ANGLE_TOL_DEG=0.5, ANGLE_TOL, NODE_MERGE_TOL=5, MIN_WALL_LENGTH=10, MITER_LIMIT=4, CLIPPER_SCALE=1000, MIN_ROOM_NET_AREA=40_000, ANCHOR_MIN_CLEARANCE=100, MAX_COORD=1_000_000`, `roundMm(v: number): number`; test-only `testIds(): (prefix: IdPrefix) => string`, `mulberry32(seed: number): () => number` (not exported from index).
+
+- [ ] **Step 0: Verify the scaffold** — `yarn --version` prints 4.x; `vitest.config.ts`, `eslint.config.js`, `tsconfig.json` exist. If `vitest.config.ts` is missing create it with `defineConfig({ test: { environment: 'node' } })` plus the include/exclude below.
+- [ ] **Step 1: Write the failing tests**
+  - `ids.test.ts`: `newId('n')` matches `/^n_[0-9a-z]{10}$/`; `newId('fr')` matches `/^fr_[0-9a-z]{10}$/`; 1000 calls unique; `isEntityId('w_abc0000001','w') === true`, `isEntityId('w_ABC0000001','w') === false`; `testIds()` yields `s_0000000001`, `s_0000000002`, then `fr_0000000001` (independent counters per prefix); `mulberry32(42)` first three values are stable across runs (assert equality of two generators); `roundMm(2.5) === 3`, `roundMm(-2.5) === -3`, `roundMm(-0.4) + 0 === 0`; `ENGINE_VERSION === '1.0.0'`.
+  - `purity.test.ts` (first line `// @vitest-environment node`): `import.meta.glob(['../**/*.ts', '!../**/__tests__/**', '!../**/__perf__/**', '!../**/*.bench.ts'])`, await every loader (none throws); `typeof window === 'undefined' && typeof document === 'undefined'`; a static scan of every engine source file text finds no `from 'vue'`, `from 'three'`, `from '@tresjs`, `\bwindow\.`, `\bdocument\.`, `\blocalStorage\b`, `\bfetch\(`; `clipper2-ts` appears only in `geometry/clip.ts`, `earcut` only in `geometry/triangulate.ts` (vacuously true until Task 5).
+  - `lintRules.test.ts`: `new ESLint({ cwd: repoRoot })`, `lintText(code, { filePath: 'resources/js/engine/plan/x.ts' })` reports `no-restricted-imports` for `import { ref } from 'vue'`, `import * as T from 'three'`, `import { TresCanvas } from '@tresjs/core'`, `import x from '@/lib/http'`, `import { Clipper64 } from 'clipper2-ts'`, `import earcut from 'earcut'`; reports `no-restricted-globals` for `window.alert(1)`, `document.body`, `localStorage.x`, `fetch('/')`; reports nothing for `import { Clipper64 } from 'clipper2-ts'` at `resources/js/engine/geometry/clip.ts` and `import earcut from 'earcut'` at `resources/js/engine/geometry/triangulate.ts`.
+- [ ] **Step 2: Run, expect FAIL** — `yarn vitest run resources/js/engine/__tests__` → module-not-found / missing rule errors.
+- [ ] **Step 3: Implement** — install deps with `yarn add`; `ids.ts` uses `customAlphabet(ID_ALPHABET, 10)` from `nanoid`; `index.ts` re-exports `ENGINE_VERSION`, `newId`, `isEntityId`, `IdPrefix`, tolerance constants, `roundMm`. ESLint: add a flat-config block `files: ['resources/js/engine/**/*.ts']` with `no-restricted-imports` (`paths`: vue, three, clipper2-ts, earcut; `patterns`: `@tresjs/*`, `three/*`, `@/*`, `**/editor/**`, `**/components/**`) and `no-restricted-globals` (`window`, `document`, `localStorage`, `fetch`, `HTMLCanvasElement`, `Image`); two later blocks for `geometry/clip.ts` / `geometry/triangulate.ts` repeating the rule without that one package. Vitest config: `include` adds `resources/js/**/__tests__/**/*.test.ts` and `engine-cli/src/**/__tests__/**/*.test.ts`; `exclude` adds `**/__perf__/**`.
+- [ ] **Step 4: Run tests, expect PASS** — `yarn vitest run resources/js/engine/__tests__`
+- [ ] **Step 5: Quality gates** — `yarn eslint resources/js/engine && yarn prettier --check resources/js/engine && yarn vue-tsc --noEmit`
+- [ ] **Step 6: Commit** — `git add package.json yarn.lock vitest.config.ts eslint.config.js resources/js/engine` → `feat(engine): scaffold engine module with ids, version and purity guards`
+
