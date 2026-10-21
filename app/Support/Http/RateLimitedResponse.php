@@ -25,10 +25,12 @@ final class RateLimitedResponse
      * silent (13 §5.5), so it never answers 429. The resend button is the verification page's own form. The phone
      * sign-in pages (`auth.otp.*`) and the re-authentication page each count their wait down; the dialog that adds a
      * phone number to an account (`account.phone.*`) shows the wait inside the dialog. A refusal that came back as a
-     * toast would look like a success to the dialog (a redirect without errors), so it gets the error.
+     * toast would look like a success to the dialog (a redirect without errors), so it gets the error. The two-factor
+     * challenge counts its wait down on its own page, too (13 §5.10).
      */
     public const array INLINE_ROUTES = [
         'login.store',
+        'two-factor.login.store',
         'register.store',
         'verification.send',
         'auth.otp.send',

@@ -56,6 +56,12 @@ final class AccessProbe
      */
     private const array ANY_PASSWORD_REDIRECTS = ['auth.reauthenticate' => 'password.confirm'];
 
+    /**
+     * Signed-in routes of Fortify that are for staff, though they sit in no staff group: customers get 403 from
+     * `PreventCustomerTwoFactor` (13 §5.10), and staff are sent on to confirm their password first.
+     */
+    private const string STAFF_ONLY_FORTIFY = 'two-factor.';
+
     public function __construct(private readonly TestCase $test) {}
 
     /**
@@ -167,6 +173,13 @@ final class AccessProbe
         );
 
         foreach (['customer' => User::factory()->create(), 'owner' => User::factory()->owner()->create()] as $who => $user) {
+            // `PreventCustomerTwoFactor` (13 §5.10) answers a customer on every `two-factor.*` route, the challenge's too.
+            if ($who === 'customer' && str_starts_with($name, self::STAFF_ONLY_FORTIFY)) {
+                $this->assert($this->get($name, $user)->getStatusCode() === 403, "{$name}: a signed-in customer does not get 403.");
+
+                continue;
+            }
+
             $this->assert(
                 $this->get($name, $user)->isRedirect(url()->to((string) config('fortify.home'))),
                 "{$name}: a signed-in {$who} is not redirected to the home page.",
@@ -204,6 +217,13 @@ final class AccessProbe
     private function checkAny(string $name): void
     {
         $this->assert($this->redirectsTo($this->get($name), route('login')), "{$name}: a guest is not sent to login.");
+
+        if (str_starts_with($name, self::STAFF_ONLY_FORTIFY)) {
+            $this->assert($this->get($name, User::factory()->create())->getStatusCode() === 403, "{$name}: a customer does not get 403.");
+            $this->assert($this->opened($this->get($name, User::factory()->owner()->create()), $name), "{$name}: an owner does not get the page.");
+
+            return;
+        }
 
         // Unverified, so the verification notice renders for them instead of redirecting away.
         $user = User::factory()->unverified()->create();

@@ -35,6 +35,7 @@ return [
 
     // Error codes of the account flows (13 §5, 10 §13.2).
     'errors' => [
+        '2fa_required' => 'Two-factor authentication is required for your role.',
         'last_login_method' => 'You need at least one way to sign in.',
 
         // Google sign-in (13 §5.3).

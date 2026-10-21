@@ -69,7 +69,7 @@ return [
     'auth.otp.complete.show' => $entry('guest'),
     'auth.otp.complete' => $entry('guest'),
 
-    // Fortify, signed-in (13 §2). Customers are kept out of `two-factor.*` by a later middleware (13 §5.10).
+    // Fortify, signed-in (13 §2). Customers get 403 on `two-factor.*` from `PreventCustomerTwoFactor` (13 §5.10), whatever the map says.
     'logout' => $entry('any'),
     'verification.notice' => $entry('any'),
     'verification.verify' => $entry('any'),
@@ -101,6 +101,9 @@ return [
 
     // Admin app (11 §2).
     'admin.dashboard' => $entry('staff'),
+
+    // The page of the staff member's second factor (13 §5.10): any staff, and exempt from `2fa.enrolled`.
+    'admin.security.two-factor' => $entry('staff'),
 
     // Staff management (11 §7, 13 §5.9). Everything that concerns an owner also needs the owner gate, in the requests and
     // the actions; the route needs `staff.manage`.

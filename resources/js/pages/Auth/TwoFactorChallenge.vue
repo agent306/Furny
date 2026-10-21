@@ -1,133 +1,147 @@
 <script setup lang="ts">
-import { Form, Head, setLayoutProps } from '@inertiajs/vue3';
-import { computed, ref, watchEffect } from 'vue';
-import InputError from '@/components/InputError.vue';
+import { Form, Head, usePage } from '@inertiajs/vue3';
+import { ref } from 'vue';
+import OtpCodeField from '@/components/auth/OtpCodeField.vue';
+import ThrottleNotice from '@/components/auth/ThrottleNotice.vue';
+import InputError from '@/components/common/InputError.vue';
+import RequiredMark from '@/components/common/RequiredMark.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-    InputOTP,
-    InputOTPGroup,
-    InputOTPSlot,
-} from '@/components/ui/input-otp';
+import { Label } from '@/components/ui/label';
+import { Spinner } from '@/components/ui/spinner';
+import { useFocusFirstError } from '@/composables/useFocusFirstError';
+import { useI18n } from '@/composables/useI18n';
+import { useThrottleCountdown } from '@/composables/useThrottleCountdown';
 import { store } from '@/routes/two-factor/login';
-import type { TwoFactorConfigContent } from '@/types';
+import type { FeatureFlags } from '@/types/inertia';
 
-const showRecoveryInput = ref<boolean>(false);
-const code = ref<string>('');
+// 10 §4.7, 13 §5.10: staff with a confirmed second factor, after their password (or Google). A 6-digit code from the
+// authenticator, or one of the recovery codes. Five tries a minute: the wait is counted down on the page.
+defineProps<{
+    features: FeatureFlags;
+    turnstileSiteKey: string | null;
+    canRegister: boolean;
+}>();
 
-const authConfigContent = computed<TwoFactorConfigContent>(() => {
-    if (showRecoveryInput.value) {
-        return {
-            title: 'Recovery code',
-            description:
-                'Please confirm access to your account by entering one of your emergency recovery codes.',
-            buttonText: 'login using an authentication code',
-        };
-    }
+const { t } = useI18n();
+const { focusFirstError } = useFocusFirstError();
+const page = usePage();
+const { remaining } = useThrottleCountdown(() => page.props.errors);
 
-    return {
-        title: 'Authentication code',
-        description:
-            'Enter the authentication code provided by your authenticator application.',
-        buttonText: 'login using a recovery code',
-    };
-});
+const useRecovery = ref(false);
+const code = ref('');
 
-watchEffect(() => {
-    setLayoutProps({
-        title: authConfigContent.value.title,
-        description: authConfigContent.value.description,
-    });
-});
-
-const toggleRecoveryMode = (clearErrors: () => void): void => {
-    showRecoveryInput.value = !showRecoveryInput.value;
-    clearErrors();
+function toggle(clearErrors: () => void): void {
+    useRecovery.value = !useRecovery.value;
     code.value = '';
-};
+    clearErrors();
+}
 </script>
 
 <template>
-    <Head title="Two-factor authentication" />
+    <Head :title="t('auth_ui.two_factor.title')" />
 
     <div class="space-y-6">
-        <template v-if="!showRecoveryInput">
-            <Form
-                v-bind="store.form()"
-                class="space-y-4"
-                reset-on-error
-                @error="code = ''"
-                #default="{ errors, processing, clearErrors }"
+        <div class="space-y-2 text-center">
+            <h1
+                tabindex="-1"
+                class="text-2xl font-semibold tracking-tight outline-none"
             >
-                <input type="hidden" name="code" :value="code" />
-                <div
-                    class="flex flex-col items-center justify-center space-y-3 text-center"
-                >
-                    <div class="flex w-full items-center justify-center">
-                        <InputOTP
-                            id="otp"
-                            v-model="code"
-                            :maxlength="6"
-                            :disabled="processing"
-                            autofocus
-                        >
-                            <InputOTPGroup>
-                                <InputOTPSlot
-                                    v-for="index in 6"
-                                    :key="index"
-                                    :index="index - 1"
-                                />
-                            </InputOTPGroup>
-                        </InputOTP>
-                    </div>
-                    <InputError :message="errors.code" />
-                </div>
-                <Button type="submit" class="w-full" :disabled="processing"
-                    >Continue</Button
-                >
-                <div class="text-center text-sm text-muted-foreground">
-                    <span>or you can </span>
-                    <button
-                        type="button"
-                        class="text-foreground underline decoration-neutral-300 underline-offset-4 transition-colors duration-300 ease-out hover:decoration-current! dark:decoration-neutral-500"
-                        @click="() => toggleRecoveryMode(clearErrors)"
-                    >
-                        {{ authConfigContent.buttonText }}
-                    </button>
-                </div>
-            </Form>
-        </template>
+                {{ t('auth_ui.two_factor.title') }}
+            </h1>
+            <p class="text-sm text-muted-foreground">
+                {{
+                    useRecovery
+                        ? t('auth_ui.two_factor.recovery_description')
+                        : t('auth_ui.two_factor.description')
+                }}
+            </p>
+        </div>
 
-        <template v-else>
-            <Form
-                v-bind="store.form()"
-                class="space-y-4"
-                reset-on-error
-                #default="{ errors, processing, clearErrors }"
-            >
+        <ThrottleNotice v-if="remaining > 0" :seconds="remaining" />
+
+        <Form
+            v-slot="{ errors, processing, clearErrors }"
+            v-bind="store.form()"
+            :reset-on-error="['recovery_code']"
+            class="flex flex-col gap-5"
+            @error="
+                () => {
+                    code = '';
+                    void focusFirstError();
+                }
+            "
+        >
+            <div v-if="!useRecovery" class="grid gap-2">
+                <Label for="code"
+                    >{{ t('auth_ui.two_factor.code') }} <RequiredMark
+                /></Label>
+                <OtpCodeField
+                    id="code"
+                    v-model="code"
+                    :disabled="processing"
+                    :invalid="Boolean(errors.code)"
+                    :describedby="errors.code ? 'code-error' : undefined"
+                />
+                <InputError id="code-error" :message="errors.code" />
+            </div>
+
+            <div v-else class="grid gap-2">
+                <Label for="recovery_code"
+                    >{{ t('auth_ui.two_factor.recovery_code') }} <RequiredMark
+                /></Label>
                 <Input
+                    id="recovery_code"
                     name="recovery_code"
                     type="text"
-                    placeholder="Enter recovery code"
-                    v-focus
+                    size="lg"
                     required
+                    aria-required="true"
+                    autocomplete="off"
+                    autocapitalize="none"
+                    spellcheck="false"
+                    class="font-mono"
+                    :aria-invalid="errors.recovery_code ? 'true' : undefined"
+                    :aria-describedby="
+                        errors.recovery_code ? 'recovery_code-error' : undefined
+                    "
                 />
-                <InputError :message="errors.recovery_code" />
-                <Button type="submit" class="w-full" :disabled="processing"
-                    >Continue</Button
-                >
+                <InputError
+                    id="recovery_code-error"
+                    :message="errors.recovery_code"
+                />
+            </div>
 
-                <div class="text-center text-sm text-muted-foreground">
-                    <span>or you can </span>
-                    <button
-                        type="button"
-                        class="text-foreground underline decoration-neutral-300 underline-offset-4 transition-colors duration-300 ease-out hover:decoration-current! dark:decoration-neutral-500"
-                        @click="() => toggleRecoveryMode(clearErrors)"
-                    >
-                        {{ authConfigContent.buttonText }}
-                    </button>
-                </div>
-            </Form>
-        </template>
+            <Button
+                type="submit"
+                size="lg"
+                class="w-full"
+                :disabled="processing || remaining > 0"
+                data-test="challenge-button"
+            >
+                <Spinner v-if="processing" />
+                {{ t('auth_ui.two_factor.submit') }}
+            </Button>
+
+            <button
+                type="button"
+                class="inline-flex min-h-11 items-center justify-center text-sm text-foreground underline underline-offset-4"
+                data-test="toggle-recovery"
+                @click="toggle(clearErrors)"
+            >
+                {{
+                    useRecovery
+                        ? t('auth_ui.two_factor.use_code')
+                        : t('auth_ui.two_factor.use_recovery')
+                }}
+            </button>
+        </Form>
+
+        <p
+            class="text-center text-sm text-muted-foreground"
+            data-test="lost-help"
+        >
+            {{ t('auth_ui.two_factor.lost_help') }}
+        </p>
     </div>
 </template>

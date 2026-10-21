@@ -12,6 +12,8 @@ use App\Http\Middleware\EnsureUserType;
 use App\Http\Middleware\FortifyRouteGuards;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\PreventCustomerTwoFactor;
+use App\Http\Middleware\PreventRequiredTwoFactorDisable;
 use App\Http\Middleware\RequireRecentAuthentication;
 use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\TrackSession;
@@ -123,6 +125,10 @@ $app = Application::configure(basePath: dirname(__DIR__))
             TrackSession::class,
             // The limiters and the closed-registration check that Fortify's own routes cannot carry (14 §3.1).
             FortifyRouteGuards::class,
+            // The two-factor rules of 13 §5.10 for Fortify's routes, which are matched by name: no customers on
+            // `two-factor.*`, and no switching off for the roles that must have it.
+            PreventCustomerTwoFactor::class,
+            PreventRequiredTwoFactorDisable::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

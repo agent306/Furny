@@ -3,9 +3,3 @@ export type AuthUser = App.Domain.Identity.Data.AuthUserData;
 
 /** `business` of the shared props (generated from `BusinessPublicData`). */
 export type BusinessPublic = App.Domain.Settings.Data.BusinessPublicData;
-
-export type TwoFactorConfigContent = {
-    title: string;
-    description: string;
-    buttonText: string;
-};

@@ -76,6 +76,12 @@ lastLoginAt: string | null,
 googleLinked: boolean,
 can: App.Domain.Identity.Data.StaffRowAbilitiesData,
 };
+export type TwoFactorPageProps = {
+enabled: boolean,
+confirmed: boolean,
+required: boolean,
+enforced: boolean,
+};
 export type UserRefData = {
 id: string,
 name: string,

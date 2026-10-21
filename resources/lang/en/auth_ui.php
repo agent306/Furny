@@ -25,6 +25,19 @@ return [
     ],
     'password_rules' => 'At least {min, plural, one {# character} other {# characters}}.',
 
+    // 10 §4.7, 13 §5.10: the challenge staff with a second factor meet after the password.
+    'two_factor' => [
+        'title' => 'Two-factor authentication',
+        'description' => 'Enter the 6-digit code from your authenticator app to finish signing in.',
+        'recovery_description' => 'Enter one of the recovery codes you saved when you set up two-factor authentication. Each one works once.',
+        'code' => '6-digit code',
+        'recovery_code' => 'Recovery code',
+        'use_recovery' => 'Use a recovery code',
+        'use_code' => 'Use an authenticator code',
+        'submit' => 'Continue',
+        'lost_help' => 'Lost your authenticator and your recovery codes? Please ask an owner to reset it for you.',
+    ],
+
     // 10 §4.2, §4.3. The caption sits under the Google button: pressing it is accepting the terms (13 §5.3).
     'google' => [
         'continue' => 'Continue with Google',

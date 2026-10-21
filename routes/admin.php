@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\Account\TwoFactorController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\StaffController;
 use App\Http\Controllers\Admin\StaffInvitationController;
@@ -10,6 +11,10 @@ use Illuminate\Support\Facades\Route;
 // Registered by bootstrap/app.php under the `/admin` prefix and the `admin.` name prefix with the middleware `web`,
 // `auth`, `active`, `staff`, `2fa.enrolled` and `session.absolute` (13 §1).
 Route::get('/', DashboardController::class)->name('dashboard');
+
+// The second factor of the signed-in staff member (13 §5.10). Exempt from `2fa.enrolled` (EnsureTwoFactorEnrolled::EXEMPT),
+// or an owner or admin who has not enrolled could not reach the page that enrols them.
+Route::get('account/two-factor', [TwoFactorController::class, 'show'])->name('security.two-factor');
 
 // Staff management (11 §7, 13 §5.9): `staff.manage`; everything that concerns an owner also needs the owner gate, which
 // the requests and the actions ask. Invitations are limited together, invitations and resends (13 §10).
