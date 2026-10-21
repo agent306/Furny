@@ -36,7 +36,7 @@ def _secret_values() -> list[str]:
 
 
 class RedactionFilter(logging.Filter):
-    """Replaces secret env values and presigned query strings in the message, string extras and traceback."""
+    """Redacts secret env values and presigned query strings in message, extras (nested too), traceback."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -48,12 +48,26 @@ class RedactionFilter(logging.Filter):
             text = text.replace(secret, REDACTED)
         return text
 
+    def redact_value(self, value: Any) -> Any:
+        """Redact recursively; values that JSON would stringify are redacted as their string form."""
+        if value is None or isinstance(value, bool | int | float):
+            return value
+        if isinstance(value, str):
+            return self.redact(value)
+        if isinstance(value, dict):
+            return {
+                (self.redact(k) if isinstance(k, str) else k): self.redact_value(v) for k, v in value.items()
+            }
+        if isinstance(value, list | tuple | set | frozenset):
+            return [self.redact_value(v) for v in value]
+        return self.redact(str(value))
+
     def filter(self, record: logging.LogRecord) -> bool:
         record.msg = self.redact(record.getMessage())
         record.args = None
         for key, value in list(record.__dict__.items()):
-            if key not in _STANDARD_ATTRS and isinstance(value, str):
-                record.__dict__[key] = self.redact(value)
+            if key not in _STANDARD_ATTRS:
+                record.__dict__[key] = self.redact_value(value)
         if record.exc_info and record.exc_info[0] is not None:
             record.exc_text = self.redact(logging.Formatter().formatException(record.exc_info))
             record.exc_info = None

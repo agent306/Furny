@@ -116,3 +116,32 @@ def test_formatter_skips_standard_attributes() -> None:
     entry = json.loads(JsonFormatter().format(record))
     assert entry["provider"] == "anthropic"
     assert set(entry) == {"ts", "level", "msg", "requestId", "provider"}
+
+
+def test_redacts_nested_and_non_string_extras(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Holder:
+        def __str__(self) -> str:
+            return "holder sk-ant-secret-123456"
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-123456")
+    configure_logging("info")
+    logging.getLogger(LOGGER_NAME).info(
+        "nested",
+        extra={
+            "d": {"k": "sk-ant-secret-123456", "u": "https://s3/x?X-Amz-Signature=abc", "n": 3},
+            "items": ["a", ("sk-ant-secret-123456", {"deep": "https://s3/y?X-Amz-Credential=def"})],
+            "obj": Holder(),
+            "count": 7,
+        },
+    )
+    out = "\n".join(_lines(capsys))
+    assert "sk-ant-secret-123456" not in out
+    assert "X-Amz-Signature=abc" not in out
+    assert "X-Amz-Credential=def" not in out
+    entry = json.loads(out)
+    assert entry["d"] == {"k": "[REDACTED]", "u": "https://s3/x?[REDACTED]", "n": 3}
+    assert entry["items"][1][1] == {"deep": "https://s3/y?[REDACTED]"}
+    assert entry["obj"] == "holder [REDACTED]"
+    assert entry["count"] == 7
