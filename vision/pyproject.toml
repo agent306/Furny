@@ -46,6 +46,7 @@ addopts = ["-m", "not live"]
 markers = [
     "live: real provider calls (manual/nightly)",
     "slow: >5 s",
+    "reference: the committed reference blueprints end to end (runs in the normal suite)",
 ]
 
 [tool.ruff]

@@ -1,0 +1,380 @@
+{
+ "source": "P2 committed fixture database/fixtures/plans/brochure-2bhk.json (controller ruling C8 applied there: y=3530 row at 3525, A7-A6 230 thick)",
+ "units": "mm",
+ "registration": {
+  "truth": [
+   [
+    0,
+    0
+   ],
+   [
+    9630,
+    0
+   ],
+   [
+    6410,
+    8120
+   ],
+   [
+    0,
+    8120
+   ]
+  ],
+  "nodes": [
+   "A1",
+   "A4",
+   "A10",
+   "A12"
+  ],
+  "source_px": [
+   [
+    55.5,
+    63.5
+   ],
+   [
+    340.5,
+    63.5
+   ],
+   [
+    246.5,
+    310.5
+   ],
+   [
+    55.5,
+    310.5
+   ]
+  ],
+  "method": "Outer plan corners A1 (0,0), A4 (9630,0), A10 (6410,8120), A12 (0,8120), measured by hand on brochure-2bhk.png in source pixels from grey-wall profiles (V<175, S<80) across the outline: bedroom 1 left face line x=55.5, bedroom tops y=63.5, bedroom 2 right x=340.5, living right x=246.5, bottom wall y=310.5. The drawing's kitchen/toilet stand ~21 px inside x=55.5 (the P2 fixture makes them flush with bedroom 1), so A12 is taken on bedroom 1's line extended to the bottom wall."
+ },
+ "nodes": {
+  "A1": [
+   0,
+   0
+  ],
+  "A2": [
+   3220,
+   0
+  ],
+  "A3": [
+   6410,
+   0
+  ],
+  "A4": [
+   9630,
+   0
+  ],
+  "A5": [
+   9630,
+   3525
+  ],
+  "A6": [
+   8010,
+   3525
+  ],
+  "A7": [
+   6410,
+   3525
+  ],
+  "A8": [
+   8010,
+   5880
+  ],
+  "A9": [
+   6410,
+   5880
+  ],
+  "A10": [
+   6410,
+   8120
+  ],
+  "A11": [
+   3220,
+   8120
+  ],
+  "A12": [
+   0,
+   8120
+  ],
+  "A13": [
+   0,
+   5170
+  ],
+  "A14": [
+   0,
+   3525
+  ],
+  "A15": [
+   3220,
+   3525
+  ],
+  "A16": [
+   3220,
+   1390
+  ],
+  "A17": [
+   6410,
+   1390
+  ],
+  "A18": [
+   2580,
+   3525
+  ],
+  "A19": [
+   2580,
+   5170
+  ],
+  "A20": [
+   3220,
+   5170
+  ]
+ },
+ "walls": [
+  {
+   "id": "W1",
+   "a": "A1",
+   "b": "A2",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W2",
+   "a": "A3",
+   "b": "A4",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W3",
+   "a": "A4",
+   "b": "A5",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W4",
+   "a": "A5",
+   "b": "A6",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W5",
+   "a": "A6",
+   "b": "A8",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W6",
+   "a": "A8",
+   "b": "A9",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W7",
+   "a": "A9",
+   "b": "A10",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W8",
+   "a": "A10",
+   "b": "A11",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W9",
+   "a": "A11",
+   "b": "A12",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W10",
+   "a": "A12",
+   "b": "A13",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W11",
+   "a": "A13",
+   "b": "A14",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W12",
+   "a": "A14",
+   "b": "A1",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W13",
+   "a": "A2",
+   "b": "A3",
+   "thickness": 115,
+   "kind": "half"
+  },
+  {
+   "id": "W14",
+   "a": "A2",
+   "b": "A16",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W15",
+   "a": "A16",
+   "b": "A15",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W16",
+   "a": "A3",
+   "b": "A17",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W17",
+   "a": "A17",
+   "b": "A7",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W18",
+   "a": "A16",
+   "b": "A17",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W19",
+   "a": "A14",
+   "b": "A18",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W20",
+   "a": "A18",
+   "b": "A15",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W21",
+   "a": "A7",
+   "b": "A6",
+   "thickness": 230,
+   "kind": "interior"
+  },
+  {
+   "id": "W22",
+   "a": "A7",
+   "b": "A9",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W23",
+   "a": "A15",
+   "b": "A20",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W24",
+   "a": "A20",
+   "b": "A11",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W25",
+   "a": "A18",
+   "b": "A19",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W26",
+   "a": "A13",
+   "b": "A19",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W27",
+   "a": "A19",
+   "b": "A20",
+   "thickness": 115,
+   "kind": "interior"
+  }
+ ],
+ "rooms": [
+  {
+   "name": "Bedroom 1",
+   "anchor": [
+    1600,
+    1800
+   ]
+  },
+  {
+   "name": "Deck",
+   "anchor": [
+    4800,
+    700
+   ]
+  },
+  {
+   "name": "Bedroom 2",
+   "anchor": [
+    8000,
+    1800
+   ]
+  },
+  {
+   "name": "Toilet 1",
+   "anchor": [
+    1300,
+    4350
+   ]
+  },
+  {
+   "name": "W/M",
+   "anchor": [
+    2900,
+    4350
+   ]
+  },
+  {
+   "name": "Kitchen",
+   "anchor": [
+    1600,
+    6650
+   ]
+  },
+  {
+   "name": "Living/Dining",
+   "anchor": [
+    4800,
+    4800
+   ]
+  },
+  {
+   "name": "Toilet 2",
+   "anchor": [
+    7200,
+    4700
+   ]
+  }
+ ]
+}

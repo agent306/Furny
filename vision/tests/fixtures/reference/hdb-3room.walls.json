@@ -1,0 +1,496 @@
+{
+ "source": "P2 committed fixture database/fixtures/plans/hdb-3room.json (controller ruling C8 applied there: N13/N20 at x=7773)",
+ "units": "mm",
+ "registration": {
+  "truth": [
+   [
+    0,
+    0
+   ],
+   [
+    11000,
+    -600
+   ],
+   [
+    11000,
+    7400
+   ],
+   [
+    0,
+    7400
+   ]
+  ],
+  "nodes": [
+   "N1",
+   "N9",
+   "N12",
+   "N16"
+  ],
+  "source_px": [
+   [
+    148.6,
+    182.2
+   ],
+   [
+    1121.9,
+    115.9
+   ],
+   [
+    1118.0,
+    811.1
+   ],
+   [
+    146.0,
+    803.3
+   ]
+  ],
+  "method": "Outer plan corners N1 (0,0), N9 (11000,-600), N12 (11000,7400), N16 (0,7400), measured by hand on hdb-3room.webp in source pixels: each corner is the crossing of the two outline strokes, every stroke located as the ink-weighted centre of a dark-pixel profile taken across it within ~60 px of the corner (TL/BR sit on black column blocks: column centre). Mapped through page.transform, then a least-squares similarity is fitted on the four pairs."
+ },
+ "nodes": {
+  "N1": [
+   0,
+   0
+  ],
+  "N2": [
+   1600,
+   0
+  ],
+  "N3": [
+   2900,
+   0
+  ],
+  "N4": [
+   4700,
+   0
+  ],
+  "N5": [
+   5900,
+   0
+  ],
+  "N6": [
+   8300,
+   0
+  ],
+  "N7": [
+   9700,
+   0
+  ],
+  "N8": [
+   9700,
+   -600
+  ],
+  "N9": [
+   11000,
+   -600
+  ],
+  "N10": [
+   11000,
+   1900
+  ],
+  "N11": [
+   11000,
+   3300
+  ],
+  "N12": [
+   11000,
+   7400
+  ],
+  "N13": [
+   7773,
+   7400
+  ],
+  "N14": [
+   7700,
+   7400
+  ],
+  "N15": [
+   4100,
+   7400
+  ],
+  "N16": [
+   0,
+   7400
+  ],
+  "N17": [
+   0,
+   3300
+  ],
+  "N18": [
+   1600,
+   3300
+  ],
+  "N19": [
+   4700,
+   3300
+  ],
+  "N20": [
+   7773,
+   3300
+  ],
+  "N21": [
+   8300,
+   3300
+  ],
+  "N22": [
+   1600,
+   1900
+  ],
+  "N23": [
+   2900,
+   1900
+  ],
+  "N24": [
+   4700,
+   1900
+  ],
+  "N25": [
+   5900,
+   1900
+  ],
+  "N26": [
+   9700,
+   1900
+  ],
+  "N27": [
+   4100,
+   8300
+  ],
+  "N28": [
+   7700,
+   8300
+  ]
+ },
+ "walls": [
+  {
+   "id": "W1",
+   "a": "N1",
+   "b": "N2",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W2",
+   "a": "N2",
+   "b": "N3",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W3",
+   "a": "N3",
+   "b": "N4",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W4",
+   "a": "N4",
+   "b": "N5",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W5",
+   "a": "N5",
+   "b": "N6",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W6",
+   "a": "N6",
+   "b": "N7",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W7",
+   "a": "N7",
+   "b": "N8",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W8",
+   "a": "N8",
+   "b": "N9",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W9",
+   "a": "N9",
+   "b": "N10",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W10",
+   "a": "N10",
+   "b": "N11",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W11",
+   "a": "N11",
+   "b": "N12",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W12",
+   "a": "N12",
+   "b": "N13",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W13",
+   "a": "N13",
+   "b": "N14",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W14",
+   "a": "N14",
+   "b": "N15",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W15",
+   "a": "N15",
+   "b": "N16",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W16",
+   "a": "N16",
+   "b": "N17",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W17",
+   "a": "N17",
+   "b": "N1",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W18",
+   "a": "N15",
+   "b": "N27",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W19",
+   "a": "N27",
+   "b": "N28",
+   "thickness": 115,
+   "kind": "half"
+  },
+  {
+   "id": "W20",
+   "a": "N28",
+   "b": "N14",
+   "thickness": 230,
+   "kind": "exterior"
+  },
+  {
+   "id": "W21",
+   "a": "N17",
+   "b": "N18",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W22",
+   "a": "N18",
+   "b": "N19",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W23",
+   "a": "N19",
+   "b": "N20",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W24",
+   "a": "N20",
+   "b": "N21",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W25",
+   "a": "N21",
+   "b": "N11",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W26",
+   "a": "N2",
+   "b": "N22",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W27",
+   "a": "N22",
+   "b": "N18",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W28",
+   "a": "N4",
+   "b": "N24",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W29",
+   "a": "N24",
+   "b": "N19",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W30",
+   "a": "N6",
+   "b": "N21",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W31",
+   "a": "N20",
+   "b": "N13",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W32",
+   "a": "N22",
+   "b": "N23",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W33",
+   "a": "N3",
+   "b": "N23",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W34",
+   "a": "N24",
+   "b": "N25",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W35",
+   "a": "N5",
+   "b": "N25",
+   "thickness": 115,
+   "kind": "interior"
+  },
+  {
+   "id": "W36",
+   "a": "N7",
+   "b": "N26",
+   "thickness": 230,
+   "kind": "interior"
+  },
+  {
+   "id": "W37",
+   "a": "N26",
+   "b": "N10",
+   "thickness": 115,
+   "kind": "interior"
+  }
+ ],
+ "rooms": [
+  {
+   "name": "Kitchen",
+   "anchor": [
+    800,
+    1650
+   ]
+  },
+  {
+   "name": "Toilet 1",
+   "anchor": [
+    2250,
+    950
+   ]
+  },
+  {
+   "name": "Bedroom 1",
+   "anchor": [
+    3800,
+    2600
+   ]
+  },
+  {
+   "name": "Toilet 2",
+   "anchor": [
+    5300,
+    950
+   ]
+  },
+  {
+   "name": "Bedroom 2",
+   "anchor": [
+    7000,
+    1650
+   ]
+  },
+  {
+   "name": "Toilet 3",
+   "anchor": [
+    10350,
+    650
+   ]
+  },
+  {
+   "name": "Dress",
+   "anchor": [
+    9000,
+    2600
+   ]
+  },
+  {
+   "name": "Living Room",
+   "anchor": [
+    4000,
+    5350
+   ]
+  },
+  {
+   "name": "Bedroom 3",
+   "anchor": [
+    9450,
+    5350
+   ]
+  },
+  {
+   "name": "Balcony",
+   "anchor": [
+    5900,
+    7850
+   ]
+  }
+ ]
+}
