@@ -55,6 +55,8 @@ export function createGenContext(
         issues: [],
         edgeMap: new Map(),
         joints: [],
+        overriddenBeforeSplit: new Set(),
+        seamPieces: new Set(),
         mat(role): CatalogMaterial {
             const found =
                 idx.material(doc.materials[role].materialCode) ??

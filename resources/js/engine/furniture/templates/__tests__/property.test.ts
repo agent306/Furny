@@ -6,8 +6,10 @@
  * - has at most 400 parts,
  * - has every part `length >= width > 0`,
  * - has every rendered part inside the bounding box (+-1 mm),
- * - has no two part boxes intersecting (Task 38 helper; the grooved back may
- *   sit in the groove of the sides, top and bottom only, R40-4).
+ * - has no two part boxes intersecting (Task 38 helper, shaped tops by their
+ *   outline's bounding box; the grooved back may sit in the groove of the
+ *   sides, top and bottom only, R40-4),
+ * - has every piece of a panel split at seams at least `MIN_SEAM_PIECE` long.
  * A failing set is reported with its parameters.
  */
 import { describe, expect, it } from 'vitest';
@@ -17,6 +19,7 @@ import { seedCatalog } from '../../../testing/seedCatalog';
 import { indexCatalog } from '../../catalogIndex';
 import { MAX_PARTS } from '../../constants';
 import { generateFurniture } from '../../generate';
+import { MIN_SEAM_PIECE } from '../../panelSplit';
 import { TEMPLATE_KEYS, type FurnitureDocument } from '../../schema';
 import { partOverlaps, sameDrawerBox } from '../../testing/overlaps';
 import type { Part } from '../../types';
@@ -115,6 +118,19 @@ function problemsOf(doc: FurnitureDocument): string[] {
             problems.push(
                 `${part.key} [${min.join(', ')}]..[${max.join(', ')}] is outside the bbox`,
             );
+        }
+    }
+
+    for (const issue of model.issues) {
+        if (issue.code !== 'furniture.panel_split') continue;
+        for (const key of issue.entityIds) {
+            const piece = model.parts.find((p) => p.key === key);
+            if (!piece) continue;
+            const { min, max } = extentOf(piece);
+            const along = (max[0] ?? 0) - (min[0] ?? 0);
+            if (along < MIN_SEAM_PIECE) {
+                problems.push(`${key} is a ${along} mm piece`);
+            }
         }
     }
 

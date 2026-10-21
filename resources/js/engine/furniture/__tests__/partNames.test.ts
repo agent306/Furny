@@ -60,6 +60,31 @@ describe('partNameEn', () => {
         expect(partNameEn('parts.extra', { name: 'Filler' })).toBe('Filler');
     });
 
+    it('numbers the pieces of a panel split at seams (Task 40)', () => {
+        expect(partNameEn('parts.top', { piece: 1 })).toBe('Top 1');
+        expect(partNameEn('parts.top', {})).toBe('Top');
+        expect(partNameEn('parts.fixed_shelf', { n: 2, piece: 3 })).toBe(
+            'Fixed shelf 2 3',
+        );
+        expect(partNameEn('parts.table_top', { piece: 2 })).toBe('Table top 2');
+        for (const key of [
+            'parts.top',
+            'parts.bottom',
+            'parts.fixed_shelf',
+            'parts.plinth_front',
+            'parts.plinth_back',
+            'parts.countertop',
+            'parts.table_top',
+            'parts.table_top_layer',
+            'parts.apron',
+            'parts.stretcher',
+            'parts.modesty_panel',
+            'parts.lower_shelf',
+        ]) {
+            expect(PART_NAMES_EN[key]).toMatch(/ \{piece\}$/);
+        }
+    });
+
     it('names plain parts and ignores unused params', () => {
         expect(partNameEn('parts.side_left')).toBe('Left side');
         expect(partNameEn('parts.countertop', { n: 4 })).toBe('Countertop');

@@ -421,10 +421,25 @@ describe('wardrobe_hinged definition', () => {
             advanced: true,
         });
         expect(field('backType')?.advanced).toBe(true);
-        expect(field('singleColumnSide')?.visibleIf).toEqual({
-            key: 'doors',
-            equals: ['auto', 1, 3, 5, 7, 9, 11],
+        // Always visible: the door clamps can turn an even request odd
+        // (Task 40 fix round 1), e.g. doors 2 at 2400 resolve to 3.
+        expect(field('singleColumnSide')).toStrictEqual({
+            key: 'singleColumnSide',
+            kind: 'select',
+            labelKey: 'templates.fields.singleColumnSide',
+            options: [
+                { value: 'left', labelKey: 'templates.options.left' },
+                { value: 'right', labelKey: 'templates.options.right' },
+            ],
         });
+        const sides = (singleColumnSide: string) =>
+            gen({
+                doors: 2,
+                width: 2400,
+                singleColumnSide,
+            }).carcass?.fronts.map((f) => f.leaves);
+        expect(sides('left')).toEqual([1, 2]);
+        expect(sides('right')).toEqual([2, 1]);
     });
 
     it('has the code defaults of 07 §2.4.1', () => {

@@ -18,8 +18,19 @@ export function sameDrawerBox(a: Part, b: Part): boolean {
     return ma !== null && mb !== null && ma[1] === mb[1];
 }
 
-const boxOf = (part: Part): Box3 | null =>
-    part.geometry.kind === 'box' ? part.geometry.box : null;
+/** A part's box; an extruded part (a shaped top) by its outline's bounding box. */
+function boxOf(part: Part): Box3 {
+    const g = part.geometry;
+    if (g.kind === 'box') return g.box;
+    const xs = g.outline.map(([x]) => x);
+    const zs = g.outline.map(([, z]) => z);
+    const x0 = Math.min(...xs);
+    const z0 = Math.min(...zs);
+    return {
+        min: [x0, g.y, z0],
+        size: [Math.max(...xs) - x0, g.thickness, Math.max(...zs) - z0],
+    };
+}
 
 /** Depth of the intersection of two boxes along each axis (negative: apart). */
 function intersection(a: Box3, b: Box3): [number, number, number] {
@@ -32,7 +43,8 @@ function intersection(a: Box3, b: Box3): [number, number, number] {
 /**
  * Every pair of box parts that intersect by more than `tolerance` on all
  * three axes, as `"keyA x keyB: dx x dy x dz"`, in part order. Extruded parts
- * and pairs `ignore` accepts (default: parts of one drawer box) are skipped.
+ * (shaped tops) count by their outline's bounding box; pairs `ignore`
+ * accepts (default: parts of one drawer box) are skipped.
  */
 export function partOverlaps(
     parts: readonly Part[],
@@ -46,10 +58,9 @@ export function partOverlaps(
     const out: string[] = [];
     parts.forEach((a, i) => {
         const ba = boxOf(a);
-        if (!ba) return;
         for (const b of parts.slice(i + 1)) {
+            if (ignore(a, b)) continue;
             const bb = boxOf(b);
-            if (!bb || ignore(a, b)) continue;
             const depth = intersection(ba, bb);
             if (depth.every((d) => d > tolerance)) {
                 const size = depth.map((d) => Math.round(d * 10) / 10);

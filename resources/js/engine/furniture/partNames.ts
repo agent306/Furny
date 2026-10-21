@@ -2,21 +2,22 @@
  * English part names for exports (07 §1.6), mirroring `resources/lang/en/parts.php`.
  * Each entry is a template: `{param}` placeholders are filled from the part's
  * `nameParams`, and a missing param simply drops out ("Back panel" when the
- * back is not split).
+ * back is not split). `{piece}` numbers the pieces of a long panel split at
+ * seams ("Top 1", "Top 2"; spec 19, Task 40).
  */
 export const PART_NAMES_EN: Record<string, string> = {
     'parts.side_left': 'Left side',
     'parts.side_right': 'Right side',
-    'parts.top': 'Top',
-    'parts.bottom': 'Bottom',
+    'parts.top': 'Top {piece}',
+    'parts.bottom': 'Bottom {piece}',
     'parts.back': 'Back panel {n}',
     'parts.partition': 'Partition {n}',
-    'parts.fixed_shelf': 'Fixed shelf {n}',
+    'parts.fixed_shelf': 'Fixed shelf {n} {piece}',
     'parts.shelf': 'Shelf {n}',
-    'parts.plinth_front': 'Plinth front',
-    'parts.plinth_back': 'Plinth back',
+    'parts.plinth_front': 'Plinth front {piece}',
+    'parts.plinth_back': 'Plinth back {piece}',
     'parts.plinth_return': 'Plinth return {n}',
-    'parts.countertop': 'Countertop',
+    'parts.countertop': 'Countertop {piece}',
     'parts.door': 'Door {leaf}',
     'parts.flap': 'Flap',
     'parts.sliding_door': 'Sliding door {leaf}',
@@ -28,14 +29,14 @@ export const PART_NAMES_EN: Record<string, string> = {
     'parts.drawer_side': 'Drawer side',
     'parts.drawer_back': 'Drawer back',
     'parts.drawer_bottom': 'Drawer bottom',
-    'parts.table_top': 'Table top',
-    'parts.table_top_layer': 'Table top layer {n}',
+    'parts.table_top': 'Table top {piece}',
+    'parts.table_top_layer': 'Table top layer {n} {piece}',
     'parts.table_leg': 'Leg',
-    'parts.apron': 'Apron',
-    'parts.stretcher': 'Stretcher',
+    'parts.apron': 'Apron {piece}',
+    'parts.stretcher': 'Stretcher {piece}',
     'parts.end_panel': 'End panel',
-    'parts.modesty_panel': 'Modesty panel',
-    'parts.lower_shelf': 'Lower shelf',
+    'parts.modesty_panel': 'Modesty panel {piece}',
+    'parts.lower_shelf': 'Lower shelf {piece}',
     'parts.trestle_upright': 'Trestle upright',
     'parts.trestle_foot': 'Trestle foot',
     'parts.trestle_cleat': 'Trestle cleat',

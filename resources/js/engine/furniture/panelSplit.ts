@@ -11,8 +11,13 @@
  * Sides and other vertical parts are never split; a piece that still fails
  * the sheet (or a part that cannot be split) is left to
  * `furniture.part_exceeds_sheet`.
+ *
+ * Fix round 1 rulings (spec 19): every piece is at least `MIN_SEAM_PIECE`
+ * long; the panel's own part override applies before the split (a removed
+ * panel is not split), and overrides on piece keys orphan.
  */
 import { fl } from './constants';
+import { applyPartOverride } from './overrides';
 import { makePart } from './parts';
 import type { EdgeId } from './schema';
 import { fitsSheet } from './sheetFit';
@@ -20,14 +25,21 @@ import type {
     Axis,
     Box3,
     GenContext,
+    Joint,
     Part,
     PartGeometry,
     PartGrain,
     PhysEdge,
 } from './types';
 
-/** A seam is only supported by a candidate at least this far from the previous seam. */
+/** A seam is only supported by a candidate at least this far from the previous seam (07 §3.4.1). */
 const MIN_PIECE = 100;
+/**
+ * Every piece of a long panel split is at least this long (spec 19, Task 40
+ * fix round 1): a support seam that would leave a shorter piece is skipped
+ * for the next-best one, else the span is split evenly.
+ */
+export const MIN_SEAM_PIECE = 300;
 /** Faces within this distance touch. */
 const TOUCH_TOLERANCE = 0.5;
 /** A support runs across at least this share of the panel's depth. */
@@ -40,21 +52,25 @@ export interface Seam {
 
 /**
  * Seams over `[from, to]` so that no piece exceeds `maxSpan` (greedy, 07
- * §3.4.1 step 3): the largest support in `[s + 100, s + maxSpan]` when there
- * is one, else an even split of the rest. Nothing for a span that cannot fit.
+ * §3.4.1 step 3): the largest support in `[s + minPiece, s + maxSpan]` that
+ * leaves at least `minTail` to `to` when there is one, else an even split of
+ * the rest. Nothing for a span that cannot fit. The back split uses the
+ * §3.4.1 defaults (100, no tail); long panels use `MIN_SEAM_PIECE` for both.
  */
 export function greedySeams(
     from: number,
     to: number,
     maxSpan: number,
     supports: readonly number[],
+    minPiece = MIN_PIECE,
+    minTail = 0,
 ): Seam[] {
     const out: Seam[] = [];
     if (maxSpan <= 0) return out;
     let s = from;
     while (to - s > maxSpan) {
         const support = supports.filter(
-            (c) => c >= s + MIN_PIECE && c <= s + maxSpan,
+            (c) => c >= s + minPiece && c <= s + maxSpan && to - c >= minTail,
         );
         const best = support.length > 0 ? Math.max(...support) : undefined;
         const at =
@@ -208,7 +224,7 @@ function maxPieceLength(
  * plinth returns behind a plinth board, side aprons and end panels under a
  * table top. Parts as long along x as across are not supports.
  */
-function supportsOf(
+export function supportsOf(
     ctx: GenContext,
     part: Part,
     box: Box3,
@@ -261,16 +277,14 @@ function splitPart(ctx: GenContext, part: Part, index: number): number {
         x1,
         maxSpan,
         supportsOf(ctx, part, box, axes.thin, cross),
+        MIN_SEAM_PIECE,
+        MIN_SEAM_PIECE,
     );
     if (seams.length === 0) return 1;
 
-    const banded = new Set<PhysEdge>(
-        EDGE_IDS.filter((id) => part.edges[id] !== null).map(
-            (id) => axes.edges[id],
-        ),
-    );
-    const bandCode = EDGE_IDS.map((id) => part.edges[id]).find(
-        (code) => code !== null,
+    // Band codes by physical edge (an edge override may set them one by one).
+    const codeAt = new Map<PhysEdge, string | null>(
+        EDGE_IDS.map((id) => [axes.edges[id], part.edges[id]]),
     );
     const cuts = [x0, ...seams.map((s) => s.at), x1];
     const pieces: Part[] = [];
@@ -297,27 +311,41 @@ function splitPart(ctx: GenContext, part: Part, index: number): number {
                 box: pieceBox,
                 thicknessAxis: axes.thin,
                 grainAxis: axes.grainAxis,
-                banded: [...banded].filter(
-                    (edge) =>
-                        !(edge === 'left' && k > 0) &&
-                        !(edge === 'right' && k + 2 < cuts.length),
-                ),
-                bandCode: bandCode ?? null,
+                banded: [],
                 visibleFaces: part.visibleFaces as 0 | 1 | 2,
                 operations: k === 0 ? part.operations : undefined,
                 geometry,
             },
             ctx,
         );
+        // Each piece keeps the panel's bands but on its seam edges.
+        const seamEdge = (edge: PhysEdge): boolean =>
+            (edge === 'left' && k > 0) ||
+            (edge === 'right' && k + 2 < cuts.length);
+        const physical = ctx.edgeMap.get(piece.key);
+        for (const id of EDGE_IDS) {
+            const edge = physical?.[id];
+            piece.edges[id] =
+                edge === undefined || seamEdge(edge)
+                    ? null
+                    : (codeAt.get(edge) ?? null);
+        }
+        piece.overridden = part.overridden;
         pieces.push(piece);
     }
     ctx.parts.splice(index, 1, ...pieces);
+    for (const piece of pieces) ctx.seamPieces.add(piece.key);
     ctx.edgeMap.delete(part.key);
 
-    // Joints of the panel go to the piece over the other part's centre.
-    const pieceAt = (x: number): Part => {
-        const k = seams.findIndex((seam) => x <= seam.at);
-        return pieces[k === -1 ? pieces.length - 1 : k] as Part;
+    // Joints of the panel go to the piece over the other part's centre; a
+    // part centred on a seam (a partition under it) joins both pieces.
+    const homesAt = (x: number): Part[] => {
+        const k = seams.findIndex(
+            (seam) => Math.abs(x - seam.at) <= TOUCH_TOLERANCE,
+        );
+        if (k >= 0) return [pieces[k] as Part, pieces[k + 1] as Part];
+        const after = seams.findIndex((seam) => x <= seam.at);
+        return [pieces[after === -1 ? pieces.length - 1 : after] as Part];
     };
     const centreOf = (key: string): number | undefined => {
         const other = ctx.parts.find((p) => p.key === key);
@@ -325,13 +353,21 @@ function splitPart(ctx: GenContext, part: Part, index: number): number {
         const b = boundsOf(other.geometry);
         return lo(b, 0) + b.size[0] / 2;
     };
+    const added: Joint[] = [];
     for (const joint of ctx.joints) {
-        if (joint.member === part.key) {
-            joint.member = pieceAt(centreOf(joint.other) ?? x0).key;
-        } else if (joint.other === part.key) {
-            joint.other = pieceAt(centreOf(joint.member) ?? x0).key;
-        }
+        const end =
+            joint.member === part.key
+                ? 'member'
+                : joint.other === part.key
+                  ? 'other'
+                  : null;
+        if (end === null) continue;
+        const counterpart = end === 'member' ? joint.other : joint.member;
+        const [first, ...more] = homesAt(centreOf(counterpart) ?? x0);
+        joint[end] = (first as Part).key;
+        for (const piece of more) added.push({ ...joint, [end]: piece.key });
     }
+    ctx.joints.push(...added);
 
     const keys = pieces.map((p) => p.key);
     ctx.issue(
@@ -373,11 +409,26 @@ function chordAt(piece: Part, x: number, cross: Axis): number {
 /**
  * Splits every long horizontal run of the model (R40-1). Run after all parts
  * and joints exist and before the connectors (07 §6.9) are counted.
+ *
+ * A part override on the panel's own key applies first, to the whole panel
+ * (spec 19, Task 40 fix round 1): the split then follows the overridden
+ * material and size, and the pieces keep the override's material, bands and
+ * grain. A removed panel is never split. Overrides on piece keys are not
+ * supported (they orphan as usual).
  */
 export function splitLongPanels(ctx: GenContext): void {
+    const overrides = ctx.doc.overrides.parts;
     for (let i = 0; i < ctx.parts.length; i++) {
         const part = ctx.parts[i] as Part;
         if (!SPLITTABLE.some((re) => re.test(part.key))) continue;
+        const override = Object.hasOwn(overrides, part.key)
+            ? overrides[part.key]
+            : undefined;
+        if (override?.removed) continue;
+        if (override) {
+            applyPartOverride(ctx, part, override);
+            ctx.overriddenBeforeSplit.add(part.key);
+        }
         i += splitPart(ctx, part, i) - 1;
     }
 }

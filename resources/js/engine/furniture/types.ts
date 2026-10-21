@@ -142,6 +142,17 @@ export interface GenContext {
     edgeMap: Map<PartKey, Record<EdgeId, PhysEdge>>;
     joints: Joint[];
     /**
+     * Part keys whose part override (07 §3.14) was applied before the long
+     * panel split (spec 19, Task 40 fix round 1), so the override step skips
+     * them: neither applied twice nor reported orphaned.
+     */
+    overriddenBeforeSplit: Set<PartKey>;
+    /**
+     * Keys of the pieces of long panels split at seams. Overrides keyed on
+     * them are not supported and are reported orphaned (spec 19).
+     */
+    seamPieces: Set<PartKey>;
+    /**
      * Effective material of a role: the assigned one, or the role default when
      * the code is unknown (the document is then reported, not rejected).
      */

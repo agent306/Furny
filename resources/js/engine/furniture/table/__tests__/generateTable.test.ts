@@ -841,6 +841,42 @@ describe('under-top drawers on four legs', () => {
         expect(partOverlaps(clamped.parts)).toEqual([]);
     });
 
+    it('legs deeper than wide or wider than deep: the inset clamp takes the smaller side (fix round 1)', () => {
+        // solid s 60 x t_leg 50: min(60, 50) - 18 = 32, while s - 18 = 42
+        const model = run(
+            diningTable((d) => {
+                d.table.base.legSection = 60;
+                d.table.base.apron.inset = 40;
+            }),
+        );
+        expect(
+            issuesOf(model, 'furniture.apron_inset_clamped')[0]?.params,
+        ).toEqual({ requested: 40, applied: 32 });
+        // the front apron stays within the legs' 50 mm depth: z [800, 850]
+        expect(boxOf(model, 'table.apron.front').min[2]).toBe(800);
+        expect(partOverlaps(model.parts)).toEqual([]);
+    });
+
+    it('thin solid legs: a full row of side drawers starts at the legs’ z face (fix round 1)', () => {
+        // legs z [50, 100] / [800, 850]: the bay along z is [100, 800]
+        for (const side of ['left', 'right'] as const) {
+            const model = run(
+                diningTable((d) => {
+                    d.table.base.legSection = 40;
+                    d.table.storage.drawers = withCount(3, side);
+                }),
+            );
+            const runners = model.parts
+                .filter((p) => /^table\.drawer\.\d\.runner\./.test(p.key))
+                .map((p) => boxOf(model, p.key));
+            expect(runners).toHaveLength(6);
+            const z0 = Math.min(...runners.map((b) => b.min[2]));
+            const z1 = Math.max(...runners.map((b) => b.min[2] + b.size[2]));
+            expect([side, z0, z1]).toEqual([side, 100, 800]);
+            expect(partOverlaps(model.parts)).toEqual([]);
+        }
+    });
+
     it('thin solid legs: side drawers keep clear of the legs along z (R40-3)', () => {
         for (const side of ['left', 'right'] as const) {
             const model = run(

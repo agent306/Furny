@@ -98,9 +98,9 @@ const fields: ParamField[] = [
         kind: 'select',
         labelKey: 'templates.fields.singleColumnSide',
         options: options(SIDES),
-        // Only an odd door count has a single-door column. `auto` may resolve
-        // to an odd count, so it keeps the field visible too.
-        visibleIf: { key: 'doors', equals: ['auto', 1, 3, 5, 7, 9, 11] },
+        // Always visible: any request can resolve to an odd door count
+        // (`auto`, or the fitDoors / sheetDoors clamps), and only then is
+        // there a single-door column for this side to place.
     },
     {
         key: 'hangingStyle',

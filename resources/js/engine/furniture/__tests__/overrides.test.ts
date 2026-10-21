@@ -134,16 +134,18 @@ describe('part overrides (07 §3.14 step 1)', () => {
         expect(partOf(model, SIDE).length).toBe(2000);
         expect(boxOf(partOf(model, SIDE))).toEqual(boxOf(partOf(plain, SIDE)));
         expect(partOf(model, 'carcass.top').width).toBe(582);
+        // The top's override applies before the long-panel split (spec 19,
+        // Task 40 fix round 1), so its issue comes first.
         expect(issuesOf(model, 'furniture.override_invalid')).toEqual([
-            expect.objectContaining({
-                severity: 'error',
-                params: { key: SIDE },
-                entityIds: [SIDE],
-            }),
             expect.objectContaining({
                 severity: 'error',
                 params: { key: 'carcass.top' },
                 entityIds: ['carcass.top'],
+            }),
+            expect.objectContaining({
+                severity: 'error',
+                params: { key: SIDE },
+                entityIds: [SIDE],
             }),
         ]);
     });

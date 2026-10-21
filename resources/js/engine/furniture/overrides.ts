@@ -2,7 +2,9 @@
  * Overrides (07 §3.14), applied to the generated model in this order: part
  * overrides, hardware overrides, extra parts, extra hardware. Overrides of
  * keys the model does not have are dropped with info
- * `furniture.override_orphaned` (03 §3.6).
+ * `furniture.override_orphaned` (03 §3.6). Part overrides of the long
+ * horizontal panels were applied earlier, before the split into pieces
+ * (`panelSplit.ts`, spec 19), and are skipped here.
  */
 import type { MaterialRole } from '../catalog/snapshot';
 import { cmpId } from '../compare';
@@ -121,7 +123,8 @@ function resize(ctx: GenContext, part: Part, override: PartOverride): void {
     size[widthAt] = (size[widthAt] ?? 0) + dw;
 }
 
-function applyPartOverride(
+/** Applies one non-removal part override to `part` (material, edges, size, grain). */
+export function applyPartOverride(
     ctx: GenContext,
     part: Part,
     override: PartOverride,
@@ -148,8 +151,13 @@ function applyPartOverrides(ctx: GenContext, orphaned: Orphan): void {
     const overrides = ctx.doc.overrides.parts;
     const removed = new Set<string>();
     for (const key of sortedKeys(overrides)) {
+        // Applied already, before the part was (maybe) split into pieces.
+        if (ctx.overriddenBeforeSplit.has(key)) continue;
         const override = overrides[key];
-        const part = ctx.parts.find((p) => p.key === key);
+        // Seam pieces take their panel's override, never one of their own.
+        const part = ctx.seamPieces.has(key)
+            ? undefined
+            : ctx.parts.find((p) => p.key === key);
         if (!override || !part) {
             orphaned(key);
             continue;
