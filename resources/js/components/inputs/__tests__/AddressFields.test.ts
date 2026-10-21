@@ -232,18 +232,44 @@ describe('AddressFields', () => {
             expect(wrapper.emitted('update:modelValue')).toBeUndefined();
         });
 
-        it('typing in another field while the country is empty still leaves it to the parent', async () => {
+        it('editing another field while the country is empty submits the shown default country', async () => {
+            resetPage({ business: { defaultCountryCode: 'AE' } });
+
             const wrapper = mountFields({
                 modelValue: { ...empty, countryCode: '' },
             });
 
-            await field(wrapper, 'city').get('input').setValue('Pune');
+            await field(wrapper, 'city').get('input').setValue('Dubai');
 
+            // What is shown (United Arab Emirates) is what gets submitted.
             expect(lastEmitted(wrapper)).toEqual({
                 ...empty,
-                countryCode: '',
-                city: 'Pune',
+                countryCode: 'AE',
+                city: 'Dubai',
             });
+            expect(wrapper.props('modelValue').countryCode).toBe('');
+        });
+
+        it('falls back to IN in the emitted value when the business shares no country', async () => {
+            resetPage({});
+
+            const wrapper = mountFields({
+                modelValue: { ...empty, countryCode: '' },
+            });
+
+            await field(wrapper, 'line1').get('input').setValue('1 Main Road');
+
+            expect(lastEmitted(wrapper)?.countryCode).toBe('IN');
+        });
+
+        it('keeps the explicit country of the model when another field is edited', async () => {
+            const wrapper = mountFields({
+                modelValue: { ...empty, countryCode: 'SG' },
+            });
+
+            await field(wrapper, 'city').get('input').setValue('Singapore');
+
+            expect(lastEmitted(wrapper)?.countryCode).toBe('SG');
         });
 
         it('tells the browser it is a country (autocomplete="country" on the form control)', () => {

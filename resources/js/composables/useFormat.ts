@@ -3,20 +3,6 @@ import { createFormat, DEFAULT_FORMAT_CONTEXT } from '@/lib/format';
 import type { FormatContext, Formatters } from '@/lib/format';
 
 /**
- * The shared props this composable reads (15 §8): `business.*` and
- * `auth.user.timezone`. Declared locally until Task 20 types the shared
- * props; every field may be absent before the server shares them.
- */
-type FormatProps = {
-    auth?: { user?: { timezone?: string | null } | null };
-    business?: {
-        locale?: string | null;
-        currency?: string | null;
-        timezone?: string | null;
-    };
-};
-
-/**
  * The format context (business locale and currency, user time zone) read from
  * the page props on every call, so it follows prop changes.
  */
@@ -24,7 +10,8 @@ export function useFormatContext(): () => FormatContext {
     const page = usePage();
 
     return (): FormatContext => {
-        const { auth, business } = page.props as FormatProps;
+        // Both are always shared (15 §8); `?.` only tolerates a page without props yet.
+        const { auth, business } = page.props;
         const businessTimeZone =
             business?.timezone ?? DEFAULT_FORMAT_CONTEXT.businessTimeZone;
 

@@ -194,10 +194,35 @@ describe('parseMajorToMinor', () => {
             'Infinity',
             '₹100',
             '100%',
-            '١٢٣',
-            '１２３',
             '(5)',
         ]) {
+            expect(parseMajorToMinor(text, 2), text).toBeNull();
+        }
+    });
+
+    it('maps any Unicode decimal digit to ASCII and ignores bidi marks', () => {
+        // Arabic-Indic, extended Arabic-Indic (Persian), Devanagari, fullwidth and mathematical digits.
+        expect(parseMajorToMinor('١٢٣', 2)).toBe(12300);
+        expect(parseMajorToMinor('۱۲۳.۵', 2)).toBe(12350);
+        expect(parseMajorToMinor('१,२३,४५६.७८', 2)).toBe(12345678);
+        expect(parseMajorToMinor('１２３', 2)).toBe(12300);
+        expect(parseMajorToMinor('𝟗𝟕', 0)).toBe(97);
+        expect(parseMajorToMinor('\u200e12.5\u200f', 2)).toBe(1250);
+        expect(parseMajorToMinor('\u200f-\u200e5', 2)).toBe(-500);
+    });
+
+    it('parses ar-EG input with Arabic-Indic digits and separators', () => {
+        const separators = numberSeparators('ar-EG');
+
+        expect(parseMajorToMinor('١٬٢٣٤٫٥٦', 2, separators)).toBe(123456);
+        expect(parseMajorToMinor('\u200f١٬٢٣٤٫٥٦\u200e', 2, separators)).toBe(
+            123456,
+        );
+    });
+
+    it('still rejects look-alike characters that are not decimal digits', () => {
+        // Superscript two (No), vulgar fraction (No) and circled one (No) are not Nd.
+        for (const text of ['²', '½', '①', '1²']) {
             expect(parseMajorToMinor(text, 2), text).toBeNull();
         }
     });

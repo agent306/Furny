@@ -4,7 +4,6 @@ import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import { home } from '@/routes';
 
 const page = usePage();
-const name = page.props.name;
 
 defineProps<{
     title?: string;
@@ -27,7 +26,7 @@ defineProps<{
                 <AppLogoIcon
                     class="mr-2 size-8 fill-current text-primary-foreground"
                 />
-                {{ name }}
+                {{ page.props.app.name }}
             </Link>
         </div>
         <div class="lg:p-8">

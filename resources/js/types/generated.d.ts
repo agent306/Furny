@@ -27,6 +27,28 @@ export type PresetCategory = 'wardrobe' | 'kitchen' | 'storage' | 'shelving' | '
 }
 }
 namespace Identity {
+namespace Data {
+export type AuthUserData = {
+id: string,
+type: App.Domain.Identity.Enums.UserType,
+name: string,
+email: string | null,
+emailVerified: boolean,
+phoneE164: string | null,
+phoneVerified: boolean,
+avatarUrl: string | null,
+roles: string[],
+permissions: string[],
+abilities: string[],
+unitSystem: App.Domain.Identity.Enums.UnitSystem,
+lengthUnit: App.Domain.Identity.Enums.LengthUnit,
+timezone: string,
+locale: string,
+onboarded: boolean,
+hasPassword: boolean,
+twoFactorEnabled: boolean,
+};
+}
 namespace Enums {
 export type DeliveryDriver = 'meta' | 'twilio' | 'msg91' | 'log' | 'array';
 export type DeliveryStatus = 'pending' | 'accepted' | 'sent' | 'delivered' | 'read' | 'failed';
@@ -76,6 +98,25 @@ export type PlanRevisionReason = 'manual_checkpoint' | 'import_accepted' | 'befo
 export type PlanSource = 'drawn' | 'imported' | 'traced' | 'duplicated';
 export type ProjectStatus = 'active' | 'archived';
 export type PropertyType = 'apartment' | 'independent_house' | 'villa' | 'office' | 'other';
+}
+}
+namespace Settings {
+namespace Data {
+export type BusinessPublicData = {
+name: string,
+currency: string,
+locale: string,
+timezone: string,
+phoneE164: string | null,
+email: string,
+workingHours: string,
+units: App.Domain.Settings.Data.BusinessUnitsData,
+defaultCountryCode: string,
+};
+export type BusinessUnitsData = {
+defaultSystem: App.Domain.Identity.Enums.UnitSystem,
+defaultLengthUnit: string,
+};
 }
 }
 namespace Shared {

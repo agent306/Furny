@@ -27,10 +27,7 @@ const page = usePage();
 const audience = computed(
     () =>
         props.audience ??
-        ((page.props as { auth?: { user?: { type?: string } | null } }).auth
-            ?.user?.type === 'staff'
-            ? 'staff'
-            : 'customer'),
+        (page.props.auth?.user?.type === 'staff' ? 'staff' : 'customer'),
 );
 const isCustomer = computed(() => audience.value === 'customer');
 const tone = computed(() => ORDER_STATE_TONE[props.state]);

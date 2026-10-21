@@ -1,18 +1,8 @@
-export type User = {
-    id: number;
-    name: string;
-    email: string;
-    avatar?: string;
-    email_verified_at: string | null;
-    two_factor_enabled?: boolean;
-    created_at: string;
-    updated_at: string;
-    [key: string]: unknown;
-};
+/** `auth.user` of the shared props (generated from `AuthUserData`). */
+export type AuthUser = App.Domain.Identity.Data.AuthUserData;
 
-export type Auth = {
-    user: User;
-};
+/** `business` of the shared props (generated from `BusinessPublicData`). */
+export type BusinessPublic = App.Domain.Settings.Data.BusinessPublicData;
 
 export type TwoFactorConfigContent = {
     title: string;

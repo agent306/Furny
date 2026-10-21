@@ -4,6 +4,8 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import AuthLayout from '@/layouts/AuthLayout.vue';
 import { initializeFlashToast } from '@/lib/flashToast';
 import { createI18n } from '@/lib/i18n';
+import { reloadForStaleI18n } from '@/lib/i18nBoot';
+import manifest from './lang/generated/manifest.json';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 
@@ -17,22 +19,28 @@ const catalogues = import.meta.glob<{ default: Record<string, string> }>([
 
 // `withApp` is synchronous, so the locale is read from the initial page here
 // to load its messages before the app is created.
-function initialLocale(): string {
+function initialI18n(): { locale: string; hash: string | undefined } {
     try {
         const json = document.querySelector(
             'script[data-page="app"][type="application/json"]',
         )?.textContent;
         const page = json
-            ? (JSON.parse(json) as { props?: { i18n?: { locale?: unknown } } })
+            ? (JSON.parse(json) as {
+                  props?: { i18n?: { locale?: unknown; hash?: unknown } };
+              })
             : null;
-        const locale = page?.props?.i18n?.locale;
+        const { locale, hash } = page?.props?.i18n ?? {};
 
-        return typeof locale === 'string' &&
-            `./lang/generated/${locale}.json` in catalogues
-            ? locale
-            : DEFAULT_LOCALE;
+        return {
+            locale:
+                typeof locale === 'string' &&
+                `./lang/generated/${locale}.json` in catalogues
+                    ? locale
+                    : DEFAULT_LOCALE,
+            hash: typeof hash === 'string' ? hash : undefined,
+        };
     } catch {
-        return DEFAULT_LOCALE;
+        return { locale: DEFAULT_LOCALE, hash: undefined };
     }
 }
 
@@ -47,7 +55,16 @@ async function loadMessages(locale: string): Promise<Record<string, string>> {
     }
 }
 
-const locale = initialLocale();
+// A stale chunk after a deploy: reload to get the new bundle (01 §6).
+window.addEventListener('vite:preloadError', () => window.location.reload());
+
+const bundledHashes: Record<string, string | undefined> = manifest;
+const { locale, hash } = initialI18n();
+
+// The catalogue baked into this bundle is older than the server's: reload once
+// (a second mismatch in the same tab is left alone, never a reload loop).
+reloadForStaleI18n(bundledHashes[locale], hash);
+
 const messages = await loadMessages(locale);
 
 void createInertiaApp({

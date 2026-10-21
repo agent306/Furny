@@ -8,10 +8,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import UserInfo from '@/components/UserInfo.vue';
 import { logout } from '@/routes';
-import type { User } from '@/types';
+import type { AuthUser } from '@/types';
 
 type Props = {
-    user: User;
+    user: AuthUser;
 };
 
 const handleLogout = () => {

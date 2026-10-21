@@ -253,6 +253,32 @@ function grammarFor({ decimal, group }: NumberSeparators): NumberGrammar {
     return grammar;
 }
 
+// Invisible direction marks (LRM, RLM, Arabic letter mark) that `Intl` puts
+// into right-to-left output and that a paste carries along.
+const BIDI_MARKS = /[\u200e\u200f\u061c]/g;
+
+// Any Unicode decimal digit (Nd) becomes its ASCII digit. Nd characters sit in
+// contiguous runs of ten starting at zero, so a digit's value is its distance
+// from the start of the Nd stretch it is in, modulo ten (the stretch of the
+// mathematical digits holds five runs).
+function toAsciiDigits(text: string): string {
+    return text.replace(/\p{Nd}/gu, (char) => {
+        const code = char.codePointAt(0) ?? 0;
+
+        if (code >= 0x30 && code <= 0x39) {
+            return char;
+        }
+
+        let start = code;
+
+        while (start > 0 && /^\p{Nd}$/u.test(String.fromCodePoint(start - 1))) {
+            start--;
+        }
+
+        return String((code - start) % 10);
+    });
+}
+
 // Typing a plain space, NBSP or narrow NBSP is the same as the locale's
 // space-like group; the keyboard apostrophe stands for `’`.
 function normaliseGroup(text: string, group: string): string {
@@ -270,9 +296,13 @@ function normaliseGroup(text: string, group: string): string {
  * - more fraction digits than `fractionDigits` (`'1.005'` → `null`, never
  *   rounded; `'12.50'` with 0 digits too),
  * - broken grouping, several decimal points, letters, currency symbols,
- *   non-ASCII digits, inner whitespace, an empty string, a lone sign or dot,
+ *   inner whitespace, an empty string, a lone sign or dot,
  * - the other locale's spelling (`'1,234.56'` under `de-DE` separators),
  * - results beyond `Number.MAX_SAFE_INTEGER`.
+ *
+ * Any Unicode decimal digit (`'١٢٣'`, `'१२३'`, fullwidth) counts as its ASCII
+ * digit, and LRM/RLM/ALM marks are ignored, so `Intl` output of right-to-left
+ * locales and pasted text parse.
  *
  * Accepts surrounding whitespace, western or lakh grouping
  * (`'1,23,456.78'`), `'.5'`, `'5.'` and one leading `+`, `-` or `−` (U+2212).
@@ -295,7 +325,10 @@ export function parseMajorToMinor(
     }
 
     const { western, lakh, decimalText } = grammarFor(separators);
-    let rest = normaliseGroup(text.trim(), separators.group);
+    let rest = normaliseGroup(
+        toAsciiDigits(text.replace(BIDI_MARKS, '')).trim(),
+        separators.group,
+    );
     let negative = false;
 
     if (/^[-−]/.test(rest)) {

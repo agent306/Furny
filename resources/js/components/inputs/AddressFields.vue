@@ -20,12 +20,14 @@ import type { AddressFormData } from '@/types/forms';
 // 15 §9.26. One address as a form: label, line1*, line2, city*, region,
 // postalCode and countryCode* (a `Select`). `errors` is keyed by wire name
 // behind `errorPrefix`, e.g. `siteAddress.line1`. Max lengths are 02 §1.2's
-// column sizes. An empty `countryCode` is *shown* as `business.defaultCountryCode`
-// but never written into the model on mount (the form must not go dirty by
-// itself): the parent should start the form with that default, e.g.
-// `countryCode: business.defaultCountryCode`, or the field submits empty
-// until the user picks one. Inside a <form> the Select also renders a native
-// <select> (autocomplete="country", named after the field) for browser autofill.
+// column sizes. An empty `countryCode` is *shown* as
+// `business.defaultCountryCode` but never written into the model on mount (the
+// form must not go dirty by itself); the first edit of any field then emits the
+// shown country with it, so what is displayed is what gets submitted. The
+// parent should still start the form with that default, e.g.
+// `countryCode: business.defaultCountryCode`. Inside a <form> the Select also
+// renders a native <select> (autocomplete="country", named after the field) for
+// browser autofill.
 const props = withDefaults(
     defineProps<{
         modelValue: AddressFormData;
@@ -128,7 +130,11 @@ const errorFor = (key: string): string | undefined =>
     props.errors?.[`${props.errorPrefix}${key}`];
 
 function update(key: keyof AddressFormData, value: string): void {
-    emit('update:modelValue', { ...props.modelValue, [key]: value });
+    emit('update:modelValue', {
+        ...props.modelValue,
+        countryCode: country.value,
+        [key]: value,
+    });
 }
 </script>
 
@@ -150,6 +156,7 @@ function update(key: keyof AddressFormData, value: string): void {
                 }}</span>
             </Label>
 
+            <!-- The dotted name (e.g. `siteAddress.countryCode`) only serves browser autofill; the value goes through v-model. -->
             <Select
                 v-if="field.key === 'countryCode'"
                 :model-value="country"

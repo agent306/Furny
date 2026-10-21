@@ -1,18 +1,6 @@
 import { usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 
-/**
- * The part of `auth.user` this composable reads (13 §7.4, 15 §8). Declared
- * locally until Task 20 types the shared props; lists may be absent before
- * the server shares them.
- */
-type PermissionUser = {
-    type?: 'customer' | 'staff';
-    roles?: string[];
-    permissions?: string[];
-    abilities?: string[];
-};
-
 export type UsePermissionsReturn = {
     /** `name` is a permission or an owner-gate ability the user passes. */
     can: (nameOrGate: string) => boolean;
@@ -30,11 +18,9 @@ export type UsePermissionsReturn = {
  */
 export function usePermissions(): UsePermissionsReturn {
     const page = usePage();
-    const user = computed(
-        () =>
-            (page.props as { auth?: { user?: PermissionUser | null } }).auth
-                ?.user ?? null,
-    );
+    // `auth` is always shared; the optional chaining only tolerates a page
+    // that has not received its props yet (and tests that mount without them).
+    const user = computed(() => page.props.auth?.user ?? null);
     const granted = computed(
         () =>
             new Set([
