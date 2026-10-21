@@ -15,7 +15,7 @@ return [
     |
     */
 
-    'default' => env('QUEUE_CONNECTION', 'database'),
+    'default' => env('QUEUE_CONNECTION', 'redis'),
 
     /*
     |--------------------------------------------------------------------------
@@ -66,11 +66,23 @@ return [
             'after_commit' => false,
         ],
 
+        // retry_after must always exceed the longest job timeout on the connection, or the
+        // job runs twice (01 §7, 17 §5.11 item 4). Fixed values on purpose: no env override.
         'redis' => [
             'driver' => 'redis',
-            'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
-            'queue' => env('REDIS_QUEUE', 'default'),
-            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
+            'connection' => 'default',
+            'queue' => 'default',
+            'retry_after' => 180,
+            'block_for' => null,
+            'after_commit' => false,
+        ],
+
+        // Same Redis, longer lease for the `imports` queue (job timeout 660 s).
+        'redis-long' => [
+            'driver' => 'redis',
+            'connection' => 'default',
+            'queue' => 'imports',
+            'retry_after' => 720,
             'block_for' => null,
             'after_commit' => false,
         ],
@@ -105,7 +117,7 @@ return [
     */
 
     'batching' => [
-        'database' => env('DB_CONNECTION', 'sqlite'),
+        'database' => env('DB_CONNECTION', 'pgsql'),
         'table' => 'job_batches',
     ],
 
@@ -124,7 +136,7 @@ return [
 
     'failed' => [
         'driver' => env('QUEUE_FAILED_DRIVER', 'database-uuids'),
-        'database' => env('DB_CONNECTION', 'sqlite'),
+        'database' => env('DB_CONNECTION', 'pgsql'),
         'table' => 'failed_jobs',
     ],
 

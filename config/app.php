@@ -2,6 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Support\AppVersion;
+
+// env() also yields booleans for literal true/false; only strings can be a version.
+$appVersion = env('APP_VERSION');
+$sourceCommit = env('SOURCE_COMMIT');
+
 return [
 
     /*
@@ -122,7 +128,34 @@ return [
 
     'maintenance' => [
         'driver' => env('APP_MAINTENANCE_DRIVER', 'file'),
-        'store' => env('APP_MAINTENANCE_STORE', 'database'),
+        'store' => env('APP_MAINTENANCE_STORE', 'redis'),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Application Version
+    |--------------------------------------------------------------------------
+    |
+    | APP_VERSION when set, otherwise the short SOURCE_COMMIT provided by
+    | Coolify, otherwise "dev" (17 §5.11 item 9). Shared to the frontend as
+    | `app.version`.
+    |
+    */
+
+    'version' => AppVersion::resolve(
+        is_string($appVersion) ? $appVersion : null,
+        is_string($sourceCommit) ? $sourceCommit : null,
+    ),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Supported Locales
+    |--------------------------------------------------------------------------
+    |
+    | English only in v1; consumed by `php artisan i18n:export`.
+    |
+    */
+
+    'supported_locales' => ['en'],
 
 ];
