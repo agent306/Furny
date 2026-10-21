@@ -17,7 +17,7 @@ use Throwable;
 final class ErrorPage
 {
     /** Statuses that always render the page. 500 joins them only when `app.debug` is off. */
-    private const array STATUSES = [403, 404, 419, 429, 503];
+    private const array STATUSES = [403, 404, 405, 419, 429, 503];
 
     /** Headers a client or proxy acts on; everything else of the original response is dropped. */
     private const array KEPT_HEADERS = ['Retry-After', 'Allow', 'X-RateLimit-Limit', 'X-RateLimit-Remaining'];

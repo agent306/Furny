@@ -152,6 +152,7 @@ describe('Error page (10 §4.10)', () => {
     const MESSAGES = {
         403: "You don't have access to this page.",
         404: "We couldn't find that page.",
+        405: "That action isn't available here.",
         419: 'Your session expired. Please reload.',
         429: 'Too many requests. Please wait a moment.',
         500: 'Something went wrong on our side.',
@@ -172,19 +173,20 @@ describe('Error page (10 §4.10)', () => {
     );
 
     it('has a translation for every status (the keys are built from the status)', () => {
-        for (const status of [403, 404, 419, 429, 500, 503]) {
+        for (const status of [403, 404, 405, 419, 429, 500, 503]) {
             expect(en, String(status)).toHaveProperty(`errors.pages.${status}`);
         }
     });
 
     it('uses the icon of the status', () => {
-        const icon = (status: 403 | 404 | 419 | 429 | 500 | 503) =>
+        const icon = (status: 403 | 404 | 405 | 419 | 429 | 500 | 503) =>
             mount(ErrorPage, { props: { status } })
                 .get('[class*="bg-brand-wood-subtle"] svg')
                 .classes();
 
         expect(icon(403)).toContain('lucide-lock');
         expect(icon(404)).toContain('lucide-map-pin-off');
+        expect(icon(405)).toContain('lucide-lock');
         expect(icon(419)).toContain('lucide-refresh-cw');
         expect(icon(429)).toContain('lucide-hourglass');
         expect(icon(500)).toContain('lucide-triangle-alert');

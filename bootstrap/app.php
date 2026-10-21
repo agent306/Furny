@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\PlainNotFoundController;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Support\Http\ErrorPage;
@@ -21,6 +22,12 @@ $app = Application::configure(basePath: dirname(__DIR__))
             // Task 23 replaces these placeholder groups with the full customer and staff groups (13 §1).
             Route::middleware(['web', 'auth'])->name('customer.')->group(base_path('routes/customer.php'));
             Route::middleware(['web', 'auth'])->prefix('admin')->name('admin.')->group(base_path('routes/admin.php'));
+
+            // Missing assets and API paths get a bare 404: no session, no cookie, no Inertia page.
+            // Registered last, so no real route with a dot in its path is ever shadowed.
+            Route::any('{path}', PlainNotFoundController::class)
+                ->where('path', '(?:build|api)/.*|.*\.[A-Za-z0-9]{1,8}')
+                ->name('unmatched.plain');
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
@@ -49,7 +56,7 @@ $app = Application::configure(basePath: dirname(__DIR__))
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
 
-        // 403/404/419/429/503, and 500 outside debug mode, render the Inertia `Error` page (10 §4.10).
+        // 403/404/405/419/429/503, and 500 outside debug mode, render the Inertia `Error` page (10 §4.10).
         $exceptions->respond(ErrorPage::render(...));
     })->create();
 

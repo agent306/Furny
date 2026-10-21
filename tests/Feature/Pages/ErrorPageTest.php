@@ -33,14 +33,14 @@ it('renders the Error page for every handled status', function (int $status): vo
         ->assertInertia(fn (Assert $page) => $page
             ->component('Error')
             ->where('status', $status));
-})->with([403, 404, 419, 429, 503]);
+})->with([403, 404, 405, 419, 429, 503]);
 
 it('never puts the exception message into the page', function (int $status): void {
     $response = $this->get("/_abort/{$status}")->assertStatus($status);
 
     expect(json_encode($response->viewData('page'), JSON_THROW_ON_ERROR))->not->toContain('secret internal reason')
         ->and($response->getContent())->not->toContain('secret internal reason');
-})->with([403, 404, 419, 429, 503]);
+})->with([403, 404, 405, 419, 429, 503]);
 
 it('answers an Inertia visit with the Error page as json, status kept', function (): void {
     $this->get('/_abort/403', ['X-Inertia' => 'true', 'X-Inertia-Version' => (string) app(HandleInertiaRequests::class)->version(request())])
@@ -157,4 +157,49 @@ it('reports a failure to render the Error page and falls back to the original re
 
 it('does not turn redirects or validation failures into error pages', function (): void {
     $this->get(route('customer.dashboard'))->assertRedirect(route('login'));
+});
+
+it('answers a missing asset or api path with a bare 404: no Inertia page, no session, no cookie', function (string $path): void {
+    $response = $this->get($path)->assertNotFound();
+
+    expect($response->headers->getCookies())->toBe([])
+        ->and($response->headers->has('Set-Cookie'))->toBeFalse()
+        ->and($response->headers->has('X-Inertia'))->toBeFalse()
+        ->and($response->getContent())->not->toContain('data-page');
+})->with(['/build/assets/x.js', '/build/missing', '/some/where/missing.css', '/favicon-gone.ico', '/api/nope', '/api/v1/deep/nope']);
+
+it('answers a missing api path with json', function (): void {
+    $this->get('/api/nope')->assertNotFound()->assertExactJson(['message' => 'Not Found']);
+});
+
+it('does not turn real page routes or extension-less unknown urls into bare 404s', function (): void {
+    $this->get('/manifest.webmanifest')->assertOk();
+    $this->get('/definitely-missing')->assertNotFound()->assertInertia(fn (Assert $page) => $page->component('Error'));
+    $this->get('/terms')->assertOk();
+});
+
+it('renders a POST to an unmatched url as the 405 Error page', function (): void {
+    $this->actingAs(User::factory()->create(['name' => 'Asha Rao']))
+        ->post('/definitely-missing')
+        ->assertStatus(405)
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Error')
+            ->where('status', 405)
+            ->has('app.name')
+            ->has('i18n.hash'));
+});
+
+it('has no closure route actions in the application routes, so route:cache works', function (): void {
+    $closures = collect(Route::getRoutes()->getRoutes())
+        ->filter(fn ($route) => $route->getAction('uses') instanceof Closure)
+        ->filter(function ($route): bool {
+            $file = (new ReflectionFunction($route->getAction('uses')))->getFileName();
+
+            return is_string($file) && ! str_contains($file, '/vendor/') && ! str_contains($file, '/tests/');
+        })
+        ->map(fn ($route): string => $route->uri())
+        ->values()
+        ->all();
+
+    expect($closures)->toBe([]);
 });

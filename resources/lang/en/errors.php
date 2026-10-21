@@ -11,6 +11,7 @@ return [
     'pages' => [
         '403' => "You don't have access to this page.",
         '404' => "We couldn't find that page.",
+        '405' => "That action isn't available here.",
         '419' => 'Your session expired. Please reload.',
         '429' => 'Too many requests. Please wait a moment.',
         '500' => 'Something went wrong on our side.',

@@ -1,17 +1,11 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
+import { computed } from 'vue';
 import AppShell from '@/components/app/AppShell.vue';
 import OfflineBanner from '@/components/common/OfflineBanner.vue';
 import SaveStatusIndicator from '@/components/common/SaveStatusIndicator.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-    Sheet,
-    SheetContent,
-    SheetDescription,
-    SheetHeader,
-    SheetTitle,
-} from '@/components/ui/sheet';
 import { useBreakpoint } from '@/composables/useBreakpoint';
 import {
     INSPECTOR_MAX,
@@ -41,8 +35,18 @@ import type { SaveStatus } from '@/types/ui';
 //   slots remain for direct use.
 //
 //   desktop  toolrail + canvas + resizable inspector
-//   tablet   toolrail + canvas; the inspector is a right Sheet (`inspector-open`)
-//   phone    view only: no toolrail, no inspector; back, title and the centre slot remain
+//   tablet   toolrail + canvas; the inspector is a non-modal right panel over the
+//            canvas, opened with `inspector-open`
+//   phone    view only: toolrail, inspector and the top-bar actions are hidden;
+//            back, title and the centre slot remain
+//
+// Every region is rendered at every breakpoint and only shown or hidden
+// (`v-show`). A Teleport resolves its target once, so a target that came and
+// went with the breakpoint (or with a Sheet being open) would never receive the
+// page's content, or would warn "Failed to locate Teleport target". One
+// persistent element per region also survives a resize across breakpoints. A
+// provide/inject registry was the alternative; it needs every page to register
+// through a composable, where Teleport is plain markup.
 withDefaults(
     defineProps<{
         title: string;
@@ -70,6 +74,11 @@ const inspectorOpen = defineModel<boolean>('inspectorOpen', { default: false });
 const { t } = useI18n();
 const { isPhone, isDesktop } = useBreakpoint();
 const { width, setWidth } = useInspectorWidth();
+
+// Desktop: always. Tablet: while open. Phone: never (view only).
+const inspectorShown = computed(
+    () => isDesktop.value || (!isPhone.value && inspectorOpen.value),
+);
 
 function startResize(event: PointerEvent): void {
     const target = event.currentTarget as HTMLElement;
@@ -158,7 +167,7 @@ function onResizeKey(event: KeyboardEvent): void {
                     <slot name="topbar-center" />
                 </div>
                 <div
-                    v-if="!isPhone"
+                    v-show="!isPhone"
                     id="topbar-end"
                     class="flex items-center gap-1"
                 >
@@ -173,10 +182,10 @@ function onResizeKey(event: KeyboardEvent): void {
             <main
                 id="main"
                 tabindex="-1"
-                class="flex min-h-0 flex-1 outline-none"
+                class="relative flex min-h-0 flex-1 outline-none"
             >
                 <aside
-                    v-if="!isPhone"
+                    v-show="!isPhone"
                     id="toolrail"
                     :aria-label="t('a11y.tools')"
                     class="flex w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r py-2"
@@ -190,47 +199,52 @@ function onResizeKey(event: KeyboardEvent): void {
                     </slot>
                 </div>
 
-                <template v-if="isDesktop">
+                <div
+                    v-if="isDesktop"
+                    role="separator"
+                    aria-orientation="vertical"
+                    tabindex="0"
+                    :aria-label="t('a11y.inspector_resize')"
+                    :aria-valuenow="width"
+                    :aria-valuemin="INSPECTOR_MIN"
+                    :aria-valuemax="INSPECTOR_MAX"
+                    data-test="inspector-handle"
+                    class="w-1 shrink-0 cursor-col-resize touch-none bg-border hover:bg-ring focus-visible:bg-ring focus-visible:outline-none"
+                    @pointerdown.prevent="startResize"
+                    @keydown="onResizeKey"
+                />
+                <aside
+                    v-show="inspectorShown"
+                    id="inspector"
+                    :aria-label="t('a11y.inspector')"
+                    :style="isDesktop ? { width: `${width}px` } : undefined"
+                    :class="
+                        isDesktop
+                            ? 'shrink-0 overflow-y-auto'
+                            : 'absolute inset-y-0 right-0 z-20 w-80 max-w-full overflow-y-auto border-l bg-background shadow-lg'
+                    "
+                    @keydown.esc="!isDesktop && (inspectorOpen = false)"
+                >
                     <div
-                        role="separator"
-                        aria-orientation="vertical"
-                        tabindex="0"
-                        :aria-label="t('a11y.inspector_resize')"
-                        :aria-valuenow="width"
-                        :aria-valuemin="INSPECTOR_MIN"
-                        :aria-valuemax="INSPECTOR_MAX"
-                        data-test="inspector-handle"
-                        class="w-1 shrink-0 cursor-col-resize touch-none bg-border hover:bg-ring focus-visible:bg-ring focus-visible:outline-none"
-                        @pointerdown.prevent="startResize"
-                        @keydown="onResizeKey"
-                    />
-                    <aside
-                        id="inspector"
-                        :aria-label="t('a11y.inspector')"
-                        :style="{ width: `${width}px` }"
-                        class="shrink-0 overflow-y-auto"
+                        v-if="!isDesktop"
+                        class="sticky top-0 z-10 flex justify-end bg-background"
                     >
-                        <slot name="inspector" />
-                    </aside>
-                </template>
-            </main>
-
-            <!-- Tablet: the inspector is a non-modal right sheet. -->
-            <Sheet
-                v-if="!isPhone && !isDesktop"
-                v-model:open="inspectorOpen"
-                :modal="false"
-            >
-                <SheetContent id="inspector" side="right" class="w-80">
-                    <SheetHeader class="sr-only">
-                        <SheetTitle>{{ t('a11y.inspector') }}</SheetTitle>
-                        <SheetDescription>{{
-                            t('a11y.inspector')
-                        }}</SheetDescription>
-                    </SheetHeader>
+                        <Button
+                            variant="ghost"
+                            size="icon-lg"
+                            :aria-label="t('common.actions.close')"
+                            data-test="inspector-close"
+                            @click="inspectorOpen = false"
+                        >
+                            <component
+                                :is="ICONS['x-circle']"
+                                aria-hidden="true"
+                            />
+                        </Button>
+                    </div>
                     <slot name="inspector" />
-                </SheetContent>
-            </Sheet>
+                </aside>
+            </main>
 
             <footer
                 id="statusbar"

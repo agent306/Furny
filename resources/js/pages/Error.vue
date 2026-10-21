@@ -13,7 +13,7 @@ import { dashboard as customerDashboard } from '@/routes/customer';
 // 10 §4.10: one page for every handled status. The layout follows the
 // audience (`resolveLayout`). It shows the status and a fixed message, never
 // anything from the exception.
-type Status = 403 | 404 | 419 | 429 | 500 | 503;
+type Status = 403 | 404 | 405 | 419 | 429 | 500 | 503;
 
 const props = defineProps<{
     status: Status;
@@ -26,6 +26,7 @@ const size = useControlSize();
 const ICON: Record<Status, IconName> = {
     403: 'lock',
     404: 'map-pin-off',
+    405: 'lock',
     419: 'refresh-cw',
     429: 'hourglass',
     500: 'alert-triangle',

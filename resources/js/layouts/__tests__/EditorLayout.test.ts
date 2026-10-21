@@ -47,6 +47,35 @@ function mountEditor(props: Record<string, unknown> = {}) {
     });
 }
 
+// What Inertia renders for an editor page: the layout around the page component.
+// A functional component: the page needs no state of its own here.
+const Page = () => [
+    h('p', { 'data-test': 'page' }, 'plan editor'),
+    h(
+        Teleport,
+        { to: '#toolrail', defer: true },
+        h('button', { 'data-test': 'tool' }, 'wall'),
+    ),
+    h(
+        Teleport,
+        { to: '#inspector', defer: true },
+        h('p', { 'data-test': 'props' }, 'properties'),
+    ),
+    h(
+        Teleport,
+        { to: '#topbar-end', defer: true },
+        h('button', { 'data-test': 'action' }, 'Done'),
+    ),
+];
+
+function editorPage(layoutProps: Record<string, unknown> = {}) {
+    return mount(EditorLayout, {
+        props: { title: 'Living room', backHref: '/plans', ...layoutProps },
+        slots: { default: () => h(Page) },
+        attachTo: document.body,
+    });
+}
+
 beforeEach(() => {
     resetViewport();
     resetPage({ app: { name: 'Furny', logoUrl: null } });
@@ -54,25 +83,74 @@ beforeEach(() => {
 });
 
 describe('EditorLayout (15 §7.3)', () => {
-    it('hides #toolrail and #inspector on a 375 px phone, keeping back, title and the centre slot', () => {
+    it('hides #toolrail, #inspector and the top-bar actions on a 375 px phone, keeping back, title and the centre slot', () => {
         setViewport(PHONE);
         const wrapper = mountEditor();
 
-        expect(wrapper.find('#toolrail').exists()).toBe(false);
-        expect(wrapper.find('#inspector').exists()).toBe(false);
-        expect(wrapper.find('[data-test="tool"]').exists()).toBe(false);
-        expect(wrapper.find('[data-test="inspector-content"]').exists()).toBe(
+        // The regions stay in the DOM (Teleport targets); they are hidden.
+        for (const id of ['#toolrail', '#inspector', '#topbar-end']) {
+            expect(wrapper.find(id).exists(), id).toBe(true);
+            expect(wrapper.get(id).isVisible(), id).toBe(false);
+        }
+
+        expect(wrapper.get('[data-test="tool"]').isVisible()).toBe(false);
+        expect(wrapper.get('[data-test="inspector-content"]').isVisible()).toBe(
             false,
         );
-        expect(wrapper.find('#topbar-end').exists()).toBe(false);
+        expect(wrapper.get('[data-test="action"]').isVisible()).toBe(false);
+        expect(wrapper.find('[data-test="inspector-handle"]').exists()).toBe(
+            false,
+        );
         expect(
             wrapper.find('#topbar [aria-label="Back"]').attributes('href'),
         ).toBe('/plans');
         expect(wrapper.get('h1').text()).toBe('Living room');
-        expect(wrapper.find('[data-test="mode-toggle"]').exists()).toBe(true);
-        expect(wrapper.find('[data-test="canvas-content"]').exists()).toBe(
+        expect(wrapper.get('[data-test="mode-toggle"]').isVisible()).toBe(true);
+        expect(wrapper.get('[data-test="canvas-content"]').isVisible()).toBe(
             true,
         );
+        expect(wrapper.get('[data-test="skip-link"]').attributes('href')).toBe(
+            '#main',
+        );
+    });
+
+    it('keeps the toolrail visible and the inspector closed on a tablet until it is opened', async () => {
+        setViewport(TABLET);
+        const wrapper = mountEditor();
+
+        expect(wrapper.get('#toolrail').isVisible()).toBe(true);
+        expect(wrapper.get('#inspector').isVisible()).toBe(false);
+        expect(wrapper.find('[data-test="inspector-handle"]').exists()).toBe(
+            false,
+        );
+
+        await wrapper.setProps({ inspectorOpen: true });
+
+        expect(wrapper.get('#inspector').isVisible()).toBe(true);
+        expect(wrapper.get('#inspector').classes()).toEqual(
+            expect.arrayContaining(['absolute', 'right-0', 'w-80', 'z-20']),
+        );
+        expect(wrapper.get('[data-test="inspector-content"]').isVisible()).toBe(
+            true,
+        );
+    });
+
+    it('closes the tablet inspector with its button or Escape, through update:inspectorOpen', async () => {
+        setViewport(TABLET);
+        const wrapper = mountEditor({ inspectorOpen: true });
+
+        await wrapper.get('[data-test="inspector-close"]').trigger('click');
+
+        expect(wrapper.emitted('update:inspectorOpen')).toEqual([[false]]);
+
+        const escaped = mountEditor({ inspectorOpen: true });
+
+        await escaped.get('#inspector').trigger('keydown', { key: 'Escape' });
+
+        expect(escaped.emitted('update:inspectorOpen')).toEqual([[false]]);
+        expect(
+            wrapper.get('[data-test="inspector-close"]').classes(),
+        ).toContain('size-11');
     });
 
     it('shows every region on desktop', () => {
@@ -112,28 +190,6 @@ describe('EditorLayout (15 §7.3)', () => {
         expect(wrapper.get('[data-test="skip-link"]').attributes('href')).toBe(
             '#main',
         );
-    });
-
-    it('keeps the toolrail and drops the inspector aside on a tablet (it is a sheet there)', () => {
-        setViewport(TABLET);
-        const wrapper = mountEditor();
-
-        expect(wrapper.find('#toolrail').exists()).toBe(true);
-        expect(wrapper.find('aside#inspector').exists()).toBe(false);
-        expect(wrapper.find('[data-test="inspector-content"]').exists()).toBe(
-            false,
-        );
-    });
-
-    it('opens the tablet inspector sheet through v-model:inspector-open', async () => {
-        setViewport(TABLET);
-        mountEditor({ inspectorOpen: true });
-        await nextTick();
-        await new Promise((resolve) => setTimeout(resolve, 20));
-
-        expect(
-            document.body.querySelector('[data-test="inspector-content"]'),
-        ).not.toBeNull();
     });
 
     it('is not a persistent layout: the title is the one h1', () => {
@@ -287,34 +343,6 @@ describe('EditorLayout is a persistent layout (15 §7)', () => {
     beforeEach(() => setViewport(DESKTOP));
 
     // What Inertia renders for an editor page: the layout around the page component.
-    // A functional component: the page needs no state of its own here.
-    const Page = () => [
-        h('p', { 'data-test': 'page' }, 'plan editor'),
-        h(
-            Teleport,
-            { to: '#toolrail', defer: true },
-            h('button', { 'data-test': 'tool' }, 'wall'),
-        ),
-        h(
-            Teleport,
-            { to: '#inspector', defer: true },
-            h('p', { 'data-test': 'props' }, 'properties'),
-        ),
-        h(
-            Teleport,
-            { to: '#topbar-end', defer: true },
-            h('button', { 'data-test': 'action' }, 'Done'),
-        ),
-    ];
-
-    function editorPage(layoutProps: Record<string, unknown> = {}) {
-        return mount(EditorLayout, {
-            props: { title: 'Living room', backHref: '/plans', ...layoutProps },
-            slots: { default: () => h(Page) },
-            attachTo: document.body,
-        });
-    }
-
     it('mounts exactly one AppShell, ConfirmHost and Toaster around an editor page', () => {
         const wrapper = editorPage();
 
@@ -417,5 +445,76 @@ describe('EditorLayout save status and offline banner', () => {
         expect(box?.contains(banners[0]?.element ?? null)).toBe(true);
         expect(banners[0]?.classes()).toContain('shrink-0');
         online.mockRestore();
+    });
+});
+
+describe('EditorLayout Teleport targets exist at every breakpoint', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    beforeEach(() => warn.mockClear());
+
+    it.each([
+        ['phone', PHONE],
+        ['tablet', TABLET],
+        ['desktop', DESKTOP],
+    ])(
+        'renders the page into every region on a %s without Vue warnings',
+        async (_name, width) => {
+            setViewport(width);
+            const wrapper = editorPage();
+
+            await flushPromises();
+
+            expect(wrapper.get('#toolrail [data-test="tool"]').text()).toBe(
+                'wall',
+            );
+            expect(wrapper.get('#inspector [data-test="props"]').text()).toBe(
+                'properties',
+            );
+            expect(wrapper.get('#topbar-end [data-test="action"]').text()).toBe(
+                'Done',
+            );
+            expect(
+                warn.mock.calls.filter((call) =>
+                    String(call[0]).includes('Teleport'),
+                ),
+            ).toEqual([]);
+        },
+    );
+
+    it('delivers the inspector content on a tablet even though the panel starts closed, and shows it once opened', async () => {
+        setViewport(TABLET);
+        const wrapper = editorPage();
+
+        await flushPromises();
+
+        const content = wrapper.get('#inspector [data-test="props"]');
+
+        expect(content.isVisible()).toBe(false);
+
+        await wrapper.setProps({ inspectorOpen: true });
+
+        expect(wrapper.get('#inspector [data-test="props"]').element).toBe(
+            content.element,
+        );
+        expect(content.isVisible()).toBe(true);
+    });
+
+    it('keeps the content on the same element when the viewport changes breakpoint', async () => {
+        setViewport(DESKTOP);
+        const wrapper = editorPage();
+
+        await flushPromises();
+
+        const inspector = wrapper.get('#inspector').element;
+
+        setViewport(TABLET);
+        window.dispatchEvent(new Event('resize'));
+        await flushPromises();
+
+        expect(wrapper.get('#inspector').element).toBe(inspector);
+        expect(wrapper.find('#inspector [data-test="props"]').exists()).toBe(
+            true,
+        );
     });
 });

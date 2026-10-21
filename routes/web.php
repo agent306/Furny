@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\LegalController;
 use App\Http\Controllers\ManifestController;
+use App\Http\Controllers\NotFoundController;
 use App\Http\Controllers\WelcomeController;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -30,4 +31,4 @@ Route::get('manifest.webmanifest', ManifestController::class)
 
 // A URL that matches nothing is a 404 raised inside the `web` group, so the Error page renders in the
 // layout of the signed-in user, with their session and the shared props (10 §4.10).
-Route::fallback(static fn () => abort(404))->name('fallback');
+Route::fallback(NotFoundController::class)->name('fallback');
