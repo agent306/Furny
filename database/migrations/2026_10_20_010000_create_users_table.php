@@ -19,6 +19,9 @@ return new class extends Migration
             $table->timestampTz('email_verified_at')->nullable();
             $table->string('phone_e164', 20)->nullable();
             $table->timestampTz('phone_verified_at')->nullable();
+            // When the user first had a verified email or phone (13 §5.6): `ContactVerified` fires once, when this
+            // is set, and never again, however the contacts change afterwards.
+            $table->timestampTz('first_contact_verified_at')->nullable();
             $table->string('password')->nullable();
             $table->string('google_id', 64)->nullable();
             $table->string('unit_system', 8)->default('metric');

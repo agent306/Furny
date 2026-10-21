@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Domain\Identity\Models\User;
 use App\Notifications\Auth\ResetPassword;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -117,8 +118,8 @@ describe('who gets a link', function (): void {
             ->and(implode(' ', $mail->introLines))->toContain('60 minutes');
     });
 
-    it('does not queue the token', function (): void {
-        expect(new ResetPassword('t'))->not->toBeInstanceOf(ShouldQueue::class);
+    it('is queued and encrypted, so the token is not readable in the queue', function (): void {
+        expect(new ResetPassword('t'))->toBeInstanceOf(ShouldQueue::class)->toBeInstanceOf(ShouldBeEncrypted::class);
     });
 });
 
@@ -187,20 +188,6 @@ describe('the hourly limit stays silent (13 section 10, preflight C9)', function
             ->post(route('password.email'), ['email' => 'asha@example.com'])
             ->assertRedirect(route('password.request'))
             ->assertSessionHas('status', trans('passwords.sent_generic'));
-    });
-
-    it('takes at least the time box, for a known, an unknown and a throttled email alike', function (): void {
-        config(['auth.password_reset_timebox_microseconds' => 150_000]);
-
-        $took = static function (callable $request): float {
-            $start = microtime(true);
-            $request();
-
-            return (microtime(true) - $start) * 1_000_000;
-        };
-
-        expect($took(fn () => ($this->send)('asha@example.com')))->toBeGreaterThanOrEqual(150_000)
-            ->and($took(fn () => ($this->send)('nobody@example.com')))->toBeGreaterThanOrEqual(150_000);
     });
 });
 

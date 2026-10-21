@@ -376,6 +376,12 @@ describe('ForgotPassword after a failed submit (15 §10.1)', () => {
 
         expect(turnstile.reset).toHaveBeenCalledWith('widget-1');
         expect(wrapper.get('#captcha-error').text()).toBe('Not confirmed.');
+
+        // Nothing else is invalid, so the focus goes to the widget.
+        const widget = wrapper.get('[data-test="turnstile"]');
+
+        expect(widget.attributes('aria-invalid')).toBe('true');
+        expect(document.activeElement).toBe(widget.element);
     });
 });
 

@@ -134,19 +134,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Password reset time box
-    |--------------------------------------------------------------------------
-    |
-    | A request for a reset link takes at least this long, whether the email has an account, the link was sent or
-    | the hourly limit swallowed the request, so the time it takes says nothing about the account (13 §5.5). The
-    | mail is sent while the request waits, so this is longer than the login box. Microseconds. Tests set it to 0.
-    |
-    */
-
-    'password_reset_timebox_microseconds' => 1_500_000,
-
-    /*
-    |--------------------------------------------------------------------------
     | Password Confirmation Timeout
     |--------------------------------------------------------------------------
     |

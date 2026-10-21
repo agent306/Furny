@@ -41,6 +41,7 @@ final class UserFactory extends Factory
             'email_verified_at' => now(),
             'phone_e164' => null,
             'phone_verified_at' => null,
+            'first_contact_verified_at' => now(),
             'password' => self::$password ??= Hash::make('password'),
             'google_id' => null,
             'unit_system' => UnitSystem::Metric,
@@ -104,12 +105,15 @@ final class UserFactory extends Factory
 
     public function unverified(): static
     {
-        return $this->state(['email_verified_at' => null]);
+        return $this->state(['email_verified_at' => null, 'first_contact_verified_at' => null]);
     }
 
     public function emailVerified(): static
     {
-        return $this->state(['email_verified_at' => now()]);
+        return $this->state(fn (array $attributes): array => [
+            'email_verified_at' => now(),
+            'first_contact_verified_at' => $attributes['first_contact_verified_at'] ?? now(),
+        ]);
     }
 
     /** Adds a verified phone number to the user (keeps the email). */
@@ -124,6 +128,7 @@ final class UserFactory extends Factory
         return $this->state([
             'email' => null,
             'email_verified_at' => null,
+            'first_contact_verified_at' => null,
             'password' => null,
         ])->withPhone();
     }
@@ -131,9 +136,10 @@ final class UserFactory extends Factory
     /** @param  ?string  $e164  generated (unique) Indian mobile number when omitted */
     public function withPhone(?string $e164 = null): static
     {
-        return $this->state(fn (): array => [
+        return $this->state(fn (array $attributes): array => [
             'phone_e164' => $e164 ?? '+919'.fake()->unique()->numerify('#########'),
             'phone_verified_at' => now(),
+            'first_contact_verified_at' => $attributes['first_contact_verified_at'] ?? now(),
         ]);
     }
 

@@ -10,7 +10,7 @@ use Tests\Support\PgSchema;
 
 it('creates users with exactly the 02 §1.1 columns', function (): void {
     expect(PgSchema::columns('users'))->toBe(PgSchema::sorted([
-        'id', 'type', 'name', 'email', 'email_verified_at', 'phone_e164', 'phone_verified_at', 'password',
+        'id', 'type', 'name', 'email', 'email_verified_at', 'phone_e164', 'phone_verified_at', 'first_contact_verified_at', 'password',
         'google_id', 'unit_system', 'length_unit', 'locale', 'timezone', 'is_active', 'last_login_at',
         'two_factor_secret', 'two_factor_recovery_codes', 'two_factor_confirmed_at', 'remember_token',
         'marketing_opt_in', 'notes_internal', 'terms_accepted_at', 'onboarded_at', 'anonymised_at',

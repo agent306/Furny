@@ -9,9 +9,9 @@ use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 
 /**
- * The user's first verified contact exists (13 §5.6): `email_verified_at` or `phone_verified_at` became non-null
- * while both were null. Dispatched after the surrounding transaction commits, by `ContactVerification`; later
- * verifications do not dispatch it.
+ * The user's first verified contact exists (13 §5.6): `first_contact_verified_at` was set, which happens once per
+ * user, with their first verified email or phone. Dispatched after the surrounding transaction commits, by
+ * `ContactVerification`; later verifications do not dispatch it.
  */
 final class ContactVerified implements ShouldDispatchAfterCommit
 {

@@ -51,6 +51,7 @@ use Spatie\Permission\Traits\HasRoles;
  * @property CarbonImmutable|null $email_verified_at
  * @property string|null $phone_e164
  * @property CarbonImmutable|null $phone_verified_at
+ * @property CarbonImmutable|null $first_contact_verified_at
  * @property string|null $password
  * @property string|null $google_id
  * @property UnitSystem $unit_system
@@ -92,6 +93,7 @@ final class User extends Authenticatable implements HasLocalePreference, HasMedi
             'marketing_opt_in' => 'bool',
             'email_verified_at' => 'immutable_datetime',
             'phone_verified_at' => 'immutable_datetime',
+            'first_contact_verified_at' => 'immutable_datetime',
             'last_login_at' => 'immutable_datetime',
             'two_factor_confirmed_at' => 'immutable_datetime',
             'terms_accepted_at' => 'immutable_datetime',

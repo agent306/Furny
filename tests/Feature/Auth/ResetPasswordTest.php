@@ -66,7 +66,7 @@ describe('a valid reset (13 section 5.5)', function (): void {
     });
 
     it('does not dispatch ContactVerified when a contact was verified before', function (): void {
-        $this->user->forceFill(['phone_e164' => '+919876543210', 'phone_verified_at' => now()->subDay()])->save();
+        $this->user->forceFill(['phone_e164' => '+919876543210', 'phone_verified_at' => now()->subDay(), 'first_contact_verified_at' => now()->subDay()])->save();
         Event::fake([ContactVerified::class]);
 
         ($this->reset)();
@@ -208,6 +208,13 @@ describe('the token', function (): void {
             ->and(Activity::query()->count())->toBe(0);
 
         ($this->reset)()->assertRedirect(route('login'));
+    });
+
+    it('does not keep the token in the session as old input when the new password is refused', function (): void {
+        ($this->reset)(['password_confirmation' => 'something-else'])->assertSessionHasErrors('password');
+
+        $this->assertNull(session('_old_input.token'));
+        $this->assertNull(session('_old_input.password'));
     });
 
     it('is refused for a password that is too short', function (): void {

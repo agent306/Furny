@@ -8,6 +8,7 @@ use App\Domain\Identity\Support\ContactVerification;
 use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\URL;
 
 describe('the first verified contact (13 section 5.6)', function (): void {
     beforeEach(function (): void {
@@ -46,7 +47,7 @@ describe('the first verified contact (13 section 5.6)', function (): void {
     });
 
     it('dispatches it for an account created already verified: markPhoneVerified on a new user with both timestamps null', function (): void {
-        $user = User::factory()->phoneOnly()->create(['phone_verified_at' => null]);
+        $user = User::factory()->phoneOnly()->create(['phone_verified_at' => null, 'first_contact_verified_at' => null]);
 
         expect($user->email_verified_at)->toBeNull()->and($user->phone_verified_at)->toBeNull();
 
@@ -71,6 +72,75 @@ describe('the first verified contact (13 section 5.6)', function (): void {
 
         Event::assertNotDispatched(ContactVerified::class);
         expect($user->refresh()->phone_verified_at)->not->toBeNull();
+    });
+});
+
+describe('once per user (first_contact_verified_at)', function (): void {
+    beforeEach(function (): void {
+        Event::fake([ContactVerified::class]);
+        $this->contacts = app(ContactVerification::class);
+    });
+
+    it('stamps the first verification and keeps that moment', function (): void {
+        $user = User::factory()->unverified()->create();
+
+        $this->contacts->markEmailVerified($user);
+        $first = $user->refresh()->first_contact_verified_at;
+
+        $this->travel(2)->days();
+        $this->contacts->markPhoneVerified($user);
+
+        expect($first)->not->toBeNull()
+            ->and($user->refresh()->first_contact_verified_at->equalTo($first))->toBeTrue();
+    });
+
+    it('does not dispatch again when a verified email is changed and the new one is verified', function (): void {
+        $user = User::factory()->unverified()->create();
+
+        $this->contacts->markEmailVerified($user);
+        // The email changes: it starts unverified, and the user has no verified contact until the link is opened.
+        $user->forceFill(['email' => 'new@example.com', 'email_verified_at' => null])->save();
+        $this->contacts->markEmailVerified($user);
+
+        Event::assertDispatchedTimes(ContactVerified::class, 1);
+        expect($user->refresh()->email_verified_at)->not->toBeNull();
+    });
+
+    it('does not dispatch again for the whole path: profile change, then the emailed link', function (): void {
+        $user = User::factory()->unverified()->create(['email' => 'asha@example.com']);
+        $this->contacts->markEmailVerified($user);
+
+        $this->actingAs($user->refresh())
+            ->withSession(['auth.login_at' => now()->getTimestamp()])
+            ->put(route('user-profile-information.update'), ['name' => $user->name, 'email' => 'new@example.com'])
+            ->assertRedirect();
+
+        $link = URL::temporarySignedRoute('verification.verify', now()->addMinutes(60), [
+            'id' => $user->getKey(),
+            'hash' => sha1('new@example.com'),
+        ]);
+        $this->actingAs($user->refresh())->get($link)->assertRedirect();
+
+        expect($user->refresh()->email_verified_at)->not->toBeNull();
+        Event::assertDispatchedTimes(ContactVerified::class, 1);
+    });
+
+    it('does not dispatch when another request got there first, even for a model that has not heard of it', function (): void {
+        $user = User::factory()->unverified()->create();
+        DB::table('users')->where('id', $user->getKey())->update(['first_contact_verified_at' => now()->subMinute()]);
+
+        $this->contacts->markEmailVerified($user);
+
+        Event::assertNotDispatched(ContactVerified::class);
+    });
+
+    it('has nothing to verify for an email that is not there', function (): void {
+        $user = User::factory()->phoneOnly()->create(['phone_verified_at' => null, 'first_contact_verified_at' => null]);
+
+        $this->contacts->markEmailVerified($user);
+
+        Event::assertNotDispatched(ContactVerified::class);
+        expect($user->refresh()->email_verified_at)->toBeNull()->and($user->first_contact_verified_at)->toBeNull();
     });
 });
 

@@ -11,15 +11,20 @@ use Illuminate\Support\Facades\DB;
 /**
  * Where a user's email or phone becomes verified (13 §5.6). Every way of verifying a contact (the emailed link, a
  * password reset, a phone code, Google, an invitation) goes through here, so `ContactVerified` is dispatched in one
- * place: when the user had no verified contact before, and so gets their first one. Later verifications, of the
- * other contact or of the same one again, only set the timestamp.
+ * place, once per user: the verification that sets `first_contact_verified_at` announces it. Later verifications, of
+ * the other contact, of the same one again, or of a new address after an email change, only set the timestamp.
  *
  * The event is dispatched after the surrounding transaction commits, and not at all when it rolls back.
  */
 final class ContactVerification
 {
+    /** An address that is not there cannot be verified. */
     public function markEmailVerified(User $user): void
     {
+        if ($user->email === null) {
+            return;
+        }
+
         $this->mark($user, 'email_verified_at');
     }
 
@@ -32,16 +37,25 @@ final class ContactVerification
     private function mark(User $user, string $column): void
     {
         DB::transaction(function () use ($user, $column): void {
-            // The row is locked while both timestamps are read, so two contacts verified at the same moment
-            // cannot both count as the first.
-            $stored = User::query()->whereKey($user->getKey())->lockForUpdate()->first();
-            $first = $stored !== null && $stored->email_verified_at === null && $stored->phone_verified_at === null;
+            $now = now();
 
-            $user->forceFill([$column => now()])->save();
+            $user->forceFill([$column => $now])->save();
 
-            if ($first) {
-                ContactVerified::dispatch($user);
+            // One conditional UPDATE decides which verification is the first: of two that run at the same moment,
+            // exactly one finds the column empty and affects the row.
+            $first = DB::table('users')
+                ->where('id', $user->getKey())
+                ->whereNull('first_contact_verified_at')
+                ->update(['first_contact_verified_at' => $now]) === 1;
+
+            if (! $first) {
+                return;
             }
+
+            $user->setAttribute('first_contact_verified_at', $now);
+            $user->syncOriginalAttribute('first_contact_verified_at');
+
+            ContactVerified::dispatch($user);
         });
     }
 }

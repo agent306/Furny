@@ -84,6 +84,7 @@ defineExpose({ reset });
     <div
         v-if="active"
         role="group"
+        tabindex="-1"
         :aria-label="t('auth_ui.captcha')"
         data-test="turnstile"
     >

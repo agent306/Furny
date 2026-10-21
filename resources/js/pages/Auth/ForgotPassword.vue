@@ -92,6 +92,9 @@ function onSuccess(): void {
                     ref="turnstile"
                     :site-key="turnstileSiteKey"
                     action="password_reset"
+                    :aria-invalid="
+                        errors.cf_turnstile_response ? 'true' : undefined
+                    "
                     :aria-describedby="
                         errors.cf_turnstile_response
                             ? 'captcha-error'

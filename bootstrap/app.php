@@ -133,6 +133,8 @@ $app = Application::configure(basePath: dirname(__DIR__))
             'password_confirmation',
             'current_password',
             'code',
+            // The reset link's secret: a refused new password must not leave it in the session as old input.
+            'token',
             'cf_turnstile_response',
         ]);
 

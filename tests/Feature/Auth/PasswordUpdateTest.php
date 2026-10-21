@@ -178,7 +178,7 @@ describe('the audit entry', function (): void {
         expect($json)->not->toContain('a-brand-new-password');
     });
 
-    it('is not written twice for a second change by the same user', function (): void {
+    it('is written once for each change of the password', function (): void {
         ($this->update)($this->valid);
         ($this->update)(['current_password' => 'a-brand-new-password', 'password' => 'yet-another-password', 'password_confirmation' => 'yet-another-password']);
 

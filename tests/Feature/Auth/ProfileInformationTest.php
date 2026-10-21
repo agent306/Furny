@@ -56,6 +56,27 @@ describe('the name and the marketing choice', function (): void {
         expect(Activity::query()->where('event', 'account.email_changed')->count())->toBe(0);
     });
 
+    it('needs no recent authentication when the email differs only by case or by spaces', function (): void {
+        $this->actingAs($this->user)
+            ->withSession(SessionStamp::loginHoursAgo(3))
+            ->put(route('user-profile-information.update'), ['name' => 'Case Change', 'email' => '  ASHA@Example.COM '])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        expect($this->user->refresh()->name)->toBe('Case Change')->and($this->user->email)->toBe('asha@example.com');
+        Notification::assertNothingSent();
+    });
+
+    it('needs no recent authentication when the email is not sent', function (): void {
+        $this->actingAs($this->user)
+            ->withSession(SessionStamp::loginHoursAgo(3))
+            ->put(route('user-profile-information.update'), ['name' => 'No Email Field'])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        expect($this->user->refresh()->name)->toBe('No Email Field')->and($this->user->email)->toBe('asha@example.com');
+    });
+
     it('does not change the email when the field is not sent', function (): void {
         ($this->update)(['name' => 'Only A Name'])->assertSessionHasNoErrors()->assertRedirect();
 
@@ -177,7 +198,7 @@ describe('changing the email (13 section 5.8)', function (): void {
         expect($json)->not->toContain('asha@example.com')->and($json)->not->toContain('new@example.com');
     });
 
-    it('lets sign-in with the old email stay as it is: the account is not blocked, only unverified', function (): void {
+    it('lets the user sign in with the new email at once: the account is not blocked, only unverified', function (): void {
         ($this->update)(['name' => 'Asha Kapoor', 'email' => 'new@example.com']);
         auth()->logout();
 

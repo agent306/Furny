@@ -227,6 +227,9 @@ function describedBy(error: string | undefined): string | undefined {
                     ref="turnstile"
                     :site-key="turnstileSiteKey"
                     action="register"
+                    :aria-invalid="
+                        errors.cf_turnstile_response ? 'true' : undefined
+                    "
                     :aria-describedby="
                         errors.cf_turnstile_response
                             ? 'captcha-error'
