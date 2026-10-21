@@ -1586,3 +1586,101 @@ describe('folded crossings', () => {
         expect(r.doc.walls[other]!.b).toBe(h.doc.walls[s1]!.a);
     });
 });
+
+describe('a crossing near the end of the crossed wall', () => {
+    it('aborts wall_too_short when its end node folds into a segment end more than 5 mm from the wall', () => {
+        // S crosses W 2 mm before W's end; S's end is 6 mm below that end
+        const build = () => {
+            const g = new Graph();
+            const w = g.wall(g.node(0, 0), g.node(3000, 0));
+            const from = g.node(2001, 3000);
+            const to = g.node(3000, -6);
+            return { g, w, from, to };
+        };
+        const insert = build();
+        expect(
+            insert.g.abortOf((d, c, o) =>
+                insertWallSegment(d, insert.from, insert.to, PROPS, c, o),
+            ),
+        ).toMatchObject({
+            code: 'wall_too_short',
+            messageKey: 'engine.plan.command.wall_too_short',
+        });
+
+        const split = build();
+        const s = split.g.wall(split.from, split.to);
+        expect(
+            split.g.abortOf((d, c, o) => splitIntersections(d, s, c, o)).code,
+        ).toBe('wall_too_short');
+    });
+
+    it("aborts wall_too_short when the folded node is within 10 mm of the crossed wall's end", () => {
+        const build = () => {
+            const g = new Graph();
+            const w = g.wall(g.node(0, 0), g.node(2008, 0));
+            const from = g.node(2000, -1000);
+            const to = g.node(2004, 3); // 3 mm off W, 4 mm from its end
+            return { g, w, from, to };
+        };
+        const insert = build();
+        expect(
+            insert.g.abortOf((d, c, o) =>
+                insertWallSegment(d, insert.from, insert.to, PROPS, c, o),
+            ).code,
+        ).toBe('wall_too_short');
+        const split = build();
+        const s = split.g.wall(split.from, split.to);
+        expect(
+            split.g.abortOf((d, c, o) => splitIntersections(d, s, c, o)).code,
+        ).toBe('wall_too_short');
+
+        // the same at the other end of the crossed wall
+        const g = new Graph();
+        g.wall(g.node(0, 0), g.node(2008, 0));
+        const from = g.node(8, -1000);
+        const to = g.node(4, 3);
+        expect(
+            g.abortOf((d, c, o) => insertWallSegment(d, from, to, PROPS, c, o))
+                .code,
+        ).toBe('wall_too_short');
+    });
+});
+
+describe('settling a rounded cut', () => {
+    /** The rounding case: the crossed wall W is cut at (7, 7), 9.9 mm from `from`. */
+    function rounding(opening?: { offset: number; width: number }) {
+        const g = new Graph();
+        const w = g.wall(g.node(-5, -31), g.node(100, 299));
+        const o = opening ? g.opening(w, opening.offset, opening.width) : '';
+        const from = g.node(0, 0);
+        const to = g.node(4000, 4000);
+        return { g, w, o, from, to };
+    }
+
+    it('re-fits the openings of the walls the merge shortens', () => {
+        const { g, w, o, from, to } = rounding({ offset: 24, width: 30 });
+        const { doc } = g.run((d, c, out) =>
+            insertWallSegment(d, from, to, PROPS, c, out),
+        );
+        // the head wall was 39.85 mm long, now 31.4: the opening is pulled in
+        expect(doc.openings[o]).toMatchObject({ wallId: w, offset: 16 });
+    });
+
+    it('aborts opening_no_fit when an opening no longer fits the shortened wall', () => {
+        const { g, from, to } = rounding({ offset: 20, width: 38 });
+        expect(
+            g.abortOf((d, c, out) =>
+                insertWallSegment(d, from, to, PROPS, c, out),
+            ).code,
+        ).toBe('opening_no_fit');
+    });
+
+    it('does not list the transient node in deletedIds', () => {
+        const { g, from, to } = rounding();
+        const { doc, out } = g.run((d, c, o) =>
+            insertWallSegment(d, from, to, PROPS, c, o),
+        );
+        expect(out.deletedIds).toEqual([]);
+        expect(Object.keys(doc.nodes)).toHaveLength(4);
+    });
+});

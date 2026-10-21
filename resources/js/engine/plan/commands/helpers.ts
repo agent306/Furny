@@ -341,8 +341,8 @@ interface Cut {
     rank: 0 | 1 | 2;
     /** The node (rank 0 and 1; set after the split for rank 2). */
     nodeId: string | null;
-    /** The wall this cut stands for where it crosses the segment. */
-    viaWall?: string;
+    /** The walls this cut stands for where they cross the segment. */
+    viaWalls?: string[];
     /** Where that wall is split (rank 2). */
     point?: Vec2;
 }
@@ -356,7 +356,7 @@ interface Folded {
 const cutOrder = (p: Cut, q: Cut): number =>
     p.t - q.t ||
     p.rank - q.rank ||
-    cmpId(p.nodeId ?? p.viaWall ?? '', q.nodeId ?? q.viaWall ?? '');
+    cmpId(p.nodeId ?? p.viaWalls?.[0] ?? '', q.nodeId ?? q.viaWalls?.[0] ?? '');
 
 /**
  * Sorts the cuts along the segment and folds those closer than `STUB` to the
@@ -372,12 +372,16 @@ function dedupeCuts(
     const folded: Folded[] = [];
     const fold = (lose: Cut, win: Cut): void => {
         for (const f of folded) if (f.into === lose) f.into = win;
-        if (
-            lose.viaWall !== undefined &&
-            (lose.nodeId === null || lose.nodeId !== win.nodeId)
-        ) {
-            folded.push({ wallId: lose.viaWall, into: win });
+        if (lose.viaWalls === undefined) return;
+        if (lose.nodeId !== null && lose.nodeId === win.nodeId) {
+            // the same node twice (a plain node and a crossing's node): the
+            // walls it stands for stay with the survivor
+            win.viaWalls = [
+                ...new Set([...(win.viaWalls ?? []), ...lose.viaWalls]),
+            ];
+            return;
         }
+        for (const wallId of lose.viaWalls) folded.push({ wallId, into: win });
     };
     for (const point of [...points].sort(cutOrder)) {
         kept.push(point);
@@ -452,7 +456,7 @@ function collectCuts(
                 t: hit.t,
                 rank: 2,
                 nodeId: null,
-                viaWall: id,
+                viaWalls: [id],
                 point: hit.point,
             });
         } else if (near.id !== ends.a && near.id !== ends.b) {
@@ -460,7 +464,7 @@ function collectCuts(
                 1,
                 Math.max(0, projectParam(nodePoint(d, near.id), seg)),
             );
-            points.push({ t, rank: 1, nodeId: near.id, viaWall: id });
+            points.push({ t, rank: 1, nodeId: near.id, viaWalls: [id] });
         }
     }
     return { points, covered };
@@ -482,7 +486,13 @@ function splitCrossedWalls(
 ): void {
     for (const cut of kept) {
         if (cut.rank === 2) {
-            cut.nodeId = splitWallAt(d, cut.viaWall!, cut.point!, ctx, out);
+            cut.nodeId = splitWallAt(
+                d,
+                cut.viaWalls![0]!,
+                cut.point!,
+                ctx,
+                out,
+            );
         }
     }
     const order = new Map(kept.map((c, i) => [c, i]));
@@ -525,7 +535,28 @@ function settleRoundedCuts(d: Doc, cuts: Cut[], ctx: Ids, out: Out): void {
             k += 1;
             continue;
         }
-        mergeNodeInto(d, lose.nodeId!, win.nodeId!, ctx, out);
+        const stray = lose.nodeId!;
+        // the walls that end at the stray node change length with the merge
+        const moved = sortedIds(d.walls).flatMap((id) => {
+            const w = d.walls[id]!;
+            if (w.a !== stray && w.b !== stray) return [];
+            return [
+                {
+                    id,
+                    end: w.a === stray ? 'a' : 'b',
+                    length: wallLength(d, id),
+                },
+            ] as const;
+        });
+        mergeNodeInto(d, stray, win.nodeId!, ctx, out);
+        // the stray node only ever existed inside this command
+        const listed = out.deletedIds.indexOf(stray);
+        if (listed >= 0) out.deletedIds.splice(listed, 1);
+        for (const wall of moved) {
+            if (Object.hasOwn(d.walls, wall.id)) {
+                reclampOpenings(d, wall.id, wall.end, wall.length);
+            }
+        }
         cuts.splice(cuts.indexOf(lose), 1);
         k = Math.max(0, k - 1);
     }
@@ -579,7 +610,6 @@ export function insertWallSegment(
         if (covered.some(([t0, t1]) => mid >= t0 && mid <= t1)) continue;
         const a = from.nodeId!;
         const b = to.nodeId!;
-        if (dist(nodePoint(d, a), nodePoint(d, b)) < MIN_WALL_LENGTH) continue;
         if (joined.has(pairKey(a, b))) continue;
         const id = ctx.newId('w');
         d.walls[id] = { ...propsOf(props), id, a, b };
