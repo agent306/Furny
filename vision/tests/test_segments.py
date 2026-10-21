@@ -391,6 +391,19 @@ def test_window_centre_line_is_not_swallowed_by_the_wall() -> None:
     assert centre, "the window's centre line survives"
 
 
+def test_wide_segment_is_trimmed_to_its_stroke() -> None:
+    """A wall's LSD edge that runs on along a window's thin face line is snapped onto the wall centre; the
+    wide segment is cut back to where the stroke is at least half its width (Task 16b)."""
+    ink = np.zeros((600, 1200), np.uint8)
+    ink[293:307, 200:801] = 255  # a 14 px wall ending at x = 800
+    ink[293:295, 800:951] = 255  # the window's thin face line continuing the wall's top face
+    dt = cv2.distanceTransform(ink, cv2.DIST_L2, 3)
+    p0, p1 = segmod._trim_to_stroke((200.0, 300.0), (950.0, 300.0), 13.4, dt)
+    assert p0[0] == pytest.approx(203, abs=4)
+    assert p1[0] == pytest.approx(797, abs=4)
+    assert segmod._trim_to_stroke((0.0, 0.0), (5.0, 0.0), 13.4, dt) == ((0.0, 0.0), (5.0, 0.0))  # no stroke
+
+
 def test_unsupported_segments_stay_put(monkeypatch: pytest.MonkeyPatch) -> None:
     """A segment snaps only when at least 5 of 9 normals meet a stroke, and only within 3 px of it."""
     img = render_plan(

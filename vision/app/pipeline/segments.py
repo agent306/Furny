@@ -18,7 +18,7 @@ from app.pipeline.context import PipelineContext
 from app.pipeline.normalize import NormalizedPage
 from app.pipeline.ocr_stage import OcrResult
 from app.schemas.candidates import Segment, SegmentSource
-from app.utils.geometry import Rect, detect_line_segments
+from app.utils.geometry import Pt, Rect, detect_line_segments
 
 __all__ = ["detect_segments", "dominant_orientation", "merge_collinear"]
 
@@ -44,6 +44,7 @@ _GRID_PX = 32  # endpoint grid of the collinear merge
 _MAX_GRID_CELLS = 1500  # a bigger box is scanned linearly instead
 _DEADLINE_EVERY = 256
 _SIMILAR_WIDTH = 1.5  # strokes up to this width ratio fuse (06 §8.1 step 8)
+TRIM_WIDTH_SHARE = 0.5  # wide segments end where their stroke is narrower than half their width
 
 
 @cache
@@ -401,8 +402,25 @@ def _attach_widths(segs: list[Segment], pre: Preprocessed) -> list[Segment]:
     out: list[Segment] = []
     for s, w in zip(segs, widths, strict=True):
         wp = float(w) if w > 0 else pre.t_thin
-        out.append(Segment(s.id, s.p0, s.p1, wp, wp <= THIN_FACTOR * pre.t_thin, s.source))
+        thin = wp <= THIN_FACTOR * pre.t_thin
+        ends = (s.p0, s.p1) if thin else _trim_to_stroke(s.p0, s.p1, wp, pre.dt)
+        out.append(Segment(s.id, ends[0], ends[1], wp, thin, s.source))
     return out
+
+
+def _trim_to_stroke(p0: Pt, p1: Pt, width: float, dt: np.ndarray) -> tuple[Pt, Pt]:
+    """A wide (not thin) segment cut back to where its stroke is at least half its width: an LSD edge of a
+    wall that runs on along a window's face line is snapped onto the wall's centre, and without this the
+    wall would span the window."""
+    a, b = np.asarray(p0, np.float64), np.asarray(p1, np.float64)
+    n = max(2, math.ceil(float(np.hypot(*(b - a)))) + 1)
+    t = np.linspace(0.0, 1.0, n)
+    pts = a[None, :] + t[:, None] * (b - a)[None, :]
+    ok = np.flatnonzero(2.0 * _sample_dt(dt, pts[:, 0], pts[:, 1]) >= TRIM_WIDTH_SHARE * width)
+    if ok.size == 0:
+        return p0, p1
+    q0, q1 = pts[ok[0]], pts[ok[-1]]
+    return (float(q0[0]), float(q0[1])), (float(q1[0]), float(q1[1]))
 
 
 def _raster_segments(pre: Preprocessed, ocr: OcrResult, ctx: PipelineContext) -> list[Segment]:
