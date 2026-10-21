@@ -1,7 +1,7 @@
 import { newId as generateId } from '../../ids';
 import { createCommandBus } from '../../commands/bus';
 import type { AnyCommandDef, CommandBus } from '../../commands/types';
-import { createPlanDeriver } from '../derive';
+import { createPlanDeriver, type DerivedPlan } from '../derive';
 import type { FootprintProvider } from '../footprint';
 import type { PlanDocument } from '../schema';
 import { planPathToEntityId } from './paths';
@@ -12,6 +12,9 @@ import {
     type PlanCommandContext,
     type PlanDefaults,
 } from './pipeline';
+
+/** Results `createPlanBus` remembers by document identity. */
+const DERIVE_MEMO_SLOTS = 2;
 
 type PlanCommandRegistry = Record<
     string,
@@ -48,6 +51,22 @@ export function createPlanBus<
     M extends PlanCommandRegistry = typeof PLAN_COMMANDS,
 >(cfg: PlanBusConfig<M>): CommandBus<PlanDocument, PlanCommandContext, M> {
     const deriver = createPlanDeriver();
+    // The deriver is incremental against its last document only. A replace
+    // merge alternates between the drag's base and the documents built on it,
+    // so the two most recent results are kept by identity.
+    const recent: Array<{ doc: PlanDocument; geom: DerivedPlan }> = [];
+    const derive = (doc: PlanDocument): DerivedPlan => {
+        const at = recent.findIndex((e) => e.doc === doc);
+        if (at >= 0) {
+            const [hit] = recent.splice(at, 1);
+            recent.unshift(hit!);
+            return hit!.geom;
+        }
+        const geom = deriver.derive(doc);
+        recent.unshift({ doc, geom });
+        recent.length = Math.min(recent.length, DERIVE_MEMO_SLOTS);
+        return geom;
+    };
     return createCommandBus<PlanDocument, PlanCommandContext, M>({
         initial: cfg.initial,
         registry: cfg.registry ?? (PLAN_COMMANDS as unknown as M),
@@ -56,8 +75,8 @@ export function createPlanBus<
         messageKeyPrefix: PLAN_COMMAND_KEY_PREFIX,
         ...(cfg.maxHistory === undefined ? {} : { maxHistory: cfg.maxHistory }),
         getContext: (doc) => ({
-            geometry: deriver.derive(doc),
-            derive: (d) => deriver.derive(d),
+            geometry: derive(doc),
+            derive,
             footprints: cfg.footprints,
             defaults: cfg.defaults ?? defaultPlanDefaults(doc),
             newId: cfg.newId ?? generateId,

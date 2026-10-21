@@ -460,6 +460,78 @@ describe('replace merge (absolute commands, 04 §6.8 200-move drag)', () => {
             { op: 'add', path: ['items', 'a'], value: { v: 1 } },
         ]);
     });
+    describe('base cache', () => {
+        /** The documents the merges ran on: getContext gets the base of each. */
+        const bases = (getContext: { mock: { calls: unknown[][] } }) =>
+            getContext.mock.calls.map((c) => c[0] as TestDoc);
+
+        it('reverts the top entry once per drag, not once per step', () => {
+            const { bus, getContext } = setup();
+            ok(bus.execute('set', { id: 'a', v: 1 }));
+            for (let i = 2; i <= 6; i += 1) {
+                ok(bus.execute('set', { id: 'a', v: i }, { merge: true }));
+            }
+            const [, ...merged] = bases(getContext);
+            expect(merged).toHaveLength(5);
+            expect(new Set(merged).size).toBe(1);
+            expect(merged[0]!.items).toEqual({});
+            expect(v(bus, 'a')).toBe(6);
+            bus.undo();
+            expect(bus.getDoc().items).toEqual({});
+        });
+
+        it('rebuilds the base for a new entry with the same merge key', () => {
+            const { bus, getContext } = setup();
+            ok(bus.execute('set', { id: 'a', v: 1 }));
+            ok(bus.execute('set', { id: 'a', v: 2 }, { merge: true }));
+            bus.seal();
+            ok(bus.execute('set', { id: 'a', v: 10 }));
+            ok(bus.execute('set', { id: 'a', v: 11 }, { merge: true }));
+            ok(bus.execute('set', { id: 'a', v: 12 }, { merge: true }));
+            const calls = bases(getContext);
+            // [fresh, merge, fresh, merge, merge]: the two drags use different bases
+            expect(calls[1]!.items).toEqual({});
+            expect(calls[3]).not.toBe(calls[1]);
+            expect(calls[3]!.items.a).toEqual({ v: 2 });
+            expect(calls[4]).toBe(calls[3]);
+            expect(bus.history().undo).toHaveLength(2);
+            bus.undo();
+            expect(v(bus, 'a')).toBe(2);
+            bus.undo();
+            expect(bus.getDoc().items).toEqual({});
+        });
+
+        it('keeps the base after a refused step and still merges correctly', () => {
+            const { bus, getContext } = setup();
+            ok(bus.execute('set', { id: 'a', v: 1 }));
+            ok(bus.execute('set', { id: 'a', v: 2 }, { merge: true }));
+            expect(
+                bus.execute('set', { id: 'a', v: -1 }, { merge: true }).ok,
+            ).toBe(false);
+            ok(bus.execute('set', { id: 'a', v: 3 }, { merge: true }));
+            const calls = bases(getContext);
+            expect(calls[3]).toBe(calls[1]);
+            expect(v(bus, 'a')).toBe(3);
+            bus.undo();
+            expect(bus.getDoc().items).toEqual({});
+        });
+
+        it('drops the cache with an entry that a merge made empty', () => {
+            const { bus } = setup({
+                initial: { items: { a: { v: 5 } }, view: { zoom: 1 } },
+            });
+            const original = bus.getDoc();
+            ok(bus.execute('set', { id: 'a', v: 6 }));
+            ok(bus.execute('set', { id: 'a', v: 5 }, { merge: true }));
+            expect(bus.history().undo).toHaveLength(0);
+            // nothing to merge into: a fresh entry, undoing to the original
+            ok(bus.execute('set', { id: 'a', v: 7 }, { merge: true }));
+            expect(bus.history().undo).toHaveLength(1);
+            ok(bus.execute('set', { id: 'a', v: 8 }, { merge: true }));
+            bus.undo();
+            expect(bus.getDoc()).toEqual(original);
+        });
+    });
 });
 
 describe('compose merge (relative commands)', () => {

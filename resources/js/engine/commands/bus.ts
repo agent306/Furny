@@ -191,6 +191,13 @@ export function createCommandBus<
     let redoStack: Readonly<HistoryEntry>[] = [];
     let seq = 0;
     let frame: Frame<D> | null = null;
+    /**
+     * The state a drag started from, kept between `replace` merges: `base` is
+     * `doc` with the top entry reverted. Valid only while `doc` is exactly the
+     * document the last merge produced and the top entry is still the same
+     * one; any other change of the document or the entries misses it.
+     */
+    let mergeBase: { seq: number; doc: D; base: D } | null = null;
 
     // ---- helpers -------------------------------------------------------
 
@@ -398,7 +405,12 @@ export function createCommandBus<
 
         // 04 §6.2-3 `replace`: re-run on the state before the merged sequence.
         if (merging && mode === 'replace') {
-            const base = patchDoc(doc, top.inversePatches);
+            const base =
+                mergeBase !== null &&
+                mergeBase.seq === top.seq &&
+                mergeBase.doc === doc
+                    ? mergeBase.base
+                    : patchDoc(doc, top.inversePatches);
             const run = pipeline(base, def, p, getContext(base));
             if (!run.ok) return refused(run.error);
             const out = run.value;
@@ -410,6 +422,8 @@ export function createCommandBus<
                     ? null
                     : merged(out.patches, out.inversePatches);
             commitMerge(out.doc, entry, patches, changedIds);
+            mergeBase =
+                entry === null ? null : { seq: top.seq, doc: out.doc, base };
             return resultOf(out, changedIds);
         }
 
@@ -465,6 +479,7 @@ export function createCommandBus<
             direction === 'undo' ? entry.inversePatches : entry.patches;
         const next = patchDoc(doc, patches);
         const changedIds = idsOf(patches);
+        mergeBase = null;
         const sealed = withSealed(entry);
         const prevDoc = doc;
         doc = next;
@@ -640,6 +655,7 @@ export function createCommandBus<
             }
             const prevDoc = doc;
             doc = next;
+            mergeBase = null;
             undoStack = [];
             redoStack = [];
             notify({
