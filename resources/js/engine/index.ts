@@ -608,6 +608,15 @@ export type {
 } from './furniture/commands/registry';
 export { syncBehindDoor } from './furniture/commands/sections';
 export {
+    CHANGE_FIELD_LABELS_EN,
+    CHANGE_KINDS,
+    CHANGE_MESSAGE_KEYS,
+    diffFurniture,
+} from './furniture/diff';
+export type { ChangeItem, ChangeKind } from './furniture/diff';
+export { highlightMap } from './furniture/diffHighlight';
+export type { Highlight } from './furniture/diffHighlight';
+export {
     EDGE_ALLOWANCE_MM,
     EDGE_WASTE_PERMILLE,
     FINISH_AREA_STEP_MM2,
