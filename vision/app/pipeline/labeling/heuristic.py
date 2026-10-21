@@ -29,7 +29,7 @@ from app.schemas.labeling import (
     TextLabel_,
     WallLabel,
 )
-from app.utils.roomnames import title_case_name
+from app.utils.roomnames import room_display_name, title_case_name
 
 UnitSystemLit = Literal["metric", "imperial", "unknown"]
 
@@ -37,7 +37,7 @@ UNIT_EVIDENCE_MIN = 3  # tokens that make a unit system (06 section 9.7)
 BOUNDARY_TOLERANCE_T = 1.0  # a name centred this close (in t_median) to a face's boundary belongs to it
 CORRIDOR_BORDER_T = 2.0  # corridors / open-to-sky this close (in t_median) to the plan region are outside
 SIZE_BELOW_TEXT_HEIGHTS = 2.0  # a size text within this many text heights below the name is the room's
-UNSURE_SUPPORT = 0.4  # openings with less evidence are "unsure"
+UNSURE_SUPPORT = 0.4  # doors and windows with less evidence are "unsure" (passages have none: support 0)
 NUMERIC_KINDS = ("mm_number", "metric_length", "feet_inch")
 OUTSIDE_TYPES = ("corridor", "ots")
 KNOWN_DIM_NOUNS = ("overall", "total")
@@ -54,6 +54,11 @@ def _imperial_evidence(t: TextToken) -> bool:
         return False
     text = normalize_text(t.text)
     return any(c.isdigit() for c in text) and ("'" in text or '"' in text)
+
+
+def _display(t: TextToken) -> str:
+    """A room-name token's name: the canonical dictionary name when the match was fuzzy (``TOILE``)."""
+    return room_display_name(t.text, t.parsed.room_name) if t.parsed.room_name else title_case_name(t.text)
 
 
 def _centre(t: TextToken) -> tuple[float, float]:
@@ -122,7 +127,7 @@ class HeuristicLabeler:
             rooms=self._rooms(c, tokens, names, face_of, unit_system),
             missed_rooms=[
                 MissedRoom(
-                    name=title_case_name(t.text),
+                    name=_display(t),
                     type=t.parsed.room_type,
                     x=round(_centre(t)[0]),
                     y=round(_centre(t)[1]),
@@ -137,7 +142,7 @@ class HeuristicLabeler:
             openings=[
                 OpeningLabel(
                     id=o.id,
-                    verdict="unsure" if o.support < UNSURE_SUPPORT else o.kind,
+                    verdict="unsure" if o.kind != "opening" and o.support < UNSURE_SUPPORT else o.kind,
                     door_type=None,
                     window_type=None,
                 )
@@ -170,7 +175,7 @@ class HeuristicLabeler:
         if t.id not in plan_ids and not dimension:
             return TextLabel_(id=t.id, role="ignore", normalized_text=None)
         if kind == "room_name":
-            return TextLabel_(id=t.id, role="room_name", normalized_text=title_case_name(t.text))
+            return TextLabel_(id=t.id, role="room_name", normalized_text=_display(t))
         role = (
             "dimension"
             if dimension
@@ -247,7 +252,7 @@ class HeuristicLabeler:
                 RoomLabel(
                     id=face.id,
                     include=not (outside and touches),
-                    name=title_case_name(main.text) if main else None,
+                    name=_display(main) if main else None,
                     type=main.parsed.room_type if main else None,
                     name_text_id=main.id if main else None,
                     size_text=size.text if size else None,

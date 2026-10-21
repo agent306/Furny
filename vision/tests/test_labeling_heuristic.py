@@ -334,7 +334,7 @@ def test_walls_and_openings() -> None:
     ]  # fmt: skip
     assert [(o.id, o.verdict, o.door_type, o.window_type) for o in r.openings] == [
         ("O1", "door", None, None), ("O2", "window", None, None),
-        ("O3", "unsure", None, None), ("O4", "unsure", None, None),
+        ("O3", "unsure", None, None), ("O4", "opening", None, None),  # a passage: support 0 by definition
     ]  # fmt: skip
     assert r.missed_openings == []
 
@@ -416,3 +416,31 @@ def test_a_metric_pair_on_an_imperial_plan_gives_no_size() -> None:
     assert (room.size_text, room.width_mm, room.depth_mm) == ("100\u00d7110", None, None)
     metric = run(c, RecognizeHints(unit_system="metric"))[0].result.rooms[0]
     assert (metric.width_mm, metric.depth_mm) == (100, 110)
+
+
+def test_fuzzy_room_names_use_the_dictionary_name() -> None:
+    """``TOILE`` matched ``TOILET`` fuzzily: the name is the canonical one. Exact names (also inside a longer
+    note) and the ``missedRooms`` entries keep the token's own words."""
+    fuzzy = token("T1", "TOILE", 200, 200)
+    exact = token("T2", "LIVING ROOM", 600, 200)
+    note = token("T3", "5 FEET WIDE CORRIDOR", 600, 600)
+    lost = token("T4", "BATHROM", 800, 600)
+    assert [t.parsed.room_name for t in (fuzzy, exact, note, lost)] == [
+        "TOILET",
+        "LIVING ROOM",
+        "CORRIDOR",
+        "BATHROOM",
+    ]
+    c = cands(
+        [fuzzy, exact, note, lost],
+        [face("R1", (100, 100, 400, 400), ("T1",)), face("R2", (500, 100, 700, 400), ("T2",))],
+    )
+    r = run(c)[0].result
+    assert [(x.name, x.type) for x in r.rooms] == [("Toilet", "toilet"), ("Living Room", "living")]
+    assert {t.id: t.normalized_text for t in r.texts if t.role == "room_name"} == {
+        "T1": "Toilet", "T2": "Living Room", "T3": "5 Feet Wide Corridor", "T4": "Bathroom",
+    }  # fmt: skip
+    assert [(m.name, m.type) for m in r.missed_rooms] == [
+        ("5 Feet Wide Corridor", "corridor"),
+        ("Bathroom", "bathroom"),
+    ]

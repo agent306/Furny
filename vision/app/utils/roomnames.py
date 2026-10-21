@@ -134,3 +134,12 @@ def match_room_name(text: str) -> tuple[str, RoomType] | None:
 def title_case_name(raw: str) -> str:
     """``"LIVING/DINING"`` -> ``"Living/Dining"``; every run of letters is capitalised, the rest kept."""
     return re.sub(r"[A-Za-z]+", lambda m: m.group(0).capitalize(), raw.strip())
+
+
+def room_display_name(text: str, key: str) -> str:
+    """The name to show for a room-name token ``text`` that matched dictionary ``key``: ``title_case_name`` of
+    the text when the key's words appear in it verbatim (``"LIVING ROOM"``, ``"5 FEET WIDE CORRIDOR"``), else
+    of the key itself, because the match was fuzzy (``"TOILE"`` -> ``"Toilet"``)."""
+    words, phrase = _words(text), _words(key)
+    exact = any(words[i : i + len(phrase)] == phrase for i in range(len(words) - len(phrase) + 1))
+    return title_case_name(text if exact else key)
