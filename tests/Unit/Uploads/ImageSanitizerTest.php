@@ -251,7 +251,8 @@ it('writes its output where it is told to', function (): void {
 
     $result = ImageSanitizer::sanitize(base_path('tests/fixtures/uploads/plain.png'), 'png', null, directory: $directory);
 
-    expect(dirname($result['path']))->toBe($directory);
+    // PHP on Windows joins with a backslash; the directory is the same either way.
+    expect(str_replace('\\', '/', dirname($result['path'])))->toBe(str_replace('\\', '/', $directory));
     unlink($result['path']);
     rmdir($directory);
 });

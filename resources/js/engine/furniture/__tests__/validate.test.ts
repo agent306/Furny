@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Issue } from '../../plan/types';
 import { testIds } from '../../testing/ids';
@@ -1077,7 +1078,7 @@ describe('FURNITURE_ISSUE_CODES (07 §7.3)', () => {
     }
 
     it('contains every furniture code literal that appears in the furniture engine', () => {
-        const root = new URL('..', import.meta.url).pathname;
+        const root = fileURLToPath(new URL('..', import.meta.url));
         const files = sources(root);
         expect(files.length).toBeGreaterThan(30);
         const known = new Set<string>(FURNITURE_ISSUE_CODES);
