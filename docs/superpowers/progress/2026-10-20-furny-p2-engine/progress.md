@@ -273,3 +273,10 @@ Task 48: review c224f0d: spec ✅ (01 §5.4 envelope + exit codes verified by ha
 Carry P5 (PHP engine contract tests): consume tests/fixtures/engine-cli/* (do not re-create); ignore the extra `command` key; PHP must log engine_error messages, never show them to users; the six-furniture validate-furniture contract is built from the compute-bom request documents.
 Task 48: minor (deferred): no test pins plan-summary == validate-plan summary (after removeOrphanNodes); details.issues uncapped.
 Task 48: complete (commits 8cf8b92..c224f0d, review clean)
+Task 49: impl 50bd56f (DONE; 14 tests, 5198 full; worker chunk 408 kB via throwaway entry — real build emits it once an editor page uses the composable).
+Task 49: review 50bd56f: spec mostly ✅ (stale cancellation, dispose, fallback, import boundary, clone safety), quality Needs fixes — Important: Worker error/messageerror leave pending calls unsettled. Fix round 1 dispatched (resume add5623af44900ab8) incl. postMessage DataCloneError cleanup + JSDoc on stale rejection.
+Task 49: minor (deferred): fixture path via cwd-relative resolve (engineRpc.test.ts:174); no real-Worker onmessage round-trip test; DerivedPlan.docRef identity lost across worker clone (callers must not rely on it — carry P4); estimateFurniture via inline port untested end to end.
+Task 49: fix round 1/5 (2 addressed, 1 open — useEngineWorker JSDoc missing despite fix report claim; commits 50bd56f..7220545). Decisions accepted: worker error fatal (until new client), messageerror non-fatal. Fix round 2 dispatched (JSDoc + correct "worker gone" comments).
+Task 49: minor (deferred): engine.worker.ts posts handler results unguarded — a DataCloneError would fire `error` and (fatal policy) disable the engine for the session; postMessage-throw cleanup has no regression test (unobservable).
+Task 49: fix round 2/5 commits 224689e + 8fd9145 (JSDoc + corrected comments; cause of round-1 miss: edit script read files with the Windows default codec, '§' never matched). Re-review 2 by controller (comment-only diff 7220545..8fd9145): finding 3 ADDRESSED, comments now accurate.
+Task 49: complete (commits 0d48cfe..8fd9145, 2 fix rounds)
