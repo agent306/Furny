@@ -37,7 +37,7 @@ from app.pipeline.context import PipelineContext
 from app.pipeline.graph import build_wall_graph
 from app.pipeline.normalize import NormalizedPage
 from app.pipeline.segments import dominant_orientation
-from app.schemas.candidates import DimensionLine, RawWall, Segment, WallGraph, WallSource
+from app.schemas.candidates import DimensionLine, RawWall, Segment, TextToken, WallGraph, WallSource
 from app.utils.geometry import Pt, Rect
 
 __all__ = [
@@ -60,9 +60,18 @@ _SOURCES: dict[int, WallSource] = {
 _SOURCE_RANK: dict[WallSource, int] = {"filled": 0, "vector": 1, "double_line": 2, "single_line": 3}
 
 VECTOR_WALL_FACTOR = 2.5  # stroked vector segments at least this many t_thin wide are walls
-DOUBLE_MIN_LEN_FRAC = 0.02  # of L
+BOLD_MIN_LEN_FRAC = 0.04  # raster bold strokes (not thin) at least 0.04 L long are solid walls (ruling R2)
+BOLD_IN_THICK_MAX = 0.5  # ... unless more than half of the stroke already lies in `thick`
+TEXT_SHARE_MAX = 0.5  # a `thick` component with more than half of its pixels in text boxes is text
+EXTENSION_ANGLE_DEG = 10.0  # extension lines: perpendicular to their dimension line within 10 degrees ...
+EXTENSION_TICK_THIN = 2.0  # ... meeting it within 2 t_thin of one of its ticks with one end ...
+EXTENSION_OVERSHOOT_THIN = (1.0, 3.0)  # ... and running on past it in the ink for 1 .. 3 t_thin (ruling R6)
+DOUBLE_MIN_LEN_FRAC = 0.03  # of L (ruling R6)
+ENVELOPE_MIN_COVER = 0.5  # solid walls outline the plan when their convex hull covers half of the region
+ENVELOPE_GROW_FRAC = 0.01  # the hull is grown by 0.01 L
+ENVELOPE_MIN_INSIDE = 0.5  # a double-line pair needs half of its centre line inside
 DOUBLE_ANGLE_DEG = 2.0
-DOUBLE_D_MIN_FRAC, DOUBLE_D_MAX_FRAC = 0.004, 0.03  # line distance, fractions of L
+DOUBLE_D_MIN_THIN, DOUBLE_D_MAX_FRAC = 1.5, 0.02  # line distance: >= 1.5 t_thin, <= 0.02 L (ruling R6)
 DOUBLE_OVERLAP = 0.6  # of the shorter segment
 HOLLOW_MAX, FILLED_MIN = 0.15, 0.85  # ink share of the strip between the two lines
 DOUBLE_CLAIM_TOL_PX = 1.0  # claims of one segment side may touch by this much
@@ -129,15 +138,118 @@ def _throttled(check: Check) -> Check:
 # --- step 2: candidate segments ------------------------------------------------------------------------
 
 
-def _wall_candidates(segments: Sequence[Segment], dimension_lines: Sequence[DimensionLine]) -> list[Segment]:
-    """Segments minus dimension lines (06 §8.1 step 2), including collinear copies of a dimension line."""
+def _wall_candidates(
+    segments: Sequence[Segment], dimension_lines: Sequence[DimensionLine], t_thin: float, ink: np.ndarray
+) -> list[Segment]:
+    """Segments minus dimension lines (06 §8.1 step 2), including collinear copies of a dimension line, and
+    minus their extension lines (ruling R6, see ``_is_extension``; ``ink`` is the page's text-free ink)."""
     dim_ids = {d.segment_id for d in dimension_lines}
     out: list[Segment] = []
     for s in segments:
-        if s.id in dim_ids or (s.is_thin and any(_on_line(s, d) for d in dimension_lines)):
+        if s.id in dim_ids or (
+            s.is_thin and any(_on_line(s, d) or _is_extension(s, d, t_thin, ink) for d in dimension_lines)
+        ):
             continue
         out.append(s)
     return out
+
+
+def _text_height(tokens: Sequence[TextToken]) -> float:
+    """Median glyph height of the numeric tokens (all tokens when none is numeric); 0 without tokens."""
+    numeric = [t.height_px for t in tokens if t.parsed.kind in ("mm_number", "metric_length", "feet_inch")]
+    heights = numeric or [t.height_px for t in tokens]
+    return float(np.median(heights)) if heights else 0.0
+
+
+def _wall_face_dims(
+    segments: Sequence[Segment],
+    dimension_lines: Sequence[DimensionLine],
+    ink: np.ndarray,
+    t_thin: float,
+    L: float,
+    text_height: float,
+) -> set[str]:
+    """Ids of the "dimension lines" that are wall faces: their segment pairs with another thin segment as a
+    double-line wall (``_double_mask``'s pair rules, strip on the text-free ``ink``). The partner may be
+    another dimension line only when the two are closer than a text height: stacked dimension chains keep
+    their labels between them, two faces of a partition do not.
+
+    A face line of a partition whose perpendicular partitions read as ticks, with a size label beside it,
+    passes ``find_dimension_lines``; dropping it and its "extension lines" would delete the partition and
+    the walls meeting it. A dimension line runs clear of other lines, so it has no such partner.
+    """
+    by_id = {s.id: s for s in segments}
+    dim_ids = {d.segment_id for d in dimension_lines}
+    min_len = DOUBLE_MIN_LEN_FRAC * L
+    lines = [by_id[d.segment_id] for d in dimension_lines if d.segment_id in by_id]
+    lines = [s for s in lines if s.length >= min_len]
+    partners = [s for s in segments if s.is_thin and s.length >= min_len and s.id not in dim_ids]
+    if not lines:
+        return set()
+    segs = [*lines, *partners]
+    p0 = np.array([s.p0 for s in segs], np.float64)
+    p1 = np.array([s.p1 for s in segs], np.float64)
+    width = np.array([s.width_px for s in segs], np.float64)
+    length = np.hypot(*(p1 - p0).T)
+    unit = (p1 - p0) / length[:, None]
+    n_lines = len(lines)
+    ii, jj = (a.ravel() for a in np.meshgrid(np.arange(n_lines), np.arange(len(segs)), indexing="ij"))
+    keep = jj > ii  # each dimension line with every later segment: the other lines and all partners
+    ii, jj = ii[keep], jj[keep]
+    cos_tol = math.cos(math.radians(DOUBLE_ANGLE_DEG))
+    d_min, d_max = DOUBLE_D_MIN_THIN * t_thin, DOUBLE_D_MAX_FRAC * L
+    faces: set[str] = set()
+    for pr in _filter_pairs(ii, jj, p0, p1, length, unit, d_min, d_max, cos_tol):
+        both_dims = pr.i < n_lines and pr.j < n_lines
+        if both_dims and pr.d >= text_height:
+            continue
+        geo = _pair_geometry(pr.i, pr.j, p0, p1, length, unit)
+        if geo is None:
+            continue
+        s0, s1, side_i, _, _ = geo
+        ratio = _strip_ink(ink, p0[pr.i], unit[pr.i], side_i, s0, s1, pr.d, width[pr.i], width[pr.j])
+        if not HOLLOW_MAX <= ratio <= FILLED_MIN:
+            faces.update(segs[k].id for k in (pr.i, pr.j) if k < n_lines)
+    return faces
+
+
+def _is_extension(s: Segment, d: DimensionLine, t_thin: float, ink: np.ndarray) -> bool:
+    """``s`` is an extension line of ``d`` (ruling R6): perpendicular to it (within 10 degrees), meeting its
+    line within ``2 t_thin`` of one of its ticks with one end (within ``3 t_thin``), and overshooting it in
+    the ink: past the far edge of the dimension line the stroke runs on for ``t_thin .. 3 t_thin`` and stops
+    (drafting convention; LSD often cuts the stub off at the crossing, so the ink is probed, not the
+    segment). A partition face that stops at a line (a T junction) has no ink beyond it and a line passing
+    through runs on, so neither is removed when a wall face was taken for a dimension line."""
+    dx, dy = d.p1[0] - d.p0[0], d.p1[1] - d.p0[1]
+    length = math.hypot(dx, dy)
+    sx, sy = s.p1[0] - s.p0[0], s.p1[1] - s.p0[1]
+    s_len = math.hypot(sx, sy)
+    if length == 0.0 or s_len == 0.0 or not d.tick_positions:
+        return False
+    ux, uy = dx / length, dy / length
+    vx, vy = sx / s_len, sy / s_len
+    if abs(ux * vx + uy * vy) > math.sin(math.radians(EXTENSION_ANGLE_DEG)):
+        return False
+    # Meeting point of the two lines: s.p0 + v * k, with zero offset from d's line.
+    h0 = -(s.p0[0] - d.p0[0]) * uy + (s.p0[1] - d.p0[1]) * ux
+    rate = -vx * uy + vy * ux  # offset change per unit along s (|rate| >= cos 10 degrees)
+    k = -h0 / rate
+    mx, my = s.p0[0] + vx * k, s.p0[1] + vy * k
+    along = (mx - d.p0[0]) * ux + (my - d.p0[1]) * uy
+    if not any(abs(along - t) <= EXTENSION_TICK_THIN * t_thin for t in d.tick_positions):
+        return False
+    reach = EXTENSION_OVERSHOOT_THIN[1] * t_thin
+    if min(abs(k), abs(s_len - k)) > reach:
+        return False  # the line passes through: the meeting point is far from both ends
+    out = -1.0 if abs(k) < abs(s_len - k) else 1.0  # away from the segment's body
+    edge = t_thin / 2.0 + 1.0  # the dimension line's far edge (it is thin)
+    steps = np.arange(_MARCH_STEP, edge + reach + 2.0 * t_thin, _MARCH_STEP)
+    pts = np.array((mx, my))[None, :] + (out * steps)[:, None] * np.array((vx, vy))[None, :]
+    inked = _sample(ink, pts) > 0
+    gap = np.flatnonzero(~inked)
+    run_on = float(steps[gap[0]]) if gap.size else float(steps[-1]) + _MARCH_STEP
+    overshoot = run_on - edge
+    return EXTENSION_OVERSHOOT_THIN[0] * t_thin <= overshoot <= reach
 
 
 def _on_line(s: Segment, d: DimensionLine) -> bool:
@@ -158,14 +270,30 @@ def _on_line(s: Segment, d: DimensionLine) -> bool:
 # --- steps 1, 3, 4: wall masks -------------------------------------------------------------------------
 
 
-def _filled_mask(pre: Preprocessed, crop: Rect, long_edge: int) -> np.ndarray:
-    """``thick`` with Sauvola holes closed: pixels between thick bands at most one Sauvola window apart
-    that are as dark as the bands (below the midpoint of wall grey and paper grey).
+def _drop_text(mask: np.ndarray, text: np.ndarray | None) -> np.ndarray:
+    """``mask`` without its components that lie mostly (> 50 %) in text boxes (ruling R6); a wall that a
+    label overlaps keeps its pixels."""
+    if text is None or not mask.any() or not (text & (mask > 0)).any():
+        return mask
+    n, labels = cv2.connectedComponents(mask, connectivity=8)
+    total = np.bincount(labels.ravel().astype(np.intp), minlength=n)
+    in_text = np.bincount(labels[text].astype(np.intp), minlength=n)
+    drop = in_text > TEXT_SHARE_MAX * total
+    drop[0] = False
+    out = mask.copy()
+    out[drop[labels]] = 0
+    return out
+
+
+def _filled_mask(pre: Preprocessed, crop: Rect, long_edge: int, text: np.ndarray | None) -> np.ndarray:
+    """``thick`` (without text components, see ``_drop_text``) with Sauvola holes closed: pixels between
+    thick bands at most one Sauvola window apart that are as dark as the bands (below the midpoint of wall
+    grey and paper grey).
 
     Brochures take ``thick`` from the colour mask, which Sauvola never hollowed, so they are left alone.
     """
     ys, xs = slice(crop.y, crop.y + crop.h), slice(crop.x, crop.x + crop.w)
-    thick = pre.thick[ys, xs].copy()
+    thick = _drop_text(pre.thick[ys, xs], text).copy()  # never write into `pre.thick`
     if pre.drawing_kind == "colored_brochure" or not thick.any():
         return thick
     win = sauvola_window(long_edge)
@@ -216,6 +344,24 @@ def _vector_mask(page: NormalizedPage, cands: Sequence[Segment], t_thin: float, 
     return mask
 
 
+def _bold_mask(cands: Sequence[Segment], thick: np.ndarray, crop: Rect, L: float) -> np.ndarray:
+    """Raster bold strokes as solid walls (ruling R2; 06 §8.1 step 1 only takes ``thick``): segments that are
+    not thin (wider than ``1.8 t_thin``), at least ``0.04 L`` long and not already in ``thick`` (at most half
+    of their length), drawn as butt-ended quads of their stroke width. Bold outline strokes are too narrow
+    for ``thick`` and too wide to be line work."""
+    mask = np.zeros((crop.h, crop.w), np.uint8)
+    origin = np.array((crop.x, crop.y), np.float64)
+    for s in cands:
+        if s.is_thin or s.source == "vector" or s.length < BOLD_MIN_LEN_FRAC * L:
+            continue
+        a, b = np.asarray(s.p0) - origin, np.asarray(s.p1) - origin
+        t = np.linspace(0.0, 1.0, max(2, math.ceil(s.length / 2.0)))[:, None]
+        if float((_sample(thick, a + t * (b - a)) > 0).mean()) > BOLD_IN_THICK_MAX:
+            continue
+        _quad(mask, a, b, s.width_px)
+    return mask
+
+
 @dataclass(frozen=True, slots=True)
 class _Pair:
     i: int
@@ -224,13 +370,24 @@ class _Pair:
     overlap: float
 
 
-def _double_mask(cands: Sequence[Segment], ink: np.ndarray, crop: Rect, L: float, poll: Check) -> np.ndarray:
+def _double_mask(
+    cands: Sequence[Segment],
+    ink: np.ndarray,
+    crop: Rect,
+    L: float,
+    t_thin: float,
+    poll: Check,
+    envelope: np.ndarray | None = None,
+) -> np.ndarray:
     """Quadrilaterals between paired parallel thin lines (06 §8.1 step 3).
 
-    Pairs: angle difference <= 2 degrees, distance ``d`` in ``[0.004 L, 0.03 L]``, projection overlap
-    >= 60 % of the shorter segment and a hollow (< 15 % ink) or filled (> 85 %) strip. Greedy by ``d``
-    ascending, then overlap descending. Each side of a segment is used once per stretch of its length (a
-    face line broken by a T junction pairs with both pieces of the opposite face). A quad is extended by
+    Pairs (ruling R6): both lines at least ``0.03 L`` long, angle difference <= 2 degrees, distance ``d`` in
+    ``[1.5 t_thin, 0.02 L]``, projection overlap >= 60 % of the shorter segment and a hollow (< 15 % ink) or
+    filled (> 85 %) strip; ``ink`` is the text-free ink. With an ``envelope`` (``_solid_envelope``) at least
+    half of the pair's centre line must lie in it. Greedy by ``d`` ascending, then overlap descending. Each
+    stretch of a segment is used by one pair, on either side (06 says once per side: a face line bounds one
+    wall, and its other side would pair with a dimension line or a counter edge into one thick block); a face
+    line broken by a T junction still pairs with both pieces of the opposite face. A quad is extended by
     ``d / 2`` at an end where one of its lines runs on (a corner or junction), not where both stop (a
     door jamb), so corners close without narrowing openings.
     """
@@ -244,13 +401,13 @@ def _double_mask(cands: Sequence[Segment], ink: np.ndarray, crop: Rect, L: float
     width = np.array([s.width_px for s in thin], np.float64)
     length = np.hypot(*(p1 - p0).T)
     unit = (p1 - p0) / length[:, None]
-    d_min, d_max = DOUBLE_D_MIN_FRAC * L, DOUBLE_D_MAX_FRAC * L
+    d_min, d_max = DOUBLE_D_MIN_THIN * t_thin, DOUBLE_D_MAX_FRAC * L
 
     pairs = _pair_candidates(p0, p1, length, unit, d_min, d_max, poll)
     if not pairs:
         return mask
     pairs.sort(key=lambda p: (p.d, -p.overlap, p.i, p.j))
-    claims: dict[tuple[int, int], list[tuple[float, float]]] = defaultdict(list)
+    claims: dict[int, list[tuple[float, float]]] = defaultdict(list)
     for count, pr in enumerate(pairs):
         if count % 256 == 0:
             poll()
@@ -258,13 +415,16 @@ def _double_mask(cands: Sequence[Segment], ink: np.ndarray, crop: Rect, L: float
         if geo is None:
             continue
         s0, s1, side_i, (t0j, t1j), side_j = geo
-        if not (_free(claims[(pr.i, side_i)], s0, s1) and _free(claims[(pr.j, side_j)], t0j, t1j)):
+        del side_j
+        if not (_free(claims[pr.i], s0, s1) and _free(claims[pr.j], t0j, t1j)):
+            continue
+        if envelope is not None and not _inside(envelope, pr.i, pr.j, s0, s1, p0, unit, side_i, pr.d):
             continue
         ratio = _strip_ink(ink, p0[pr.i], unit[pr.i], side_i, s0, s1, pr.d, width[pr.i], width[pr.j])
         if HOLLOW_MAX <= ratio <= FILLED_MIN:
             continue
-        claims[(pr.i, side_i)].append((s0, s1))
-        claims[(pr.j, side_j)].append((t0j, t1j))
+        claims[pr.i].append((s0, s1))
+        claims[pr.j].append((t0j, t1j))
         _fill_pair(mask, pr.i, pr.j, s0, s1, pr.d, p0, p1, length, unit)
     return mask
 
@@ -371,6 +531,41 @@ def _pair_geometry(
     a, b = p0[i] + u * s0, p0[i] + u * s1
     q0, q1 = float((a - p0[j]) @ uj), float((b - p0[j]) @ uj)
     return s0, s1, side_i, (min(q0, q1), max(q0, q1)), side_j
+
+
+def _inside(
+    envelope: np.ndarray,
+    i: int,
+    j: int,
+    s0: float,
+    s1: float,
+    p0: np.ndarray,
+    unit: np.ndarray,
+    side_i: int,
+    d: float,
+) -> bool:
+    """At least half of the pair's centre line (``i`` over ``[s0, s1]`` and ``j``) lies in ``envelope``."""
+    del j
+    u = unit[i]
+    n = np.array((-u[1], u[0])) * side_i
+    t = np.linspace(s0, s1, max(2, math.ceil((s1 - s0) / 2.0)))[:, None]
+    pts = p0[i] + t * u + n * (d / 2.0)
+    return float((_sample(envelope, pts) > 0).mean()) >= ENVELOPE_MIN_INSIDE
+
+
+def _solid_envelope(solid: np.ndarray, L: float) -> np.ndarray | None:
+    """Where double-line walls may lie: the convex hull of the solid (filled and bold) walls grown by
+    ``0.01 L``, when that hull covers at least half of the plan region; otherwise (no solid outline, a few
+    columns) None. Pairs of extension lines and stacked dimension chains outside a drawn outline are not
+    walls; nothing a plan draws as walls lies outside its own outline."""
+    if not solid.any():
+        return None
+    envelope = np.zeros_like(solid)
+    cv2.fillConvexPoly(envelope, cv2.convexHull(cv2.findNonZero(solid)), 255)
+    if np.count_nonzero(envelope) < ENVELOPE_MIN_COVER * envelope.size:
+        return None
+    k = 2 * round(ENVELOPE_GROW_FRAC * L) + 1
+    return cv2.dilate(envelope, np.ones((k, k), np.uint8))
 
 
 def _free(claimed: list[tuple[float, float]], s0: float, s1: float) -> bool:
@@ -759,7 +954,12 @@ def _snap(chains: list[list[_Piece]], theta0: float, L: float) -> list[_Piece]:
     A kept piece after a dropped head (or before a dropped tail) of its path is extended along its own
     line to the projection of the path's end node (a diagonal whose skeleton curls into a junction). When
     that end is free (a skeleton curling into a corner of a wall's end), the kept piece inherits the free
-    end instead, so the end is still refined to the end of the wall."""
+    end instead, so the end is still refined to the end of the wall.
+
+    Between two kept pieces whose short off-axis stretch in between was dropped (a wall that jogs where
+    two drawing styles meet: a column block and the bold line continuing it) the path stays connected:
+    pieces on different axes are extended to the crossing of their lines, parallel ones are joined by a
+    connector piece between their facing ends."""
     out: list[_Piece] = []
     for chain in chains:
         kept = [(k, q) for k, q in enumerate(_snap_one(p, theta0, L) for p in chain) if q is not None]
@@ -770,7 +970,32 @@ def _snap(chains: list[list[_Piece]], theta0: float, L: float) -> list[_Piece]:
         _close_end(chain, kept_idx[0], pieces[0], head=True)
         _close_end(chain, kept_idx[-1], pieces[-1], head=False)
         out.extend(pieces)
+        for (ka, a), (kb, b) in itertools.pairwise(kept):
+            if kb > ka + 1:
+                out.extend(_join(a, b, chain[ka + 1 : kb]))
     return out
+
+
+def _join(a: _Piece, b: _Piece, dropped: list[_Piece]) -> list[_Piece]:
+    """Reconnect ``a`` (path order: its ``p1`` faces ``b``) and ``b`` across the ``dropped`` pieces between
+    them; returns the connector piece, if one is needed."""
+    da, db = a.p1 - a.p0, b.p1 - b.p0
+    cross = float(da[0] * db[1] - da[1] * db[0])
+    na, nb = float(np.hypot(*da)), float(np.hypot(*db))
+    if na > 1e-9 and nb > 1e-9 and abs(cross) / (na * nb) > math.sin(math.radians(SNAP_DEG)):
+        # The crossing of the two lines: a.p0 + da * s = b.p0 + db * t.
+        r = b.p0 - a.p0
+        s_par = float(r[0] * db[1] - r[1] * db[0]) / cross
+        meet = a.p0 + da * s_par
+        _extend_to(a, meet, at_start=False)
+        _extend_to(b, meet, at_start=True)
+        return []
+    thickness = float(np.median([p.thickness for p in dropped])) if dropped else min(a.thickness, b.thickness)
+    if float(np.hypot(*(b.p0 - a.p1))) < 1e-6:
+        return []
+    return [
+        _Piece(a.p1.copy(), b.p0.copy(), thickness, dropped[0].source if dropped else a.source, False, False)
+    ]
 
 
 def _close_end(chain: list[_Piece], kept_at: int, piece: _Piece, *, head: bool) -> None:
@@ -1103,6 +1328,9 @@ def extract_walls(
     segments: list[Segment],
     dimension_lines: list[DimensionLine],
     ctx: PipelineContext,
+    *,
+    ink: np.ndarray | None = None,
+    tokens: Sequence[TextToken] = (),
 ) -> WallExtraction:
     """Wall masks and raw wall centre lines of the plan region (06 §8.1 steps 1-8); see the module doc.
 
@@ -1115,21 +1343,32 @@ def extract_walls(
     crop = pre.region.clip(w, h)
     mask = np.zeros((h, w), np.uint8)
     source_full = np.zeros((h, w), np.uint8)
-    cands = _wall_candidates(segments, dimension_lines)
+    ink_used = pre.ink if ink is None else ink
+    L = float(crop.long_side)
+    faces = (
+        _wall_face_dims(segments, dimension_lines, ink_used, pre.t_thin, L, _text_height(tokens))
+        if crop.w and crop.h
+        else set()
+    )
+    dims = [d for d in dimension_lines if d.segment_id not in faces]
+    cands = _wall_candidates(segments, dims, pre.t_thin, ink_used)
     theta0 = dominant_orientation(cands)
     if crop.w <= 0 or crop.h <= 0:
         return WallExtraction(mask, source_full, [], theta0, max(1.0, 2.0 * pre.t_thin))
-    L = float(crop.long_side)
     ys, xs = slice(crop.y, crop.y + crop.h), slice(crop.x, crop.x + crop.w)
 
-    filled = _filled_mask(pre, crop, max(h, w))
+    text = None if ink is None else ((pre.ink[ys, xs] > 0) & (ink[ys, xs] == 0))
+    filled = _filled_mask(pre, crop, max(h, w), text)
+    if page.source_kind != "pdf_vector":
+        filled |= _bold_mask(cands, filled, crop, L)
     poll()
     vector = (
         _vector_mask(page, cands, pre.t_thin, crop)
         if page.source_kind == "pdf_vector"
         else np.zeros_like(filled)
     )
-    double = _double_mask(cands, pre.ink[ys, xs], crop, L, poll)
+    envelope = _solid_envelope(filled, L)
+    double = _double_mask(cands, ink_used[ys, xs], crop, L, pre.t_thin, poll, envelope)
     poll()
     covered = int(np.count_nonzero(filled | double | vector))
     single = (

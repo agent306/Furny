@@ -26,7 +26,7 @@ from app.pipeline.walls import (
     extract_walls,
     walls_to_graph,
 )
-from app.schemas.candidates import RawWall, Segment, TextToken, WallCandidate, WallGraph
+from app.schemas.candidates import DimensionLine, RawWall, Segment, TextToken, WallCandidate, WallGraph
 from app.utils.geometry import Rect
 from tests.support.synth import SDimChain, SDoor, SGap, SWall, render_plan
 from tests.test_normalize import make_ctx
@@ -75,7 +75,7 @@ def run(
     ocr = OcrResult(tokens=tokens, text_mask=mask, ink_notext=ink_notext)
     segments = detect_segments(page, pre, ocr, make_ctx())
     dims = find_dimension_lines(segments, tokens, pre.region, ink=ink_notext) if use_dimensions else []
-    ext = extract_walls(page, pre, segments, dims, make_ctx())
+    ext = extract_walls(page, pre, segments, dims, make_ctx(), ink=ink_notext, tokens=tokens)
     return Run(page, pre, segments, ext, walls_to_graph(ext, pre.region))
 
 
@@ -312,22 +312,25 @@ def test_double_line_strip_must_be_hollow_or_filled(rungs: bool) -> None:
 
 
 @pytest.mark.parametrize(
-    ("b_from", "b_to", "dy", "paired"),
+    ("b_from", "b_to", "dy", "t_thin", "paired"),
     [
-        (500, 1500, 20, True),
-        (900, 1600, 20, True),  # overlap 600 of 700: 86 %
-        (1100, 1800, 20, False),  # overlap 400 of 700: 57 % < 60 %
-        (500, 1500, 6, False),  # d < 0.004 L (9.0 px)
-        (500, 1500, 64, True),  # d <= 0.03 L (67.7 px)
-        (500, 1500, 72, False),  # d > 0.03 L
+        (500, 1500, 20, None, True),
+        (900, 1600, 20, None, True),  # overlap 600 of 700: 86 %
+        (1100, 1800, 20, None, False),  # overlap 400 of 700: 57 % < 60 %
+        (500, 1500, 10, 8.0, False),  # d < 1.5 t_thin (12 px; ruling R6)
+        (500, 1500, 14, 8.0, True),  # d >= 1.5 t_thin
+        (500, 1500, 44, None, True),  # d <= 0.02 L (45.1 px; ruling R6)
+        (500, 1500, 48, None, False),  # d > 0.02 L
+        (500, 560, 20, None, False),  # the shorter line is < 0.03 L (67.7 px; ruling R6)
+        (500, 580, 20, None, True),  # ... and >= 0.03 L
     ],
 )
-def test_double_line_pair_limits(b_from: int, b_to: int, dy: int, paired: bool) -> None:
+def test_double_line_pair_limits(b_from: int, b_to: int, dy: int, t_thin: float | None, paired: bool) -> None:
     lines = [
         SWall((500, 600), (1500, 600), 2, style="single"),
         SWall((b_from, 600 + dy), (b_to, 600 + dy), 2, style="single"),
     ]
-    r = run(room_with_lines(lines))
+    r = run(room_with_lines(lines), t_thin=t_thin)
     assert r.pre.region.long_side == 2256
     x = (max(500, b_from) + min(1500, b_to)) / 2
     found = [w for w in r.ext.raw if w.source == "double_line"]
@@ -628,3 +631,162 @@ def test_empty_page_has_no_walls() -> None:
     assert r.ext.raw == []
     assert r.graph.walls == [] and r.graph.gaps == []
     assert cv2.countNonZero(r.ext.mask) == 0
+
+
+# --- Task 16b: reference-image hardening (rulings R2, R6) -----------------------------------------------
+
+BOLD_DIMS = [SDimChain((0, 150), "x", [300, 1200, 2100], ["9000", "9000"])]
+
+
+def bold_plan() -> np.ndarray:
+    """The brief's plan drawn with 7 px bold strokes and 3 px line work (t_thin 3.75, thick kernel 9): the
+    strokes are neither thin (<= 6.75 px) nor wide enough for `thick`, like the HDB reference outline."""
+    return render_plan(SIZE, plan("filled", t=7), dims=BOLD_DIMS, line_px=3)
+
+
+def test_bold_outline_strokes_are_filled_walls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ruling R2: non-thin strokes >= 0.04 L long that are not in `thick` are solid walls of their width."""
+    r = run(bold_plan(), use_dimensions=False)
+    assert r.pre.t_thin == pytest.approx(3.75)
+    assert not r.pre.thick[700:800, 1190:1210].any()  # precondition: the partition is not thick
+    assert_plan_topology(r.graph)
+    assert {w.source for w in r.graph.walls} == {"filled"}
+    assert all(w.thickness_px == pytest.approx(7.6, abs=1.5) for w in r.graph.walls)
+    # Discriminating: without the bold-stroke rule there are no walls at all.
+    monkeypatch.setattr(wallmod, "BOLD_MIN_LEN_FRAC", 10.0)
+    assert run(bold_plan(), use_dimensions=False).graph.walls == []
+
+
+def test_short_bold_stroke_is_not_a_wall() -> None:
+    walls = [*plan("filled", t=7), SWall((600, 800), (660, 800), 7)]  # 60 px < 0.04 L (~83 px)
+    r = run(render_plan(SIZE, walls, dims=BOLD_DIMS, line_px=3), use_dimensions=False)
+    assert len(r.graph.walls) == 7
+    assert not any(abs(w.a[1] - 800) < 10 and abs(w.b[1] - 800) < 10 for w in r.graph.walls)
+
+
+def test_text_blob_is_not_a_filled_wall() -> None:
+    """Ruling R6: a wall-scale ink blob inside a text box (a bold label) is not a filled wall; a wall that
+    a label overlaps is kept."""
+    blob = SWall((900, 800), (1000, 800), 24)
+    label = token("T1", "LIVINGROOM", 950, 800, height=40)
+    on_wall = token("T2", "BEDROOM", 1200, 760, height=30)  # overlaps the partition at x = 1200
+    img = render_plan(SIZE, [*plan("filled"), blob])
+    r = run(img, tokens=[label, on_wall])
+    assert len(r.graph.walls) == 7
+    assert not any(890 < (w.a[0] + w.b[0]) / 2 < 1010 and abs(w.a[1] - 800) < 20 for w in r.graph.walls)
+    # Discriminating: without the text mask the blob is a wall.
+    assert any(abs((w.p0[1] + w.p1[1]) / 2 - 800) < 5 for w in run(img).ext.raw)
+
+
+def _seg(sid: str, p0: tuple[float, float], p1: tuple[float, float]) -> Segment:
+    return Segment(sid, p0, p1, 2.0, True, "lsd")
+
+
+@pytest.mark.parametrize(
+    ("x", "top", "seg_top", "expected"),
+    [
+        (300, 93, 98.4, True),  # runs on 5 px (2.5 t_thin) past the line's far edge; LSD cut the stub
+        (300, 93, 93.5, True),  # same, the stub kept in the segment
+        (300, 101, 101.5, False),  # stops at the line: a T junction, not an extension line
+        (300, 97, 98.4, False),  # runs on < t_thin
+        (300, 90, 98.4, False),  # runs on > 3 t_thin
+        (300, 50, 50.5, False),  # passes through: the tick is far from both ends of the segment
+        (250, 93, 98.4, False),  # not at a tick
+    ],
+)
+def test_extension_line_rule(x: int, top: int, seg_top: float, expected: bool) -> None:
+    """t_thin 2: the dimension line is 2 px (rows 99-100, centre 99.5) with ticks at x = 100, 300, 500."""
+    ink = np.zeros((400, 600), np.uint8)
+    ink[99:101, 100:501] = 255
+    ink[top:300, x - 1 : x + 1] = 255
+    dim = DimensionLine("L1", (100.0, 99.5), (500.0, 99.5), [0.0, 200.0, 400.0], "S1")
+    seg = _seg("S2", (x - 0.5, seg_top), (x - 0.5, 299.5))
+    assert wallmod._is_extension(seg, dim, 2.0, ink) is expected
+    tilted = _seg("S3", (x - 0.5, seg_top), (x + 70.0, 290.0))  # 20 degrees off perpendicular
+    assert wallmod._is_extension(tilted, dim, 2.0, ink) is False
+
+
+def test_extension_lines_do_not_pair_into_walls() -> None:
+    """Ruling R6: two extension lines 12 px apart (two chains' ticks side by side) would pair into a
+    double-line wall; they are excluded with their dimension line."""
+    lines = [
+        SWall((600, 700), (1600, 700), 2, style="single"),  # the dimension line
+        SWall((1000, 694), (1000, 1100), 2, style="single"),  # extension lines, overshooting by 6 px
+        SWall((1012, 694), (1012, 1100), 2, style="single"),
+    ]
+    r = run(room_with_lines(lines), use_dimensions=False)
+    piece = max(
+        (s for s in r.segments if abs(s.p0[1] - 700) < 2 and abs(s.p1[1] - 700) < 2), key=lambda s: s.length
+    )
+    dim = DimensionLine("L1", (600.0, 700.0), (1600.0, 700.0), [0.0, 400.0, 412.0, 1000.0], piece.id)
+    near = [w for w in r.ext.raw if w.source == "double_line" and abs((w.p0[0] + w.p1[0]) / 2 - 1006) < 4]
+    assert len(near) == 1  # precondition: without the dimension line they pair
+    ext = extract_walls(r.page, r.pre, r.segments, [dim], make_ctx(), ink=r.pre.ink)
+    assert not [w for w in ext.raw if w.source == "double_line" and abs((w.p0[0] + w.p1[0]) / 2 - 1006) < 4]
+
+
+def test_wall_face_taken_for_a_dimension_line_stays_a_wall(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A face of a double-line partition passed in as a "dimension line" pairs with the other face: it is
+    a wall face, so neither it nor the walls ending on it are removed."""
+    r = run(render_plan(SIZE, plan("double")), use_dimensions=False)
+    face = next(
+        s for s in r.segments if abs(s.p0[0] - 1193) <= 2 and abs(s.p1[0] - 1193) <= 2 and s.length > 900
+    )
+    dim = DimensionLine("L1", face.p0, face.p1, [0.0, face.length], face.id)
+    ext = extract_walls(r.page, r.pre, r.segments, [dim], make_ctx(), ink=r.pre.ink)
+    assert_plan_topology(walls_to_graph(ext, r.pre.region))
+    monkeypatch.setattr(wallmod, "_wall_face_dims", lambda *a, **k: set())
+    ext = extract_walls(r.page, r.pre, r.segments, [dim], make_ctx(), ink=r.pre.ink)
+    assert len(walls_to_graph(ext, r.pre.region).walls) < 7
+
+
+def test_face_line_pairs_on_one_side_only() -> None:
+    """A face line with a partner on each side pairs with the nearer one only (06 says once per side; the
+    far pair would merge into one thick block centred between the two)."""
+    lines = [
+        SWall((500, 600), (1500, 600), 2, style="single"),  # A
+        SWall((500, 614), (1500, 614), 2, style="single"),  # B: 14 px below A
+        SWall((500, 580), (1500, 580), 2, style="single"),  # C: 20 px above A
+    ]
+    found = [w for w in run(room_with_lines(lines)).ext.raw if w.source == "double_line"]
+    assert len(found) == 1
+    assert (found[0].p0[1] + found[0].p1[1]) / 2 == pytest.approx(607, abs=2)
+    assert found[0].thickness_px == pytest.approx(14, abs=3)
+
+
+def test_double_lines_outside_the_solid_outline_are_not_walls() -> None:
+    inside = [
+        SWall((500, 600), (1500, 600), 2, style="single"),
+        SWall((500, 620), (1500, 620), 2, style="single"),
+    ]
+    outside = [
+        SWall((500, 1540), (1500, 1540), 2, style="single"),
+        SWall((500, 1560), (1500, 1560), 2, style="single"),
+    ]
+    pts = [(200, 200), (2200, 200), (2200, 1500), (200, 1500)]
+    room = [SWall(pts[i], pts[(i + 1) % 4], 14) for i in range(4)]
+    r = run(render_plan(SIZE, [*room, *inside, *outside]))
+    assert r.pre.region.contains((1000.0, 1560.0))  # precondition: the outside pair is in the region
+    doubles = [(w.p0[1] + w.p1[1]) / 2 for w in r.ext.raw if w.source == "double_line"]
+    assert doubles == [pytest.approx(610, abs=2)]
+    # Without solid walls there is no outline to test against: a pure double-line drawing keeps both.
+    only_lines = run(render_plan(SIZE, [*plan("double"), *inside, *outside]))
+    ys = [(w.p0[1] + w.p1[1]) / 2 for w in only_lines.ext.raw if abs(w.p0[1] - w.p1[1]) < 2]
+    assert any(abs(y - 1550) < 3 for y in ys)
+
+
+def test_jog_between_column_and_wall_stays_connected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A column block whose wall continues 10 px off its centre line: the short off-axis kink of the
+    skeleton is dropped, but the two straight pieces stay connected (no free ends)."""
+    walls = [
+        SWall((300, 300), (1700, 300), 14),
+        SWall((1700, 300), (1700, 1200), 14),
+        SWall((1700, 1200), (310, 1200), 14),
+        SWall((310, 1200), (310, 440), 14),
+        SWall((300, 300), (300, 420), 40),  # the column
+    ]
+    img = render_plan(SIZE, walls)
+    r = run(img)
+    assert sum(w.free_ends for w in r.graph.walls) == 0
+    monkeypatch.setattr(wallmod, "_join", lambda a, b, dropped: [])
+    assert sum(w.free_ends for w in run(img).graph.walls) > 0
