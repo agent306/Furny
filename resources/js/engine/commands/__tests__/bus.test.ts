@@ -1,260 +1,17 @@
-import { isDeepStrictEqual } from 'node:util';
-import { apply, type Draft } from 'mutative';
+import { apply } from 'mutative';
 import { describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
-import type { EngineMessage } from '../../plan/types';
-import { createCommandBus, defaultPipeline, shouldAutoFreeze } from '../bus';
+import { defaultPipeline, shouldAutoFreeze } from '../bus';
+import { CommandFailedError, type Pipeline } from '../types';
 import {
-    CommandAbort,
-    CommandFailedError,
-    type BusEvent,
-    type CommandDef,
-    type ExecuteOptions,
-    type Pipeline,
-} from '../types';
-
-// ---- test document and commands (brief, Task 20) ---------------------------
-
-interface TestDoc {
-    items: Record<string, { v: number }>;
-    view: { zoom: number };
-}
-interface Ctx {
-    size: number;
-}
-
-const msg = (code: string): EngineMessage => ({
-    code,
-    messageKey: `test.${code}`,
-    params: {},
-});
-
-const cmd = <P, R = void>(def: CommandDef<TestDoc, P, Ctx, R>) => def;
-
-interface IdValue {
-    id: string;
-    v: number;
-}
-interface IdBy {
-    id: string;
-    by: number;
-}
-
-/** Sets `items[id].v`; assigning the value it already has produces no patch. */
-function setItem(draft: Draft<TestDoc>, id: string, value: number): void {
-    const cur = draft.items[id];
-    if (cur) cur.v = value;
-    else draft.items[id] = { v: value };
-}
-
-/** Absolute target; replace-merges per id. A negative value is refused. */
-const set = cmd<IdValue>({
-    type: 'set',
-    labelKey: 'test.label.set',
-    validate: (_doc, p) => (p.v < 0 ? msg('negative') : null),
-    run: (draft, p) => setItem(draft, p.id, p.v),
-    labelParams: (p) => ({ id: p.id, v: p.v }),
-    mergeKey: (p) => `set:${p.id}`,
-    touchesGeometry: false,
-});
-
-/** Absolute target with one merge key for every id (cross-entity drag). */
-const move = cmd<IdValue>({
-    type: 'move',
-    labelKey: 'test.label.move',
-    validate: () => null,
-    run: (draft, p) => setItem(draft, p.id, p.v),
-    mergeKey: () => 'drag',
-    touchesGeometry: false,
-});
-
-/** Relative; composes. */
-const inc = cmd<IdBy>({
-    type: 'inc',
-    labelKey: 'test.label.inc',
-    validate: () => null,
-    run(draft, p) {
-        const cur = draft.items[p.id];
-        if (cur) cur.v += p.by;
-        else draft.items[p.id] = { v: p.by };
-    },
-    mergeKey: (p) => `inc:${p.id}`,
-    mergeMode: 'compose',
-    touchesGeometry: false,
-});
-
-/** No merge key. */
-const plain = cmd<IdValue>({
-    type: 'plain',
-    labelKey: 'test.label.plain',
-    validate: () => null,
-    run: (draft, p) => setItem(draft, p.id, p.v),
-    touchesGeometry: false,
-});
-
-const remove = cmd<{ id: string }>({
-    type: 'remove',
-    labelKey: 'test.label.remove',
-    validate: () => null,
-    run: (draft, p) => {
-        delete draft.items[p.id];
-    },
-    touchesGeometry: false,
-});
-
-/** Mutates, then cancels. */
-const abort = cmd<{ id: string }>({
-    type: 'abort',
-    labelKey: 'test.label.abort',
-    validate: () => null,
-    run(draft, p) {
-        draft.items[p.id] = { v: 999 };
-        throw new CommandAbort(msg('aborted'));
-    },
-    touchesGeometry: false,
-});
-
-const invalid = cmd<{ id: string }>({
-    type: 'invalid',
-    labelKey: 'test.label.invalid',
-    validate: () => msg('invalid'),
-    run(draft, p) {
-        draft.items[p.id] = { v: 1 };
-    },
-    touchesGeometry: false,
-});
-
-/** Mutates, then crashes with a bug rather than a CommandAbort. */
-const boom = cmd<{ id: string }>({
-    type: 'boom',
-    labelKey: 'test.label.boom',
-    validate: () => null,
-    run(draft, p) {
-        draft.items[p.id] = { v: 999 };
-        throw new Error('boom');
-    },
-    touchesGeometry: false,
-});
-
-const typed = cmd<{ n: number }>({
-    type: 'typed',
-    labelKey: 'test.label.typed',
-    paramsSchema: z.object({ n: z.number().int() }),
-    labelParams: (p) => ({ n: p.n }),
-    validate: () => null,
-    run(draft, p) {
-        draft.items.n = { v: p.n };
-    },
-    touchesGeometry: false,
-});
-
-/** Defaults the value through the schema, to prove the bus passes parsed params on. */
-const defaulted = cmd<{ id: string; v: number }>({
-    type: 'defaulted',
-    labelKey: 'test.label.defaulted',
-    paramsSchema: z.object({ id: z.string(), v: z.number().default(7) }),
-    validate: () => null,
-    run(draft, p) {
-        draft.items[p.id] = { v: p.v };
-    },
-    touchesGeometry: false,
-});
-
-/** Touches only `view`, which `pathToEntityId` ignores. */
-const zoom = cmd<{ zoom: number }>({
-    type: 'zoom',
-    labelKey: 'test.label.zoom',
-    validate: () => null,
-    run(draft, p) {
-        draft.view.zoom = p.zoom;
-    },
-    touchesGeometry: false,
-});
-
-/** Replaces a whole collection: path length 1. */
-const replaceAll = cmd<{ items: TestDoc['items'] }>({
-    type: 'replaceAll',
-    labelKey: 'test.label.replaceAll',
-    validate: () => null,
-    run(draft, p) {
-        draft.items = p.items as Draft<TestDoc['items']>;
-    },
-    touchesGeometry: false,
-});
-
-const withOutput = cmd<{ id: string }, number>({
-    type: 'withOutput',
-    labelKey: 'test.label.withOutput',
-    validate: () => null,
-    run(draft, p, ctx, out) {
-        draft.items[p.id] = { v: ctx.size };
-        out.result = ctx.size + 100;
-        out.warnings.push(msg('careful'));
-        out.deletedIds.push('gone');
-    },
-    touchesGeometry: false,
-});
-
-const registry = {
-    set,
-    move,
-    inc,
-    plain,
-    remove,
-    abort,
-    invalid,
-    boom,
-    typed,
-    defaulted,
-    zoom,
-    replaceAll,
-    withOutput,
-};
-
-function pathToEntityId(path: (string | number)[]): string | null {
-    if (path.length === 1) return '*';
-    if (path[0] === 'items' && typeof path[1] === 'string') return path[1];
-    return null;
-}
-
-const emptyDoc = (): TestDoc => ({ items: {}, view: { zoom: 1 } });
-
-function setup(
-    over: {
-        initial?: TestDoc;
-        maxHistory?: number;
-        messageKeyPrefix?: string;
-        pipeline?: Pipeline<TestDoc, Ctx>;
-    } = {},
-) {
-    let clock = 1000;
-    const getContext = vi.fn((d: TestDoc): Ctx => ({
-        size: Object.keys(d.items).length,
-    }));
-    const bus = createCommandBus({
-        initial: over.initial ?? emptyDoc(),
-        registry,
-        getContext,
-        pathToEntityId,
-        messageKeyPrefix: over.messageKeyPrefix ?? 'test',
-        now: () => (clock += 1),
-        ...(over.maxHistory === undefined
-            ? {}
-            : { maxHistory: over.maxHistory }),
-        ...(over.pipeline === undefined ? {} : { pipeline: over.pipeline }),
-    });
-    const events: BusEvent<TestDoc>[] = [];
-    bus.subscribe((e) => events.push(e));
-    return { bus, events, getContext };
-}
-
-type Bus = ReturnType<typeof setup>['bus'];
-
-const v = (bus: Bus, id: string): number | undefined =>
-    bus.getDoc().items[id]?.v;
-const ok = (r: { ok: boolean }): void => {
-    expect(r.ok).toBe(true);
-};
+    emptyDoc,
+    msg,
+    ok,
+    setup,
+    v,
+    type Bus,
+    type Ctx,
+    type TestDoc,
+} from './busFixture';
 
 // ---- execute ----------------------------------------------------------------
 
@@ -1193,10 +950,21 @@ describe('frozen documents', () => {
         expect(Object.isFrozen(bus.getDoc().items.a)).toBe(true);
         bus.redo();
         expect(Object.isFrozen(bus.getDoc().items.b)).toBe(true);
+    });
+
+    it('freezes a restored, previously unfrozen document on rollback', () => {
+        const { bus } = setup();
+        const fresh: TestDoc = { items: { a: { v: 1 } }, view: { zoom: 1 } };
+        bus.reset(fresh); // reset does not freeze what it is given
+        expect(Object.isFrozen(fresh)).toBe(false);
+        expect(Object.isFrozen(fresh.items)).toBe(false);
         bus.beginTransaction('test.tx');
-        bus.execute('set', { id: 'c', v: 1 });
+        bus.execute('set', { id: 'b', v: 1 });
         bus.rollbackTransaction();
-        expect(Object.isFrozen(bus.getDoc().items.a)).toBe(true);
+        expect(bus.getDoc()).toBe(fresh);
+        expect(Object.isFrozen(fresh)).toBe(true);
+        expect(Object.isFrozen(fresh.items)).toBe(true);
+        expect(Object.isFrozen(fresh.items.a)).toBe(true);
     });
 });
 
@@ -1439,520 +1207,269 @@ describe('custom pipeline', () => {
     });
 });
 
-// ---- property test ----------------------------------------------------------------
+// ---- fix round 1 ---------------------------------------------------------------
 
-function mulberry32(seed: number): () => number {
-    let a = seed;
-    return () => {
-        a = (a + 0x6d2b79f5) | 0;
-        let t = Math.imul(a ^ (a >>> 15), 1 | a);
-        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
+describe('a replace merge that returns to its start', () => {
+    const start = (): TestDoc => ({
+        items: { a: { v: 0 } },
+        view: { zoom: 1 },
+    });
 
-type Items = TestDoc['items'];
+    it('drops the empty entry: nothing left to undo', () => {
+        const { bus, events } = setup({ initial: start() });
+        const original = bus.getDoc();
+        ok(bus.execute('set', { id: 'a', v: 10 }));
+        ok(bus.execute('set', { id: 'a', v: 20 }, { merge: true }));
+        events.length = 0;
 
-interface RefEntry {
-    before: Items;
-    after: Items;
-    key: string | null;
-    sealed: boolean;
-}
+        const r = bus.execute('set', { id: 'a', v: 0 }, { merge: true });
+        expect(r).toMatchObject({ ok: true, changedIds: new Set(['a']) });
+        expect(bus.getDoc()).toEqual(original);
+        expect(bus.history().undo).toEqual([]);
+        expect(bus.canUndo()).toBe(false);
+        expect(bus.undo()).toBe(false);
 
-interface RefMark {
-    items: Items;
-    view: TestDoc['view'];
-    steps: number;
-    hist: number;
-}
-
-/**
- * Reference model of the bus: history as plain snapshots, commands as pure
- * functions. It shares no code with the bus, so undo/redo exactness is checked
- * against documents, not against patches.
- */
-class Ref {
-    items: Items;
-    view: TestDoc['view'];
-    undoStack: RefEntry[] = [];
-    redoStack: RefEntry[] = [];
-    tx: { marks: RefMark[]; steps: number; hist: number } | null = null;
-
-    constructor(
-        initial: TestDoc,
-        private readonly cap: number,
-    ) {
-        this.items = initial.items;
-        this.view = initial.view;
-    }
-
-    get doc(): TestDoc {
-        return { items: this.items, view: this.view };
-    }
-
-    private top(): RefEntry | undefined {
-        return this.undoStack.at(-1);
-    }
-
-    seal(): void {
-        const t = this.top();
-        if (t) t.sealed = true;
-    }
-
-    private push(e: RefEntry): void {
-        this.undoStack.push(e);
-        while (this.undoStack.length > this.cap) this.undoStack.shift();
-    }
-
-    /** A command on `items`. */
-    exec(
-        fn: (i: Items) => Items,
-        key: string | null,
-        mode: 'replace' | 'compose',
-        merge: boolean,
-    ): void {
-        const t = this.top();
-        const merging =
-            merge &&
-            this.tx === null &&
-            t !== undefined &&
-            !t.sealed &&
-            key !== null &&
-            t.key === key;
-        if (merging && mode === 'replace') {
-            t.after = fn(t.before);
-            this.items = t.after;
-            return;
-        }
-        const next = fn(this.items);
-        if (isDeepStrictEqual(next, this.items)) {
-            if (!merging) this.seal();
-            return;
-        }
-        if (merging) {
-            t.after = next;
-            this.items = next;
-            return;
-        }
-        if (this.tx !== null) {
-            this.tx.steps += 1;
-            this.tx.hist += 1;
-            this.items = next;
-            return;
-        }
-        this.seal();
-        this.redoStack = [];
-        this.push({ before: this.items, after: next, key, sealed: false });
-        this.items = next;
-    }
-
-    /** The `history: false` view command. */
-    zoom(zoom: number): void {
-        if (this.view.zoom === zoom) {
-            this.seal();
-            return;
-        }
-        this.view = { zoom };
-        if (this.tx !== null) {
-            this.tx.steps += 1;
-            return;
-        }
-        this.seal();
-        this.redoStack = [];
-    }
-
-    canUndo = (): boolean => this.tx === null && this.undoStack.length > 0;
-    canRedo = (): boolean => this.tx === null && this.redoStack.length > 0;
-
-    undo(): boolean {
-        if (!this.canUndo()) return false;
-        const e = this.undoStack.pop()!;
-        e.sealed = true;
-        this.items = e.before;
-        this.redoStack.push(e);
-        return true;
-    }
-
-    redo(): boolean {
-        if (!this.canRedo()) return false;
-        const e = this.redoStack.pop()!;
-        this.items = e.after;
-        this.undoStack.push(e);
-        return true;
-    }
-
-    begin(): void {
-        if (this.tx === null) {
-            this.seal();
-            this.tx = { marks: [], steps: 0, hist: 0 };
-        }
-        this.tx.marks.push({
-            items: this.items,
-            view: this.view,
-            steps: this.tx.steps,
-            hist: this.tx.hist,
+        expect(events).toHaveLength(1);
+        const e = events[0]!;
+        expect(e).toMatchObject({
+            kind: 'merge',
+            entry: null,
+            changedIds: new Set(['a']),
         });
-    }
+        expect(apply(e.prevDoc, e.patches)).toEqual(e.doc);
+        expect(e.doc).toEqual(original);
+    });
 
-    commit(): void {
-        const tx = this.tx!;
-        if (tx.marks.length > 1) {
-            tx.marks.pop();
-            return;
-        }
-        const start = tx.marks[0]!;
-        this.tx = null;
-        if (tx.steps > 0) this.redoStack = [];
-        if (tx.hist > 0) {
-            this.push({
-                before: start.items,
-                after: this.items,
-                key: null,
-                sealed: true,
-            });
-        }
-    }
-
-    rollback(): void {
-        const tx = this.tx!;
-        const m = tx.marks.pop()!;
-        this.items = m.items;
-        this.view = m.view;
-        tx.steps = m.steps;
-        tx.hist = m.hist;
-        if (tx.marks.length === 0) this.tx = null;
-    }
-
-    reset(doc: TestDoc): void {
-        this.items = doc.items;
-        this.view = doc.view;
-        this.undoStack = [];
-        this.redoStack = [];
-    }
-}
-
-const withItem = (i: Items, id: string, value: number): Items => ({
-    ...i,
-    [id]: { v: value },
+    it('keeps the entries below and starts a new entry for the next move', () => {
+        const { bus } = setup({ initial: start() });
+        ok(bus.execute('plain', { id: 'z', v: 1 }));
+        ok(bus.execute('set', { id: 'a', v: 10 }));
+        ok(bus.execute('set', { id: 'a', v: 0 }, { merge: true }));
+        expect(bus.history().undo.map((e) => e.type)).toEqual(['plain']);
+        // the entry below is sealed, so a further drag cannot merge into it
+        ok(bus.execute('set', { id: 'a', v: 5 }, { merge: true }));
+        expect(bus.history().undo.map((e) => e.type)).toEqual(['plain', 'set']);
+        bus.undo();
+        expect(v(bus, 'a')).toBe(0);
+        bus.undo();
+        expect(bus.getDoc().items).toEqual({ a: { v: 0 } });
+    });
 });
 
-type Op = (typeof OPS)[number][0];
-const OPS = [
-    ['set', 14],
-    ['move', 6],
-    ['inc', 14],
-    ['plain', 4],
-    ['remove', 4],
-    ['setBad', 3],
-    ['abort', 2],
-    ['zoom', 4],
-    ['seal', 5],
-    ['undo', 9],
-    ['redo', 6],
-    ['begin', 3],
-    ['commit', 3],
-    ['rollback', 2],
-    ['txFn', 5],
-    ['reset', 1],
-] as const;
-const OP_TOTAL = OPS.reduce((n, [, w]) => n + w, 0);
+describe('transaction() with an asynchronous fn', () => {
+    it('is a type error', () => {
+        const { bus } = setup();
+        // @ts-expect-error fn must be synchronous
+        const attempt = () => bus.transaction('test.tx', async () => 1);
+        expect(typeof attempt).toBe('function'); // type-level test only
+        const sync: number = bus.transaction('test.tx', () => 1);
+        expect(sync).toBe(1);
+    });
 
-describe.each([
-    { seed: 1, cap: 200 },
-    { seed: 2, cap: 200 },
-    { seed: 3, cap: 200 },
-    { seed: 4, cap: 25 },
-    { seed: 5, cap: 8 },
-])(
-    'random sequences against a snapshot model (seed $seed, cap $cap)',
-    ({ seed, cap }) => {
-        it('keeps the document equal to the model after each of 200 operations', () => {
-            const rng = mulberry32(seed);
-            const pick = <T>(xs: readonly T[]): T =>
-                xs[Math.floor(rng() * xs.length)]!;
-            const IDS = ['a', 'b', 'c'] as const;
-            const randomDoc = (): TestDoc => ({
-                items: Object.fromEntries(
-                    IDS.filter(() => rng() < 0.5).map((id) => [
-                        id,
-                        { v: Math.floor(rng() * 6) },
-                    ]),
-                ),
-                view: { zoom: 1 + Math.floor(rng() * 3) },
-            });
+    it('rolls back and throws when fn returns a promise', async () => {
+        const { bus, events } = setup();
+        const start = bus.getDoc();
+        const asyncFn = (async () => {
+            bus.execute('set', { id: 'a', v: 1 });
+            await Promise.resolve();
+            throw new Error('late failure'); // must not become unhandled
+        }) as unknown as () => never;
+        expect(() => bus.transaction('test.tx', asyncFn)).toThrow(
+            'transaction fn must be synchronous',
+        );
+        await new Promise((r) => setTimeout(r, 0));
+        expect(bus.getDoc()).toBe(start);
+        expect(bus.history().undo).toEqual([]);
+        expect(events.map((e) => e.kind)).toEqual(['execute', 'rollback']);
+        // no transaction is left open
+        ok(bus.execute('set', { id: 'a', v: 1 }));
+        expect(bus.history().undo).toHaveLength(1);
+    });
 
-            const initial = randomDoc();
-            const { bus, events } = setup({ initial, maxHistory: cap });
-            const ref = new Ref(initial, cap);
+    it('treats any thenable like a promise', () => {
+        const { bus } = setup();
+        const thenable = (() => ({
+            then: () => undefined,
+        })) as unknown as () => never;
+        expect(() => bus.transaction('test.tx', thenable)).toThrow(
+            'must be synchronous',
+        );
+        expect(bus.canUndo()).toBe(false);
+    });
+});
 
-            // Repeating the last id and command makes merge bursts likely.
-            let lastId: (typeof IDS)[number] = 'a';
-            let lastKind: 'set' | 'move' | 'inc' | 'plain' | 'remove' = 'set';
-            /** One random history command on both sides. */
-            const randomCommand = (merge: boolean): void => {
-                const id = rng() < 0.6 ? lastId : pick(IDS);
-                const kind =
-                    rng() < 0.6
-                        ? lastKind
-                        : pick([
-                              'set',
-                              'move',
-                              'inc',
-                              'plain',
-                              'remove',
-                          ] as const);
-                lastId = id;
-                lastKind = kind;
-                const value = Math.floor(rng() * 6);
-                const by = Math.floor(rng() * 5) - 1;
-                const opts: ExecuteOptions = { merge };
-                switch (kind) {
-                    case 'set':
-                        ok(bus.execute('set', { id, v: value }, opts));
-                        ref.exec(
-                            (i) => withItem(i, id, value),
-                            `set:${id}`,
-                            'replace',
-                            merge,
-                        );
-                        break;
-                    case 'move':
-                        ok(bus.execute('move', { id, v: value }, opts));
-                        ref.exec(
-                            (i) => withItem(i, id, value),
-                            'drag',
-                            'replace',
-                            merge,
-                        );
-                        break;
-                    case 'inc':
-                        ok(bus.execute('inc', { id, by }, opts));
-                        ref.exec(
-                            (i) => withItem(i, id, (i[id]?.v ?? 0) + by),
-                            `inc:${id}`,
-                            'compose',
-                            merge,
-                        );
-                        break;
-                    case 'plain':
-                        ok(bus.execute('plain', { id, v: value }, opts));
-                        ref.exec(
-                            (i) => withItem(i, id, value),
-                            null,
-                            'replace',
-                            merge,
-                        );
-                        break;
-                    case 'remove':
-                        ok(bus.execute('remove', { id }, opts));
-                        ref.exec(
-                            (i) =>
-                                Object.fromEntries(
-                                    Object.entries(i).filter(
-                                        ([key]) => key !== id,
-                                    ),
-                                ),
-                            null,
-                            'replace',
-                            merge,
-                        );
-                        break;
-                }
-            };
-
-            // What the generator reached, asserted at the end so a change to
-            // the weights cannot silently stop exercising a code path.
-            const reached = {
-                replaceMerges: 0,
-                composeMerges: 0,
-                multiPatchUndos: 0,
-                multiPatchRedos: 0,
-                commits: 0,
-                rollbacks: 0,
-            };
-            const drain = (): void => {
-                for (const e of events.splice(0)) {
-                    if (e.kind === 'merge') {
-                        if (e.entry?.mergeMode === 'compose') {
-                            reached.composeMerges += 1;
-                        } else reached.replaceMerges += 1;
-                    }
-                    const multi =
-                        e.entry !== null &&
-                        e.entry.type !== 'transaction' &&
-                        e.entry.patches.length > 1;
-                    if (e.kind === 'undo' && multi)
-                        reached.multiPatchUndos += 1;
-                    if (e.kind === 'redo' && multi)
-                        reached.multiPatchRedos += 1;
-                    if (e.kind === 'commit') reached.commits += 1;
-                    if (e.kind === 'rollback') reached.rollbacks += 1;
-                    if (e.kind !== 'reset') {
-                        expect(apply(e.prevDoc, e.patches)).toEqual(e.doc);
-                    }
-                    // changedIds covers every item that actually differs
-                    for (const id of IDS) {
-                        if (
-                            !isDeepStrictEqual(
-                                e.prevDoc.items[id],
-                                e.doc.items[id],
-                            )
-                        ) {
-                            expect(
-                                e.changedIds.has(id) || e.changedIds.has('*'),
-                            ).toBe(true);
-                        }
-                    }
-                }
-            };
-
-            const compare = (step: string): void => {
-                expect(bus.getDoc(), step).toEqual(ref.doc);
-                expect(bus.canUndo(), step).toBe(ref.canUndo());
-                expect(bus.canRedo(), step).toBe(ref.canRedo());
-                const h = bus.history();
-                expect(
-                    h.undo.map((e) => [e.mergeKey, e.sealed]),
-                    step,
-                ).toEqual(ref.undoStack.map((e) => [e.key, e.sealed]));
-                expect(h.redo, step).toHaveLength(ref.redoStack.length);
-                expect(h.undo.length, step).toBeLessThanOrEqual(cap);
-                drain();
-            };
-
-            const executed: string[] = [];
-            for (let step = 0; step < 200; step += 1) {
-                let r = rng() * OP_TOTAL;
-                const op: Op = OPS.find(([, w]) => (r -= w) < 0)![0];
-                const merge = rng() < 0.7;
-                executed.push(op);
-                switch (op) {
-                    case 'set':
-                    case 'move':
-                    case 'inc':
-                    case 'plain':
-                    case 'remove':
-                        randomCommand(merge);
-                        break;
-                    case 'setBad': {
-                        // refused: validate rejects a negative value; no trace
-                        const id = pick(IDS);
-                        const res = bus.execute(
-                            'set',
-                            { id, v: -1 },
-                            { merge },
-                        );
-                        expect(res.ok).toBe(false);
-                        break;
-                    }
-                    case 'abort': {
-                        const res = bus.execute('abort', { id: pick(IDS) });
-                        expect(res.ok).toBe(false);
-                        break;
-                    }
-                    case 'zoom': {
-                        const zoomTo = 1 + Math.floor(rng() * 3);
-                        ok(
-                            bus.execute(
-                                'zoom',
-                                { zoom: zoomTo },
-                                { history: false },
-                            ),
-                        );
-                        ref.zoom(zoomTo);
-                        break;
-                    }
-                    case 'seal':
-                        bus.seal();
-                        ref.seal();
-                        break;
-                    case 'undo':
-                        expect(bus.undo()).toBe(ref.undo());
-                        break;
-                    case 'redo':
-                        expect(bus.redo()).toBe(ref.redo());
-                        break;
-                    case 'begin':
-                        if (ref.tx !== null && ref.tx.marks.length >= 3) break;
-                        bus.beginTransaction('test.tx');
-                        ref.begin();
-                        break;
-                    case 'commit':
-                        if (ref.tx === null) break;
-                        bus.commitTransaction();
-                        ref.commit();
-                        break;
-                    case 'rollback':
-                        if (ref.tx === null) break;
-                        bus.rollbackTransaction();
-                        ref.rollback();
-                        break;
-                    case 'txFn': {
-                        const mode = pick([
-                            'ok',
-                            'ok',
-                            'throw',
-                            'fail',
-                        ] as const);
-                        ref.begin();
-                        let threw: unknown;
-                        try {
-                            bus.transaction('test.tx', () => {
-                                const n = 1 + Math.floor(rng() * 3);
-                                for (let k = 0; k < n; k += 1)
-                                    randomCommand(merge);
-                                if (mode === 'throw')
-                                    throw new Error('fn failed');
-                                if (mode === 'fail') {
-                                    bus.execute('abort', { id: pick(IDS) });
-                                }
-                            });
-                        } catch (e) {
-                            threw = e;
-                        }
-                        if (mode === 'ok') {
-                            expect(threw).toBeUndefined();
-                            ref.commit();
-                        } else {
-                            expect(threw).toBeInstanceOf(
-                                mode === 'fail' ? CommandFailedError : Error,
-                            );
-                            ref.rollback();
-                        }
-                        break;
-                    }
-                    case 'reset': {
-                        if (ref.tx !== null) break;
-                        const doc = randomDoc();
-                        bus.reset(doc);
-                        ref.reset(doc);
-                        break;
-                    }
-                }
-                compare(
-                    `step ${step}: ${op} (${executed.slice(-4).join(', ')})`,
-                );
-            }
-
-            // Close any open transaction, then walk the whole history both ways.
-            while (ref.tx !== null) {
-                bus.commitTransaction();
-                ref.commit();
-            }
-            compare('after closing transactions');
-            while (ref.canUndo()) {
-                expect(bus.undo()).toBe(true);
-                expect(ref.undo()).toBe(true);
-                compare('final undo walk');
-            }
-            expect(bus.undo()).toBe(false);
-            while (ref.canRedo()) {
-                expect(bus.redo()).toBe(true);
-                expect(ref.redo()).toBe(true);
-                compare('final redo walk');
-            }
-            expect(bus.redo()).toBe(false);
+describe('meta', () => {
+    it('a merge keeps the existing entry meta object', () => {
+        const { bus, events } = setup();
+        const first = {
+            selectionBefore: ['a'],
+            selectionAfter: null as unknown,
+        };
+        bus.execute('set', { id: 'a', v: 1 }, { meta: first });
+        const other = { selectionBefore: ['zzz'] };
+        bus.execute('set', { id: 'a', v: 2 }, { merge: true, meta: other });
+        bus.execute('set', { id: 'a', v: 3 }, { merge: true });
+        const entry = bus.history().undo[0]!;
+        expect(entry.meta).toBe(first);
+        expect(events.at(-1)!.entry!.meta).toBe(first);
+        // the editor completes the same object through the entry it received
+        (events.at(-1)!.entry!.meta as typeof first).selectionAfter = ['a'];
+        expect(bus.history().undo[0]!.meta).toEqual({
+            selectionBefore: ['a'],
+            selectionAfter: ['a'],
         });
-    },
-);
+        // and it survives sealing, undo and redo
+        bus.seal();
+        bus.undo();
+        bus.redo();
+        expect(bus.history().undo[0]!.meta).toBe(first);
+    });
+
+    it('compose merges keep it too', () => {
+        const { bus } = setup();
+        const first = { n: 1 };
+        bus.execute('inc', { id: 'a', by: 1 }, { meta: first });
+        bus.execute('inc', { id: 'a', by: 1 }, { merge: true, meta: { n: 2 } });
+        expect(bus.history().undo[0]!.meta).toBe(first);
+    });
+
+    it('beginTransaction and transaction store meta on the committed entry', () => {
+        const { bus } = setup();
+        const m1 = { selection: 1 };
+        bus.beginTransaction('test.tx', { k: 1 }, m1);
+        bus.beginTransaction('test.inner', {}, { ignored: true });
+        bus.execute('set', { id: 'a', v: 1 });
+        bus.commitTransaction();
+        bus.commitTransaction();
+        expect(bus.history().undo[0]!.meta).toBe(m1);
+
+        const m2 = { selection: 2 };
+        bus.transaction(
+            'test.tx2',
+            () => bus.execute('set', { id: 'b', v: 1 }),
+            {},
+            m2,
+        );
+        expect(bus.history().undo[1]!.meta).toBe(m2);
+        bus.transaction('test.tx3', () =>
+            bus.execute('set', { id: 'c', v: 1 }),
+        );
+        expect(bus.history().undo[2]!.meta).toBeNull();
+    });
+});
+
+describe('what subscribers and callers cannot mutate', () => {
+    it('a result changedIds is not shared with the event still queued for delivery', () => {
+        const { bus } = setup();
+        const seen: string[][] = [];
+        let nested = false;
+        bus.subscribe(() => {
+            if (nested) return;
+            nested = true;
+            const r = bus.execute('set', { id: 'b', v: 1 }); // queued event
+            if (r.ok) (r.changedIds as Set<string>).add('vandal');
+        });
+        bus.subscribe((e) => seen.push([...e.changedIds]));
+        bus.execute('set', { id: 'a', v: 1 });
+        expect(seen).toEqual([['a'], ['b']]);
+    });
+
+    it('freezes patch lists on entries and events (auto-freeze on)', () => {
+        const { bus, events } = setup();
+        bus.execute('inc', { id: 'a', by: 1 });
+        bus.execute('inc', { id: 'a', by: 1 }, { merge: true });
+        bus.undo();
+        const entry = bus.history().redo[0]!;
+        for (const list of [
+            entry.patches,
+            entry.inversePatches,
+            ...events.map((e) => e.patches),
+        ]) {
+            expect(Object.isFrozen(list)).toBe(true);
+            expect(() => list.push({ op: 'remove', path: ['items'] })).toThrow(
+                TypeError,
+            );
+            for (const patch of list) expect(Object.isFrozen(patch)).toBe(true);
+        }
+        // a transaction entry and its commit event too
+        bus.transaction('test.tx', () => {
+            bus.execute('set', { id: 'b', v: 1 });
+        });
+        const commit = events.at(-1)!;
+        expect(commit.kind).toBe('commit');
+        expect(Object.isFrozen(commit.patches)).toBe(true);
+        expect(Object.isFrozen(commit.entry!.patches)).toBe(true);
+        expect(Object.isFrozen(commit.entry!.inversePatches)).toBe(true);
+    });
+
+    it('gives every subscriber and the result its own changedIds', () => {
+        const { bus } = setup();
+        const seen: string[][] = [];
+        bus.subscribe((e) => {
+            (e.changedIds as Set<string>).add('vandal');
+            (e.changedIds as Set<string>).delete('a');
+        });
+        bus.subscribe((e) => seen.push([...e.changedIds]));
+        const r = bus.execute('set', { id: 'a', v: 1 });
+        expect(seen).toEqual([['a']]);
+        expect(r.ok && [...r.changedIds]).toEqual(['a']);
+        // mutating the result does not touch what later subscribers see
+        if (r.ok) (r.changedIds as Set<string>).add('more');
+        bus.execute('set', { id: 'b', v: 1 });
+        expect(seen).toEqual([['a'], ['b']]);
+        // and the event objects themselves are frozen
+        let event: unknown;
+        bus.subscribe((e) => (event = e));
+        bus.execute('set', { id: 'c', v: 1 });
+        expect(Object.isFrozen(event)).toBe(true);
+    });
+});
+
+describe('labels and failures', () => {
+    it('a compose merge updates labelParams to the latest params', () => {
+        const { bus } = setup();
+        bus.execute('inc', { id: 'a', by: 1 });
+        expect(bus.history().undo[0]!.labelParams).toEqual({ id: 'a', by: 1 });
+        bus.execute('inc', { id: 'a', by: 5 }, { merge: true });
+        const entry = bus.history().undo[0]!;
+        expect(entry.labelParams).toEqual({ id: 'a', by: 5 });
+        expect(entry.lastParams).toEqual({ id: 'a', by: 5 });
+        expect(entry.patches).toHaveLength(2);
+    });
+
+    it('CommandFailedError carries the first failure, not the last', () => {
+        const { bus } = setup();
+        let caught: unknown;
+        try {
+            bus.transaction('test.tx', () => {
+                bus.execute('abort', { id: 'a' });
+                bus.execute('invalid', { id: 'a' });
+                bus.execute('set', { id: 'a', v: -1 });
+            });
+        } catch (e) {
+            caught = e;
+        }
+        expect(caught).toBeInstanceOf(CommandFailedError);
+        expect((caught as CommandFailedError).error).toEqual(msg('aborted'));
+    });
+
+    it('a failure forgiven by an inner rollback is not reported', () => {
+        const { bus } = setup();
+        let caught: unknown;
+        try {
+            bus.transaction('test.outer', () => {
+                bus.execute('abort', { id: 'x' }); // first, unforgiven
+                try {
+                    bus.transaction('test.inner', () => {
+                        bus.execute('invalid', { id: 'x' });
+                    });
+                } catch {
+                    // forgiven: the inner level was rolled back
+                }
+            });
+        } catch (e) {
+            caught = e;
+        }
+        expect((caught as CommandFailedError).error).toEqual(msg('aborted'));
+    });
+});

@@ -101,6 +101,32 @@ export function defaultPipeline<D extends object, C>(
     }
 }
 
+/** Freezes `value` and everything it holds (documents are plain data). */
+function deepFreeze<T>(value: T): T {
+    if (typeof value !== 'object' || value === null || Object.isFrozen(value)) {
+        return value;
+    }
+    Object.freeze(value);
+    if (value instanceof Map) value.forEach((v) => deepFreeze(v));
+    else if (value instanceof Set) value.forEach((v) => deepFreeze(v));
+    else Object.values(value).forEach((v) => deepFreeze(v));
+    return value;
+}
+
+/** In dev and tests the patch lists handed out by the bus cannot be mutated. */
+function frozenPatches(patches: Patches): Patches {
+    if (shouldAutoFreeze()) {
+        for (const patch of patches) Object.freeze(patch);
+        Object.freeze(patches);
+    }
+    return patches;
+}
+
+const isThenable = (v: unknown): boolean =>
+    (typeof v === 'object' || typeof v === 'function') &&
+    v !== null &&
+    typeof (v as { then?: unknown }).then === 'function';
+
 /** One executed command inside a transaction. */
 interface Step {
     forward: Patches;
@@ -113,19 +139,19 @@ interface Step {
 interface Mark<D> {
     doc: D;
     steps: number;
-    failures: number;
-    lastFailure: EngineMessage | null;
+    /** Number of failures logged when the level opened. */
+    failed: number;
 }
 
 interface Frame<D> {
     labelKey: string;
     labelParams: Record<string, string | number>;
+    meta: unknown;
     steps: Step[];
     /** One mark per open level; the first is the transaction start. */
     marks: Mark<D>[];
-    /** Execute calls that returned an error inside this transaction. */
-    failures: number;
-    lastFailure: EngineMessage | null;
+    /** Errors of the executes that failed inside this transaction, in order. */
+    failed: EngineMessage[];
 }
 
 interface Subscription<D> {
@@ -133,6 +159,17 @@ interface Subscription<D> {
 }
 
 const TRANSACTION_TYPE = 'transaction';
+
+const resultOf = (
+    out: PipelineOutput<unknown>,
+    changedIds: ReadonlySet<string>,
+): ExecuteResult<unknown> => ({
+    ok: true,
+    result: out.result,
+    warnings: out.warnings,
+    deletedIds: out.deletedIds,
+    changedIds: new Set(changedIds),
+});
 
 export function createCommandBus<
     D extends object,
@@ -171,8 +208,12 @@ export function createCommandBus<
         return ids;
     }
 
-    const entryOf = (e: Omit<HistoryEntry, 'seq'>, n: number) =>
-        Object.freeze<HistoryEntry>({ ...e, seq: n });
+    /** An immutable entry; its patch lists are frozen in dev and tests. */
+    function makeEntry(e: HistoryEntry): Readonly<HistoryEntry> {
+        frozenPatches(e.patches);
+        frozenPatches(e.inversePatches);
+        return Object.freeze(e);
+    }
 
     const withSealed = (e: Readonly<HistoryEntry>): Readonly<HistoryEntry> =>
         e.sealed ? e : Object.freeze({ ...e, sealed: true });
@@ -222,7 +263,8 @@ export function createCommandBus<
     let delivering = false;
 
     function notify(event: BusEvent<D>): void {
-        queue.push(Object.freeze(event));
+        frozenPatches(event.patches);
+        queue.push(event);
         if (delivering) return;
         delivering = true;
         const errors: unknown[] = [];
@@ -231,7 +273,13 @@ export function createCommandBus<
                 for (const sub of [...subscriptions]) {
                     if (!subscriptions.has(sub)) continue;
                     try {
-                        sub.fn(e);
+                        // each subscriber gets its own changedIds to play with
+                        sub.fn(
+                            Object.freeze({
+                                ...e,
+                                changedIds: new Set(e.changedIds),
+                            }),
+                        );
                     } catch (error) {
                         errors.push(error);
                     }
@@ -249,154 +297,39 @@ export function createCommandBus<
         }
     }
 
-    // ---- execute -------------------------------------------------------
+    // ---- commits (nothing but `notify` can throw in these) ------------------
 
-    function execute<K extends keyof M & string>(
-        type: K,
-        params: unknown,
-        opts: ExecuteOptions = {},
-    ): ExecuteResult<unknown> {
-        const def = Object.hasOwn(registry, type) ? registry[type] : undefined;
-        if (def === undefined) {
-            throw new Error(
-                `command bus: unknown command ${JSON.stringify(type)}`,
-            );
-        }
+    /**
+     * A merge into the top entry. `entry` replaces it; `null` drops it (the
+     * merged sequence ended where it started, so it would undo nothing).
+     */
+    function commitMerge(
+        next: D,
+        entry: Readonly<HistoryEntry> | null,
+        patches: Patches,
+        changedIds: ReadonlySet<string>,
+    ): void {
+        const prevDoc = doc;
+        doc = next;
+        if (entry === null) undoStack.pop();
+        else undoStack[undoStack.length - 1] = entry;
+        notify({ kind: 'merge', doc, prevDoc, patches, changedIds, entry });
+    }
 
-        const refused = (error: EngineMessage): ExecuteResult<unknown> => {
-            if (frame !== null) {
-                frame.failures += 1;
-                frame.lastFailure = error;
-            }
-            return { ok: false, error };
-        };
-
-        const parsed = parseParams(def, params);
-        if (!parsed.ok) return refused(parsed.error);
-        const p = parsed.value;
-
-        const inTransaction = frame !== null;
-        const wantHistory = opts.history !== false;
-        const mergeKey = def.mergeKey?.(p) ?? null;
-        const mode = def.mergeMode ?? 'replace';
-        const top = undoStack.at(-1);
-        const merging =
-            opts.merge === true &&
-            !inTransaction &&
-            wantHistory &&
-            top !== undefined &&
-            !top.sealed &&
-            mergeKey !== null &&
-            top.mergeKey === mergeKey;
-
-        const done = (
-            out: PipelineOutput<D>,
-            changedIds: ReadonlySet<string>,
-        ): ExecuteResult<unknown> => ({
-            ok: true,
-            result: out.result,
-            warnings: out.warnings,
-            deletedIds: out.deletedIds,
-            changedIds,
-        });
-
-        // 04 §6.2-3 `replace`: re-run on the state before the merged sequence.
-        if (merging && mode === 'replace') {
-            const base = patchDoc(doc, top.inversePatches);
-            const run = pipeline(base, def, p, getContext(base));
-            if (!run.ok) return refused(run.error);
-            const out = run.value;
-            // doc -> base -> new doc, so ids touched by the old drag count too
-            const eventPatches = [...top.inversePatches, ...out.patches];
-            const changedIds = idsOf(eventPatches);
-            const entry = Object.freeze<HistoryEntry>({
-                ...top,
-                patches: out.patches,
-                inversePatches: out.inversePatches,
-                mergeMode: mode,
-                labelParams: def.labelParams?.(p) ?? {},
-                lastParams: p,
-                at: now(),
-                meta: opts.meta !== undefined ? opts.meta : top.meta,
-            });
-            const prevDoc = doc;
-            doc = out.doc;
-            undoStack[undoStack.length - 1] = entry;
-            notify({
-                kind: 'merge',
-                doc,
-                prevDoc,
-                patches: eventPatches,
-                changedIds,
-                entry,
-            });
-            return done(out, changedIds);
-        }
-
-        const run = pipeline(doc, def, p, getContext(doc));
-        if (!run.ok) return refused(run.error);
-        const out = run.value;
-
-        // A command that changed nothing: no entry, no event, redo survives.
-        if (out.patches.length === 0) {
-            if (!merging) sealTop();
-            return done(out, new Set());
-        }
-        const changedIds = idsOf(out.patches);
-
-        // 04 §6.2-3 `compose`: run on the current document, append the patches.
-        if (merging) {
-            const entry = Object.freeze<HistoryEntry>({
-                ...top,
-                patches: [...top.patches, ...out.patches],
-                inversePatches: [...out.inversePatches, ...top.inversePatches],
-                mergeMode: mode,
-                lastParams: p,
-                at: now(),
-                meta: opts.meta !== undefined ? opts.meta : top.meta,
-            });
-            const prevDoc = doc;
-            doc = out.doc;
-            undoStack[undoStack.length - 1] = entry;
-            notify({
-                kind: 'merge',
-                doc,
-                prevDoc,
-                patches: out.patches,
-                changedIds,
-                entry,
-            });
-            return done(out, changedIds);
-        }
-
-        const entry =
-            inTransaction || !wantHistory
-                ? null
-                : entryOf(
-                      {
-                          type: def.type,
-                          labelKey: def.labelKey,
-                          labelParams: def.labelParams?.(p) ?? {},
-                          patches: out.patches,
-                          inversePatches: out.inversePatches,
-                          mergeKey,
-                          mergeMode: mode,
-                          sealed: false,
-                          lastParams: p,
-                          at: now(),
-                          meta: opts.meta ?? null,
-                      },
-                      seq + 1,
-                  );
-
-        // Commit: nothing below can throw.
+    /** A new change: a pushed entry, or a step of the open transaction. */
+    function commitChange(
+        out: PipelineOutput<D>,
+        entry: Readonly<HistoryEntry> | null,
+        history: boolean,
+        changedIds: ReadonlySet<string>,
+    ): void {
         const prevDoc = doc;
         doc = out.doc;
         if (frame !== null) {
             frame.steps.push({
                 forward: out.patches,
                 inverse: out.inversePatches,
-                history: wantHistory,
+                history,
             });
         } else {
             sealTop();
@@ -414,7 +347,112 @@ export function createCommandBus<
             changedIds,
             entry,
         });
-        return done(out, changedIds);
+    }
+
+    // ---- execute -------------------------------------------------------
+
+    function execute<K extends keyof M & string>(
+        type: K,
+        params: unknown,
+        opts: ExecuteOptions = {},
+    ): ExecuteResult<unknown> {
+        const def = Object.hasOwn(registry, type) ? registry[type] : undefined;
+        if (def === undefined) {
+            throw new Error(
+                `command bus: unknown command ${JSON.stringify(type)}`,
+            );
+        }
+
+        const refused = (error: EngineMessage): ExecuteResult<unknown> => {
+            frame?.failed.push(error);
+            return { ok: false, error };
+        };
+
+        const parsed = parseParams(def, params);
+        if (!parsed.ok) return refused(parsed.error);
+        const p = parsed.value;
+
+        const wantHistory = opts.history !== false;
+        const mergeKey = def.mergeKey?.(p) ?? null;
+        const mode = def.mergeMode ?? 'replace';
+        const top = undoStack.at(-1);
+        const merging =
+            opts.merge === true &&
+            frame === null &&
+            wantHistory &&
+            top !== undefined &&
+            !top.sealed &&
+            mergeKey !== null &&
+            top.mergeKey === mergeKey;
+        /** `top` with new patches; `meta` stays the entry's existing object. */
+        const merged = (patches: Patches, inversePatches: Patches) =>
+            makeEntry({
+                ...top!,
+                patches,
+                inversePatches,
+                mergeMode: mode,
+                labelParams: def.labelParams?.(p) ?? {},
+                lastParams: p,
+                at: now(),
+            });
+
+        // 04 §6.2-3 `replace`: re-run on the state before the merged sequence.
+        if (merging && mode === 'replace') {
+            const base = patchDoc(doc, top.inversePatches);
+            const run = pipeline(base, def, p, getContext(base));
+            if (!run.ok) return refused(run.error);
+            const out = run.value;
+            // doc -> base -> new doc, so ids touched by the old drag count too
+            const patches = [...top.inversePatches, ...out.patches];
+            const changedIds = idsOf(patches);
+            const entry =
+                out.patches.length === 0
+                    ? null
+                    : merged(out.patches, out.inversePatches);
+            commitMerge(out.doc, entry, patches, changedIds);
+            return resultOf(out, changedIds);
+        }
+
+        const run = pipeline(doc, def, p, getContext(doc));
+        if (!run.ok) return refused(run.error);
+        const out = run.value;
+
+        // A command that changed nothing: no entry, no event, redo survives.
+        if (out.patches.length === 0) {
+            if (!merging) sealTop();
+            return resultOf(out, new Set());
+        }
+        const changedIds = idsOf(out.patches);
+
+        // 04 §6.2-3 `compose`: run on the current document, append the patches.
+        if (merging) {
+            const entry = merged(
+                [...top.patches, ...out.patches],
+                [...out.inversePatches, ...top.inversePatches],
+            );
+            commitMerge(out.doc, entry, out.patches, changedIds);
+            return resultOf(out, changedIds);
+        }
+
+        const entry =
+            frame !== null || !wantHistory
+                ? null
+                : makeEntry({
+                      seq: seq + 1,
+                      type: def.type,
+                      labelKey: def.labelKey,
+                      labelParams: def.labelParams?.(p) ?? {},
+                      patches: out.patches,
+                      inversePatches: out.inversePatches,
+                      mergeKey,
+                      mergeMode: mode,
+                      sealed: false,
+                      lastParams: p,
+                      at: now(),
+                      meta: opts.meta ?? null,
+                  });
+        commitChange(out, entry, wantHistory, changedIds);
+        return resultOf(out, changedIds);
     }
 
     // ---- undo / redo ---------------------------------------------------
@@ -449,23 +487,23 @@ export function createCommandBus<
     function beginTransaction(
         labelKey: string,
         labelParams: Record<string, string | number> = {},
+        meta: unknown = null,
     ): void {
         if (frame === null) {
             sealTop();
             frame = {
                 labelKey,
                 labelParams: { ...labelParams },
+                meta,
                 steps: [],
                 marks: [],
-                failures: 0,
-                lastFailure: null,
+                failed: [],
             };
         }
         frame.marks.push({
             doc,
             steps: frame.steps.length,
-            failures: frame.failures,
-            lastFailure: frame.lastFailure,
+            failed: frame.failed.length,
         });
     }
 
@@ -484,24 +522,22 @@ export function createCommandBus<
         const entry =
             kept.length === 0
                 ? null
-                : entryOf(
-                      {
-                          type: TRANSACTION_TYPE,
-                          labelKey: f.labelKey,
-                          labelParams: f.labelParams,
-                          patches: kept.flatMap((s) => s.forward),
-                          inversePatches: kept
-                              .toReversed()
-                              .flatMap((s) => s.inverse),
-                          mergeKey: null,
-                          mergeMode: 'replace',
-                          sealed: true,
-                          lastParams: null,
-                          at: now(),
-                          meta: null,
-                      },
-                      seq + 1,
-                  );
+                : makeEntry({
+                      seq: seq + 1,
+                      type: TRANSACTION_TYPE,
+                      labelKey: f.labelKey,
+                      labelParams: f.labelParams,
+                      patches: kept.flatMap((s) => s.forward),
+                      inversePatches: kept
+                          .toReversed()
+                          .flatMap((s) => s.inverse),
+                      mergeKey: null,
+                      mergeMode: 'replace',
+                      sealed: true,
+                      lastParams: null,
+                      at: now(),
+                      meta: f.meta,
+                  });
         frame = null;
         if (f.steps.length > 0) redoStack = [];
         if (entry === null) return;
@@ -526,10 +562,10 @@ export function createCommandBus<
         const patches = undone.flatMap((s) => s.inverse);
         const changedIds = idsOf(patches);
         const prevDoc = doc;
-        doc = mark.doc;
+        // the restored document may predate auto-freeze (e.g. `initial`)
+        doc = shouldAutoFreeze() ? deepFreeze(mark.doc) : mark.doc;
         f.steps.length = mark.steps;
-        f.failures = mark.failures;
-        f.lastFailure = mark.lastFailure;
+        f.failed.length = mark.failed;
         f.marks.pop();
         if (f.marks.length === 0) frame = null;
         notify({
@@ -542,14 +578,15 @@ export function createCommandBus<
         });
     }
 
-    function transaction<T>(
+    function transaction(
         labelKey: string,
-        fn: () => T,
+        fn: () => unknown,
         labelParams?: Record<string, string | number>,
-    ): T {
-        beginTransaction(labelKey, labelParams);
+        meta?: unknown,
+    ): unknown {
+        beginTransaction(labelKey, labelParams, meta);
         const f = frame!;
-        const failuresBefore = f.failures;
+        const failedBefore = f.failed.length;
         // Roll back; a listener error raised by the rollback event must not
         // hide the error that caused it.
         const abort = (): void => {
@@ -559,15 +596,21 @@ export function createCommandBus<
                 // state was restored before notifying; the original error wins
             }
         };
-        let value: T;
+        let value: unknown;
         try {
             value = fn();
         } catch (error) {
             abort();
             throw error;
         }
-        if (f.failures > failuresBefore) {
-            const error = f.lastFailure!;
+        if (isThenable(value)) {
+            abort();
+            // nobody will await it: do not leave an unhandled rejection behind
+            void Promise.resolve(value).catch(() => {});
+            throw new Error('command bus: transaction fn must be synchronous');
+        }
+        if (f.failed.length > failedBefore) {
+            const error = f.failed[failedBefore]!; // the first failure
             abort();
             throw new CommandFailedError(error);
         }
@@ -588,7 +631,7 @@ export function createCommandBus<
         beginTransaction,
         commitTransaction,
         rollbackTransaction,
-        transaction,
+        transaction: transaction as CommandBus<D, C, M>['transaction'],
         reset(next: D): void {
             if (frame !== null) {
                 throw new Error(

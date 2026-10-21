@@ -74,7 +74,12 @@ export interface HistoryEntry {
     lastParams: unknown;
     /** Millisecond timestamp of the last update. */
     at: number;
-    /** Opaque editor data (selection before/after); never inspected by the engine. */
+    /**
+     * Opaque editor data (selection before/after); never inspected by the
+     * engine. A merge keeps the entry's existing `meta` object (the first
+     * step's), so the editor can fill `selectionAfter` into it through the
+     * entry it receives with every `merge` event.
+     */
     meta: unknown;
 }
 
@@ -97,12 +102,20 @@ export interface BusEvent<D> {
     patches: Patches;
     /** `'*'` means "everything". */
     changedIds: ReadonlySet<string>;
+    /**
+     * The entry the event created or updated. `null` for `reset` and
+     * `rollback`, for commands that left no entry (`history: false`, inside a
+     * transaction), and for a `merge` that returned the document to the start
+     * of the merged sequence: that merge drops the now empty entry, so there
+     * is nothing left to undo.
+     */
     entry: Readonly<HistoryEntry> | null;
 }
 
 export interface ExecuteOptions {
     merge?: boolean;
     history?: boolean;
+    /** Stored on a new entry; ignored by a merge, which keeps the entry's existing `meta`. */
     meta?: unknown;
 }
 
@@ -144,21 +157,33 @@ export interface CommandBus<
     canRedo(): boolean;
     /** Seals the top entry (ends a drag / nudge burst). */
     seal(): void;
+    /**
+     * Opens a transaction (a nested call opens a savepoint level; only the
+     * outermost call's label and `meta` are used for the committed entry).
+     */
     beginTransaction(
         labelKey: string,
         labelParams?: Record<string, string | number>,
+        meta?: unknown,
     ): void;
     commitTransaction(): void;
+    /** Rolls back to the matching `beginTransaction` (the whole transaction at depth 1). */
     rollbackTransaction(): void;
     /**
      * `begin; fn; commit`. Rolls back and rethrows when `fn` throws, and rolls
-     * back and throws `CommandFailedError` when any execute inside returned an
-     * error (even if `fn` ignored it).
+     * back and throws `CommandFailedError` (carrying the first failure) when
+     * any execute inside returned an error, even if `fn` ignored it.
+     *
+     * `fn` must be synchronous: commands run after its first `await` would
+     * land outside the transaction. The type rejects a Promise-returning `fn`,
+     * and at run time a returned thenable rolls the transaction back and throws
+     * `transaction fn must be synchronous`.
      */
     transaction<T>(
         labelKey: string,
-        fn: () => T,
+        fn: () => T extends PromiseLike<unknown> ? never : T,
         labelParams?: Record<string, string | number>,
+        meta?: unknown,
     ): T;
     /** Replaces the document and clears history (load, restore revision). */
     reset(doc: D): void;
