@@ -19,6 +19,8 @@ return [
         'save_changes' => 'Save changes',
     ],
 
+    'verify_required' => 'Verify your email or phone number to continue.',
+
     'a11y' => [
         'skip_to_content' => 'Skip to content',
     ],

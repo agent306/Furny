@@ -9,6 +9,9 @@
     "common.actions.save_changes": "Save changes",
     "common.counts.items": "{count, plural, one {# item} other {# items}}",
     "common.photo_n": "Photo {n}",
+    "common.verify_required": "Verify your email or phone number to continue.",
+    "designs.errors.in_order": "This design is part of an order, so it cannot be deleted.",
+    "designs.errors.locked": "This design is part of an order and cannot be changed.",
     "production.stages.assembly": "Assembly",
     "production.stages.cutting": "Cutting",
     "production.stages.drilling": "Drilling & machining",
@@ -17,5 +20,6 @@
     "production.stages.material_procurement": "Material procurement",
     "production.stages.packing": "Packing",
     "production.stages.quality_check": "Quality check",
+    "projects.errors.has_orders": "This project has orders, so it cannot be deleted.",
     "quotes.default_terms": "This quote is valid until the date shown. Final dimensions are confirmed during our confirmation call. Delivery dates are estimates until production starts."
 }
