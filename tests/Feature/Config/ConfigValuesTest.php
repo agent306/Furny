@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Providers\AppServiceProvider;
+use App\Support\Media\Media;
 use Illuminate\Support\Facades\Log;
 
 it('pins the application basics', function (): void {
@@ -107,4 +108,24 @@ it('stays quiet when the application name fits in 20 characters', function (): v
     (new AppServiceProvider($this->app))->boot();
 
     Log::shouldNotHaveReceived('warning');
+});
+
+it('defaults the media library to the private s3 disk, the default queue and the application media model', function (): void {
+    /** @var array<string, mixed> $media */
+    $media = evaluateConfigFile('media-library', [
+        'MEDIA_DISK' => false, 'MEDIA_QUEUE' => false, 'QUEUE_CONVERSIONS_BY_DEFAULT' => false, 'IMAGE_DRIVER' => false,
+    ]);
+
+    expect($media['disk_name'])->toBe('s3')
+        ->and($media['queue_name'])->toBe('default')
+        ->and($media['queue_conversions_by_default'])->toBeTrue()
+        ->and($media['media_model'])->toBe(Media::class)
+        ->and($media['image_driver'])->toBe('gd');
+});
+
+it('takes the Pulse ingest driver from the environment', function (): void {
+    /** @var array{ingest: array{driver: string}} $pulse */
+    $pulse = evaluateConfigFile('pulse', ['PULSE_INGEST_DRIVER' => 'redis']);
+
+    expect($pulse['ingest']['driver'])->toBe('redis');
 });

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Identity\Models;
 
 use App\Domain\Identity\Enums\StaffRole;
+use Carbon\CarbonImmutable;
 use Database\Factories\Domain\Identity\StaffInvitationFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -12,7 +13,6 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Carbon;
 
 /**
  * 02 §1.5. Rows are never deleted (audit, 13 §5.9).
@@ -22,12 +22,12 @@ use Illuminate\Support\Carbon;
  * @property string $name
  * @property StaffRole $role
  * @property string|null $invited_by
- * @property Carbon $expires_at
- * @property Carbon|null $accepted_at
- * @property Carbon|null $revoked_at
+ * @property CarbonImmutable $expires_at
+ * @property CarbonImmutable|null $accepted_at
+ * @property CarbonImmutable|null $revoked_at
  * @property string|null $user_id
- * @property Carbon|null $created_at
- * @property Carbon|null $updated_at
+ * @property CarbonImmutable|null $created_at
+ * @property CarbonImmutable|null $updated_at
  */
 #[Fillable(['email', 'name', 'role', 'invited_by', 'expires_at', 'accepted_at', 'revoked_at', 'user_id'])]
 final class StaffInvitation extends Model

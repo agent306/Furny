@@ -6,13 +6,13 @@ namespace App\Domain\Identity\Models;
 
 use App\Domain\Identity\Enums\OtpChannel;
 use App\Domain\Identity\Enums\OtpPurpose;
+use Carbon\CarbonImmutable;
 use Database\Factories\Domain\Identity\OtpCodeFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Carbon;
 
 /**
  * 02 §1.3. `code_hash` is `Hash::make` of the 6-digit code; the plain code is never stored.
@@ -23,11 +23,11 @@ use Illuminate\Support\Carbon;
  * @property OtpChannel $channel
  * @property string $code_hash
  * @property int $attempts
- * @property Carbon $expires_at
- * @property Carbon|null $consumed_at
+ * @property CarbonImmutable $expires_at
+ * @property CarbonImmutable|null $consumed_at
  * @property string|null $ip
- * @property Carbon|null $created_at
- * @property Carbon|null $updated_at
+ * @property CarbonImmutable|null $created_at
+ * @property CarbonImmutable|null $updated_at
  */
 #[Fillable(['phone_e164', 'purpose', 'channel', 'code_hash', 'attempts', 'expires_at', 'consumed_at', 'ip'])]
 #[Hidden(['code_hash'])]

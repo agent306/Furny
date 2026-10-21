@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace App\Domain\Identity\Models;
 
+use Carbon\CarbonImmutable;
 use Database\Factories\Domain\Identity\AddressFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Carbon;
 
 /**
  * 02 §1.2.
@@ -26,8 +26,8 @@ use Illuminate\Support\Carbon;
  * @property string $country_code
  * @property string|null $latitude
  * @property string|null $longitude
- * @property Carbon|null $created_at
- * @property Carbon|null $updated_at
+ * @property CarbonImmutable|null $created_at
+ * @property CarbonImmutable|null $updated_at
  */
 #[Fillable(['label', 'line1', 'line2', 'city', 'region', 'postal_code', 'country_code', 'latitude', 'longitude'])]
 final class Address extends Model

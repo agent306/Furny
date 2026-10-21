@@ -2,6 +2,8 @@ declare namespace App {
 namespace Domain {
 namespace Identity {
 namespace Enums {
+export type DeliveryDriver = 'meta' | 'twilio' | 'msg91' | 'log' | 'array';
+export type DeliveryStatus = 'pending' | 'accepted' | 'sent' | 'delivered' | 'read' | 'failed';
 export type LengthUnit = 'mm' | 'cm' | 'm' | 'ftin' | 'in';
 export type OtpChannel = 'whatsapp' | 'sms';
 export type OtpPurpose = 'login' | 'verify_phone';
@@ -13,6 +15,8 @@ export type UserType = 'customer' | 'staff';
 namespace Shared {
 namespace Enums {
 export type NotificationChannel = 'database' | 'mail' | 'whatsapp' | 'sms' | 'webpush';
+export type UploadPurpose = 'blueprint_source' | 'message_attachment' | 'production_photo' | 'issue_photo' | 'delivery_photo' | 'avatar' | 'business_logo' | 'material_texture' | 'finish_texture' | 'hardware_image' | 'plan_thumbnail' | 'project_cover' | 'furniture_thumbnail' | 'preset_thumbnail';
+export type UploadStatus = 'pending' | 'uploaded' | 'ready' | 'rejected' | 'consumed' | 'expired';
 }
 }
 }

@@ -7,6 +7,8 @@ namespace App\Domain\Identity\Models;
 use App\Domain\Identity\Enums\LengthUnit;
 use App\Domain\Identity\Enums\UnitSystem;
 use App\Domain\Identity\Enums\UserType;
+use App\Domain\Shared\Models\UploadIntent;
+use Carbon\CarbonImmutable;
 use Database\Factories\Domain\Identity\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Contracts\Translation\HasLocalePreference;
@@ -19,8 +21,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Illuminate\Support\Carbon;
 use Laravel\Fortify\TwoFactorAuthenticatable;
+use NotificationChannels\WebPush\HasPushSubscriptions;
+use Spatie\Image\Enums\Fit;
+use Spatie\MediaLibrary\HasMedia;
+use Spatie\MediaLibrary\InteractsWithMedia;
+use Spatie\MediaLibrary\MediaCollections\Models\Media as BaseMedia;
 
 /**
  * 02 §1.1. `type`, `is_active`, the verification and onboarding timestamps and the Fortify
@@ -30,9 +36,9 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property UserType $type
  * @property string $name
  * @property string|null $email
- * @property Carbon|null $email_verified_at
+ * @property CarbonImmutable|null $email_verified_at
  * @property string|null $phone_e164
- * @property Carbon|null $phone_verified_at
+ * @property CarbonImmutable|null $phone_verified_at
  * @property string|null $password
  * @property string|null $google_id
  * @property UnitSystem $unit_system
@@ -40,26 +46,26 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property string $locale
  * @property string $timezone
  * @property bool $is_active
- * @property Carbon|null $last_login_at
+ * @property CarbonImmutable|null $last_login_at
  * @property string|null $two_factor_secret
  * @property string|null $two_factor_recovery_codes
- * @property Carbon|null $two_factor_confirmed_at
+ * @property CarbonImmutable|null $two_factor_confirmed_at
  * @property string|null $remember_token
  * @property bool $marketing_opt_in
  * @property string|null $notes_internal
- * @property Carbon|null $terms_accepted_at
- * @property Carbon|null $onboarded_at
- * @property Carbon|null $anonymised_at
- * @property Carbon|null $created_at
- * @property Carbon|null $updated_at
- * @property Carbon|null $deleted_at
+ * @property CarbonImmutable|null $terms_accepted_at
+ * @property CarbonImmutable|null $onboarded_at
+ * @property CarbonImmutable|null $anonymised_at
+ * @property CarbonImmutable|null $created_at
+ * @property CarbonImmutable|null $updated_at
+ * @property CarbonImmutable|null $deleted_at
  */
 #[Fillable(['name', 'email', 'phone_e164', 'password', 'locale', 'timezone', 'unit_system', 'length_unit', 'marketing_opt_in'])]
 #[Hidden(['password', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
-final class User extends Authenticatable implements HasLocalePreference, MustVerifyEmail
+final class User extends Authenticatable implements HasLocalePreference, HasMedia, MustVerifyEmail
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, HasUlids, Notifiable, SoftDeletes, TwoFactorAuthenticatable;
+    use HasFactory, HasPushSubscriptions, HasUlids, InteractsWithMedia, Notifiable, SoftDeletes, TwoFactorAuthenticatable;
 
     /**
      * @return array<string, string>
@@ -107,6 +113,38 @@ final class User extends Authenticatable implements HasLocalePreference, MustVer
     public function addresses(): HasMany
     {
         return $this->hasMany(Address::class);
+    }
+
+    /**
+     * @return HasMany<NotificationDelivery, $this>
+     */
+    public function notificationDeliveries(): HasMany
+    {
+        return $this->hasMany(NotificationDelivery::class);
+    }
+
+    /**
+     * @return HasMany<UploadIntent, $this>
+     */
+    public function uploadIntents(): HasMany
+    {
+        return $this->hasMany(UploadIntent::class);
+    }
+
+    /** 02 §10: one avatar (jpg, png, webp) on the public disk with a 128 px `thumb`. */
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection('avatar')
+            ->useDisk('s3-public')
+            ->singleFile()
+            ->acceptsMimeTypes(['image/jpeg', 'image/png', 'image/webp']);
+    }
+
+    public function registerMediaConversions(?BaseMedia $media = null): void
+    {
+        $this->addMediaConversion('thumb')
+            ->performOnCollections('avatar')
+            ->fit(Fit::Crop, 128, 128);
     }
 
     public function isStaff(): bool
