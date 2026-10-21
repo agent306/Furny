@@ -13,6 +13,7 @@ import pytest
 
 from app.api.errors import VisionError
 from app.pipeline import wall_candidates as candmod
+from app.pipeline import wall_runs as runsmod
 from app.pipeline import walls as wallmod
 from app.pipeline.binarize import Preprocessed, preprocess
 from app.pipeline.dimensions import find_dimension_lines
@@ -490,7 +491,7 @@ def test_door_leaf_touching_the_jamb_is_not_a_wall(monkeypatch: pytest.MonkeyPat
     gap = r.graph.gaps[0]
     assert gap.u1 - gap.u0 == pytest.approx(90, abs=6)
     # Discriminating: without the leaf-length test the leaf is a dangling sketch wall.
-    monkeypatch.setattr(wallmod, "LEAF_MAX", 0.0)
+    monkeypatch.setattr(runsmod, "LEAF_MAX", 0.0)
     ext = extract_walls(r.page, r.pre, r.segments, [], make_ctx(), ink=r.pre.ink)
     assert any(abs(w.p0[0] - 550) < 6 and abs(w.p1[0] - 550) < 6 for w in ext.raw)
 
@@ -824,7 +825,7 @@ def test_jog_between_column_and_wall_stays_connected(monkeypatch: pytest.MonkeyP
     img = render_plan(SIZE, walls)
     r = run(img)
     assert sum(w.free_ends for w in r.graph.walls) == 0
-    monkeypatch.setattr(wallmod, "_join", lambda a, b, dropped: [])
+    monkeypatch.setattr(runsmod, "_join", lambda a, b, dropped: [])
     assert sum(w.free_ends for w in run(img).graph.walls) > 0
 
 

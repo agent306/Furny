@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 import pytest
 
+from app.pipeline import wall_runs as runsmod
 from app.pipeline import walls as wallmod
 from app.pipeline.opening_evidence import door_arc
 from app.schemas.candidates import WallGraph
@@ -94,13 +95,13 @@ def test_wall_ending_beside_a_black_blocks_centre_line_keeps_its_junction(
     ]
     img = render_plan(SIZE, walls)
     assert free_ends(run(img).graph) == 0
-    real = wallmod._close_end
+    real = runsmod._close_end
 
     def without_connector(*args: object, **kwargs: object) -> list[object]:
         real(*args, **kwargs)  # type: ignore[arg-type]
         return []
 
-    monkeypatch.setattr(wallmod, "_close_end", without_connector)
+    monkeypatch.setattr(runsmod, "_close_end", without_connector)
     assert free_ends(run(img).graph) > 0
 
 
@@ -180,11 +181,11 @@ def test_block_and_bold_stroke_are_bridged_across_a_door(side: int) -> None:
     assert free_ends(run(block_door_bold(door=False), use_dimensions=False).graph) == 2
 
 
-def _run(s0: float, s1: float, off: float, t: float, style: str) -> wallmod._Run:
+def _run(s0: float, s1: float, off: float, t: float, style: str) -> runsmod._Run:
     u, n = np.array((1.0, 0.0)), np.array((0.0, 1.0))
     source = "double_line" if style == "double" else "filled"
-    member = wallmod._Item(s0, s1, off, t, t, source, style, True, True)  # type: ignore[arg-type]
-    return wallmod._Run(u, n, s0, s1, [member], [], True, True)
+    member = runsmod._Item(s0, s1, off, t, t, source, style, True, True)  # type: ignore[arg-type]
+    return runsmod._Run(u, n, s0, s1, [member], [], True, True)
 
 
 @pytest.mark.parametrize(
@@ -205,7 +206,7 @@ def test_frame_lines_are_opening_evidence(lines: list[tuple[int, int, int, int]]
     a = _run(0.0, 500.0, 100.0, 28.0, "block")
     b = _run(700.0, 1500.0, 107.0, 10.0, "bold")
     thin = np.array(lines, np.float64)
-    out = wallmod._link_runs([a, b], thin, np.zeros((300, 1600), np.uint8), 14.0, lambda: None)
+    out = runsmod._link_runs([a, b], thin, np.zeros((300, 1600), np.uint8), 14.0, lambda: None)
     if not bridged:
         assert out == []
         return
@@ -218,7 +219,7 @@ def test_frame_lines_are_opening_evidence(lines: list[tuple[int, int, int, int]]
     ]
     # Styles must differ: two bold strokes are not bridged (their gaps follow step 8 and t_wall).
     assert (
-        wallmod._link_runs(
+        runsmod._link_runs(
             [a, _run(700.0, 1500.0, 107.0, 10.0, "block")],
             thin,
             np.zeros((300, 1600), np.uint8),
@@ -508,5 +509,5 @@ def test_bridge_candidates_poll_the_deadline_each() -> None:
         )
     polls: list[int] = []
     ink = np.zeros((600, 2600), np.uint8)
-    wallmod._link_runs(runs, np.zeros((0, 4)), ink, 20.0, lambda: polls.append(1))
+    runsmod._link_runs(runs, np.zeros((0, 4)), ink, 20.0, lambda: polls.append(1))
     assert len(polls) >= 1 + 5
