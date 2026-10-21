@@ -25,6 +25,15 @@ return [
     ],
     'password_rules' => 'At least {min, plural, one {# character} other {# characters}}.',
 
+    // 10 §4.2, §4.3. The caption sits under the Google button: pressing it is accepting the terms (13 §5.3).
+    'google' => [
+        'continue' => 'Continue with Google',
+        'caption_before' => 'By continuing you accept the',
+        'caption_and' => 'and',
+        'caption_after' => '.',
+        'or' => 'or',
+    ],
+
     // 10 §4.2
     'login' => [
         'title' => 'Log in',

@@ -52,6 +52,7 @@ twoFactorEnabled: boolean,
 namespace Enums {
 export type DeliveryDriver = 'meta' | 'twilio' | 'msg91' | 'log' | 'array';
 export type DeliveryStatus = 'pending' | 'accepted' | 'sent' | 'delivered' | 'read' | 'failed';
+export type GoogleIntent = 'login' | 'link' | 'invitation' | 'reauthenticate';
 export type LengthUnit = 'mm' | 'cm' | 'm' | 'ftin' | 'in';
 export type OtpChannel = 'whatsapp' | 'sms';
 export type OtpPurpose = 'login' | 'verify_phone';

@@ -173,13 +173,32 @@ describe('Register (10 §4.3)', () => {
         expect(wrapper.text()).toContain('Already have an account?');
     });
 
-    it('has a submit button and no phone or Google buttons yet', () => {
+    it('has a submit button, and Google under the form while the feature is on', () => {
         const wrapper = register();
 
         expect(wrapper.get('[data-test="register-button"]').text()).toBe(
             'Create account',
         );
         expect(wrapper.findAll('button[type="submit"]')).toHaveLength(1);
+        expect(
+            wrapper.get('a[data-test="google-button"]').attributes('href'),
+        ).toBe('/auth/google/redirect?intent=login');
+        expect(wrapper.get('[data-test="google-caption"]').text()).toContain(
+            'Terms of service',
+        );
+    });
+
+    it('has no Google button while the feature is off', () => {
+        resetPage({
+            auth: { user: null },
+            features: { ...features, google_login: false },
+        });
+
+        expect(
+            register({ features: { ...features, google_login: false } })
+                .find('[data-test="google-sign-in"]')
+                .exists(),
+        ).toBe(false);
     });
 });
 

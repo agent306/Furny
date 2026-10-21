@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Account\GoogleLinkController;
 use App\Http\Controllers\Account\SessionController;
+use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\CspReportController;
 use App\Http\Controllers\LegalController;
 use App\Http\Controllers\ManifestController;
@@ -27,6 +29,14 @@ Route::post('csp-report', CspReportController::class)
     ->middleware('throttle:csp-report')
     ->withoutMiddleware(StatelessRoute::WITHOUT);
 
+// Google sign-in (13 §5.3). Open to everybody: a guest signs in, a signed-in user links Google or confirms their
+// identity, and the intent decides which. `active` signs out a deactivated user first. Hidden (404) unless
+// `features.google_login`.
+Route::middleware(['throttle:oauth', 'active'])->prefix('auth/google')->name('auth.google.')->group(function (): void {
+    Route::get('redirect', [GoogleController::class, 'redirect'])->name('redirect');
+    Route::get('callback', [GoogleController::class, 'callback'])->name('callback');
+});
+
 // Account security, for both audiences (14 §3.3). Signing out one's own devices is not a sensitive action; signing
 // out all the others is (`recent.auth`).
 Route::middleware(['auth', 'active'])->prefix('account')->name('account.')->group(function (): void {
@@ -34,6 +44,9 @@ Route::middleware(['auth', 'active'])->prefix('account')->name('account.')->grou
     Route::delete('sessions', [SessionController::class, 'destroyOthers'])
         ->middleware('recent.auth')
         ->name('sessions.destroy-others');
+    Route::delete('google', [GoogleLinkController::class, 'destroy'])
+        ->middleware('recent.auth')
+        ->name('google.unlink');
 });
 
 // A URL that matches nothing is a 404 raised inside the `web` group, so the Error page renders in the

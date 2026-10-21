@@ -36,6 +36,12 @@ final class AccessProbe
      */
     private const array GUEST_REDIRECTS = ['two-factor.login' => 'login'];
 
+    /**
+     * Public routes that send a visitor on without showing a page: the Google round trip starts with a redirect
+     * (here, back with an error, as the visitor did not say what they come for) and ends with one.
+     */
+    private const array PUBLIC_REDIRECTS = ['auth.google.redirect', 'auth.google.callback'];
+
     public function __construct(private readonly TestCase $test) {}
 
     /**
@@ -191,7 +197,15 @@ final class AccessProbe
 
     private function checkPublic(string $name): void
     {
-        $this->assert($this->opened($this->get($name)), "{$name}: a guest does not get the page.");
+        $guest = $this->get($name);
+
+        if (in_array($name, self::PUBLIC_REDIRECTS, true)) {
+            $this->assert($guest->isRedirect(), "{$name}: a guest is not redirected.");
+
+            return;
+        }
+
+        $this->assert($this->opened($guest), "{$name}: a guest does not get the page.");
     }
 
     /** A staff role other than the owner that does not hold the permission (the owner gates are the owner's alone). */

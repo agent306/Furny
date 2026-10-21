@@ -49,7 +49,7 @@ function login(props: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-    resetPage({ auth: { user: null } });
+    resetPage({ auth: { user: null }, features });
 });
 
 describe('Login (10 §4.2)', () => {
@@ -134,11 +134,34 @@ describe('Login (10 §4.2)', () => {
         expect(wrapper.text()).not.toContain('New here?');
     });
 
-    it('has no phone or Google buttons yet', () => {
+    it('offers Google under the form, with its terms caption', () => {
         const wrapper = login();
 
-        expect(wrapper.findAll('a')).toHaveLength(2);
+        expect(
+            wrapper.get('a[data-test="google-button"]').attributes('href'),
+        ).toBe('/auth/google/redirect?intent=login');
+        expect(wrapper.find('[data-test="google-separator"]').exists()).toBe(
+            true,
+        );
+        expect(wrapper.get('[data-test="google-caption"]').text()).toContain(
+            'By continuing you accept the',
+        );
         expect(wrapper.findAll('button[type="submit"]')).toHaveLength(1);
+    });
+
+    it('has no Google button while the feature is off', () => {
+        resetPage({
+            auth: { user: null },
+            features: { ...features, google_login: false },
+        });
+        const wrapper = login({
+            features: { ...features, google_login: false },
+        });
+
+        expect(wrapper.find('[data-test="google-sign-in"]').exists()).toBe(
+            false,
+        );
+        expect(wrapper.findAll('a')).toHaveLength(2);
     });
 
     it('shows the status message of the session', () => {

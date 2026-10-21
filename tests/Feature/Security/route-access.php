@@ -51,6 +51,10 @@ return [
     'two-factor.login' => $entry('guest'),
     'two-factor.login.store' => $entry('guest'),
 
+    // Google sign-in (13 §5.3): open to everybody, the intent decides what the round trip does.
+    'auth.google.redirect' => $entry('public'),
+    'auth.google.callback' => $entry('public'),
+
     // Fortify, signed-in (13 §2). Customers are kept out of `two-factor.*` by a later middleware (13 §5.10).
     'logout' => $entry('any'),
     'verification.notice' => $entry('any'),
@@ -72,6 +76,7 @@ return [
     // Account security, both audiences (14 §3.3).
     'account.sessions.destroy' => $entry('any'),
     'account.sessions.destroy-others' => $entry('any'),
+    'account.google.unlink' => $entry('any'),
 
     // Customer app (10 §2).
     'customer.dashboard' => $entry('customer'),

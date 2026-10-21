@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Actions\Fortify;
 
 use App\Domain\Identity\Models\User;
+use App\Listeners\RecordSuccessfulLogin;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
@@ -26,6 +27,12 @@ final class AuthenticateUser
     /** @throws ValidationException when the password is right but the account is not active */
     public static function handle(Request $request): ?User
     {
+        // A password login is a password login: a method another flow left for a later step (Google and then the
+        // two-factor challenge, abandoned) must not be taken for this sign-in's.
+        if ($request->hasSession()) {
+            $request->session()->forget(RecordSuccessfulLogin::PENDING_METHOD_KEY);
+        }
+
         // Fortify asks twice for one login: its two-factor step and its authenticate step each call this. The
         // second call gets the answer of the first, so one login costs one hash check and one time box.
         $key = hash('sha256', (string) self::email($request)."\0".(is_string($request->input('password')) ? $request->input('password') : ''));

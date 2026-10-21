@@ -36,6 +36,17 @@ return [
     // Error codes of the account flows (13 §5, 10 §13.2).
     'errors' => [
         'last_login_method' => 'You need at least one way to sign in.',
+
+        // Google sign-in (13 §5.3).
+        'oauth_cancelled' => 'Google sign-in was cancelled. You can try again or use another way to sign in.',
+        'oauth_state_invalid' => 'That sign-in attempt has expired. Please try again.',
+        'oauth_failed' => "We couldn't sign you in with Google. Please try again in a moment.",
+        'google_email_unverified' => 'Google has not verified the email address of that account, so we cannot use it.',
+        'google_email_mismatch' => 'That Google account uses a different email address than the one expected here.',
+        'google_in_use' => 'That Google account is already connected to another account.',
+        'email_unavailable' => "This email can't be used with your account. Try another Google account.",
+        'account_pending_deletion' => 'This account is scheduled for deletion. Contact us to restore it.',
+        'pending_staff_invitation' => 'Open the invitation link we emailed you.',
     ],
 
 ];

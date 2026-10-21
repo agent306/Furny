@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Form, Head, Link, usePage } from '@inertiajs/vue3';
 import { computed, useTemplateRef } from 'vue';
+import GoogleButton from '@/components/auth/GoogleButton.vue';
 import PasswordField from '@/components/auth/PasswordField.vue';
 import ThrottleNotice from '@/components/auth/ThrottleNotice.vue';
 import TurnstileWidget from '@/components/auth/TurnstileWidget.vue';
@@ -19,7 +20,7 @@ import { privacy, terms } from '@/routes/legal';
 import { store } from '@/routes/register';
 import type { FeatureFlags } from '@/types/inertia';
 
-// 10 §4.3. The phone and Google sign-up buttons are added with those sign-in methods.
+// 10 §4.3. The phone sign-up button is added with that sign-in method.
 const props = defineProps<{
     canRegister: boolean;
     features: FeatureFlags;
@@ -253,6 +254,8 @@ function describedBy(error: string | undefined): string | undefined {
                 {{ t('auth_ui.register.submit') }}
             </Button>
         </Form>
+
+        <GoogleButton separated />
 
         <p class="text-center text-sm text-muted-foreground">
             {{ t('auth_ui.register.have_account') }}
