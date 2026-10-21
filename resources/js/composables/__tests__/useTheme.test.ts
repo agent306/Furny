@@ -244,13 +244,15 @@ describe('useTheme leftovers (Task 16 review)', () => {
         expect(cookieWrites[0]?.toLowerCase()).toContain('appearance=dark');
     });
 
-    it('leaves a matching cookie alone', async () => {
+    it('refreshes a matching cookie too (sliding one-year expiry on every load)', async () => {
         localStorage.setItem('fs:appearance', 'dark');
         cookieHeader = 'appearance=dark';
 
         await loadTheme();
 
-        expect(cookieWrites).toEqual([]);
+        expect(cookieWrites).toHaveLength(1);
+        expect(cookieWrites[0]?.toLowerCase()).toContain('appearance=dark');
+        expect(cookieWrites[0]?.toLowerCase()).toContain('max-age=31536000');
     });
 
     it('does not write a cookie when nothing is stored', async () => {

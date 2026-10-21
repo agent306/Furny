@@ -104,9 +104,9 @@ function initialise(): void {
     appearance.value = stored ?? cookie ?? 'system';
 
     // The cookie is what the server renders from (app.blade.php) and it
-    // expires; refresh it from localStorage so an explicit `dark` does not
-    // flash light on the first load after expiry.
-    if (stored !== null && stored !== cookie) {
+    // expires; rewrite it from localStorage on every load (sliding expiry) so
+    // an explicit `dark` never flashes light after a year of inactivity.
+    if (stored !== null) {
         writeCookie(stored);
     }
 

@@ -4290,7 +4290,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"reka-ui@npm:^2.6.1, reka-ui@npm:^2.9":
+"reka-ui@npm:^2.10, reka-ui@npm:^2.6.1":
   version: 2.11.0
   resolution: "reka-ui@npm:2.11.0"
   dependencies:
@@ -4527,7 +4527,7 @@ __metadata:
     prettier: "npm:^3.9.10"
     prettier-plugin-tailwindcss: "npm:0.8.1"
     pusher-js: "npm:^8.6.0"
-    reka-ui: "npm:^2.9"
+    reka-ui: "npm:^2.10"
     svg2pdf.js: "npm:^2.8"
     tailwind-merge: "npm:^3.7.0"
     tailwindcss: "npm:^4.3"
