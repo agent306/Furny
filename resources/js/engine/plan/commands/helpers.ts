@@ -248,9 +248,10 @@ export function splitWallAt(
 
 /**
  * Ends of a wall, resolved to a node (04 §6.5): an existing node id; else the
- * nearest node within `NODE_MERGE_TOL`; else a T-node on the nearest wall
- * whose centre line is within tolerance (not too close to its ends); else a
- * new node at the rounded point.
+ * nearest node within `NODE_MERGE_TOL`; else, on the nearest wall whose centre
+ * line is within tolerance, the wall's end node when the click projects within
+ * `MIN_WALL_LENGTH` of that end, or a T-node splitting the wall; else a new
+ * node at the rounded point.
  */
 export function resolveEndpoint(
     d: Doc,
@@ -276,7 +277,16 @@ export function resolveEndpoint(
     }
     if (nearest !== null) return nearest.id;
 
-    let onWall: { id: string; distance: number; at: Vec2 } | null = null;
+    // The nearest wall whose centre line is within tolerance. Near one of its
+    // ends (within MIN_WALL_LENGTH along the wall) the click means that end
+    // node; a split there would leave a stub.
+    let onWall: {
+        wall: Draft<Wall>;
+        distance: number;
+        at: Vec2;
+        u: number;
+        length: number;
+    } | null = null;
     for (const id of sortedIds(d.walls)) {
         const wall = d.walls[id]!;
         if (
@@ -288,17 +298,26 @@ export function resolveEndpoint(
         const seg = segmentOf(d, wall);
         const length = dist(seg.a, seg.b);
         const hit = closestPointOnSeg(point, seg);
-        const u = hit.t * length;
         if (
             hit.dist <= NODE_MERGE_TOL &&
-            u >= NODE_MERGE_TOL &&
-            u <= length - NODE_MERGE_TOL &&
             (onWall === null || hit.dist < onWall.distance)
         ) {
-            onWall = { id, distance: hit.dist, at: hit.point };
+            onWall = {
+                wall,
+                distance: hit.dist,
+                at: hit.point,
+                u: hit.t * length,
+                length,
+            };
         }
     }
-    if (onWall !== null) return splitWallAt(d, onWall.id, onWall.at, ctx, out);
+    if (onWall !== null) {
+        const toB = onWall.length - onWall.u;
+        if (onWall.u <= MIN_WALL_LENGTH || toB <= MIN_WALL_LENGTH) {
+            return onWall.u <= toB ? onWall.wall.a : onWall.wall.b;
+        }
+        return splitWallAt(d, onWall.wall.id, onWall.at, ctx, out);
+    }
 
     const id = ctx.newId('n');
     const at = roundedPoint(point);
@@ -487,6 +506,31 @@ function splitCrossedWalls(
     }
 }
 
+/**
+ * Rounding can put a wall-split node closer than `MIN_WALL_LENGTH` to its
+ * neighbouring cut although the unrounded cuts were far enough apart. The new
+ * node is then merged into the neighbour (the segment's end first), so the
+ * segment goes through that node: no stub wall and no orphaned end. Existing
+ * nodes are never merged away. `cuts` loses the merged cuts.
+ */
+function settleRoundedCuts(d: Doc, cuts: Cut[], ctx: Ids, out: Out): void {
+    for (let k = 0; k + 1 < cuts.length;) {
+        const p = cuts[k]!;
+        const q = cuts[k + 1]!;
+        const close =
+            dist(nodePoint(d, p.nodeId!), nodePoint(d, q.nodeId!)) <
+            MIN_WALL_LENGTH;
+        const [win, lose] = q.rank < p.rank ? [q, p] : [p, q];
+        if (!close || lose.rank !== 2 || win.nodeId === lose.nodeId) {
+            k += 1;
+            continue;
+        }
+        mergeNodeInto(d, lose.nodeId!, win.nodeId!, ctx, out);
+        cuts.splice(cuts.indexOf(lose), 1);
+        k = Math.max(0, k - 1);
+    }
+}
+
 // ---- insertWallSegment -------------------------------------------------------
 
 /**
@@ -522,6 +566,7 @@ export function insertWallSegment(
     );
     const { kept: cuts, folded } = dedupeCuts(points, length);
     splitCrossedWalls(d, cuts, folded, ctx, out);
+    settleRoundedCuts(d, cuts, ctx, out);
 
     const joined = new Set(
         Object.values(d.walls).map((w) => pairKey(w.a, w.b)),
@@ -575,6 +620,7 @@ export function splitIntersections(
     );
     const { kept, folded } = dedupeCuts(points, length);
     splitCrossedWalls(d, kept, folded, ctx, out);
+    settleRoundedCuts(d, kept, ctx, out);
 
     // The wall keeps its id and always ends at the next cut; the rest of it
     // moves to the new wall each time, so the next cut splits that tail.

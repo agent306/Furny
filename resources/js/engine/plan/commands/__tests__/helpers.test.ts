@@ -255,14 +255,21 @@ describe('resolveEndpoint', () => {
         expect(Object.keys(doc.walls)).toHaveLength(1);
     });
 
-    it('does not split a wall within tolerance of its end', () => {
-        const { g } = oneWall();
-        // 4 mm along, 4 mm off: no node within 5 mm, projection inside the end margin
-        const { doc, value } = g.run((d, c, o) =>
-            resolveEndpoint(d, { point: { x: 4, y: -4 } }, c, o),
-        );
-        expect(Object.keys(doc.walls)).toHaveLength(1);
-        expect(doc.nodes[value]).toEqual({ id: value, x: 4, y: -4 });
+    it('snaps to the wall end when the click projects within 10 mm of it and no node is within 5 mm', () => {
+        const { g, a, b } = oneWall();
+        const at = (x: number, y: number) =>
+            g.run((d, c, o) => resolveEndpoint(d, { point: { x, y } }, c, o));
+        for (const [x, y, end] of [
+            [4, -4, a],
+            [9, 3, a],
+            [10, 3, a],
+            [4990, -3, b],
+            [4991, 5, b],
+        ] as const) {
+            const r = at(x, y);
+            expect(r.value).toBe(end);
+            expect(r.doc).toBe(g.doc); // nothing created or split
+        }
     });
 
     it('writes a new node without a negative zero', () => {
@@ -1128,26 +1135,29 @@ describe('tolerance boundaries (5 mm)', () => {
         expect(Object.keys(snap(-5).walls)).toHaveLength(2);
     });
 
-    it('treats a projection under 5 mm from the wall end as no wall snap, and refuses a split under 10 mm', () => {
-        const { g } = oneWall();
+    it('splits the wall from just over 10 mm along it, and snaps to the end at 10 mm', () => {
+        const { g, a } = oneWall();
         const at = (x: number) =>
-            g.run((d, c, o) => resolveEndpoint(d, { point: { x, y: 4 } }, c, o))
-                .doc;
-        // x = 4.9: u < 5, a plain node and no split
-        expect(Object.keys(at(4.9).walls)).toHaveLength(1);
-        // u = 5 is inside the snap margin but would leave a stub: refused
-        expect(
-            g.abortOf((d, c, o) =>
-                resolveEndpoint(d, { point: { x: 5, y: 4 } }, c, o),
-            ).code,
-        ).toBe('wall_too_short');
-        expect(
-            g.abortOf((d, c, o) =>
-                resolveEndpoint(d, { point: { x: 4995, y: 4 } }, c, o),
-            ).code,
-        ).toBe('wall_too_short');
-        // 4.001 mm beyond the node tolerance of the end, over 10 mm in
-        expect(Object.keys(at(10.5).walls)).toHaveLength(2);
+            g.run((d, c, o) =>
+                resolveEndpoint(d, { point: { x, y: 4 } }, c, o),
+            );
+        expect(at(10).value).toBe(a);
+        const split = at(10.001);
+        expect(Object.keys(split.doc.walls)).toHaveLength(2);
+        expect(split.doc.nodes[split.value]).toEqual({
+            id: split.value,
+            x: 10,
+            y: 0,
+        });
+        // a click 5.001 mm off the line is no wall snap at all
+        const off = g.run((d, c, o) =>
+            resolveEndpoint(d, { point: { x: 4, y: 5.001 } }, c, o),
+        );
+        expect(off.doc.nodes[off.value]).toEqual({
+            id: off.value,
+            x: 4,
+            y: 5,
+        });
     });
 
     it('joins a node at exactly 5 mm from the segment interior and not at 5.001 mm', () => {
@@ -1522,18 +1532,57 @@ describe('folded crossings', () => {
         expect(wallsOf(doc)).toHaveLength(6);
     });
 
-    it('never makes a wall under 10 mm when rounding moves a cut node closer to the end', () => {
+    it('routes S through `from` when rounding puts a cut node under 10 mm from it', () => {
         const g = new Graph();
         // crosses S (the diagonal) at 7.1875, 7.1875: 10.16 mm from `from`,
         // but the rounded node (7, 7) is only 9.9 mm away
-        g.wall(g.node(-5, -31), g.node(100, 299));
+        const crossed = g.wall(g.node(-5, -31), g.node(100, 299));
         const from = g.node(0, 0);
         const to = g.node(4000, 4000);
         const { doc, value } = g.run((d, c, o) =>
             insertWallSegment(d, from, to, PROPS, c, o),
         );
         expect(value.wallIds.map((id) => endsOf(doc, id))).toEqual([
-            '7,7>4000,4000',
+            '0,0>4000,4000',
         ]);
+        // the crossed wall passes through `from`; the stray node is gone
+        expect(doc.walls[crossed]!.b).toBe(from);
+        expect(wallsOf(doc)).toHaveLength(3);
+        expect(Object.values(doc.nodes).some((n) => n.x === 7)).toBe(false);
+        expect(
+            Object.values(doc.walls).every(
+                (w) =>
+                    dist(
+                        { x: doc.nodes[w.a]!.x, y: doc.nodes[w.a]!.y },
+                        { x: doc.nodes[w.b]!.x, y: doc.nodes[w.b]!.y },
+                    ) >= 10,
+            ),
+        ).toBe(true);
+    });
+
+    it('does the same at `to` and in splitIntersections', () => {
+        // mirror image: the crossing is 10.16 mm from `to`
+        const g = new Graph();
+        const crossed = g.wall(g.node(4005, 4031), g.node(3900, 3701));
+        const from = g.node(0, 0);
+        const to = g.node(4000, 4000);
+        const { doc, value } = g.run((d, c, o) =>
+            insertWallSegment(d, from, to, PROPS, c, o),
+        );
+        expect(value.wallIds.map((id) => endsOf(doc, id))).toEqual([
+            '0,0>4000,4000',
+        ]);
+        expect(
+            wallsOf(doc).filter((w) => w.a === to || w.b === to),
+        ).toHaveLength(3);
+        expect(doc.walls[crossed]).toBeDefined();
+
+        const h = new Graph();
+        const s1 = h.wall(h.node(0, 0), h.node(4000, 4000));
+        const other = h.wall(h.node(-5, -31), h.node(100, 299));
+        const r = h.run((d, c, o) => splitIntersections(d, s1, c, o));
+        expect(endsOf(r.doc, s1)).toBe('0,0>4000,4000');
+        expect(wallsOf(r.doc)).toHaveLength(3);
+        expect(r.doc.walls[other]!.b).toBe(h.doc.walls[s1]!.a);
     });
 });
