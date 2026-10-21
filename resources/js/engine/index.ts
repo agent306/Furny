@@ -105,3 +105,11 @@ export type { OffsetJoin } from './geometry/clip';
 export { triangulate } from './geometry/triangulate';
 export type { TriangleMesh } from './geometry/triangulate';
 export { cyrb53 } from './geometry/hash';
+export { buildPlanarGraph, nestFaces, walkFaces } from './geometry/planarFaces';
+export type {
+    FaceCycle,
+    PlanarEdge,
+    PlanarGraph,
+    RawFace,
+} from './geometry/planarFaces';
+export { polylabel } from './geometry/polylabel';
