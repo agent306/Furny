@@ -176,14 +176,22 @@ export function readEditorColors(): Record<EditorColorKey, string> {
         typeof document === 'undefined'
             ? null
             : getComputedStyle(document.documentElement);
+    let complete = true;
     const colors = Object.fromEntries(
-        EDITOR_COLOR_KEYS.map((key) => [
-            key,
-            style?.getPropertyValue(`--${key}`).trim() || EXPORT_PALETTE[key],
-        ]),
+        EDITOR_COLOR_KEYS.map((key) => {
+            const value = style?.getPropertyValue(`--${key}`).trim();
+
+            if (!value) {
+                complete = false;
+            }
+
+            return [key, value || EXPORT_PALETTE[key]];
+        }),
     ) as Record<EditorColorKey, string>;
 
-    cache = { resolved: resolved.value, colors };
+    // A fallback means the stylesheet is not applied yet (or the token is
+    // missing): do not pin the light palette for the rest of the theme.
+    cache = complete ? { resolved: resolved.value, colors } : null;
 
     return colors;
 }
@@ -205,8 +213,27 @@ function parseHex(css: string): number | null {
 }
 
 /**
+ * True when the canvas parsed `css`. Canvas keeps the previous `fillStyle` when
+ * the assigned string is not a colour, so each assignment is checked against a
+ * sentinel; two different sentinels tell "ignored" from "same as the sentinel".
+ */
+function canvasAccepts(
+    context: CanvasRenderingContext2D,
+    css: string,
+): boolean {
+    return ['#000000', '#ffffff'].some((sentinel) => {
+        context.fillStyle = sentinel;
+        context.fillStyle = css;
+
+        return context.fillStyle !== sentinel;
+    });
+}
+
+/**
  * Converts any CSS colour (including oklch) to a three.js-compatible sRGB hex
- * number by painting it on a 1×1 canvas. Alpha is ignored.
+ * number by painting it on a 1×1 canvas. Alpha is ignored. Throws for a string
+ * the browser does not recognise as a colour, rather than returning a stale
+ * pixel.
  */
 export function cssColorToHex(css: string): number {
     const hex = parseHex(css);
@@ -224,8 +251,11 @@ export function cssColorToHex(css: string): number {
         throw new Error('A 2D canvas is required to convert CSS colours.');
     }
 
+    if (!canvasAccepts(context, css)) {
+        throw new Error(`Not a CSS colour the browser understands: ${css}`);
+    }
+
     context.clearRect(0, 0, 1, 1);
-    context.fillStyle = css;
     context.fillRect(0, 0, 1, 1);
     const [r = 0, g = 0, b = 0] = context.getImageData(0, 0, 1, 1).data;
 

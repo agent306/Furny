@@ -1,3 +1,10 @@
+@php
+    // Normally shared by HandleAppearance (web group). Defaults keep the root view
+    // renderable where that middleware did not run (error pages, bare routes).
+    $appearance ??= 'system';
+    $themeColors ??= \App\Http\Middleware\HandleAppearance::THEME_COLOR;
+    $themeColor ??= $themeColors[$appearance === 'dark' ? 'dark' : 'light'];
+@endphp
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}" @class(['dark' => $appearance === 'dark'])>
     <head>

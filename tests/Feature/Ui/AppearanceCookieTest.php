@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use App\Http\Middleware\HandleAppearance;
 use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 /** The inline script's appearance constant, however the string is quoted. */
 const SYSTEM_APPEARANCE = '/const appearance = ([\'"])system\1/';
@@ -111,4 +113,18 @@ it('gives the inline theme script the CSP nonce when one is shared, and none oth
     view()->share('csp_nonce', 'abc123');
 
     expect($inlineScript(renderedRoot(null)))->toContain('nonce="abc123"');
+});
+
+it('renders the root view with safe defaults outside the web group', function () {
+    // No HandleAppearance here (e.g. an error page or a route without the web
+    // middleware): the view must not throw on the undefined shared variables.
+    Route::get('/_bare-root', fn () => Inertia::render('Welcome'));
+
+    $document = $this->get('/_bare-root')->assertOk()->getContent();
+
+    expect($document)->toStartWith('<!DOCTYPE html>')
+        ->and(htmlTag($document))->not->toContain('dark')
+        ->and($document)->toMatch(SYSTEM_APPEARANCE)
+        ->and($document)->toContain('<meta name="theme-color" content="'.HandleAppearance::THEME_COLOR['light'].'">')
+        ->and($document)->toContain(HandleAppearance::THEME_COLOR['dark']);
 });

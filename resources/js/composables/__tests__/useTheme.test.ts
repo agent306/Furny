@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { nextTick } from 'vue';
+import { nextTick, watch } from 'vue';
 
 type Listener = (event: { matches: boolean }) => void;
 
 let systemDark = false;
 let listeners: Listener[] = [];
 let cookieWrites: string[] = [];
+let cookieHeader = '';
 
 function mockMatchMedia(): void {
     vi.stubGlobal(
@@ -47,13 +48,14 @@ beforeEach(() => {
     systemDark = false;
     listeners = [];
     cookieWrites = [];
+    cookieHeader = '';
     html().className = '';
     document.head.innerHTML = '<meta name="theme-color" content="#fbfaf7">';
     localStorage.clear();
     mockMatchMedia();
     Object.defineProperty(document, 'cookie', {
         configurable: true,
-        get: () => '',
+        get: () => cookieHeader,
         set: (value: string) => {
             cookieWrites.push(value);
         },
@@ -217,5 +219,63 @@ describe('useTheme', () => {
 
         expect(theme.appearance.value).toBe('system');
         expect(cookieWrites).toEqual([]);
+    });
+});
+
+describe('useTheme leftovers (Task 16 review)', () => {
+    it('rewrites the cookie when the stored value differs (sliding refresh after expiry)', async () => {
+        localStorage.setItem('fs:appearance', 'dark');
+        cookieHeader = '';
+
+        await loadTheme();
+
+        expect(cookieWrites).toHaveLength(1);
+        expect(cookieWrites[0]?.toLowerCase()).toContain('appearance=dark');
+        expect(cookieWrites[0]?.toLowerCase()).toContain('max-age=31536000');
+    });
+
+    it('rewrites a cookie that holds a different value than the stored one', async () => {
+        localStorage.setItem('fs:appearance', 'dark');
+        cookieHeader = 'theme=x; appearance=light';
+
+        await loadTheme();
+
+        expect(cookieWrites).toHaveLength(1);
+        expect(cookieWrites[0]?.toLowerCase()).toContain('appearance=dark');
+    });
+
+    it('leaves a matching cookie alone', async () => {
+        localStorage.setItem('fs:appearance', 'dark');
+        cookieHeader = 'appearance=dark';
+
+        await loadTheme();
+
+        expect(cookieWrites).toEqual([]);
+    });
+
+    it('does not write a cookie when nothing is stored', async () => {
+        cookieHeader = 'appearance=dark';
+
+        const theme = await loadTheme();
+
+        expect(theme.appearance.value).toBe('dark');
+        expect(cookieWrites).toEqual([]);
+    });
+
+    it('toggles the dark class before it publishes the resolved theme', async () => {
+        const theme = await loadTheme();
+        const seen: boolean[] = [];
+
+        watch(
+            theme.resolved,
+            () => seen.push(html().classList.contains('dark')),
+            { flush: 'sync' },
+        );
+
+        theme.setAppearance('dark');
+        theme.setAppearance('light');
+
+        // A reader of `resolved` (e.g. readEditorColors) must already see the new class.
+        expect(seen).toEqual([true, false]);
     });
 });

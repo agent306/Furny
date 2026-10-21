@@ -181,6 +181,38 @@ describe('cssColorToHex', () => {
         expect(fillRect).toHaveBeenCalledWith(0, 0, 1, 1);
     });
 
+    it('throws when the canvas ignores an invalid fillStyle instead of returning the previous pixel', () => {
+        const fillRect = vi.fn();
+        // Browsers silently keep the old fillStyle when the assigned value does not parse.
+        let current = '#000000';
+        const context = {
+            get fillStyle() {
+                return current;
+            },
+            set fillStyle(value: string) {
+                if (/^(#[0-9a-f]{6}|oklch\()/i.test(value)) {
+                    current = value.toLowerCase();
+                }
+            },
+            clearRect: vi.fn(),
+            fillRect,
+            getImageData: () => ({
+                data: Uint8ClampedArray.of(0, 0, 0, 255),
+            }),
+        };
+
+        vi.spyOn(document, 'createElement').mockReturnValue({
+            width: 0,
+            height: 0,
+            getContext: () => context,
+        } as unknown as HTMLCanvasElement);
+
+        expect(() => cssColorToHex('not-a-colour')).toThrow(/not-a-colour/);
+        expect(fillRect).not.toHaveBeenCalled();
+        // A valid colour that equals the sentinel is not mistaken for an invalid one.
+        expect(() => cssColorToHex('oklch(0 0 0)')).not.toThrow();
+    });
+
     it('parses plain hex colours without a canvas', () => {
         const create = vi.spyOn(document, 'createElement');
 
@@ -189,6 +221,12 @@ describe('cssColorToHex', () => {
         expect(create).not.toHaveBeenCalled();
     });
 });
+
+function defineAllTokens(value: string): void {
+    for (const key of EDITOR_COLOR_KEYS) {
+        document.documentElement.style.setProperty(`--${key}`, value);
+    }
+}
 
 describe('readEditorColors', () => {
     afterEach(() => {
@@ -199,6 +237,7 @@ describe('readEditorColors', () => {
 
     it('reads the values from the document CSS and refreshes when the theme resolves differently', () => {
         const root = document.documentElement;
+        defineAllTokens('oklch(0.5 0.01 60)');
         root.style.setProperty('--wall', 'oklch(0.3 0.01 60)');
         useTheme().setAppearance('light');
 
@@ -218,5 +257,30 @@ describe('readEditorColors', () => {
         expect(readEditorColors()['room-label']).toBe(
             EXPORT_PALETTE['room-label'],
         );
+    });
+
+    it('does not cache a read in which a token fell back (the CSS may not have loaded yet)', () => {
+        const root = document.documentElement;
+        useTheme().setAppearance('light');
+
+        const early = readEditorColors();
+        expect(early.wall).toBe(EXPORT_PALETTE.wall);
+
+        defineAllTokens('oklch(0.5 0.01 60)');
+        root.style.setProperty('--wall', 'oklch(0.3 0.01 60)');
+
+        expect(readEditorColors().wall).toBe('oklch(0.3 0.01 60)');
+        expect(readEditorColors()['room-label']).toBe('oklch(0.5 0.01 60)');
+    });
+
+    it('caches a read in which every token was defined', () => {
+        const root = document.documentElement;
+        defineAllTokens('oklch(0.5 0.01 60)');
+        useTheme().setAppearance('light');
+
+        const first = readEditorColors();
+        root.style.setProperty('--wall', 'oklch(0.9 0.01 60)');
+
+        expect(readEditorColors()).toBe(first);
     });
 });

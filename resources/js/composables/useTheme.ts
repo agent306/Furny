@@ -77,18 +77,18 @@ function writeCookie(value: Appearance): void {
 }
 
 function applyToDocument(): void {
-    resolved.value =
+    const next: ResolvedAppearance =
         appearance.value === 'system'
             ? systemPrefersDark()
                 ? 'dark'
                 : 'light'
             : appearance.value;
 
-    document.documentElement.classList.toggle(
-        'dark',
-        resolved.value === 'dark',
-    );
-    applyThemeColor(resolved.value);
+    // Class first: anything reacting to `resolved` (e.g. readEditorColors)
+    // must already see the new theme's CSS variables.
+    document.documentElement.classList.toggle('dark', next === 'dark');
+    resolved.value = next;
+    applyThemeColor(next);
 }
 
 function initialise(): void {
@@ -97,7 +97,19 @@ function initialise(): void {
     }
 
     initialised = true;
-    appearance.value = readStored() ?? readCookie() ?? 'system';
+
+    const stored = readStored();
+    const cookie = readCookie();
+
+    appearance.value = stored ?? cookie ?? 'system';
+
+    // The cookie is what the server renders from (app.blade.php) and it
+    // expires; refresh it from localStorage so an explicit `dark` does not
+    // flash light on the first load after expiry.
+    if (stored !== null && stored !== cookie) {
+        writeCookie(stored);
+    }
+
     applyToDocument();
 
     try {
