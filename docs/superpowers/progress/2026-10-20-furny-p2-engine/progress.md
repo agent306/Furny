@@ -239,3 +239,6 @@ Task 42: fix round 1 1dd7dd1 (3634 engine). Re-review dispatched.
 Task 42: re-review 1 APPROVED. Carry Task 51: bom/intMath.ts duplicates money.ts safe-int/ceil-div helpers — dedupe.
 Task 42: complete (commits 989261a..1dd7dd1)
 STOP: user wrap-up — Task 43 NOT dispatched. Resume P2 at Task 43.
+RESUME 2026-10-22 (new controller, Windows host; worktree D:/Dev/Furny.worktrees/p2-engine, branch build/p2-engine recreated from main 7b40ce4). Env notes for subagents: D:/Dev/Furny.worktrees/_ctl/ENV.md.
+Ruling: commit trailer is the single line `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`; the plan's `Claude-Session:` line is dropped — current attribution instructions — cost if wrong: cosmetic.
+Ruling: main baseline vitest on this host = 4999/5002; 3 pre-existing portability failures (furniture/__tests__/validate.test.ts uses `new URL(..).pathname` → '/D:/…' on Windows; lib/__tests__/format.test.ts de-CH ×2: Node 22.23 ICU 78 groups with "'" not "’") are fixed in a separate baseline branch, not in P2 tasks — cost if wrong: none.
