@@ -216,3 +216,4 @@ Task 33: minor (deferred): RFC 6266 filename* for non-ASCII download names (Medi
 Carry Task 34/37 (browser pass): mount ImageUploader/FileDropzone/Lightbox in a Playwright test — XHR to storage, drag-and-drop, camera input, swipe/zoom.
 Note: OtpConcurrencyTest "ten sends an hour of one IP" race flaked once in a full run under machine load (passes alone) — final review.
 Task 33: complete (commits e65506a..d9f97da, 1 fix round)
+Merged main 8a5518f (host baseline) → 334038f; pest 3872/3872, vitest 5045/5045.
