@@ -587,3 +587,23 @@ export {
     wardrobeHingedParamsSchema,
 } from './furniture/templates/wardrobe_hinged';
 export type { WardrobeHingedParams } from './furniture/templates/wardrobe_hinged';
+export {
+    FURNITURE_COMMAND_ERROR_CODES,
+    FURNITURE_COMMAND_KEY_PREFIX,
+    furnitureCommandMessage,
+    furniturePipeline,
+} from './furniture/commands/pipeline';
+export type {
+    FurnitureCommandContext,
+    FurnitureCommandErrorCode,
+} from './furniture/commands/pipeline';
+export {
+    FURNITURE_COMMANDS,
+    createFurnitureBus,
+    furniturePathToEntityId,
+} from './furniture/commands/registry';
+export type {
+    FurnitureBusConfig,
+    FurnitureCommandType,
+} from './furniture/commands/registry';
+export { syncBehindDoor } from './furniture/commands/sections';

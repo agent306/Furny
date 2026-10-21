@@ -131,7 +131,7 @@ export function isSaveBlocking(issues: readonly Issue[]): boolean {
 }
 
 /** Overall size limits of 03 §2.4, in the order they are reported. */
-const DIMENSION_RANGES = [
+export const DIMENSION_RANGES = [
     ['width', 150, 6000],
     ['height', 100, 3000],
     ['depth', 100, 1200],
