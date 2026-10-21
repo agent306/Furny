@@ -38,6 +38,7 @@ order of the walls' ids, then ``u0``. Talks to the other stages only through ``a
 types and plain arrays (06 I12).
 """
 
+import dataclasses
 import math
 from collections import defaultdict
 from dataclasses import dataclass
@@ -167,6 +168,9 @@ def find_openings(
             continue
         op = _classify(u0, u1, f, ink, thin, is_gap)
         if op is not None:
+            op = dataclasses.replace(
+                op, u0=max(0.0, op.u0), u1=min(f.length, op.u1)
+            )  # a door's span may overrun
             found.append((order[wall_id], op.u0, wall_id, op))
     found.sort(key=lambda x: (x[0], x[1]))
     return [
@@ -196,6 +200,40 @@ def _candidates(
             hit[0][0], hit[0][1] = min(hit[0][0], b0), max(hit[0][1], b1)
     for w in graph.walls:
         out.extend((w.id, g0, g1, True) for g0, g1 in gaps[w.id])
+    return _off_junctions(graph, frames, out)
+
+
+def _off_junctions(
+    graph: WallGraph, frames: dict[str, _Frame | None], cands: list[tuple[str, float, float, bool]]
+) -> list[tuple[str, float, float, bool]]:
+    """Candidates trimmed clear of the walls crossing at their wall's end nodes (half the thickest one,
+    + 2 px; a collinear continuation does not count), and dropped when less than ``1.5 t`` stays: a gap
+    that is only a junction's own extent is no opening."""
+    at: dict[str, list[WallCandidate]] = defaultdict(list)
+    for w in graph.walls:
+        at[w.a_node].append(w)
+        at[w.b_node].append(w)
+    by_id = {w.id: w for w in graph.walls}
+    cos_tol = math.cos(math.radians(LINE_DEG))
+
+    def zone(w: WallCandidate, node: str) -> float:
+        f = frames[w.id]
+        assert f is not None
+        crossing = []
+        for o in at[node]:
+            fo = frames[o.id]
+            if o.id != w.id and fo is not None and abs(float(fo.d @ f.d)) < cos_tol:
+                crossing.append(o.thickness_px)
+        return max(crossing) / 2.0 + 2.0 if crossing else 0.0
+
+    out = []
+    for wall_id, u0, u1, is_gap in cands:
+        w, f = by_id[wall_id], frames[wall_id]
+        if f is None:
+            continue
+        u0, u1 = max(u0, zone(w, w.a_node), 0.0), min(u1, f.length - zone(w, w.b_node), f.length)
+        if u1 - u0 >= SOLID_GAP[0] * f.t:
+            out.append((wall_id, u0, u1, is_gap))
     return out
 
 

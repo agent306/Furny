@@ -31,7 +31,7 @@ STEMS = sorted(IMAGES)
 TARGET = {"hdb-3room": (0.75, 0.85), "brochure-2bhk": (0.70, 0.80)}  # recall, precision (the brief's)
 HINGE_SWING_MIN = 0.8
 # Task 17 as committed (recall, precision): the targets above are not reached (task-17-report.md).
-OPENING_FLOOR = {"hdb-3room": (0.416, 0.555), "brochure-2bhk": (0.375, 1.0)}
+OPENING_FLOOR = {"hdb-3room": (0.416, 0.625), "brochure-2bhk": (0.375, 1.0)}
 
 
 @pytest.fixture(scope="module")

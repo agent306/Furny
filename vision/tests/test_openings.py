@@ -323,3 +323,28 @@ def test_window_across_a_junction_is_one_window() -> None:
     host = next(w for w in r.graph.walls if w.id == o.wall_id)
     xs = sorted(host.a[0] + (host.b[0] - host.a[0]) * u / math.dist(host.a, host.b) for u in (o.u0, o.u1))
     assert xs[1] - xs[0] >= 50  # at least the window's half on its wall
+
+
+def test_gaps_stay_clear_of_crossing_walls() -> None:
+    """A gap reaching a node is trimmed clear of the wall crossing there (half its thickness + 2 px); a
+    collinear continuation does not trim it; a gap that is only the junction's own extent is dropped."""
+    from app.pipeline import openings as om
+    from app.schemas.candidates import WallCandidate
+
+    def wall(
+        wid: str, a: tuple[float, float], b: tuple[float, float], na: str, nb: str, t: float
+    ) -> WallCandidate:
+        return WallCandidate(wid, a, b, na, nb, t, "filled", 1.0, 0, ())
+
+    graph = WallGraph(
+        {"N1": (0.0, 0.0), "N2": (300.0, 0.0), "N3": (0.0, 300.0), "N4": (500.0, 0.0)},
+        [
+            wall("W1", (0.0, 0.0), (300.0, 0.0), "N1", "N2", 10.0),
+            wall("W2", (0.0, 0.0), (0.0, 300.0), "N1", "N3", 14.0),  # crosses W1 at N1
+            wall("W3", (300.0, 0.0), (500.0, 0.0), "N2", "N4", 10.0),  # continues W1 at N2
+        ],
+        [],
+    )
+    frames = {w.id: om._frame(w) for w in graph.walls}
+    cands = [("W1", 0.0, 60.0, True), ("W1", 0.0, 20.0, True), ("W1", 250.0, 300.0, True)]
+    assert om._off_junctions(graph, frames, cands) == [("W1", 9.0, 60.0, True), ("W1", 250.0, 300.0, True)]
