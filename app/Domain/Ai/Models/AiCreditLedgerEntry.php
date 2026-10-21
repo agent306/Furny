@@ -17,8 +17,9 @@ use LogicException;
 
 /**
  * 02 §7.1: one row of the append-only credit ledger (balance = SUM(delta) per user). Rows are
- * written once by the credit actions (18 §9) and never updated, so any update throws and nothing is
- * mass-assignable.
+ * written once by the credit actions (18 §9) and never updated or deleted through the model, so any
+ * update or delete throws and nothing is mass-assignable. Deleting a user still removes their rows
+ * through the foreign key cascade, which bypasses model events.
  *
  * @property string $id
  * @property string $user_id
@@ -44,6 +45,10 @@ final class AiCreditLedgerEntry extends Model
     {
         self::updating(static function (self $entry): never {
             throw new LogicException("Ledger entry {$entry->getKey()} is immutable and cannot be updated.");
+        });
+
+        self::deleting(static function (self $entry): never {
+            throw new LogicException("Ledger entry {$entry->getKey()} is append only and cannot be deleted.");
         });
     }
 

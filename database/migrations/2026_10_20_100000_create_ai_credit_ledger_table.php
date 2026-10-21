@@ -26,6 +26,7 @@ return new class extends Migration
             $table->timestampTz('created_at');
 
             $table->index(['user_id', 'created_at']);
+            $table->index(['reference_type', 'reference_id']);
         });
 
         // One monthly grant per user and period (02 §7.1, 18 Q6): the daily top-up job is idempotent through it.

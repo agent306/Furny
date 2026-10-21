@@ -27,7 +27,7 @@ return new class extends Migration
             $table->string('error_title', 255)->nullable();
             $table->string('pricing_category', 24)->nullable();
             $table->boolean('billable')->nullable();
-            $table->char('fallback_of_id', 26)->nullable();
+            $table->char('fallback_of_id', 26)->nullable()->index();
             $table->jsonb('context')->nullable();
             $table->smallInteger('attempts')->default(0);
             $table->timestampTz('accepted_at')->nullable();

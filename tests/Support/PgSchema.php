@@ -101,4 +101,33 @@ final class PgSchema
 
         return $names;
     }
+
+    /**
+     * Foreign keys of the current schema whose column list is not a leading prefix of any full, valid
+     * index (primary keys and unique indexes count; partial and expression indexes do not), as
+     * `table(col, col)`, sorted. Postgres does not index foreign keys, so such a key makes the parent's
+     * deletes and joins from the child scan the whole child table.
+     *
+     * @return list<string>
+     */
+    public static function unindexedForeignKeys(): array
+    {
+        $rows = DB::select(
+            "select c.conrelid::regclass::text || '(' || string_agg(a.attname, ', ' order by k.ord) || ')' as name
+             from pg_constraint c
+             cross join lateral unnest(c.conkey) with ordinality as k(attnum, ord)
+             join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
+             where c.contype = 'f' and c.connamespace = current_schema()::regnamespace
+             group by c.oid, c.conrelid, c.conkey
+             having not exists (
+                 select 1 from pg_index i
+                 where i.indrelid = c.conrelid and i.indisvalid and i.indpred is null
+                   and (string_to_array(i.indkey::text, ' ')::int2[])[1:array_length(c.conkey, 1)] = c.conkey
+             )",
+        );
+        $names = array_column($rows, 'name');
+        sort($names);
+
+        return $names;
+    }
 }

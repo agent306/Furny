@@ -13,7 +13,7 @@ return new class extends Migration
         Schema::create('app_settings', function (Blueprint $table): void {
             $table->string('key', 100)->primary();
             $table->jsonb('value');
-            $table->foreignUlid('updated_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('updated_by')->nullable()->index()->constrained('users')->nullOnDelete();
             $table->timestampsTz();
         });
     }

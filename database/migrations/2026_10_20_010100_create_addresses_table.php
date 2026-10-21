@@ -12,7 +12,7 @@ return new class extends Migration
     {
         Schema::create('addresses', function (Blueprint $table): void {
             $table->ulid('id')->primary();
-            $table->foreignUlid('user_id')->constrained()->cascadeOnDelete();
+            $table->foreignUlid('user_id')->index()->constrained()->cascadeOnDelete();
             $table->string('label', 60)->nullable();
             $table->string('line1', 200);
             $table->string('line2', 200)->nullable();

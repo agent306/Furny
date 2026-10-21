@@ -22,7 +22,7 @@ return new class extends Migration
             $table->string('engine_version', 16)->nullable();
             $table->integer('catalog_version')->nullable();
             $table->string('reason', 24);
-            $table->foreignUlid('author_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('author_id')->nullable()->index()->constrained('users')->nullOnDelete();
             $table->string('author_kind', 8);
             $table->jsonb('change_summary')->nullable();
             // Immutable rows: created_at only, no updated_at (02 §5.2).

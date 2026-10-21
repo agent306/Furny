@@ -18,14 +18,14 @@ return new class extends Migration
             $table->string('source', 16);
             $table->jsonb('working_document');
             $table->integer('working_version')->default(1);
-            $table->foreignUlid('working_saved_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('working_saved_by')->nullable()->index()->constrained('users')->nullOnDelete();
             $table->timestampTz('working_saved_at')->nullable();
             // The foreign key to plan_revisions is added by 2026_10_20_040300 (circular reference).
-            $table->ulid('current_revision_id')->nullable();
+            $table->ulid('current_revision_id')->nullable()->index();
             $table->smallInteger('schema_version')->default(1);
             $table->jsonb('summary')->default('{}');
             $table->timestampTz('locked_at')->nullable();
-            $table->foreignUlid('locked_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('locked_by')->nullable()->index()->constrained('users')->nullOnDelete();
             $table->timestampsTz();
             $table->softDeletesTz();
 

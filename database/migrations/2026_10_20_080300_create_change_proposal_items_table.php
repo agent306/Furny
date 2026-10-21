@@ -13,9 +13,9 @@ return new class extends Migration
         Schema::create('change_proposal_items', function (Blueprint $table): void {
             $table->ulid('id')->primary();
             $table->foreignUlid('change_proposal_id')->constrained()->cascadeOnDelete();
-            $table->foreignUlid('order_item_id')->constrained()->cascadeOnDelete();
-            $table->foreignUlid('from_revision_id')->constrained('furniture_revisions')->restrictOnDelete();
-            $table->foreignUlid('to_revision_id')->nullable()->constrained('furniture_revisions')->restrictOnDelete();
+            $table->foreignUlid('order_item_id')->index()->constrained()->cascadeOnDelete();
+            $table->foreignUlid('from_revision_id')->index()->constrained('furniture_revisions')->restrictOnDelete();
+            $table->foreignUlid('to_revision_id')->nullable()->index()->constrained('furniture_revisions')->restrictOnDelete();
             $table->jsonb('staff_draft_document')->nullable();
             $table->integer('staff_draft_version')->default(1);
             $table->jsonb('changes')->nullable();

@@ -18,7 +18,7 @@ return new class extends Migration
             $table->smallInteger('schema_version');
             $table->string('reason', 24);
             $table->string('label', 120)->nullable();
-            $table->foreignUlid('author_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('author_id')->nullable()->index()->constrained('users')->nullOnDelete();
             // Immutable rows: created_at only, no updated_at (02 §3.3).
             $table->timestampTz('created_at');
 

@@ -188,12 +188,14 @@ it('has exactly the indexes of 02 §7 and §9, plus the plain indexes on the for
             'ai_credit_ledger_created_by_index',
             'ai_credit_ledger_one_monthly_grant_per_period',
             'ai_credit_ledger_pkey',
+            'ai_credit_ledger_reference_type_reference_id_index',
             'ai_credit_ledger_user_id_created_at_index',
         ])
         ->and(PgSchema::indexNames('ai_usage_events'))->toBe([
             'ai_usage_events_created_at_index',
             'ai_usage_events_pkey',
             'ai_usage_events_provider_created_at_index',
+            'ai_usage_events_reference_type_reference_id_index',
             'ai_usage_events_user_id_created_at_index',
         ]);
 
@@ -204,7 +206,10 @@ it('has exactly the indexes of 02 §7 and §9, plus the plain indexes on the for
         ->and(PgSchema::indexDefinition('ai_credit_ledger', 'ai_credit_ledger_created_by_index'))->not->toContain('UNIQUE')->toContain('(created_by)')
         ->and(PgSchema::indexDefinition('ai_usage_events', 'ai_usage_events_created_at_index'))->not->toContain('UNIQUE')->toContain('(created_at)')
         ->and(PgSchema::indexDefinition('ai_usage_events', 'ai_usage_events_user_id_created_at_index'))->not->toContain('UNIQUE')->toContain('(user_id, created_at)')
-        ->and(PgSchema::indexDefinition('ai_usage_events', 'ai_usage_events_provider_created_at_index'))->not->toContain('UNIQUE')->toContain('(provider, created_at)');
+        ->and(PgSchema::indexDefinition('ai_usage_events', 'ai_usage_events_provider_created_at_index'))->not->toContain('UNIQUE')->toContain('(provider, created_at)')
+        // The morph reference of both AI tables (BlueprintImport::ledgerEntries() / usageEvents()).
+        ->and(PgSchema::indexDefinition('ai_credit_ledger', 'ai_credit_ledger_reference_type_reference_id_index'))->not->toContain('UNIQUE')->toContain('(reference_type, reference_id)')
+        ->and(PgSchema::indexDefinition('ai_usage_events', 'ai_usage_events_reference_type_reference_id_index'))->not->toContain('UNIQUE')->toContain('(reference_type, reference_id)');
 });
 
 it('keys message_reads on (order_id, user_id)', function (): void {
@@ -255,11 +260,12 @@ it('does not limit the other ledger kinds in a period', function (): void {
     expect(AiCreditLedgerEntry::query()->where('user_id', $user->id)->count())->toBe(8);
 });
 
-it('lets a monthly grant be written again once the earlier one of the period is gone', function (): void {
+it('lets a monthly grant be written again once the earlier one of the period is gone from the table', function (): void {
     $user = User::factory()->create();
     $first = AiCreditLedgerEntry::factory()->for($user)->monthlyGrant('2026-10')->create();
 
-    $first->delete();
+    // The model refuses to delete (append only); this is the row going away at the database level, as a cascade would.
+    DB::table('ai_credit_ledger')->where('id', $first->id)->delete();
     AiCreditLedgerEntry::factory()->for($user)->monthlyGrant('2026-10')->create();
 
     expect(AiCreditLedgerEntry::query()->where('user_id', $user->id)->count())->toBe(1);

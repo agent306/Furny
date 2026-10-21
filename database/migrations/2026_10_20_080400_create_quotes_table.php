@@ -32,7 +32,7 @@ return new class extends Migration
             $table->jsonb('cost_snapshot')->default('{}');
             $table->integer('catalog_version');
             $table->string('engine_version', 16);
-            $table->foreignUlid('created_by')->constrained('users')->restrictOnDelete();
+            $table->foreignUlid('created_by')->index()->constrained('users')->restrictOnDelete();
             $table->timestampTz('sent_at')->nullable();
             $table->timestampTz('accepted_at')->nullable();
             $table->timestampTz('declined_at')->nullable();

@@ -26,7 +26,7 @@ it('has the ten domain areas with the eight standard sub-directories', function 
 /**
  * @return list<class-string>
  */
-function domainClasses(string $directory): array
+function archDomainClasses(string $directory): array
 {
     $root = dirname(__DIR__, 2).'/app/Domain/';
     $classes = [];
@@ -44,7 +44,7 @@ it('makes every domain model final and gives it a ULID key', function (): void {
     // Models whose key is not a generated ULID: settings are keyed by name, the business profile is a singleton
     // pseudo-model, template settings by their template key and a message read mark by (order, user).
     $withoutUlid = [AppSetting::class, BusinessProfile::class, FurnitureTemplateSetting::class, MessageRead::class];
-    $models = domainClasses('Models');
+    $models = archDomainClasses('Models');
 
     $notFinal = array_values(array_filter($models, static fn (string $model): bool => ! (new ReflectionClass($model))->isFinal()));
     $withoutKey = array_values(array_filter(
@@ -61,7 +61,7 @@ it('makes every domain model final and gives it a ULID key', function (): void {
 
 it('makes every domain action final', function (): void {
     $open = array_values(array_filter(
-        domainClasses('Actions'),
+        archDomainClasses('Actions'),
         static fn (string $action): bool => ! (new ReflectionClass($action))->isFinal(),
     ));
 

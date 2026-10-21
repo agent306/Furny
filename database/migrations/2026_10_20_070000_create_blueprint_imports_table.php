@@ -12,8 +12,8 @@ return new class extends Migration
     {
         Schema::create('blueprint_imports', function (Blueprint $table): void {
             $table->ulid('id')->primary();
-            $table->foreignUlid('project_id')->constrained()->cascadeOnDelete();
-            $table->foreignUlid('plan_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignUlid('project_id')->index()->constrained()->cascadeOnDelete();
+            $table->foreignUlid('plan_id')->nullable()->index()->constrained()->nullOnDelete();
             $table->foreignUlid('user_id')->constrained()->restrictOnDelete();
             $table->string('status', 24)->default('uploaded');
             $table->string('mode', 16)->default('auto');

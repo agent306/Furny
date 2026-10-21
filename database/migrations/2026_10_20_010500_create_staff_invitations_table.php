@@ -16,11 +16,11 @@ return new class extends Migration
             $table->string('email', 254);
             $table->string('name', 120);
             $table->string('role', 32);
-            $table->foreignUlid('invited_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('invited_by')->nullable()->index()->constrained('users')->nullOnDelete();
             $table->timestampTz('expires_at');
             $table->timestampTz('accepted_at')->nullable();
             $table->timestampTz('revoked_at')->nullable();
-            $table->foreignUlid('user_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignUlid('user_id')->nullable()->index()->constrained()->nullOnDelete();
             $table->timestampsTz();
 
             $table->index('created_at');

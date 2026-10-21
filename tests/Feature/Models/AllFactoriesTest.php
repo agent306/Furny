@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Model;
  *
  * @return array<string, array{class-string<Factory<Model>>}>
  */
-function discoveredFactories(): array
+function allFactoriesDiscovered(): array
 {
     $root = dirname(__DIR__, 3).'/database/factories/Domain';
     $datasets = [];
@@ -28,10 +28,10 @@ function discoveredFactories(): array
     return $datasets;
 }
 
-dataset('factories', fn (): array => discoveredFactories());
+dataset('factories', fn (): array => allFactoriesDiscovered());
 
 it('finds the factories of every domain area', function (): void {
-    $names = array_keys(discoveredFactories());
+    $names = array_keys(allFactoriesDiscovered());
 
     expect($names)->toContain('Identity/UserFactory', 'Orders/OrderFactory', 'Messaging/MessageFactory', 'Messaging/MessageReadFactory', 'Ai/AiCreditLedgerEntryFactory', 'Ai/AiUsageEventFactory');
 });
@@ -50,7 +50,7 @@ it('creates a row from the factory alone', function (string $factory): void {
 it('has a factory for every model that can use one', function (): void {
     $covered = array_map(
         static fn (array $dataset): string => (new ($dataset[0]))->modelName(),
-        array_values(discoveredFactories()),
+        array_values(allFactoriesDiscovered()),
     );
     $missing = [];
 

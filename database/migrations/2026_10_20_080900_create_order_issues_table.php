@@ -14,12 +14,12 @@ return new class extends Migration
             $table->ulid('id')->primary();
             // Plain join-key index 02 omits: issues are read per order.
             $table->foreignUlid('order_id')->index()->constrained()->cascadeOnDelete();
-            $table->foreignUlid('order_item_id')->nullable()->constrained()->nullOnDelete();
-            $table->foreignUlid('raised_by')->constrained('users')->restrictOnDelete();
+            $table->foreignUlid('order_item_id')->nullable()->index()->constrained()->nullOnDelete();
+            $table->foreignUlid('raised_by')->index()->constrained('users')->restrictOnDelete();
             $table->text('description');
             $table->string('status', 16)->default('open');
             $table->text('resolution_note')->nullable();
-            $table->foreignUlid('resolved_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('resolved_by')->nullable()->index()->constrained('users')->nullOnDelete();
             $table->timestampTz('resolved_at')->nullable();
             $table->timestampsTz();
         });

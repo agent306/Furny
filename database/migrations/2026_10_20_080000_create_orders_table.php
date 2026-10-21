@@ -14,21 +14,21 @@ return new class extends Migration
         Schema::create('orders', function (Blueprint $table): void {
             $table->ulid('id')->primary();
             $table->string('number', 20);
-            $table->foreignUlid('project_id')->constrained()->restrictOnDelete();
+            $table->foreignUlid('project_id')->index()->constrained()->restrictOnDelete();
             $table->foreignUlid('customer_id')->constrained('users')->restrictOnDelete();
             $table->string('state', 32)->default('draft');
             $table->string('state_before_hold', 32)->nullable();
             $table->foreignUlid('assigned_to')->nullable()->constrained('users')->nullOnDelete();
-            $table->foreignUlid('production_assignee_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('production_assignee_id')->nullable()->index()->constrained('users')->nullOnDelete();
             $table->string('title', 160);
             $table->text('customer_notes')->nullable();
-            $table->foreignUlid('site_address_id')->nullable()->constrained('addresses')->nullOnDelete();
+            $table->foreignUlid('site_address_id')->nullable()->index()->constrained('addresses')->nullOnDelete();
             $table->boolean('needs_installation')->default(true);
             $table->date('preferred_delivery_on')->nullable();
             $table->date('expected_delivery_on')->nullable();
             // The foreign keys to quotes are added with the quotes table (02 §15 group 8, Task 11).
-            $table->ulid('accepted_quote_id')->nullable();
-            $table->ulid('current_quote_id')->nullable();
+            $table->ulid('accepted_quote_id')->nullable()->index();
+            $table->ulid('current_quote_id')->nullable()->index();
             $table->smallInteger('production_progress')->default(0);
             $table->string('production_stage', 32)->nullable();
             $table->string('cancel_reason', 32)->nullable();

@@ -13,7 +13,7 @@ return new class extends Migration
         Schema::create('production_updates', function (Blueprint $table): void {
             $table->ulid('id')->primary();
             $table->foreignUlid('order_id')->constrained()->cascadeOnDelete();
-            $table->foreignUlid('author_id')->constrained('users')->restrictOnDelete();
+            $table->foreignUlid('author_id')->index()->constrained('users')->restrictOnDelete();
             $table->string('stage', 32);
             $table->smallInteger('progress');
             $table->string('title', 160);

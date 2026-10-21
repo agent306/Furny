@@ -19,7 +19,7 @@ return new class extends Migration
             $table->boolean('installed')->default(false);
             $table->string('recipient_name', 120)->nullable();
             $table->text('notes')->nullable();
-            $table->foreignUlid('recorded_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('recorded_by')->nullable()->index()->constrained('users')->nullOnDelete();
             $table->timestampsTz();
 
             $table->unique('order_id');

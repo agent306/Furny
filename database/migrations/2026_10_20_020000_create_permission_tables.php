@@ -67,6 +67,8 @@ return new class extends Migration
             $table->foreign($pivotPermission)->references('id')->on($tableNames['permissions'])->cascadeOnDelete();
             $table->foreign($pivotRole)->references('id')->on($tableNames['roles'])->cascadeOnDelete();
             $table->primary([$pivotPermission, $pivotRole], 'role_has_permissions_permission_id_role_id_primary');
+            // The primary key leads with the permission; a role's permissions are read by role (every foreign key is indexed).
+            $table->index($pivotRole);
         });
 
         app('cache')

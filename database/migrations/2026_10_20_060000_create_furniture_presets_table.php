@@ -20,7 +20,7 @@ return new class extends Migration
             $table->jsonb('document');
             $table->boolean('is_active')->default(true);
             $table->integer('sort_order')->default(0);
-            $table->foreignUlid('created_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('created_by')->nullable()->index()->constrained('users')->nullOnDelete();
             $table->timestampsTz();
             $table->softDeletesTz();
         });

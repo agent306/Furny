@@ -16,7 +16,7 @@ return new class extends Migration
             $table->smallInteger('number');
             $table->string('status', 16)->default('draft');
             $table->text('message')->nullable();
-            $table->foreignUlid('created_by')->constrained('users')->restrictOnDelete();
+            $table->foreignUlid('created_by')->index()->constrained('users')->restrictOnDelete();
             $table->timestampTz('sent_at')->nullable();
             $table->timestampTz('resolved_at')->nullable();
             $table->timestampTz('withdrawn_at')->nullable();

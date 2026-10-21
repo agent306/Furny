@@ -13,8 +13,8 @@ return new class extends Migration
         Schema::create('order_items', function (Blueprint $table): void {
             $table->ulid('id')->primary();
             $table->foreignUlid('order_id')->constrained()->cascadeOnDelete();
-            $table->foreignUlid('furniture_design_id')->constrained()->restrictOnDelete();
-            $table->foreignUlid('furniture_revision_id')->nullable()->constrained()->restrictOnDelete();
+            $table->foreignUlid('furniture_design_id')->index()->constrained()->restrictOnDelete();
+            $table->foreignUlid('furniture_revision_id')->nullable()->index()->constrained()->restrictOnDelete();
             $table->smallInteger('quantity')->default(1);
             $table->string('room_label', 80)->nullable();
             $table->text('customer_notes')->nullable();

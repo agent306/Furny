@@ -234,6 +234,45 @@ it('inserts a read mark with a composite key and updates it by saving again', fu
         ->and(MessageRead::query()->firstOrFail()->last_read_at->isToday())->toBeTrue();
 });
 
+it('compares read marks by order and user, not by a key they do not have', function (): void {
+    $order = Order::factory()->create();
+    $mine = MessageRead::factory()->for($order)->create();
+    $theirs = MessageRead::factory()->for($order)->by(User::factory()->staff()->create())->create();
+    $sameRowAgain = MessageRead::query()->where('order_id', $order->id)->where('user_id', $mine->user_id)->firstOrFail();
+
+    expect($mine->is($sameRowAgain))->toBeTrue()
+        ->and($mine->isNot($sameRowAgain))->toBeFalse()
+        ->and($mine->is($theirs))->toBeFalse()
+        ->and($mine->isNot($theirs))->toBeTrue()
+        ->and($mine->is(MessageRead::factory()->create()))->toBeFalse()
+        ->and($mine->is(null))->toBeFalse()
+        ->and($mine->is($order))->toBeFalse();
+});
+
+it('addresses a read mark by its original key columns when they are changed in memory', function (): void {
+    $order = Order::factory()->create();
+    $mine = MessageRead::factory()->for($order)->create(['last_read_at' => now()->subDay()]);
+    $theirs = MessageRead::factory()->for($order)->by(User::factory()->staff()->create())->create(['last_read_at' => now()->subDay()]);
+    $movedTo = User::factory()->staff()->create();
+    $original = $mine->user_id;
+
+    // Moving the mark to another user updates the row it was loaded from, nothing else.
+    $mine->user_id = $movedTo->id;
+    $mine->save();
+
+    expect(MessageRead::query()->count())->toBe(2)
+        ->and(MessageRead::query()->where('order_id', $order->id)->where('user_id', $original)->exists())->toBeFalse()
+        ->and(MessageRead::query()->where('order_id', $order->id)->where('user_id', $movedTo->id)->exists())->toBeTrue()
+        ->and(MessageRead::query()->where('order_id', $order->id)->where('user_id', $theirs->user_id)->exists())->toBeTrue();
+
+    // Deleting after a change in memory removes the loaded row, not a row of the new key.
+    $mine->user_id = $theirs->user_id;
+    $mine->delete();
+
+    expect(MessageRead::query()->where('order_id', $order->id)->where('user_id', $movedTo->id)->exists())->toBeFalse()
+        ->and(MessageRead::query()->where('order_id', $order->id)->where('user_id', $theirs->user_id)->exists())->toBeTrue();
+});
+
 it('lets a read mark be written only through the last read fields', function (): void {
     $read = new MessageRead;
     $read->fill(['last_read_at' => now(), 'last_read_message_id' => 'x', 'order_id' => 'x', 'user_id' => 'x']);
@@ -318,6 +357,23 @@ it('refuses to update a ledger entry, which is append only', function (): void {
         ->and(fn () => $entry->forceFill(['note' => 'edited'])->save())->toThrow(LogicException::class)
         ->and($entry->fresh()->delta)->toBe($delta)
         ->and($entry->fresh()->note)->toBeNull();
+});
+
+it('refuses to delete a ledger entry, which is append only', function (): void {
+    $entry = AiCreditLedgerEntry::factory()->create();
+
+    expect(fn () => $entry->delete())->toThrow(LogicException::class, "Ledger entry {$entry->id} is append only and cannot be deleted")
+        ->and(AiCreditLedgerEntry::query()->whereKey($entry->id)->exists())->toBeTrue();
+});
+
+it('still removes the ledger rows of a deleted user through the database cascade', function (): void {
+    $user = User::factory()->create();
+    AiCreditLedgerEntry::factory()->for($user)->count(2)->create();
+    $kept = AiCreditLedgerEntry::factory()->create();
+
+    $user->forceDelete();
+
+    expect(AiCreditLedgerEntry::query()->pluck('id')->all())->toBe([$kept->id]);
 });
 
 it('still saves a new ledger entry and an unchanged one', function (): void {

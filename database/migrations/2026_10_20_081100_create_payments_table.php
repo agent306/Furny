@@ -14,7 +14,7 @@ return new class extends Migration
             $table->ulid('id')->primary();
             // Plain join-key index 02 omits: payments are read per order, and the restrict check scans it.
             $table->foreignUlid('order_id')->index()->constrained()->restrictOnDelete();
-            $table->foreignUlid('quote_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignUlid('quote_id')->nullable()->index()->constrained()->nullOnDelete();
             $table->string('kind', 16);
             $table->bigInteger('amount_minor');
             $table->char('currency', 3);
@@ -23,7 +23,7 @@ return new class extends Migration
             $table->string('gateway', 24)->nullable();
             $table->string('gateway_reference', 120)->nullable();
             $table->timestampTz('paid_at')->nullable();
-            $table->foreignUlid('recorded_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('recorded_by')->nullable()->index()->constrained('users')->nullOnDelete();
             $table->text('notes')->nullable();
             $table->timestampsTz();
         });

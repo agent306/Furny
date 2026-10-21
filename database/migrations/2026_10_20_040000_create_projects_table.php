@@ -13,10 +13,10 @@ return new class extends Migration
         Schema::create('projects', function (Blueprint $table): void {
             $table->ulid('id')->primary();
             $table->foreignUlid('owner_id')->constrained('users')->restrictOnDelete();
-            $table->foreignUlid('created_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('created_by')->nullable()->index()->constrained('users')->nullOnDelete();
             $table->string('name', 120);
             $table->string('property_type', 24)->default('apartment');
-            $table->foreignUlid('site_address_id')->nullable()->constrained('addresses')->nullOnDelete();
+            $table->foreignUlid('site_address_id')->nullable()->index()->constrained('addresses')->nullOnDelete();
             $table->text('notes')->nullable();
             $table->string('status', 16)->default('active');
             $table->timestampsTz();

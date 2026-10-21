@@ -304,27 +304,34 @@ it('indexes quotes, deliveries and production updates as listed in 02 §8', func
         ->not->toContain('UNIQUE')->toContain('(order_id, created_at)');
 });
 
-it('indexes the order and quote join keys that 02 §8 leaves bare', function (): void {
-    // Added by the controller ruling on missing FK join-key indexes (logged in 19). Complete lists per table:
-    // the primary key, any index of 02, and the plain join-key index.
-    expect(PgSchema::indexNames('quote_lines'))->toBe(['quote_lines_pkey', 'quote_lines_quote_id_index'])
-        ->and(PgSchema::indexNames('quote_negotiations'))->toBe(['quote_negotiations_order_id_index', 'quote_negotiations_pkey', 'quote_negotiations_quote_id_index'])
-        ->and(PgSchema::indexNames('confirmation_calls'))->toBe(['confirmation_calls_order_id_index', 'confirmation_calls_pkey'])
-        ->and(PgSchema::indexNames('order_issues'))->toBe(['order_issues_order_id_index', 'order_issues_pkey'])
-        ->and(PgSchema::indexNames('payments'))->toBe(['payments_order_id_index', 'payments_pkey']);
-
-    foreach ([
-        'quote_lines.quote_id' => 'quote_lines_quote_id_index',
-        'quote_negotiations.quote_id' => 'quote_negotiations_quote_id_index',
-        'quote_negotiations.order_id' => 'quote_negotiations_order_id_index',
-        'confirmation_calls.order_id' => 'confirmation_calls_order_id_index',
-        'order_issues.order_id' => 'order_issues_order_id_index',
-        'payments.order_id' => 'payments_order_id_index',
-    ] as $name => $index) {
-        [$table, $column] = explode('.', $name);
-
-        expect(PgSchema::indexDefinition($table, $index))->not->toContain('UNIQUE')->toContain("({$column})");
-    }
+it('has exactly the indexes of 02 §8.5-§8.12 plus a plain index on every foreign key', function (): void {
+    // Complete lists per table: the primary key, the indexes of 02, and the plain foreign key indexes added by
+    // the controller rulings (logged in 19). The whole-schema check is ForeignKeyIndexTest.
+    expect(PgSchema::indexNames('quotes'))->toBe([
+        'quotes_created_by_index', 'quotes_number_unique', 'quotes_one_sent_per_order', 'quotes_order_id_version_unique', 'quotes_pkey',
+    ])
+        ->and(PgSchema::indexNames('quote_lines'))->toBe([
+            'quote_lines_order_item_id_index', 'quote_lines_pkey', 'quote_lines_quote_id_index', 'quote_lines_tax_rate_id_index',
+        ])
+        ->and(PgSchema::indexNames('quote_negotiations'))->toBe([
+            'quote_negotiations_answered_by_index', 'quote_negotiations_customer_id_index', 'quote_negotiations_order_id_index',
+            'quote_negotiations_pkey', 'quote_negotiations_quote_id_index', 'quote_negotiations_resulting_quote_id_index',
+        ])
+        ->and(PgSchema::indexNames('confirmation_calls'))->toBe([
+            'confirmation_calls_order_id_index', 'confirmation_calls_pkey', 'confirmation_calls_staff_id_index',
+        ])
+        ->and(PgSchema::indexNames('production_updates'))->toBe([
+            'production_updates_author_id_index', 'production_updates_order_id_created_at_index', 'production_updates_pkey',
+        ])
+        ->and(PgSchema::indexNames('order_issues'))->toBe([
+            'order_issues_order_id_index', 'order_issues_order_item_id_index', 'order_issues_pkey', 'order_issues_raised_by_index', 'order_issues_resolved_by_index',
+        ])
+        ->and(PgSchema::indexNames('deliveries'))->toBe([
+            'deliveries_order_id_unique', 'deliveries_pkey', 'deliveries_recorded_by_index',
+        ])
+        ->and(PgSchema::indexNames('payments'))->toBe([
+            'payments_order_id_index', 'payments_pkey', 'payments_quote_id_index', 'payments_recorded_by_index',
+        ]);
 });
 
 it('allows only one sent quote per order, through a partial unique index', function (): void {

@@ -14,7 +14,7 @@ return new class extends Migration
             $table->ulid('id')->primary();
             // Plain join-key index 02 omits: calls are read per order.
             $table->foreignUlid('order_id')->index()->constrained()->cascadeOnDelete();
-            $table->foreignUlid('staff_id')->constrained('users')->restrictOnDelete();
+            $table->foreignUlid('staff_id')->index()->constrained('users')->restrictOnDelete();
             $table->timestampTz('called_at');
             $table->string('phone_e164', 20);
             $table->string('outcome', 24);

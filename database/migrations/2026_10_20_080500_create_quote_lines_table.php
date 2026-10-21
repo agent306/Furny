@@ -14,7 +14,7 @@ return new class extends Migration
             $table->ulid('id')->primary();
             // Postgres does not index foreign keys and 02 lists no index here: the quote's lines are read by this key.
             $table->foreignUlid('quote_id')->index()->constrained()->cascadeOnDelete();
-            $table->foreignUlid('order_item_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignUlid('order_item_id')->nullable()->index()->constrained()->nullOnDelete();
             $table->string('kind', 16);
             $table->string('description', 255);
             $table->jsonb('details')->nullable();
@@ -22,7 +22,7 @@ return new class extends Migration
             $table->string('unit', 16)->default('item');
             $table->bigInteger('unit_price_minor');
             $table->bigInteger('amount_minor');
-            $table->foreignUlid('tax_rate_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignUlid('tax_rate_id')->nullable()->index()->constrained()->nullOnDelete();
             $table->boolean('is_visible_to_customer')->default(true);
             $table->smallInteger('sort_order')->default(0);
             $table->timestampsTz();

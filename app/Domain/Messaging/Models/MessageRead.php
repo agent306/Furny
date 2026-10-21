@@ -16,10 +16,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * 02 §9.2: how far a user has read an order's thread. The table is keyed by (`order_id`, `user_id`),
- * which Eloquent cannot express, so the model has no single key: saving, deleting, `fresh()` and
- * `refresh()` address the row by both columns, and rows are found with `where` on those two columns,
- * never `find()`. The order and user are set by the read action, so only the marker is
- * mass-assignable.
+ * which Eloquent cannot express, so the model has no single key. Saving, deleting, `fresh()`,
+ * `refresh()` and `is()` address the row by both columns (the original values, as Eloquent does for
+ * a key). Anything else that needs a key does not work: no `find()` / `findOrFail()`, no queued
+ * serialisation (`SerializesModels`, queued listeners or notifications taking the model), no
+ * collection keying (`keyBy`, `modelKeys`, `find` on a collection). Find rows with `where` on the two
+ * columns and pass the two ids to jobs. The order and user are set by the read action, so only the
+ * marker is mass-assignable.
  *
  * @property string $order_id
  * @property string $user_id
@@ -81,6 +84,18 @@ final class MessageRead extends Model
     }
 
     /**
+     * Two marks are the same row when order and user match; the keyless parent comparison would call any two equal.
+     */
+    public function is($model): bool
+    {
+        return $model instanceof self
+            && $this->getAttribute('order_id') === $model->getAttribute('order_id')
+            && $this->getAttribute('user_id') === $model->getAttribute('user_id')
+            && $this->getTable() === $model->getTable()
+            && $this->getConnectionName() === $model->getConnectionName();
+    }
+
+    /**
      * `fresh()` and `refresh()` find the row by both key columns.
      *
      * @param  Builder<static>  $query
@@ -108,9 +123,10 @@ final class MessageRead extends Model
      */
     private function whereThisRow(Builder $query): Builder
     {
+        // The original values, as for a key: a changed order or user in memory moves the loaded row.
         return $query
-            ->where('order_id', $this->getAttribute('order_id'))
-            ->where('user_id', $this->getAttribute('user_id'));
+            ->where('order_id', $this->getOriginal('order_id') ?? $this->getAttribute('order_id'))
+            ->where('user_id', $this->getOriginal('user_id') ?? $this->getAttribute('user_id'));
     }
 
     protected static function newFactory(): MessageReadFactory

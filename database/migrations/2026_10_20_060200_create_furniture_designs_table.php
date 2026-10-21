@@ -13,17 +13,17 @@ return new class extends Migration
         Schema::create('furniture_designs', function (Blueprint $table): void {
             $table->ulid('id')->primary();
             $table->foreignUlid('project_id')->constrained()->cascadeOnDelete();
-            $table->foreignUlid('owner_id')->constrained('users')->restrictOnDelete();
-            $table->foreignUlid('created_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('owner_id')->index()->constrained('users')->restrictOnDelete();
+            $table->foreignUlid('created_by')->nullable()->index()->constrained('users')->nullOnDelete();
             $table->string('name', 120);
             $table->string('template_key', 40);
-            $table->foreignUlid('preset_id')->nullable()->constrained('furniture_presets')->nullOnDelete();
+            $table->foreignUlid('preset_id')->nullable()->index()->constrained('furniture_presets')->nullOnDelete();
             $table->jsonb('working_document');
             $table->integer('working_version')->default(1);
-            $table->foreignUlid('working_saved_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignUlid('working_saved_by')->nullable()->index()->constrained('users')->nullOnDelete();
             $table->timestampTz('working_saved_at')->nullable();
             // The foreign key to furniture_revisions is added by 2026_10_20_060400 (circular reference).
-            $table->ulid('current_revision_id')->nullable();
+            $table->ulid('current_revision_id')->nullable()->index();
             // The foreign key to orders is added with the orders tables (02 §15 group 8).
             $table->ulid('locked_by_order_id')->nullable();
             $table->jsonb('estimate')->default('{}');
