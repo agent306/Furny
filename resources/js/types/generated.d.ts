@@ -20,6 +20,124 @@ export type UploadStatus = 'pending' | 'uploaded' | 'ready' | 'rejected' | 'cons
 }
 }
 }
+namespace Support {
+namespace Settings {
+export type SettingsGroup = 'business' | 'units' | 'pricing' | 'workflow' | 'ai' | 'notifications' | 'auth';
+namespace Groups {
+export type AiPriceRowData = {
+provider: string,
+model: string,
+inputPerMtokUsd: string,
+outputPerMtokUsd: string,
+};
+export type AiSettings = {
+provider: string,
+model: string,
+effort: string,
+agenticCrops: boolean,
+fallbackToNoneOnError: boolean,
+signupCredits: number,
+monthlyCredits: number,
+creditsPerRecognition: number,
+creditsPerRecognitionNone: number,
+maxRecognitionsPerDay: number,
+globalMonthlyBudgetUsd: string,
+budgetExhaustedBehavior: string,
+priceTable: App.Support.Settings.Groups.AiPriceRowData[],
+staffUnlimited: boolean,
+};
+export type AuthSettings = {
+allowCustomerRegistration: boolean,
+otpAllowedCountryCodes: string[],
+otpGlobalHourlyCap: number,
+staffSessionAbsoluteHours: number,
+};
+export type BusinessSettings = {
+name: string,
+legalName: string | null,
+taxId: string | null,
+email: string,
+phoneE164: string | null,
+address: Record<string, any> | null,
+currency: string,
+locale: string,
+timezone: string,
+logoMediaId: number | null,
+quoteTerms: string,
+workingHours: string,
+};
+export type NotificationsSettings = {
+whatsappTemplates: Record<string, App.Support.Settings.Groups.WhatsAppTemplateData>,
+smsDriver: string,
+smsTemplates: Record<string, App.Support.Settings.Groups.SmsTemplateData>,
+otpChannelOrder: string[],
+staffDigestHour: number,
+quietHours: App.Support.Settings.Groups.QuietHoursData,
+};
+export type PricingSettings = {
+pricesIncludeTax: boolean,
+defaultTaxRateId: string | null,
+marginBps: number,
+overheadBps: number,
+minimumOrderMinor: number,
+roundingMinor: number,
+estimateDisclaimerKey: string,
+installationBps: number,
+deliveryFlatMinor: number,
+kerfMm: number,
+sheetTrimMm: number,
+nestingAllowRotationDefault: boolean,
+sheetBillingMode: string,
+edgePremillMm: number,
+};
+export type ProductionStageData = {
+key: string,
+labelKey: string | null,
+label: string | null,
+defaultProgress: number,
+};
+export type QuietHoursData = {
+enabled: boolean,
+start: string,
+end: string,
+};
+export type SettingsData = object;
+export type SettingsItemData = object;
+export type SmsTemplateData = {
+textKey: string,
+dltTemplateId: string | null,
+providerTemplateId: string | null,
+};
+export type UnitsSettings = {
+defaultSystem: string,
+defaultLengthUnit: string,
+defaultWallHeightMm: number,
+defaultExteriorWallThicknessMm: number,
+defaultInteriorWallThicknessMm: number,
+defaultDoorWidthMm: number,
+defaultDoorHeightMm: number,
+defaultWindowWidthMm: number,
+defaultWindowHeightMm: number,
+defaultWindowSillMm: number,
+};
+export type WhatsAppTemplateData = {
+name: string,
+language: string,
+components: Record<string, any>[],
+};
+export type WorkflowSettings = {
+quoteValidityDays: number,
+autoCloseDays: number,
+reminderAfterHours: number,
+productionStages: App.Support.Settings.Groups.ProductionStageData[],
+requireCompletionPhotos: number,
+allowCustomerCounterOffer: boolean,
+maxNegotiationRounds: number,
+minPreferredDeliveryDays: number,
+};
+}
+}
+}
 }
 declare namespace Illuminate {
 export type CursorPaginator<TKey, TValue> = {

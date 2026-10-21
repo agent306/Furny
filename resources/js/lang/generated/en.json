@@ -8,5 +8,14 @@
     "common.actions.retry": "Retry",
     "common.actions.save_changes": "Save changes",
     "common.counts.items": "{count, plural, one {# item} other {# items}}",
-    "common.photo_n": "Photo {n}"
+    "common.photo_n": "Photo {n}",
+    "production.stages.assembly": "Assembly",
+    "production.stages.cutting": "Cutting",
+    "production.stages.drilling": "Drilling & machining",
+    "production.stages.edge_banding": "Edge banding",
+    "production.stages.finishing": "Finishing",
+    "production.stages.material_procurement": "Material procurement",
+    "production.stages.packing": "Packing",
+    "production.stages.quality_check": "Quality check",
+    "quotes.default_terms": "This quote is valid until the date shown. Final dimensions are confirmed during our confirmation call. Delivery dates are estimates until production starts."
 }

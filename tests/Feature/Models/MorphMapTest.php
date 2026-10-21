@@ -49,6 +49,6 @@ it('enforces the map so an unmapped morph class is refused', function (): void {
 it('contains the Identity and infrastructure aliases', function (): void {
     expect(array_keys(MorphMap::MAP))->toContain(
         'user', 'address', 'staff_invitation', 'upload_intent', 'notification_delivery',
-        'otp_code', 'notification_preference',
+        'otp_code', 'notification_preference', 'app_setting', 'business_profile',
     );
 });

@@ -10,6 +10,8 @@ use App\Domain\Identity\Models\NotificationPreference;
 use App\Domain\Identity\Models\OtpCode;
 use App\Domain\Identity\Models\StaffInvitation;
 use App\Domain\Identity\Models\User;
+use App\Domain\Settings\Models\AppSetting;
+use App\Domain\Settings\Models\BusinessProfile;
 use App\Domain\Shared\Models\UploadIntent;
 use Illuminate\Database\Eloquent\Model;
 
@@ -29,5 +31,7 @@ final class MorphMap
         'staff_invitation' => StaffInvitation::class,
         'upload_intent' => UploadIntent::class,
         'notification_delivery' => NotificationDelivery::class,
+        'app_setting' => AppSetting::class,
+        'business_profile' => BusinessProfile::class,
     ];
 }
