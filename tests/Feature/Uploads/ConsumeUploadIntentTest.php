@@ -11,6 +11,7 @@ use App\Domain\Shared\Models\UploadIntent;
 use App\Support\Http\CodedValidationException;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
@@ -163,4 +164,36 @@ it('answers a JSON client with the code, the message and the upload id', functio
             'errors' => ['_error' => [trans_icu('uploads.errors.upload_invalid')]],
             'uploadId' => $intent->id,
         ]);
+});
+
+it('removes the processed file once the media is safe, and not before the outer transaction commits', function (): void {
+    $user = User::factory()->create();
+    $intent = readyIntent($user);
+
+    DB::transaction(function () use ($user, $intent): void {
+        app(ConsumeUploadIntent::class)->handle($user, $intent->id, UploadPurpose::Avatar, null, $user, 'avatar');
+
+        Storage::disk('s3')->assertExists($intent->processed_key);
+    });
+
+    Storage::disk('s3')->assertMissing($intent->processed_key);
+    expect($user->getMedia('avatar'))->toHaveCount(1);
+});
+
+it('keeps the processed file and the ready intent when the caller\'s transaction rolls back', function (): void {
+    $user = User::factory()->create();
+    $intent = readyIntent($user);
+
+    expect(fn () => DB::transaction(function () use ($user, $intent): void {
+        app(ConsumeUploadIntent::class)->handle($user, $intent->id, UploadPurpose::Avatar, null, $user, 'avatar');
+
+        throw new RuntimeException('the caller failed after consuming');
+    }))->toThrow(RuntimeException::class);
+
+    expect($intent->refresh()->status)->toBe(UploadStatus::Ready)->and($intent->consumed_at)->toBeNull();
+    Storage::disk('s3')->assertExists($intent->processed_key);
+
+    // The upload can still be used.
+    app(ConsumeUploadIntent::class)->handle($user, $intent->id, UploadPurpose::Avatar, null, $user, 'avatar');
+    expect($user->getMedia('avatar'))->toHaveCount(1);
 });

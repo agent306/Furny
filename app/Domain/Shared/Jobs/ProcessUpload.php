@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Shared\Jobs;
 
+use App\Domain\Shared\Enums\UploadPurpose;
 use App\Domain\Shared\Enums\UploadStatus;
 use App\Domain\Shared\Models\UploadIntent;
 use App\Support\Uploads\HeicConverter;
@@ -32,7 +33,10 @@ final class ProcessUpload implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable;
 
-    public int $timeout = 60;
+    /** The queue kills the job after this; the vision call is kept shorter (`VisionHeicConverter`). */
+    public const int TIMEOUT_SECONDS = 60;
+
+    public int $timeout = self::TIMEOUT_SECONDS;
 
     public int $tries = 2;
 
@@ -103,7 +107,7 @@ final class ProcessUpload implements ShouldQueue
         }
 
         if ($purpose->reencodes() && in_array($type, self::IMAGE_TYPES, true)) {
-            ['path' => $path, 'width' => $width, 'height' => $height] = ImageSanitizer::sanitize($path, $type, $purpose->maxEdge(), $purpose->squares());
+            ['path' => $path, 'width' => $width, 'height' => $height] = ImageSanitizer::sanitize($path, $type, $purpose->maxEdge(), $purpose->squares(), $directory);
         }
 
         $processedKey = sprintf('uploads/%s/%s/%s.%s', $purpose->value, now()->format('Y/m'), $intent->id, MagicBytes::extension($type));
@@ -141,7 +145,8 @@ final class ProcessUpload implements ShouldQueue
         }
 
         if ($type === null || ! in_array($type, $intent->purpose->allowedSniffedTypes(), true)) {
-            throw new UploadRejected('upload_type_not_allowed');
+            // 06 §2.1 names the unknown types a blueprint can come as (TIFF, AVIF, GIF, BMP, SVG) `unsupported_type`.
+            throw new UploadRejected($intent->purpose === UploadPurpose::BlueprintSource ? 'unsupported_type' : 'upload_type_not_allowed');
         }
 
         if ($this->declaredType($intent) !== $type) {
@@ -160,7 +165,7 @@ final class ProcessUpload implements ShouldQueue
     {
         $mime = $intent->declared_mime;
 
-        if (in_array($mime, ['application/octet-stream', 'text/plain'], true)) {
+        if (in_array($mime, MagicBytes::GENERIC_MIMES, true)) {
             return MagicBytes::typeOfExtension(pathinfo($intent->original_filename, PATHINFO_EXTENSION));
         }
 

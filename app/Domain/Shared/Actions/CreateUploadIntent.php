@@ -28,12 +28,6 @@ final class CreateUploadIntent
     /** How long the PUT may start. */
     private const int EXPIRES_MINUTES = 15;
 
-    /** A browser sends these when it does not know the type; a blueprint takes them with the matching extension only. */
-    private const array GENERIC_MIMES = ['application/octet-stream', 'text/plain'];
-
-    /** The extensions a generic MIME type may go with. */
-    private const array GENERIC_EXTENSIONS = ['application/octet-stream' => ['dxf', 'heic', 'heif'], 'text/plain' => ['dxf']];
-
     public function __construct(private readonly UploadPresigner $presigner) {}
 
     /**
@@ -115,7 +109,7 @@ final class CreateUploadIntent
         }
 
         if (! in_array($contentType, $purpose->allowedDeclaredMimes(), true)
-            || (in_array($contentType, self::GENERIC_MIMES, true) && ! in_array($extension, self::GENERIC_EXTENSIONS[$contentType], true))) {
+            || (in_array($contentType, MagicBytes::GENERIC_MIMES, true) && ! MagicBytes::genericMimeFits($contentType, $extension))) {
             throw CodedValidationException::make('upload_type_not_allowed', trans_icu('uploads.errors.upload_type_not_allowed'), 'contentType');
         }
 

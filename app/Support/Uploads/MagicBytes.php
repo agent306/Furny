@@ -16,6 +16,11 @@ final class MagicBytes
     /** Bytes 8-11 of an `ftyp` box that make a HEIC/HEIF image. */
     private const array HEIC_BRANDS = ['heic', 'heix', 'hevc', 'heim', 'heis', 'mif1', 'msf1'];
 
+    /** What a browser declares when it does not know a type; only `.dxf`/`.heic`/`.heif` files may go by them (06 §2.1). */
+    public const array GENERIC_MIMES = ['application/octet-stream', 'text/plain'];
+
+    private const array GENERIC_EXTENSIONS = ['application/octet-stream' => ['dxf', 'heic', 'heif'], 'text/plain' => ['dxf']];
+
     private const string BINARY_DXF = "AutoCAD Binary DXF\r\n\x1a\0";
 
     /**
@@ -76,6 +81,12 @@ final class MagicBytes
     public static function declaredMimes(string $type): array
     {
         return self::TYPES[$type]['declared'];
+    }
+
+    /** Whether a generic MIME type goes with this extension (a `.dxf` as `text/plain`); false for any other MIME type. */
+    public static function genericMimeFits(string $mime, string $extension): bool
+    {
+        return in_array(strtolower($extension), self::GENERIC_EXTENSIONS[$mime] ?? [], true);
     }
 
     /** The type a declared MIME type stands for; null for a generic one (`application/octet-stream`) or an unknown one. */

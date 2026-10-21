@@ -107,6 +107,23 @@ it('rejects an image of 50 megapixels before it decodes it', function (): void {
     Storage::disk('s3')->assertMissing($intent->object_key);
 });
 
+it('rejects an animated WebP whose first frame is a bomb under a small canvas, without decoding it', function (string $fixture): void {
+    $before = memory_get_peak_usage(true);
+    $scratch = glob(sys_get_temp_dir().'/{sanitized,frame}-*', GLOB_BRACE);
+
+    $intent = processUpload(uploadedIntent(uploadFixture($fixture), UploadPurpose::Avatar, 'image/webp', 'me.webp'));
+
+    expect($intent->status)->toBe(UploadStatus::Rejected)->and($intent->reason_code)->toBe('upload_image_too_large')
+        ->and(memory_get_peak_usage(true) - $before)->toBeLessThan(50 * 1024 * 1024)
+        ->and(glob(sys_get_temp_dir().'/{sanitized,frame}-*', GLOB_BRACE))->toBe($scratch);
+})->with(['animated-frame-bomb-121mp.webp', 'animated-frame-bomb-48mp.webp']);
+
+it('rejects a blueprint of a type the system does not know with unsupported_type (06 §2.1)', function (string $fixture): void {
+    $intent = processUpload(uploadedIntent(uploadFixture($fixture), UploadPurpose::BlueprintSource, 'image/png', 'plan.png'));
+
+    expect($intent->status)->toBe(UploadStatus::Rejected)->and($intent->reason_code)->toBe('unsupported_type');
+})->with(['vector.svg']);
+
 it('rejects an image that cannot be decoded', function (): void {
     $intent = processUpload(uploadedIntent("\xFF\xD8\xFF\xE0\0\x10JFIF\0".str_repeat('x', 40), UploadPurpose::ProductionPhoto, 'image/jpeg', 'bad.jpg'));
 
@@ -242,12 +259,14 @@ it('rejects a file whose first bytes look like an image that libmagic does not r
 
 it('leaves no temporary file behind, on success, on rejection and on error', function (): void {
     $before = tempFiles();
+    $scratch = glob(sys_get_temp_dir().'/{sanitized,frame}-*', GLOB_BRACE);
 
     processUpload(uploadedIntent(uploadFixture('exif-gps-rotated.jpg'), UploadPurpose::ProductionPhoto, 'image/jpeg', 'a.jpg'));
     processUpload(uploadedIntent(uploadFixture('vector.svg'), UploadPurpose::Avatar, 'image/png', 'a.png'));
     processUpload(uploadedIntent(uploadFixture('bomb-50mp.png'), UploadPurpose::ProductionPhoto, 'image/png', 'a.png'));
 
-    expect(tempFiles())->toBe($before)->and(leftoverObjects())->toBe([]);
+    expect(tempFiles())->toBe($before)->and(leftoverObjects())->toBe([])
+        ->and(glob(sys_get_temp_dir().'/{sanitized,frame}-*', GLOB_BRACE))->toBe($scratch);
 });
 
 it('does nothing for an intent that is not in the uploaded state', function (UploadStatus $status): void {
@@ -325,8 +344,8 @@ describe('HEIC photos', function (): void {
         expect(leftoverObjects())->toBe([]);
     });
 
-    it('takes the timeouts from the import settings', function (): void {
-        config(['imports.vision.normalize_timeout_s' => 77]);
+    it('takes the timeouts from the import settings, but never lets the call outlast the job', function (int $configured, int $expected): void {
+        config(['imports.vision.normalize_timeout_s' => $configured]);
         $timeouts = null;
         Http::fake(function (Request $request, array $options) use (&$timeouts) {
             $timeouts = [$options['timeout'] ?? null, $options['connect_timeout'] ?? null];
@@ -337,8 +356,8 @@ describe('HEIC photos', function (): void {
 
         processUpload(uploadedIntent(uploadFixture('minimal.heic'), UploadPurpose::IssuePhoto, 'image/heif', 'IMG_1.heif'));
 
-        expect($timeouts)->toBe([77, 5]);
-    });
+        expect($timeouts)->toBe([$expected, 5]);
+    })->with([[30, 30], [120, 50], [60, 50]]);
 
     it('rejects a HEIC file the vision service cannot decode', function (int $status): void {
         Http::fake(['*' => Http::response(['error' => ['code' => 'decode_failed', 'message' => 'x', 'retryable' => false]], $status)]);

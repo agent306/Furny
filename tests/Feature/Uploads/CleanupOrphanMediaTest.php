@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Domain\Shared\Enums\UploadStatus;
 use App\Domain\Shared\Models\UploadIntent;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 
 beforeEach(function (): void {
@@ -50,7 +51,6 @@ it('keeps consumed intents and intents under 24 hours old', function (): void {
 
     expect(UploadIntent::query()->count())->toBe(3);
     Storage::disk('s3')->assertExists($consumed->object_key);
-    Storage::disk('s3')->assertExists($consumed->processed_key);
     Storage::disk('s3')->assertExists($young->object_key);
     Storage::disk('s3')->assertExists($ready->processed_key);
 });
@@ -99,4 +99,18 @@ it('handles more rows than one chunk', function (): void {
 
     expect(UploadIntent::query()->pluck('id')->all())->toBe([$keep->id])
         ->and($keep->status)->toBe(UploadStatus::Consumed);
+});
+
+it('sweeps work directories of jobs that were killed, and only the old ones', function (): void {
+    $root = storage_path('app/tmp');
+    File::ensureDirectoryExists($root.'/stale-job');
+    File::ensureDirectoryExists($root.'/fresh-job');
+    file_put_contents($root.'/stale-job/source', 'x');
+    touch($root.'/stale-job', now()->subHours(3)->getTimestamp());
+    touch($root.'/fresh-job', now()->subMinutes(5)->getTimestamp());
+
+    $this->artisan('media:cleanup-orphans')->assertSuccessful();
+
+    expect(is_dir($root.'/stale-job'))->toBeFalse()->and(is_dir($root.'/fresh-job'))->toBeTrue();
+    File::deleteDirectory($root.'/fresh-job');
 });

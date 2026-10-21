@@ -68,17 +68,12 @@ it('signs the content type and the exact length into the URL', function (): void
         ]));
 });
 
-it('makes a PUT with another type or length fail the signature', function (): void {
-    $presigned = (new S3UploadPresigner(presignerDisk()))->presignPut('tmp/avatar/2030/06/01J0EXAMPLE', 'image/png', 1_048_576, CarbonImmutable::now()->addMinutes(15));
-    parse_str((string) parse_url($presigned->url, PHP_URL_QUERY), $query);
+it('needs its own signer because the SDK\'s presigned PUT signs the host only', function (): void {
+    // If this ever signs the type and length (a newer SDK), ContentSigningSignature is no longer needed.
+    $sdk = presignerDisk()->temporaryUploadUrl('tmp/a', CarbonImmutable::now()->addMinutes(15), ['ContentType' => 'image/png', 'ContentLength' => 10]);
+    parse_str((string) parse_url($sdk['url'], PHP_URL_QUERY), $query);
 
-    foreach ([['1048577', 'image/png'], ['1048576', 'image/jpeg']] as [$length, $type]) {
-        expect($query['X-Amz-Signature'])->not->toBe(presignerExpectedSignature($presigned->url, [
-            'content-length' => $length,
-            'content-type' => $type,
-            'host' => 'localhost:9000',
-        ]));
-    }
+    expect($query['X-Amz-SignedHeaders'])->toBe('host');
 });
 
 it('signs without a length when none is known (the vision service writes the normalised image)', function (): void {

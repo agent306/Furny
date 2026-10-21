@@ -12,6 +12,7 @@ use App\Support\Http\CodedValidationException;
 use App\Support\Uploads\FileName;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
@@ -31,17 +32,24 @@ final class ConsumeUploadIntent
             // Locked, so that two requests cannot use one upload twice.
             $intent = UploadIntent::query()->whereKey($uploadId)->lockForUpdate()->first();
 
-            if (! $intent instanceof UploadIntent || ! $this->usable($intent, $user, $purpose, $target) || $intent->processed_key === null) {
+            $processedKey = $intent?->processed_key;
+
+            if (! $intent instanceof UploadIntent || $processedKey === null || ! $this->usable($intent, $user, $purpose, $target)) {
                 throw CodedValidationException::make('upload_invalid', trans_icu('uploads.errors.upload_invalid'))
                     ->withContext(['uploadId' => $uploadId]);
             }
 
-            $media = $model->addMediaFromDisk($intent->processed_key, 's3')
-                ->usingName(FileName::sanitize($intent->original_filename, pathinfo($intent->processed_key, PATHINFO_EXTENSION)))
-                ->usingFileName(basename($intent->processed_key))
+            // The original is kept until the outermost transaction has committed: if the caller fails after this, the intent is
+            // `ready` again and its file must still be there.
+            $media = $model->addMediaFromDisk($processedKey, 's3')
+                ->preservingOriginal()
+                ->usingName(FileName::sanitize($intent->original_filename, pathinfo($processedKey, PATHINFO_EXTENSION)))
+                ->usingFileName(basename($processedKey))
                 ->toMediaCollection($collection);
 
             $intent->forceFill(['status' => UploadStatus::Consumed, 'consumed_at' => now()])->save();
+
+            DB::afterCommit(static fn () => Storage::disk('s3')->delete($processedKey));
 
             return $media;
         });

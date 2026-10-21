@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support\Uploads;
 
+use App\Domain\Shared\Jobs\ProcessUpload;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -18,6 +19,9 @@ final class VisionHeicConverter implements HeicConverter
 
     private const int MAX_EDGE = 4096;
 
+    /** Seconds the call ends before the queue would kill the job (13 §11.3: 60 s), so the job can clean up. */
+    private const int JOB_MARGIN = 10;
+
     /** The vision service answers these for a file it cannot use: nothing a second try would change. */
     private const array UNUSABLE_FILE = [413, 415, 422];
 
@@ -31,7 +35,7 @@ final class VisionHeicConverter implements HeicConverter
             ->acceptJson()
             ->asJson()
             ->connectTimeout((int) config('imports.vision.connect_timeout_s'))
-            ->timeout((int) config('imports.vision.normalize_timeout_s'))
+            ->timeout(min((int) config('imports.vision.normalize_timeout_s'), ProcessUpload::TIMEOUT_SECONDS - self::JOB_MARGIN))
             ->post(rtrim((string) config('imports.vision.url'), '/').'/v1/images/normalize', [
                 'sourceUrl' => $this->presigner->presignGet($sourceKey, $expiresAt),
                 'targetUrl' => $this->presigner->presignPut($targetKey, 'image/jpeg', null, $expiresAt)->url,

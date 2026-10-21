@@ -9,6 +9,7 @@ function magicBytesFile(string $contents): string
 {
     $path = tempnam(sys_get_temp_dir(), 'magic');
     file_put_contents($path, $contents);
+    register_shutdown_function(static fn () => @unlink($path));
 
     return $path;
 }
@@ -92,4 +93,20 @@ it('knows the canonical extension and MIME type of each type', function (): void
         ->and(MagicBytes::typeOfExtension('heif'))->toBe('heic')
         ->and(MagicBytes::typeOfExtension('dwg'))->toBeNull()
         ->and(MagicBytes::typeOfExtension('bmp'))->toBeNull();
+});
+
+it('lets a generic MIME type go with the extensions of its kind only', function (string $mime, string $extension, bool $expected): void {
+    expect(MagicBytes::genericMimeFits($mime, $extension))->toBe($expected);
+})->with([
+    ['application/octet-stream', 'dxf', true],
+    ['application/octet-stream', 'heic', true],
+    ['application/octet-stream', 'heif', true],
+    ['application/octet-stream', 'jpg', false],
+    ['text/plain', 'dxf', true],
+    ['text/plain', 'heic', false],
+    ['image/png', 'png', false],
+]);
+
+it('knows which MIME types are generic', function (): void {
+    expect(MagicBytes::GENERIC_MIMES)->toBe(['application/octet-stream', 'text/plain']);
 });

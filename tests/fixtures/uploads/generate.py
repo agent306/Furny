@@ -83,6 +83,32 @@ def animated_webp() -> bytes:
     return buffer.getvalue()
 
 
+def riff_chunk(fourcc: bytes, payload: bytes) -> bytes:
+    return fourcc + struct.pack("<I", len(payload)) + payload + (b"\x00" if len(payload) % 2 else b"")
+
+
+def le24(value: int) -> bytes:
+    return struct.pack("<I", value)[:3]
+
+
+def animated_webp_with_frame(canvas: int, width: int, height: int) -> bytes:
+    """An animated WebP whose canvas is `canvas` x `canvas` but whose one frame announces `width` x `height`.
+
+    The frame is a VP8L header with almost no pixel data: `getimagesize` on the whole file reports the small canvas,
+    while the frame's own bitstream is the size that would be decoded (the decompression bomb of 13 §11.3).
+    """
+    bits = (width - 1) | ((height - 1) << 14)  # 14 + 14 bits, then alpha (1) and version (3) = 0
+    vp8l = riff_chunk(b"VP8L", b"\x2f" + struct.pack("<I", bits) + b"\x00" * 8)
+    frame = le24(0) + le24(0) + le24(width - 1) + le24(height - 1) + le24(100) + b"\x00" + vp8l
+    body = (
+        b"WEBP"
+        + riff_chunk(b"VP8X", b"\x02\x00\x00\x00" + le24(canvas - 1) + le24(canvas - 1))
+        + riff_chunk(b"ANIM", b"\x00\x00\x00\x00" + b"\x00\x00")
+        + riff_chunk(b"ANMF", frame)
+    )
+    return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
 def png_chunk(kind: bytes, payload: bytes) -> bytes:
     body = kind + payload
     return struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
@@ -161,6 +187,9 @@ def main() -> None:
     write("plain.webp", plain_webp())
     write("animated.webp", animated_webp())
     write("png-as-jpg.jpg", png_as_jpg())
+    write("animated-frame-bomb-121mp.webp", animated_webp_with_frame(64, 11000, 11000))
+    write("animated-frame-bomb-48mp.webp", animated_webp_with_frame(64, 8000, 6000))
+    write("animated-frame-over-canvas.webp", animated_webp_with_frame(64, 100, 100))
     write("doc.pdf", minimal_pdf())
     write("plan.dxf", ascii_dxf())
     write("binary.dxf", binary_dxf())

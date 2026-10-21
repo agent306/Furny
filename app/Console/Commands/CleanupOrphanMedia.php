@@ -7,6 +7,7 @@ namespace App\Console\Commands;
 use App\Domain\Shared\Enums\UploadStatus;
 use App\Domain\Shared\Models\UploadIntent;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
 
@@ -48,10 +49,28 @@ final class CleanupOrphanMedia extends Command
 
         $this->info("Deleted {$deleted} upload intents.");
 
+        $this->sweepWorkDirectories();
+
         if ($failed > 0) {
             $this->warn("Could not delete the files of {$failed} upload intents; they are kept for the next run.");
         }
 
         return $failed > 0 ? self::FAILURE : self::SUCCESS;
+    }
+
+    /** Work directories of `ProcessUpload` jobs that the queue killed before their `finally` ran (60 s timeout). */
+    private function sweepWorkDirectories(): void
+    {
+        $limit = now()->subHour()->getTimestamp();
+
+        if (! is_dir(storage_path('app/tmp'))) {
+            return;
+        }
+
+        foreach (File::directories(storage_path('app/tmp')) as $directory) {
+            if (filemtime($directory) < $limit) {
+                File::deleteDirectory($directory);
+            }
+        }
     }
 }

@@ -24,10 +24,23 @@ function sanitizerQuadrants(int $width = 40, int $height = 24): GdImage
     return $image;
 }
 
+/** Sanitises and removes the output when the test process ends. @return array{path: string, width: int, height: int} */
+function sanitizerRun(string $path, string $type, ?int $maxEdge, bool $square = false): array
+{
+    $result = ImageSanitizer::sanitize($path, $type, $maxEdge, $square);
+    register_shutdown_function(static fn () => @unlink($result['path']));
+
+    return $result;
+}
+
 function sanitizerTemp(string $suffix = ''): string
 {
-    $path = tempnam(sys_get_temp_dir(), 'sanitize').$suffix;
-    register_shutdown_function(static fn () => @unlink($path));
+    $base = (string) tempnam(sys_get_temp_dir(), 'sanitize');
+    $path = $base.$suffix;
+    register_shutdown_function(static function () use ($base, $path): void {
+        @unlink($base);
+        @unlink($path);
+    });
 
     return $path;
 }
@@ -89,7 +102,7 @@ function sanitizerPngHeader(int $width, int $height): string
 }
 
 it('applies the EXIF orientation to the pixels and keeps no orientation tag', function (int $orientation, array $expectedCorners, bool $swapsSides): void {
-    $result = ImageSanitizer::sanitize(sanitizerJpegWithOrientation($orientation), 'jpeg', null);
+    $result = sanitizerRun(sanitizerJpegWithOrientation($orientation), 'jpeg', null);
 
     expect($result['width'])->toBe($swapsSides ? 24 : 40)
         ->and($result['height'])->toBe($swapsSides ? 40 : 24)
@@ -109,7 +122,7 @@ it('applies the EXIF orientation to the pixels and keeps no orientation tag', fu
 ]);
 
 it('writes a progressive JPEG', function (): void {
-    $result = ImageSanitizer::sanitize(sanitizerJpegWithOrientation(1), 'jpeg', null);
+    $result = sanitizerRun(sanitizerJpegWithOrientation(1), 'jpeg', null);
 
     // SOF2 (progressive DCT) instead of SOF0 (baseline).
     expect(file_get_contents($result['path']))->toContain("\xFF\xC2")->not->toContain("\xFF\xC0");
@@ -119,7 +132,7 @@ it('drops the metadata of the fixture with GPS data', function (): void {
     $fixture = base_path('tests/fixtures/uploads/exif-gps-rotated.jpg');
     expect(@exif_read_data($fixture, null, true))->toHaveKey('GPS');
 
-    $result = ImageSanitizer::sanitize($fixture, 'jpeg', null);
+    $result = sanitizerRun($fixture, 'jpeg', null);
     $exif = @exif_read_data($result['path'], null, true);
 
     expect($result['width'])->toBe(300)->and($result['height'])->toBe(400)
@@ -128,7 +141,7 @@ it('drops the metadata of the fixture with GPS data', function (): void {
 });
 
 it('keeps the alpha channel of a PNG', function (): void {
-    $result = ImageSanitizer::sanitize(base_path('tests/fixtures/uploads/plain.png'), 'png', null);
+    $result = sanitizerRun(base_path('tests/fixtures/uploads/plain.png'), 'png', null);
     $image = imagecreatefrompng($result['path']);
 
     // The fixture is transparent in its middle band and opaque in the corners.
@@ -138,14 +151,14 @@ it('keeps the alpha channel of a PNG', function (): void {
 });
 
 it('re-encodes a WebP and writes a WebP', function (): void {
-    $result = ImageSanitizer::sanitize(base_path('tests/fixtures/uploads/plain.webp'), 'webp', null);
+    $result = sanitizerRun(base_path('tests/fixtures/uploads/plain.webp'), 'webp', null);
 
     expect([$result['width'], $result['height']])->toBe([64, 48])
         ->and(substr(file_get_contents($result['path']), 8, 4))->toBe('WEBP');
 });
 
 it('keeps the first frame of an animated WebP', function (): void {
-    $result = ImageSanitizer::sanitize(base_path('tests/fixtures/uploads/animated.webp'), 'webp', null);
+    $result = sanitizerRun(base_path('tests/fixtures/uploads/animated.webp'), 'webp', null);
     $bytes = file_get_contents($result['path']);
     $image = imagecreatefromwebp($result['path']);
 
@@ -159,8 +172,8 @@ it('shrinks to the longer edge and never enlarges', function (): void {
     $source = sanitizerTemp('.jpg');
     imagejpeg(sanitizerQuadrants(200, 100), $source, 90);
 
-    $smaller = ImageSanitizer::sanitize($source, 'jpeg', 50);
-    $same = ImageSanitizer::sanitize($source, 'jpeg', 512);
+    $smaller = sanitizerRun($source, 'jpeg', 50);
+    $same = sanitizerRun($source, 'jpeg', 512);
 
     expect([$smaller['width'], $smaller['height']])->toBe([50, 25])
         ->and([$same['width'], $same['height']])->toBe([200, 100]);
@@ -170,7 +183,7 @@ it('cuts the middle square and resizes it to the edge when asked for a square', 
     $source = sanitizerTemp('.png');
     imagepng(sanitizerQuadrants(200, 100), $source);
 
-    $result = ImageSanitizer::sanitize($source, 'png', 64, square: true);
+    $result = sanitizerRun($source, 'png', 64, square: true);
     $image = imagecreatefrompng($result['path']);
 
     // The 100 x 100 middle of 200 x 100 holds the right half of the red/blue quadrants and the left half of green/yellow.
@@ -186,7 +199,7 @@ it('enlarges a small square texture to the edge', function (): void {
     $source = sanitizerTemp('.jpg');
     imagejpeg(sanitizerQuadrants(30, 30), $source, 90);
 
-    $result = ImageSanitizer::sanitize($source, 'jpeg', 100, square: true);
+    $result = sanitizerRun($source, 'jpeg', 100, square: true);
 
     expect([$result['width'], $result['height']])->toBe([100, 100]);
 });
@@ -194,7 +207,7 @@ it('enlarges a small square texture to the edge', function (): void {
 it('refuses an image over 40 megapixels from its header, before it decodes anything', function (): void {
     $before = memory_get_peak_usage(true);
 
-    expect(fn () => ImageSanitizer::sanitize(base_path('tests/fixtures/uploads/bomb-50mp.png'), 'png', null))
+    expect(fn () => sanitizerRun(base_path('tests/fixtures/uploads/bomb-50mp.png'), 'png', null))
         ->toThrow(fn (UploadRejected $e) => expect($e->reason)->toBe('upload_image_too_large'));
 
     // 50 megapixels would need 200 MB as a GD true colour image.
@@ -202,11 +215,11 @@ it('refuses an image over 40 megapixels from its header, before it decodes anyth
 });
 
 it('refuses a side over 12000 pixels, and accepts 12000', function (): void {
-    expect(fn () => ImageSanitizer::sanitize(sanitizerPngHeader(12_001, 1), 'png', null))
+    expect(fn () => sanitizerRun(sanitizerPngHeader(12_001, 1), 'png', null))
         ->toThrow(fn (UploadRejected $e) => expect($e->reason)->toBe('upload_image_too_large'));
 
     // 12000 x 1 passes the header check; the pixel data is not there, so decoding fails.
-    expect(fn () => ImageSanitizer::sanitize(sanitizerPngHeader(12_000, 1), 'png', null))
+    expect(fn () => sanitizerRun(sanitizerPngHeader(12_000, 1), 'png', null))
         ->toThrow(fn (UploadRejected $e) => expect($e->reason)->toBe('upload_corrupt'));
 });
 
@@ -214,10 +227,47 @@ it('refuses a file that is not a decodable image of the declared kind', function
     $path = sanitizerTemp();
     file_put_contents($path, $contents);
 
-    expect(fn () => ImageSanitizer::sanitize($path, $type, null))
+    expect(fn () => sanitizerRun($path, $type, null))
         ->toThrow(fn (UploadRejected $e) => expect($e->reason)->toBe('upload_corrupt'));
 })->with([
     'truncated jpeg' => ['jpeg', "\xFF\xD8\xFF\xE0\0\x10JFIF\0"],
     'garbage as png' => ['png', 'not a png at all'],
     'empty webp' => ['webp', ''],
 ]);
+
+it('writes its output to the temporary directory, never next to the input', function (): void {
+    $directory = base_path('tests/fixtures/uploads');
+    $before = glob($directory.'/*');
+
+    $result = sanitizerRun($directory.'/plain.png', 'png', null);
+
+    expect(dirname($result['path']))->toBe(rtrim(sys_get_temp_dir(), '/'))
+        ->and(glob($directory.'/*'))->toBe($before);
+});
+
+it('writes its output where it is told to', function (): void {
+    $directory = sys_get_temp_dir().'/sanitize-dir-'.uniqid();
+    mkdir($directory);
+
+    $result = ImageSanitizer::sanitize(base_path('tests/fixtures/uploads/plain.png'), 'png', null, directory: $directory);
+
+    expect(dirname($result['path']))->toBe($directory);
+    unlink($result['path']);
+    rmdir($directory);
+});
+
+it('refuses an animated WebP whose first frame is a bomb, though its canvas is small', function (string $fixture): void {
+    // The canvas says 64 x 64; the frame's own bitstream says 121 or 48 megapixels.
+    $before = memory_get_peak_usage(true);
+
+    expect(fn () => ImageSanitizer::sanitize(base_path('tests/fixtures/uploads/'.$fixture), 'webp', 4096))
+        ->toThrow(fn (UploadRejected $e) => expect($e->reason)->toBe('upload_image_too_large'));
+
+    expect(memory_get_peak_usage(true) - $before)->toBeLessThan(50 * 1024 * 1024)
+        ->and(glob(sys_get_temp_dir().'/frame-*'))->toBe([]);
+})->with(['animated-frame-bomb-121mp.webp', 'animated-frame-bomb-48mp.webp']);
+
+it('refuses an animated WebP whose first frame is larger than its canvas', function (): void {
+    expect(fn () => ImageSanitizer::sanitize(base_path('tests/fixtures/uploads/animated-frame-over-canvas.webp'), 'webp', null))
+        ->toThrow(fn (UploadRejected $e) => expect($e->reason)->toBe('upload_corrupt'));
+});

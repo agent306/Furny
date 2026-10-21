@@ -72,7 +72,7 @@ enum UploadPurpose: string
     {
         $mimes = array_merge(...array_map(MagicBytes::declaredMimes(...), $this->allowedSniffedTypes()));
 
-        return array_values(array_unique($this === self::BlueprintSource ? [...$mimes, 'application/octet-stream', 'text/plain'] : $mimes));
+        return array_values(array_unique($this === self::BlueprintSource ? [...$mimes, ...MagicBytes::GENERIC_MIMES] : $mimes));
     }
 
     /** The size limit in bytes; DXF blueprints are held to 15 MB (06 §2.1), whatever the extension's case. */

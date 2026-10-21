@@ -31,21 +31,28 @@ final class ImageSanitizer
      * exactly `$maxEdge` pixels a side (textures).
      *
      * @param  'jpeg'|'png'|'webp'|string  $type
-     * @return array{path: string, width: int, height: int} the file written next to `$path`; the caller deletes it
+     * @return array{path: string, width: int, height: int} the file written to `$directory` (default: the system's
+     *                                                      temporary directory); the caller deletes it
      *
      * @throws UploadRejected `upload_image_too_large`, or `upload_corrupt` when the file is not an image of that type
      */
-    public static function sanitize(string $path, string $type, ?int $maxEdge, bool $square = false): array
+    public static function sanitize(string $path, string $type, ?int $maxEdge, bool $square = false, ?string $directory = null): array
     {
         if (! isset(self::IMAGE_TYPES[$type])) {
             throw new UploadRejected('upload_corrupt');
         }
 
-        self::guardSize($path, $type);
+        $canvas = self::guardSize($path, $type);
 
-        $frame = $type === 'webp' ? self::firstWebpFrame($path) : null;
+        $frame = $type === 'webp' ? self::firstWebpFrame($path, $directory ?? sys_get_temp_dir()) : null;
 
         try {
+            // GD decodes the frame's own bitstream, whose size the container does not vouch for: it is checked
+            // against the same limits, and against the canvas, before anything is decoded.
+            if ($frame !== null && ! self::fitsCanvas(self::guardSize($frame, 'webp'), $canvas)) {
+                throw new UploadRejected('upload_corrupt');
+            }
+
             $source = self::decode($frame ?? $path, $type);
             $orientation = $type === 'jpeg' ? self::orientation($path) : 1;
         } finally {
@@ -66,7 +73,7 @@ final class ImageSanitizer
         unset($source);
         $image = self::fit($image, $maxEdge, $square);
 
-        $output = (string) tempnam(dirname($path), 'sanitized-');
+        $output = (string) tempnam($directory ?? sys_get_temp_dir(), 'sanitized-');
         $written = match ($type) {
             'jpeg' => self::writeJpeg($image, $output),
             'png' => imagepng($image, $output, self::PNG_COMPRESSION),
@@ -82,8 +89,12 @@ final class ImageSanitizer
         return ['path' => $output, 'width' => imagesx($image), 'height' => imagesy($image)];
     }
 
-    /** From the header only: width x height over 40 MP, or a side over 12 000 px, is refused before any decode. */
-    private static function guardSize(string $path, string $type): void
+    /**
+     * From the header only: width x height over 40 MP, or a side over 12 000 px, is refused before any decode.
+     *
+     * @return array{int, int} width and height
+     */
+    private static function guardSize(string $path, string $type): array
     {
         $info = self::quietly(static fn (): array|false => getimagesize($path));
 
@@ -94,6 +105,17 @@ final class ImageSanitizer
         if ($info[0] * $info[1] > self::MAX_PIXELS || max($info[0], $info[1]) > self::MAX_SIDE) {
             throw new UploadRejected('upload_image_too_large');
         }
+
+        return [$info[0], $info[1]];
+    }
+
+    /**
+     * @param  array{int, int}  $frame
+     * @param  array{int, int}  $canvas
+     */
+    private static function fitsCanvas(array $frame, array $canvas): bool
+    {
+        return $frame[0] <= $canvas[0] && $frame[1] <= $canvas[1];
     }
 
     private static function decode(string $path, string $type): GdImage
@@ -198,7 +220,7 @@ final class ImageSanitizer
      * GD decodes the first frame of nothing but a still WebP, so the first frame of an animated one is cut out into a
      * file of its own. Null when the file is a still.
      */
-    private static function firstWebpFrame(string $path): ?string
+    private static function firstWebpFrame(string $path, string $directory): ?string
     {
         $head = (string) file_get_contents($path, false, null, 0, 30);
 
@@ -220,7 +242,7 @@ final class ImageSanitizer
                 $width = self::littleEndian($bytes, $offset + 8 + 6, 3) + 1;
                 $height = self::littleEndian($bytes, $offset + 8 + 9, 3) + 1;
 
-                return self::stillWebp($path, $frame, $width, $height);
+                return self::stillWebp($directory, $frame, $width, $height);
             }
 
             $offset += 8 + $size + ($size & 1);
@@ -242,7 +264,7 @@ final class ImageSanitizer
     }
 
     /** A WebP file of one frame's chunks; a frame with an alpha chunk needs the extended header to say so. */
-    private static function stillWebp(string $path, string $frame, int $width, int $height): string
+    private static function stillWebp(string $directory, string $frame, int $width, int $height): string
     {
         $body = 'WEBP';
 
@@ -251,7 +273,7 @@ final class ImageSanitizer
         }
 
         $body .= $frame;
-        $still = (string) tempnam(dirname($path), 'frame-');
+        $still = (string) tempnam($directory, 'frame-');
         file_put_contents($still, 'RIFF'.pack('V', strlen($body)).$body);
 
         return $still;
