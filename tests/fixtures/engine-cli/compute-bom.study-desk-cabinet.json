@@ -1,0 +1,2572 @@
+{
+  "command": "compute-bom",
+  "request": {
+    "document": {
+      "schemaVersion": 1,
+      "templateKey": "study_desk",
+      "family": "table",
+      "dims": {
+        "width": 1200,
+        "height": 750,
+        "depth": 600
+      },
+      "materials": {
+        "carcass": {
+          "materialCode": "PB18-WHITE",
+          "edgeBandCode": null,
+          "finishCode": null
+        },
+        "back": {
+          "materialCode": "HDF3-WHITE",
+          "edgeBandCode": null,
+          "finishCode": null
+        },
+        "shelf": {
+          "materialCode": "PB18-WHITE",
+          "edgeBandCode": null,
+          "finishCode": null
+        },
+        "front": {
+          "materialCode": "PB18-WHITE",
+          "edgeBandCode": null,
+          "finishCode": null
+        },
+        "top": {
+          "materialCode": "PB25-WHITE",
+          "edgeBandCode": null,
+          "finishCode": null
+        },
+        "drawer_box": {
+          "materialCode": "PLY12-BWR",
+          "edgeBandCode": null,
+          "finishCode": null
+        },
+        "drawer_bottom": {
+          "materialCode": "HDF3-WHITE",
+          "edgeBandCode": null,
+          "finishCode": null
+        },
+        "plinth": {
+          "materialCode": "PB18-WHITE",
+          "edgeBandCode": null,
+          "finishCode": null
+        },
+        "leg": {
+          "materialCode": "SW50-RUBBER",
+          "edgeBandCode": null,
+          "finishCode": null
+        }
+      },
+      "carcass": null,
+      "table": {
+        "top": {
+          "shape": "rectangle",
+          "thickness": "material",
+          "cornerRadius": 0,
+          "overhang": 0
+        },
+        "base": {
+          "type": "cabinet_ends",
+          "legSource": "hardware",
+          "legCode": null,
+          "legSection": 50,
+          "apron": {
+            "enabled": false,
+            "height": 80,
+            "inset": 15
+          },
+          "stretcher": true
+        },
+        "storage": {
+          "drawers": null,
+          "lowerShelf": false,
+          "endCabinets": {
+            "width": 400,
+            "content": {
+              "type": "drawers",
+              "count": 3,
+              "frontHeights": "equal",
+              "slideCode": null,
+              "behindDoor": false
+            }
+          }
+        }
+      },
+      "overrides": {
+        "parts": {},
+        "extraParts": [],
+        "hardware": {},
+        "extraHardware": []
+      },
+      "notes": null
+    },
+    "catalog": {
+      "version": 1,
+      "currency": "INR",
+      "generatedAt": "2026-10-20T00:00:00Z",
+      "materials": [
+        {
+          "id": "seed-PB18-WHITE",
+          "code": "PB18-WHITE",
+          "name": "PB 18 mm Frosty White",
+          "boardType": "particle_board",
+          "thicknessMm": 18,
+          "sheetLengthMm": 2440,
+          "sheetWidthMm": 1220,
+          "hasGrain": false,
+          "decorName": "Frosty White",
+          "colorHex": "#f4f4f2",
+          "textureUrl": null,
+          "textureThumbUrl": null,
+          "surface": "pre_laminated",
+          "pricePerSheetMinor": 215000,
+          "wasteFactor": 0.1,
+          "densityKgM3": 650,
+          "usage": [
+            "carcass",
+            "shelf",
+            "front",
+            "top",
+            "plinth"
+          ],
+          "defaultEdgeBandCode": "EB08-WHITE",
+          "isActive": true,
+          "sortOrder": 10
+        },
+        {
+          "id": "seed-PB18-OAK",
+          "code": "PB18-OAK",
+          "name": "PB 18 mm Natural Oak",
+          "boardType": "particle_board",
+          "thicknessMm": 18,
+          "sheetLengthMm": 2440,
+          "sheetWidthMm": 1220,
+          "hasGrain": true,
+          "decorName": "Natural Oak",
+          "colorHex": "#c8a27a",
+          "textureUrl": null,
+          "textureThumbUrl": null,
+          "surface": "pre_laminated",
+          "pricePerSheetMinor": 265000,
+          "wasteFactor": 0.12,
+          "densityKgM3": 650,
+          "usage": [
+            "carcass",
+            "shelf",
+            "front",
+            "top",
+            "plinth"
+          ],
+          "defaultEdgeBandCode": "EB08-OAK",
+          "isActive": true,
+          "sortOrder": 20
+        },
+        {
+          "id": "seed-PB18-ANTH",
+          "code": "PB18-ANTH",
+          "name": "PB 18 mm Anthracite",
+          "boardType": "particle_board",
+          "thicknessMm": 18,
+          "sheetLengthMm": 2800,
+          "sheetWidthMm": 2070,
+          "hasGrain": false,
+          "decorName": "Anthracite",
+          "colorHex": "#3b3e42",
+          "textureUrl": null,
+          "textureThumbUrl": null,
+          "surface": "pre_laminated",
+          "pricePerSheetMinor": 460000,
+          "wasteFactor": 0.1,
+          "densityKgM3": 650,
+          "usage": [
+            "carcass",
+            "shelf",
+            "front",
+            "top",
+            "plinth"
+          ],
+          "defaultEdgeBandCode": "EB08-ANTH",
+          "isActive": true,
+          "sortOrder": 30
+        },
+        {
+          "id": "seed-PB25-WHITE",
+          "code": "PB25-WHITE",
+          "name": "PB 25 mm Frosty White",
+          "boardType": "particle_board",
+          "thicknessMm": 25,
+          "sheetLengthMm": 2800,
+          "sheetWidthMm": 2070,
+          "hasGrain": false,
+          "decorName": "Frosty White",
+          "colorHex": "#f4f4f2",
+          "textureUrl": null,
+          "textureThumbUrl": null,
+          "surface": "pre_laminated",
+          "pricePerSheetMinor": 520000,
+          "wasteFactor": 0.1,
+          "densityKgM3": 630,
+          "usage": [
+            "shelf",
+            "top"
+          ],
+          "defaultEdgeBandCode": "EB10-WHITE-28",
+          "isActive": true,
+          "sortOrder": 40
+        },
+        {
+          "id": "seed-MDF18-RAW",
+          "code": "MDF18-RAW",
+          "name": "MDF 18 mm (for paint / PU)",
+          "boardType": "mdf",
+          "thicknessMm": 18,
+          "sheetLengthMm": 2440,
+          "sheetWidthMm": 1220,
+          "hasGrain": false,
+          "decorName": null,
+          "colorHex": "#c9b79c",
+          "textureUrl": null,
+          "textureThumbUrl": null,
+          "surface": "raw",
+          "pricePerSheetMinor": 240000,
+          "wasteFactor": 0.1,
+          "densityKgM3": 750,
+          "usage": [
+            "front",
+            "carcass",
+            "shelf",
+            "top"
+          ],
+          "defaultEdgeBandCode": null,
+          "isActive": true,
+          "sortOrder": 50
+        },
+        {
+          "id": "seed-MDF18-GLOSS-WHITE",
+          "code": "MDF18-GLOSS-WHITE",
+          "name": "MDF 18 mm High-gloss White",
+          "boardType": "mdf",
+          "thicknessMm": 18,
+          "sheetLengthMm": 2440,
+          "sheetWidthMm": 1220,
+          "hasGrain": false,
+          "decorName": "Gloss White",
+          "colorHex": "#fafafa",
+          "textureUrl": null,
+          "textureThumbUrl": null,
+          "surface": "laminate",
+          "pricePerSheetMinor": 420000,
+          "wasteFactor": 0.12,
+          "densityKgM3": 750,
+          "usage": [
+            "front"
+          ],
+          "defaultEdgeBandCode": "EB20-WHITE",
+          "isActive": true,
+          "sortOrder": 60
+        },
+        {
+          "id": "seed-PLY18-BWR",
+          "code": "PLY18-BWR",
+          "name": "Plywood 18 mm BWR",
+          "boardType": "plywood",
+          "thicknessMm": 18,
+          "sheetLengthMm": 2440,
+          "sheetWidthMm": 1220,
+          "hasGrain": false,
+          "decorName": null,
+          "colorHex": "#d9b98c",
+          "textureUrl": null,
+          "textureThumbUrl": null,
+          "surface": "raw",
+          "pricePerSheetMinor": 340000,
+          "wasteFactor": 0.1,
+          "densityKgM3": 600,
+          "usage": [
+            "carcass",
+            "shelf",
+            "front",
+            "top",
+            "plinth"
+          ],
+          "defaultEdgeBandCode": null,
+          "isActive": true,
+          "sortOrder": 70
+        },
+        {
+          "id": "seed-PLY12-BWR",
+          "code": "PLY12-BWR",
+          "name": "Plywood 12 mm BWR",
+          "boardType": "plywood",
+          "thicknessMm": 12,
+          "sheetLengthMm": 2440,
+          "sheetWidthMm": 1220,
+          "hasGrain": false,
+          "decorName": null,
+          "colorHex": "#d9b98c",
+          "textureUrl": null,
+          "textureThumbUrl": null,
+          "surface": "raw",
+          "pricePerSheetMinor": 250000,
+          "wasteFactor": 0.1,
+          "densityKgM3": 600,
+          "usage": [
+            "drawer_box"
+          ],
+          "defaultEdgeBandCode": null,
+          "isActive": true,
+          "sortOrder": 80
+        },
+        {
+          "id": "seed-HDF3-WHITE",
+          "code": "HDF3-WHITE",
+          "name": "HDF 3 mm White (one side)",
+          "boardType": "hdf",
+          "thicknessMm": 3,
+          "sheetLengthMm": 2440,
+          "sheetWidthMm": 1220,
+          "hasGrain": false,
+          "decorName": "White",
+          "colorHex": "#f2f2f0",
+          "textureUrl": null,
+          "textureThumbUrl": null,
+          "surface": "melamine",
+          "pricePerSheetMinor": 65000,
+          "wasteFactor": 0.1,
+          "densityKgM3": 900,
+          "usage": [
+            "back",
+            "drawer_bottom"
+          ],
+          "defaultEdgeBandCode": null,
+          "isActive": true,
+          "sortOrder": 90
+        },
+        {
+          "id": "seed-PLY6-BWR",
+          "code": "PLY6-BWR",
+          "name": "Plywood 6 mm BWR",
+          "boardType": "plywood",
+          "thicknessMm": 6,
+          "sheetLengthMm": 2440,
+          "sheetWidthMm": 1220,
+          "hasGrain": false,
+          "decorName": null,
+          "colorHex": "#d9b98c",
+          "textureUrl": null,
+          "textureThumbUrl": null,
+          "surface": "raw",
+          "pricePerSheetMinor": 125000,
+          "wasteFactor": 0.1,
+          "densityKgM3": 600,
+          "usage": [
+            "back",
+            "drawer_bottom"
+          ],
+          "defaultEdgeBandCode": null,
+          "isActive": true,
+          "sortOrder": 100
+        },
+        {
+          "id": "seed-GLASS5-CLEAR",
+          "code": "GLASS5-CLEAR",
+          "name": "Toughened glass 5 mm, clear",
+          "boardType": "glass",
+          "thicknessMm": 5,
+          "sheetLengthMm": 2440,
+          "sheetWidthMm": 1830,
+          "hasGrain": false,
+          "decorName": "Clear",
+          "colorHex": "#ddeff2",
+          "textureUrl": null,
+          "textureThumbUrl": null,
+          "surface": "raw",
+          "pricePerSheetMinor": 580000,
+          "wasteFactor": 0.05,
+          "densityKgM3": 2500,
+          "usage": [
+            "glass"
+          ],
+          "defaultEdgeBandCode": null,
+          "isActive": true,
+          "sortOrder": 110
+        },
+        {
+          "id": "seed-SW50-RUBBER",
+          "code": "SW50-RUBBER",
+          "name": "Rubberwood 50 mm (legs, frames)",
+          "boardType": "solid_wood",
+          "thicknessMm": 50,
+          "sheetLengthMm": 2440,
+          "sheetWidthMm": 300,
+          "hasGrain": true,
+          "decorName": "Rubberwood",
+          "colorHex": "#d2b48c",
+          "textureUrl": null,
+          "textureThumbUrl": null,
+          "surface": "raw",
+          "pricePerSheetMinor": 450000,
+          "wasteFactor": 0.15,
+          "densityKgM3": 700,
+          "usage": [
+            "leg"
+          ],
+          "defaultEdgeBandCode": null,
+          "isActive": true,
+          "sortOrder": 120
+        }
+      ],
+      "edgeBands": [
+        {
+          "id": "seed-EB04-WHITE",
+          "code": "EB04-WHITE",
+          "name": "0.4 × 22 White",
+          "thicknessMm": 0.4,
+          "widthMm": 22,
+          "colorHex": "#f4f4f2",
+          "pricePerMeterMinor": 300,
+          "isActive": true
+        },
+        {
+          "id": "seed-EB08-ANTH",
+          "code": "EB08-ANTH",
+          "name": "0.8 × 22 Anthracite",
+          "thicknessMm": 0.8,
+          "widthMm": 22,
+          "colorHex": "#3b3e42",
+          "pricePerMeterMinor": 700,
+          "isActive": true
+        },
+        {
+          "id": "seed-EB08-OAK",
+          "code": "EB08-OAK",
+          "name": "0.8 × 22 Natural Oak",
+          "thicknessMm": 0.8,
+          "widthMm": 22,
+          "colorHex": "#c8a27a",
+          "pricePerMeterMinor": 800,
+          "isActive": true
+        },
+        {
+          "id": "seed-EB08-WHITE",
+          "code": "EB08-WHITE",
+          "name": "0.8 × 22 Frosty White",
+          "thicknessMm": 0.8,
+          "widthMm": 22,
+          "colorHex": "#f4f4f2",
+          "pricePerMeterMinor": 600,
+          "isActive": true
+        },
+        {
+          "id": "seed-EB10-WHITE-28",
+          "code": "EB10-WHITE-28",
+          "name": "1.0 × 28 White (25 mm boards)",
+          "thicknessMm": 1,
+          "widthMm": 28,
+          "colorHex": "#f4f4f2",
+          "pricePerMeterMinor": 1000,
+          "isActive": true
+        },
+        {
+          "id": "seed-EB20-ANTH",
+          "code": "EB20-ANTH",
+          "name": "2.0 × 22 Anthracite",
+          "thicknessMm": 2,
+          "widthMm": 22,
+          "colorHex": "#3b3e42",
+          "pricePerMeterMinor": 1600,
+          "isActive": true
+        },
+        {
+          "id": "seed-EB20-OAK",
+          "code": "EB20-OAK",
+          "name": "2.0 × 22 Natural Oak",
+          "thicknessMm": 2,
+          "widthMm": 22,
+          "colorHex": "#c8a27a",
+          "pricePerMeterMinor": 1800,
+          "isActive": true
+        },
+        {
+          "id": "seed-EB20-WHITE",
+          "code": "EB20-WHITE",
+          "name": "2.0 × 22 White",
+          "thicknessMm": 2,
+          "widthMm": 22,
+          "colorHex": "#f7f7f5",
+          "pricePerMeterMinor": 1400,
+          "isActive": true
+        }
+      ],
+      "hardware": [
+        {
+          "id": "seed-CON-CAM-15",
+          "code": "CON-CAM-15",
+          "name": "Cam lock 15 mm with connecting bolt",
+          "category": "connector",
+          "specs": {
+            "kind": "cam"
+          },
+          "unit": "piece",
+          "priceMinor": 900,
+          "isDefaultFor": [
+            "connector.cam"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 270
+        },
+        {
+          "id": "seed-CON-DOWEL-8",
+          "code": "CON-DOWEL-8",
+          "name": "Wooden dowel 8 × 35 mm",
+          "category": "connector",
+          "specs": {
+            "kind": "dowel"
+          },
+          "unit": "piece",
+          "priceMinor": 100,
+          "isDefaultFor": [
+            "connector.dowel"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 280
+        },
+        {
+          "id": "seed-CON-TBL-CORNER",
+          "code": "CON-TBL-CORNER",
+          "name": "Table corner bracket with hanger bolt",
+          "category": "connector",
+          "specs": {
+            "kind": "table_corner"
+          },
+          "unit": "piece",
+          "priceMinor": 8500,
+          "isDefaultFor": [
+            "connector.table_corner"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 290
+        },
+        {
+          "id": "seed-DMP-PUSH",
+          "code": "DMP-PUSH",
+          "name": "Push-in door damper",
+          "category": "damper",
+          "specs": {},
+          "unit": "piece",
+          "priceMinor": 4000,
+          "isDefaultFor": [],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 390
+        },
+        {
+          "id": "seed-SLD-BB-250",
+          "code": "SLD-BB-250",
+          "name": "Ball-bearing slide 45 mm, full extension, soft-close, 250 mm",
+          "category": "drawer_slide",
+          "specs": {
+            "type": "side_mount",
+            "family": "bb45",
+            "lengthMm": 250,
+            "loadKg": 35,
+            "softClose": true,
+            "extension": "full",
+            "clearancePerSideMm": 12.7
+          },
+          "unit": "pair",
+          "priceMinor": 35000,
+          "isDefaultFor": [],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 50
+        },
+        {
+          "id": "seed-SLD-BB-300",
+          "code": "SLD-BB-300",
+          "name": "Ball-bearing slide 45 mm, full extension, soft-close, 300 mm",
+          "category": "drawer_slide",
+          "specs": {
+            "type": "side_mount",
+            "family": "bb45",
+            "lengthMm": 300,
+            "loadKg": 35,
+            "softClose": true,
+            "extension": "full",
+            "clearancePerSideMm": 12.7
+          },
+          "unit": "pair",
+          "priceMinor": 38000,
+          "isDefaultFor": [],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 60
+        },
+        {
+          "id": "seed-SLD-BB-350",
+          "code": "SLD-BB-350",
+          "name": "Ball-bearing slide 45 mm, full extension, soft-close, 350 mm",
+          "category": "drawer_slide",
+          "specs": {
+            "type": "side_mount",
+            "family": "bb45",
+            "lengthMm": 350,
+            "loadKg": 35,
+            "softClose": true,
+            "extension": "full",
+            "clearancePerSideMm": 12.7
+          },
+          "unit": "pair",
+          "priceMinor": 42000,
+          "isDefaultFor": [],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 70
+        },
+        {
+          "id": "seed-SLD-BB-400",
+          "code": "SLD-BB-400",
+          "name": "Ball-bearing slide 45 mm, full extension, soft-close, 400 mm",
+          "category": "drawer_slide",
+          "specs": {
+            "type": "side_mount",
+            "family": "bb45",
+            "lengthMm": 400,
+            "loadKg": 35,
+            "softClose": true,
+            "extension": "full",
+            "clearancePerSideMm": 12.7
+          },
+          "unit": "pair",
+          "priceMinor": 46000,
+          "isDefaultFor": [],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 80
+        },
+        {
+          "id": "seed-SLD-BB-450",
+          "code": "SLD-BB-450",
+          "name": "Ball-bearing slide 45 mm, full extension, soft-close, 450 mm",
+          "category": "drawer_slide",
+          "specs": {
+            "type": "side_mount",
+            "family": "bb45",
+            "lengthMm": 450,
+            "loadKg": 35,
+            "softClose": true,
+            "extension": "full",
+            "clearancePerSideMm": 12.7
+          },
+          "unit": "pair",
+          "priceMinor": 50000,
+          "isDefaultFor": [
+            "slide.side_mount"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 90
+        },
+        {
+          "id": "seed-SLD-BB-500",
+          "code": "SLD-BB-500",
+          "name": "Ball-bearing slide 45 mm, full extension, soft-close, 500 mm",
+          "category": "drawer_slide",
+          "specs": {
+            "type": "side_mount",
+            "family": "bb45",
+            "lengthMm": 500,
+            "loadKg": 35,
+            "softClose": true,
+            "extension": "full",
+            "clearancePerSideMm": 12.7
+          },
+          "unit": "pair",
+          "priceMinor": 55000,
+          "isDefaultFor": [],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 100
+        },
+        {
+          "id": "seed-SLD-BB-550",
+          "code": "SLD-BB-550",
+          "name": "Ball-bearing slide 45 mm, full extension, soft-close, 550 mm",
+          "category": "drawer_slide",
+          "specs": {
+            "type": "side_mount",
+            "family": "bb45",
+            "lengthMm": 550,
+            "loadKg": 35,
+            "softClose": true,
+            "extension": "full",
+            "clearancePerSideMm": 12.7
+          },
+          "unit": "pair",
+          "priceMinor": 60000,
+          "isDefaultFor": [],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 110
+        },
+        {
+          "id": "seed-SLD-BB-600",
+          "code": "SLD-BB-600",
+          "name": "Ball-bearing slide 45 mm, full extension, soft-close, 600 mm",
+          "category": "drawer_slide",
+          "specs": {
+            "type": "side_mount",
+            "family": "bb45",
+            "lengthMm": 600,
+            "loadKg": 35,
+            "softClose": true,
+            "extension": "full",
+            "clearancePerSideMm": 12.7
+          },
+          "unit": "pair",
+          "priceMinor": 65000,
+          "isDefaultFor": [],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 120
+        },
+        {
+          "id": "seed-SLD-UM-350",
+          "code": "SLD-UM-350",
+          "name": "Undermount concealed slide, soft-close, 350 mm",
+          "category": "drawer_slide",
+          "specs": {
+            "type": "undermount",
+            "family": "um",
+            "lengthMm": 350,
+            "loadKg": 30,
+            "softClose": true,
+            "extension": "full",
+            "innerWidthDeductionMm": 42,
+            "lengthDeductionMm": 10,
+            "bottomRecessMm": 13,
+            "maxSideThicknessMm": 16
+          },
+          "unit": "pair",
+          "priceMinor": 140000,
+          "isDefaultFor": [],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 130
+        },
+        {
+          "id": "seed-SLD-UM-400",
+          "code": "SLD-UM-400",
+          "name": "Undermount concealed slide, soft-close, 400 mm",
+          "category": "drawer_slide",
+          "specs": {
+            "type": "undermount",
+            "family": "um",
+            "lengthMm": 400,
+            "loadKg": 30,
+            "softClose": true,
+            "extension": "full",
+            "innerWidthDeductionMm": 42,
+            "lengthDeductionMm": 10,
+            "bottomRecessMm": 13,
+            "maxSideThicknessMm": 16
+          },
+          "unit": "pair",
+          "priceMinor": 150000,
+          "isDefaultFor": [],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 140
+        },
+        {
+          "id": "seed-SLD-UM-450",
+          "code": "SLD-UM-450",
+          "name": "Undermount concealed slide, soft-close, 450 mm",
+          "category": "drawer_slide",
+          "specs": {
+            "type": "undermount",
+            "family": "um",
+            "lengthMm": 450,
+            "loadKg": 30,
+            "softClose": true,
+            "extension": "full",
+            "innerWidthDeductionMm": 42,
+            "lengthDeductionMm": 10,
+            "bottomRecessMm": 13,
+            "maxSideThicknessMm": 16
+          },
+          "unit": "pair",
+          "priceMinor": 160000,
+          "isDefaultFor": [
+            "slide.undermount"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 150
+        },
+        {
+          "id": "seed-SLD-UM-500",
+          "code": "SLD-UM-500",
+          "name": "Undermount concealed slide, soft-close, 500 mm",
+          "category": "drawer_slide",
+          "specs": {
+            "type": "undermount",
+            "family": "um",
+            "lengthMm": 500,
+            "loadKg": 30,
+            "softClose": true,
+            "extension": "full",
+            "innerWidthDeductionMm": 42,
+            "lengthDeductionMm": 10,
+            "bottomRecessMm": 13,
+            "maxSideThicknessMm": 16
+          },
+          "unit": "pair",
+          "priceMinor": 175000,
+          "isDefaultFor": [],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 160
+        },
+        {
+          "id": "seed-GAS-80N",
+          "code": "GAS-80N",
+          "name": "Gas strut 80 N for lift-up flaps",
+          "category": "gas_strut",
+          "specs": {
+            "forceN": 80
+          },
+          "unit": "piece",
+          "priceMinor": 15000,
+          "isDefaultFor": [
+            "gas_strut.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 340
+        },
+        {
+          "id": "seed-HDL-BAR-160",
+          "code": "HDL-BAR-160",
+          "name": "Bar handle, stainless steel, 160 mm (128 c/c)",
+          "category": "handle",
+          "specs": {
+            "lengthMm": 160,
+            "holeSpacingMm": 128,
+            "holeCount": 2
+          },
+          "unit": "piece",
+          "priceMinor": 18000,
+          "isDefaultFor": [
+            "handle.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 170
+        },
+        {
+          "id": "seed-HDL-BAR-320",
+          "code": "HDL-BAR-320",
+          "name": "Bar handle, stainless steel, 320 mm (288 c/c)",
+          "category": "handle",
+          "specs": {
+            "lengthMm": 320,
+            "holeSpacingMm": 288,
+            "holeCount": 2
+          },
+          "unit": "piece",
+          "priceMinor": 32000,
+          "isDefaultFor": [],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 180
+        },
+        {
+          "id": "seed-HDL-FLUSH",
+          "code": "HDL-FLUSH",
+          "name": "Flush pull for sliding doors",
+          "category": "handle",
+          "specs": {
+            "lengthMm": 100,
+            "holeSpacingMm": 0,
+            "holeCount": 0,
+            "flush": true
+          },
+          "unit": "piece",
+          "priceMinor": 15000,
+          "isDefaultFor": [
+            "handle.flush"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 190
+        },
+        {
+          "id": "seed-ROD-OVAL-1200",
+          "code": "ROD-OVAL-1200",
+          "name": "Wardrobe oval rod 30 × 15 mm, cut to ≤ 1200 mm",
+          "category": "hanging_rod",
+          "specs": {
+            "maxLengthMm": 1200,
+            "profile": "oval"
+          },
+          "unit": "piece",
+          "priceMinor": 22000,
+          "isDefaultFor": [
+            "rod.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 240
+        },
+        {
+          "id": "seed-HNG-FO-SC",
+          "code": "HNG-FO-SC",
+          "name": "Concealed hinge 35 mm, full overlay, soft-close, 110°",
+          "category": "hinge",
+          "specs": {
+            "overlay": "full",
+            "crankMm": 0,
+            "openingAngle": 110,
+            "softClose": true,
+            "cupDiameterMm": 35,
+            "boringDistanceMm": 4,
+            "integratedPlate": false
+          },
+          "unit": "piece",
+          "priceMinor": 12000,
+          "isDefaultFor": [
+            "hinge.full_overlay"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 10
+        },
+        {
+          "id": "seed-HNG-HO-SC",
+          "code": "HNG-HO-SC",
+          "name": "Concealed hinge 35 mm, half overlay (cranked), soft-close",
+          "category": "hinge",
+          "specs": {
+            "overlay": "half",
+            "crankMm": 9.5,
+            "openingAngle": 110,
+            "softClose": true,
+            "cupDiameterMm": 35,
+            "boringDistanceMm": 4,
+            "integratedPlate": false
+          },
+          "unit": "piece",
+          "priceMinor": 12500,
+          "isDefaultFor": [
+            "hinge.half_overlay"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 20
+        },
+        {
+          "id": "seed-HNG-IN-SC",
+          "code": "HNG-IN-SC",
+          "name": "Concealed hinge 35 mm, inset (heavy crank), soft-close",
+          "category": "hinge",
+          "specs": {
+            "overlay": "inset",
+            "crankMm": 16,
+            "openingAngle": 110,
+            "softClose": true,
+            "cupDiameterMm": 35,
+            "boringDistanceMm": 4,
+            "integratedPlate": false
+          },
+          "unit": "piece",
+          "priceMinor": 13500,
+          "isDefaultFor": [
+            "hinge.inset"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 30
+        },
+        {
+          "id": "seed-HNG-PLATE-0",
+          "code": "HNG-PLATE-0",
+          "name": "Clip mounting plate 0 mm",
+          "category": "hinge_plate",
+          "specs": {
+            "heightMm": 0
+          },
+          "unit": "piece",
+          "priceMinor": 2500,
+          "isDefaultFor": [
+            "hinge_plate.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 40
+        },
+        {
+          "id": "seed-KNB-ROUND-30",
+          "code": "KNB-ROUND-30",
+          "name": "Round knob 30 mm",
+          "category": "knob",
+          "specs": {
+            "diameterMm": 30,
+            "holeCount": 1
+          },
+          "unit": "piece",
+          "priceMinor": 9000,
+          "isDefaultFor": [
+            "knob.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 200
+        },
+        {
+          "id": "seed-LED-STRIP-12V",
+          "code": "LED-STRIP-12V",
+          "name": "LED strip 12 V warm white",
+          "category": "led_strip",
+          "specs": {},
+          "unit": "meter",
+          "priceMinor": 25000,
+          "isDefaultFor": [
+            "led_strip.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 400
+        },
+        {
+          "id": "seed-LEG-CAB-ADJ",
+          "code": "LEG-CAB-ADJ",
+          "name": "Cabinet leg, metal, adjustable 100–160 mm",
+          "category": "leg",
+          "specs": {
+            "minHeightMm": 100,
+            "maxHeightMm": 160,
+            "sectionMm": 40
+          },
+          "unit": "piece",
+          "priceMinor": 35000,
+          "isDefaultFor": [
+            "leg.cabinet"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 220
+        },
+        {
+          "id": "seed-LEG-TBL-710",
+          "code": "LEG-TBL-710",
+          "name": "Table leg, steel 60 × 60, 710 mm (+15 adjustable)",
+          "category": "leg",
+          "specs": {
+            "heightMm": 710,
+            "adjustableMm": 15,
+            "sectionMm": 60
+          },
+          "unit": "piece",
+          "priceMinor": 120000,
+          "isDefaultFor": [
+            "leg.table"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 230
+        },
+        {
+          "id": "seed-LFT-STAY-SC",
+          "code": "LFT-STAY-SC",
+          "name": "Soft-down flap stay",
+          "category": "lift_mechanism",
+          "specs": {
+            "maxFlapWeightKg": 8
+          },
+          "unit": "piece",
+          "priceMinor": 38000,
+          "isDefaultFor": [
+            "lift.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 350
+        },
+        {
+          "id": "seed-LCK-CAM-20",
+          "code": "LCK-CAM-20",
+          "name": "Cupboard cam lock 20 mm",
+          "category": "lock",
+          "specs": {},
+          "unit": "piece",
+          "priceMinor": 11000,
+          "isDefaultFor": [
+            "lock.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 380
+        },
+        {
+          "id": "seed-BSK-PULL-600",
+          "code": "BSK-PULL-600",
+          "name": "Pull-out wire basket with slides (600 mm cabinet)",
+          "category": "other",
+          "specs": {
+            "kind": "basket",
+            "minInnerWidthMm": 550,
+            "maxInnerWidthMm": 570,
+            "minDepthMm": 450
+          },
+          "unit": "piece",
+          "priceMinor": 220000,
+          "isDefaultFor": [
+            "basket.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 360
+        },
+        {
+          "id": "seed-LEG-PLINTH-100",
+          "code": "LEG-PLINTH-100",
+          "name": "Adjustable plinth leg 95–150 mm",
+          "category": "plinth_leg",
+          "specs": {
+            "minHeightMm": 95,
+            "maxHeightMm": 150
+          },
+          "unit": "piece",
+          "priceMinor": 4500,
+          "isDefaultFor": [
+            "leg.plinth"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 210
+        },
+        {
+          "id": "seed-ROD-SUP",
+          "code": "ROD-SUP",
+          "name": "Oval rod end support",
+          "category": "rod_support",
+          "specs": {},
+          "unit": "piece",
+          "priceMinor": 3000,
+          "isDefaultFor": [
+            "rod_support.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 250
+        },
+        {
+          "id": "seed-SCR-PACK",
+          "code": "SCR-PACK",
+          "name": "Assembly screw pack (100 pcs, assorted)",
+          "category": "screw_pack",
+          "specs": {
+            "pieces": 100
+          },
+          "unit": "pack",
+          "priceMinor": 12000,
+          "isDefaultFor": [
+            "screw_pack.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 370
+        },
+        {
+          "id": "seed-SHF-PIN-5",
+          "code": "SHF-PIN-5",
+          "name": "Shelf support pin 5 mm",
+          "category": "shelf_support",
+          "specs": {
+            "pinDiameterMm": 5
+          },
+          "unit": "piece",
+          "priceMinor": 400,
+          "isDefaultFor": [
+            "shelf_support.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 260
+        },
+        {
+          "id": "seed-ROL-SLD-SET",
+          "code": "ROL-SLD-SET",
+          "name": "Sliding door roller set (2 rollers + top guides), per leaf",
+          "category": "sliding_roller",
+          "specs": {
+            "maxLeafWeightKg": 60
+          },
+          "unit": "set",
+          "priceMinor": 65000,
+          "isDefaultFor": [
+            "sliding_roller.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 330
+        },
+        {
+          "id": "seed-TRK-SLD-2T-3000",
+          "code": "TRK-SLD-2T-3000",
+          "name": "Sliding wardrobe track set, 2-track top + bottom, 3000 mm",
+          "category": "sliding_track",
+          "specs": {
+            "lengthMm": 3000,
+            "tracks": 2,
+            "system": "bottom_rolling"
+          },
+          "unit": "set",
+          "priceMinor": 280000,
+          "isDefaultFor": [
+            "sliding_track.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 320
+        },
+        {
+          "id": "seed-BRK-WALL-HANG",
+          "code": "BRK-WALL-HANG",
+          "name": "Adjustable cabinet hanging bracket with rail",
+          "category": "wall_bracket",
+          "specs": {
+            "kind": "hanging",
+            "loadKg": 65
+          },
+          "unit": "piece",
+          "priceMinor": 16000,
+          "isDefaultFor": [
+            "wall_bracket.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 300
+        },
+        {
+          "id": "seed-BRK-ANTITIP",
+          "code": "BRK-ANTITIP",
+          "name": "Anti-tip wall fixing kit (2 brackets)",
+          "category": "wall_bracket",
+          "specs": {
+            "kind": "anti_tip"
+          },
+          "unit": "set",
+          "priceMinor": 6000,
+          "isDefaultFor": [
+            "anti_tip.default"
+          ],
+          "imageUrl": null,
+          "isActive": true,
+          "sortOrder": 310
+        }
+      ],
+      "finishes": [
+        {
+          "id": "seed-FIN-DUCO",
+          "code": "FIN-DUCO",
+          "name": "Duco paint",
+          "finishType": "duco",
+          "pricePerSqmMinor": 90000,
+          "appliesTo": [
+            "mdf",
+            "plywood"
+          ],
+          "colorHex": null,
+          "textureUrl": null,
+          "isActive": true
+        },
+        {
+          "id": "seed-FIN-LAM-MATT",
+          "code": "FIN-LAM-MATT",
+          "name": "Laminate 1 mm, matt (per face)",
+          "finishType": "laminate",
+          "pricePerSqmMinor": 45000,
+          "appliesTo": [
+            "particle_board",
+            "mdf",
+            "plywood",
+            "blockboard"
+          ],
+          "colorHex": null,
+          "textureUrl": null,
+          "isActive": true
+        },
+        {
+          "id": "seed-FIN-MEMBRANE",
+          "code": "FIN-MEMBRANE",
+          "name": "PVC membrane (3D foil)",
+          "finishType": "membrane",
+          "pricePerSqmMinor": 100000,
+          "appliesTo": [
+            "mdf"
+          ],
+          "colorHex": null,
+          "textureUrl": null,
+          "isActive": true
+        },
+        {
+          "id": "seed-FIN-PU-GLOSS",
+          "code": "FIN-PU-GLOSS",
+          "name": "PU paint, high gloss",
+          "finishType": "pu",
+          "pricePerSqmMinor": 160000,
+          "appliesTo": [
+            "mdf"
+          ],
+          "colorHex": null,
+          "textureUrl": null,
+          "isActive": true
+        },
+        {
+          "id": "seed-FIN-PU-MATT",
+          "code": "FIN-PU-MATT",
+          "name": "PU paint, matt",
+          "finishType": "pu",
+          "pricePerSqmMinor": 110000,
+          "appliesTo": [
+            "mdf"
+          ],
+          "colorHex": null,
+          "textureUrl": null,
+          "isActive": true
+        },
+        {
+          "id": "seed-FIN-VENEER-TEAK",
+          "code": "FIN-VENEER-TEAK",
+          "name": "Teak veneer with PU clear coat",
+          "finishType": "veneer",
+          "pricePerSqmMinor": 140000,
+          "appliesTo": [
+            "plywood",
+            "mdf",
+            "blockboard"
+          ],
+          "colorHex": "#a0703c",
+          "textureUrl": null,
+          "isActive": true
+        }
+      ],
+      "labourRates": [
+        {
+          "id": "seed-assembly_per_part",
+          "key": "assembly_per_part",
+          "name": "Assembly per panel",
+          "unit": "part",
+          "rateMinor": 4000,
+          "isActive": true
+        },
+        {
+          "id": "seed-cutting_per_sheet",
+          "key": "cutting_per_sheet",
+          "name": "Panel cutting",
+          "unit": "sheet",
+          "rateMinor": 15000,
+          "isActive": true
+        },
+        {
+          "id": "seed-drawer_assembly_each",
+          "key": "drawer_assembly_each",
+          "name": "Drawer assembly incl. slides",
+          "unit": "piece",
+          "rateMinor": 25000,
+          "isActive": true
+        },
+        {
+          "id": "seed-drilling_per_hole",
+          "key": "drilling_per_hole",
+          "name": "Drilling (shelf pins, dowels, cams, handles)",
+          "unit": "piece",
+          "rateMinor": 100,
+          "isActive": true
+        },
+        {
+          "id": "seed-edge_banding_per_meter",
+          "key": "edge_banding_per_meter",
+          "name": "Edge banding",
+          "unit": "meter",
+          "rateMinor": 1200,
+          "isActive": true
+        },
+        {
+          "id": "seed-finishing_per_sqm",
+          "key": "finishing_per_sqm",
+          "name": "Finishing labour",
+          "unit": "sqm",
+          "rateMinor": 20000,
+          "isActive": true
+        },
+        {
+          "id": "seed-general_per_hour",
+          "key": "general_per_hour",
+          "name": "General labour (manual quote lines)",
+          "unit": "hour",
+          "rateMinor": 30000,
+          "isActive": true
+        },
+        {
+          "id": "seed-glass_fitting_each",
+          "key": "glass_fitting_each",
+          "name": "Glass panel fitting",
+          "unit": "piece",
+          "rateMinor": 20000,
+          "isActive": true
+        },
+        {
+          "id": "seed-hardware_fitting_each",
+          "key": "hardware_fitting_each",
+          "name": "Hardware fitting (handles, rods, legs, brackets…)",
+          "unit": "piece",
+          "rateMinor": 2500,
+          "isActive": true
+        },
+        {
+          "id": "seed-hinge_cup_boring_each",
+          "key": "hinge_cup_boring_each",
+          "name": "Hinge cup boring",
+          "unit": "piece",
+          "rateMinor": 1000,
+          "isActive": true
+        },
+        {
+          "id": "seed-hinge_install_each",
+          "key": "hinge_install_each",
+          "name": "Hinge installation & adjustment",
+          "unit": "piece",
+          "rateMinor": 2000,
+          "isActive": true
+        },
+        {
+          "id": "seed-installation_per_item",
+          "key": "installation_per_item",
+          "name": "Minimum installation charge per item",
+          "unit": "item",
+          "rateMinor": 150000,
+          "isActive": true
+        },
+        {
+          "id": "seed-packing_per_item",
+          "key": "packing_per_item",
+          "name": "Packing & handling per item",
+          "unit": "item",
+          "rateMinor": 30000,
+          "isActive": true
+        },
+        {
+          "id": "seed-sliding_door_fitting_each",
+          "key": "sliding_door_fitting_each",
+          "name": "Sliding door fitting per leaf",
+          "unit": "piece",
+          "rateMinor": 40000,
+          "isActive": true
+        }
+      ],
+      "taxRates": [
+        {
+          "id": "seed-tax-gst18",
+          "name": "GST 18%",
+          "rateBps": 1800,
+          "isDefault": true,
+          "isActive": true
+        },
+        {
+          "id": "seed-tax-gst12",
+          "name": "GST 12%",
+          "rateBps": 1200,
+          "isDefault": false,
+          "isActive": true
+        },
+        {
+          "id": "seed-tax-gst5",
+          "name": "GST 5%",
+          "rateBps": 500,
+          "isDefault": false,
+          "isActive": true
+        },
+        {
+          "id": "seed-tax-none",
+          "name": "No tax 0%",
+          "rateBps": 0,
+          "isDefault": false,
+          "isActive": true
+        }
+      ],
+      "pricing": {
+        "pricesIncludeTax": false,
+        "defaultTaxRateId": "seed-tax-gst18",
+        "marginBps": 3500,
+        "overheadBps": 1000,
+        "minimumOrderMinor": 0,
+        "roundingMinor": 100,
+        "estimateDisclaimerKey": "estimates.disclaimer",
+        "installationBps": 800,
+        "deliveryFlatMinor": 0,
+        "kerfMm": 4,
+        "sheetTrimMm": 10,
+        "nestingAllowRotationDefault": true,
+        "sheetBillingMode": "used_area",
+        "edgePremillMm": 0
+      }
+    },
+    "options": {
+      "nesting": true
+    }
+  },
+  "response": {
+    "ok": true,
+    "result": {
+      "bom": {
+        "engineVersion": "1.0.0",
+        "catalogVersion": 1,
+        "cutList": [
+          {
+            "rowKey": "rd04b0e66",
+            "partKeys": [
+              "table.cabinet.back"
+            ],
+            "name": "Back panel",
+            "nameKey": "parts.back",
+            "nameParams": {},
+            "materialCode": "HDF3-WHITE",
+            "thickness": 3,
+            "length": 707,
+            "width": 364,
+            "cutLength": 707,
+            "cutWidth": 364,
+            "qty": 1,
+            "grain": "none",
+            "edges": {
+              "L1": null,
+              "L2": null,
+              "W1": null,
+              "W2": null
+            }
+          },
+          {
+            "rowKey": "rf28a0238",
+            "partKeys": [
+              "table.cabinet.drawer.1.bottom",
+              "table.cabinet.drawer.2.bottom",
+              "table.cabinet.drawer.3.bottom"
+            ],
+            "name": "Drawer bottom",
+            "nameKey": "parts.drawer_bottom",
+            "nameParams": {},
+            "materialCode": "HDF3-WHITE",
+            "thickness": 3,
+            "length": 550,
+            "width": 324,
+            "cutLength": 550,
+            "cutWidth": 324,
+            "qty": 3,
+            "grain": "none",
+            "edges": {
+              "L1": null,
+              "L2": null,
+              "W1": null,
+              "W2": null
+            }
+          },
+          {
+            "rowKey": "rc26fd159",
+            "partKeys": [
+              "table.stretcher.back"
+            ],
+            "name": "Modesty panel",
+            "nameKey": "parts.modesty_panel",
+            "nameParams": {},
+            "materialCode": "PB18-WHITE",
+            "thickness": 18,
+            "length": 782,
+            "width": 362,
+            "cutLength": 782,
+            "cutWidth": 361,
+            "qty": 1,
+            "grain": "none",
+            "edges": {
+              "L1": null,
+              "L2": "EB08-WHITE",
+              "W1": null,
+              "W2": null
+            }
+          },
+          {
+            "rowKey": "re1537dcb",
+            "partKeys": [
+              "table.end.left"
+            ],
+            "name": "End panel",
+            "nameKey": "parts.end_panel",
+            "nameParams": {},
+            "materialCode": "PB18-WHITE",
+            "thickness": 18,
+            "length": 725,
+            "width": 600,
+            "cutLength": 725,
+            "cutWidth": 598,
+            "qty": 1,
+            "grain": "none",
+            "edges": {
+              "L1": "EB08-WHITE",
+              "L2": "EB08-WHITE",
+              "W1": null,
+              "W2": null
+            }
+          },
+          {
+            "rowKey": "ref829636",
+            "partKeys": [
+              "table.cabinet.side.left",
+              "table.cabinet.side.right"
+            ],
+            "name": "Left side / Right side",
+            "nameKey": "parts.side_left",
+            "nameParams": {},
+            "materialCode": "PB18-WHITE",
+            "thickness": 18,
+            "length": 725,
+            "width": 582,
+            "cutLength": 725,
+            "cutWidth": 581,
+            "qty": 2,
+            "grain": "none",
+            "edges": {
+              "L1": "EB08-WHITE",
+              "L2": null,
+              "W1": null,
+              "W2": null
+            }
+          },
+          {
+            "rowKey": "r71fedf97",
+            "partKeys": [
+              "table.cabinet.bottom"
+            ],
+            "name": "Bottom",
+            "nameKey": "parts.bottom",
+            "nameParams": {},
+            "materialCode": "PB18-WHITE",
+            "thickness": 18,
+            "length": 579,
+            "width": 364,
+            "cutLength": 578,
+            "cutWidth": 364,
+            "qty": 1,
+            "grain": "none",
+            "edges": {
+              "L1": null,
+              "L2": null,
+              "W1": "EB08-WHITE",
+              "W2": null
+            }
+          },
+          {
+            "rowKey": "r14b8d2ba",
+            "partKeys": [
+              "table.cabinet.drawer.1.front",
+              "table.cabinet.drawer.2.front",
+              "table.cabinet.drawer.3.front"
+            ],
+            "name": "Drawer front 1 / Drawer front 2 / Drawer front 3",
+            "nameKey": "parts.drawer_front",
+            "nameParams": {
+              "n": 1
+            },
+            "materialCode": "PB18-WHITE",
+            "thickness": 18,
+            "length": 397,
+            "width": 239,
+            "cutLength": 395,
+            "cutWidth": 237,
+            "qty": 3,
+            "grain": "none",
+            "edges": {
+              "L1": "EB08-WHITE",
+              "L2": "EB08-WHITE",
+              "W1": "EB08-WHITE",
+              "W2": "EB08-WHITE"
+            }
+          },
+          {
+            "rowKey": "r649925d6",
+            "partKeys": [
+              "table.top"
+            ],
+            "name": "Table top",
+            "nameKey": "parts.table_top",
+            "nameParams": {},
+            "materialCode": "PB25-WHITE",
+            "thickness": 25,
+            "length": 1200,
+            "width": 600,
+            "cutLength": 1198,
+            "cutWidth": 598,
+            "qty": 1,
+            "grain": "none",
+            "edges": {
+              "L1": "EB10-WHITE-28",
+              "L2": "EB10-WHITE-28",
+              "W1": "EB10-WHITE-28",
+              "W2": "EB10-WHITE-28"
+            }
+          },
+          {
+            "rowKey": "ra0d1bf56",
+            "partKeys": [
+              "table.cabinet.drawer.1.side.left",
+              "table.cabinet.drawer.1.side.right",
+              "table.cabinet.drawer.2.side.left",
+              "table.cabinet.drawer.2.side.right"
+            ],
+            "name": "Drawer side",
+            "nameKey": "parts.drawer_side",
+            "nameParams": {},
+            "materialCode": "PLY12-BWR",
+            "thickness": 12,
+            "length": 550,
+            "width": 190,
+            "cutLength": 550,
+            "cutWidth": 190,
+            "qty": 4,
+            "grain": "none",
+            "edges": {
+              "L1": null,
+              "L2": null,
+              "W1": null,
+              "W2": null
+            }
+          },
+          {
+            "rowKey": "r43365361",
+            "partKeys": [
+              "table.cabinet.drawer.3.side.left",
+              "table.cabinet.drawer.3.side.right"
+            ],
+            "name": "Drawer side",
+            "nameKey": "parts.drawer_side",
+            "nameParams": {},
+            "materialCode": "PLY12-BWR",
+            "thickness": 12,
+            "length": 550,
+            "width": 180,
+            "cutLength": 550,
+            "cutWidth": 180,
+            "qty": 2,
+            "grain": "none",
+            "edges": {
+              "L1": null,
+              "L2": null,
+              "W1": null,
+              "W2": null
+            }
+          },
+          {
+            "rowKey": "r2eb99121",
+            "partKeys": [
+              "table.cabinet.drawer.1.back",
+              "table.cabinet.drawer.2.back"
+            ],
+            "name": "Drawer back",
+            "nameKey": "parts.drawer_back",
+            "nameParams": {},
+            "materialCode": "PLY12-BWR",
+            "thickness": 12,
+            "length": 314,
+            "width": 177,
+            "cutLength": 314,
+            "cutWidth": 177,
+            "qty": 2,
+            "grain": "none",
+            "edges": {
+              "L1": null,
+              "L2": null,
+              "W1": null,
+              "W2": null
+            }
+          },
+          {
+            "rowKey": "r76dcbf36",
+            "partKeys": [
+              "table.cabinet.drawer.3.back"
+            ],
+            "name": "Drawer back",
+            "nameKey": "parts.drawer_back",
+            "nameParams": {},
+            "materialCode": "PLY12-BWR",
+            "thickness": 12,
+            "length": 314,
+            "width": 167,
+            "cutLength": 314,
+            "cutWidth": 167,
+            "qty": 1,
+            "grain": "none",
+            "edges": {
+              "L1": null,
+              "L2": null,
+              "W1": null,
+              "W2": null
+            }
+          }
+        ],
+        "materials": [
+          {
+            "materialCode": "HDF3-WHITE",
+            "partCount": 4,
+            "netAreaMm2": 791948,
+            "sheetsEstimated": 1,
+            "sheetsNested": 1,
+            "sheetsBilled": 1,
+            "utilization": 0.266
+          },
+          {
+            "materialCode": "PB18-WHITE",
+            "partCount": 8,
+            "netAreaMm2": 2057389,
+            "sheetsEstimated": 1,
+            "sheetsNested": 1,
+            "sheetsBilled": 1,
+            "utilization": 0.6885
+          },
+          {
+            "materialCode": "PB25-WHITE",
+            "partCount": 1,
+            "netAreaMm2": 720000,
+            "sheetsEstimated": 1,
+            "sheetsNested": 1,
+            "sheetsBilled": 1,
+            "utilization": 0.1236
+          },
+          {
+            "materialCode": "PLY12-BWR",
+            "partCount": 9,
+            "netAreaMm2": 779594,
+            "sheetsEstimated": 1,
+            "sheetsNested": 1,
+            "sheetsBilled": 1,
+            "utilization": 0.2619
+          }
+        ],
+        "edgeBanding": [
+          {
+            "edgeBandCode": "EB08-WHITE",
+            "lengthMm": 9201
+          },
+          {
+            "edgeBandCode": "EB10-WHITE-28",
+            "lengthMm": 3990
+          }
+        ],
+        "hardware": [
+          {
+            "code": "CON-CAM-15",
+            "qty": 14
+          },
+          {
+            "code": "CON-DOWEL-8",
+            "qty": 14
+          },
+          {
+            "code": "HDL-BAR-160",
+            "qty": 3
+          },
+          {
+            "code": "SCR-PACK",
+            "qty": 1
+          },
+          {
+            "code": "SLD-BB-550",
+            "qty": 3
+          }
+        ],
+        "finishing": [],
+        "operations": {
+          "hingeCups": 0,
+          "shelfPinHoles": 0,
+          "dowels": 14,
+          "camLocks": 14,
+          "slideScrewSets": 6,
+          "handleHoles": 6
+        },
+        "nesting": {
+          "sheets": [
+            {
+              "materialCode": "HDF3-WHITE",
+              "sheetLength": 2440,
+              "sheetWidth": 1220,
+              "placements": [
+                {
+                  "rowKey": "rd04b0e66",
+                  "partKey": "table.cabinet.back",
+                  "x": 10,
+                  "y": 10,
+                  "length": 707,
+                  "width": 364,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "rf28a0238",
+                  "partKey": "table.cabinet.drawer.1.bottom",
+                  "x": 378,
+                  "y": 10,
+                  "length": 550,
+                  "width": 324,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "rf28a0238",
+                  "partKey": "table.cabinet.drawer.2.bottom",
+                  "x": 378,
+                  "y": 564,
+                  "length": 550,
+                  "width": 324,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "rf28a0238",
+                  "partKey": "table.cabinet.drawer.3.bottom",
+                  "x": 706,
+                  "y": 10,
+                  "length": 550,
+                  "width": 324,
+                  "rotated": true
+                }
+              ],
+              "cuts": [
+                {
+                  "x1": 374,
+                  "y1": 10,
+                  "x2": 374,
+                  "y2": 1210
+                },
+                {
+                  "x1": 10,
+                  "y1": 717,
+                  "x2": 374,
+                  "y2": 717
+                },
+                {
+                  "x1": 702,
+                  "y1": 10,
+                  "x2": 702,
+                  "y2": 1210
+                },
+                {
+                  "x1": 378,
+                  "y1": 560,
+                  "x2": 702,
+                  "y2": 560
+                },
+                {
+                  "x1": 378,
+                  "y1": 1114,
+                  "x2": 702,
+                  "y2": 1114
+                },
+                {
+                  "x1": 1030,
+                  "y1": 10,
+                  "x2": 1030,
+                  "y2": 1210
+                },
+                {
+                  "x1": 706,
+                  "y1": 560,
+                  "x2": 1030,
+                  "y2": 560
+                }
+              ],
+              "utilization": 0.266
+            },
+            {
+              "materialCode": "PB18-WHITE",
+              "sheetLength": 2440,
+              "sheetWidth": 1220,
+              "placements": [
+                {
+                  "rowKey": "rc26fd159",
+                  "partKey": "table.stretcher.back",
+                  "x": 10,
+                  "y": 10,
+                  "length": 782,
+                  "width": 361,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "re1537dcb",
+                  "partKey": "table.end.left",
+                  "x": 375,
+                  "y": 10,
+                  "length": 725,
+                  "width": 598,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "ref829636",
+                  "partKey": "table.cabinet.side.left",
+                  "x": 977,
+                  "y": 10,
+                  "length": 725,
+                  "width": 581,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "ref829636",
+                  "partKey": "table.cabinet.side.right",
+                  "x": 1562,
+                  "y": 10,
+                  "length": 725,
+                  "width": 581,
+                  "rotated": false
+                },
+                {
+                  "rowKey": "r71fedf97",
+                  "partKey": "table.cabinet.bottom",
+                  "x": 977,
+                  "y": 739,
+                  "length": 578,
+                  "width": 364,
+                  "rotated": false
+                },
+                {
+                  "rowKey": "r14b8d2ba",
+                  "partKey": "table.cabinet.drawer.1.front",
+                  "x": 10,
+                  "y": 796,
+                  "length": 395,
+                  "width": 237,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "r14b8d2ba",
+                  "partKey": "table.cabinet.drawer.2.front",
+                  "x": 375,
+                  "y": 739,
+                  "length": 395,
+                  "width": 237,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "r14b8d2ba",
+                  "partKey": "table.cabinet.drawer.3.front",
+                  "x": 616,
+                  "y": 739,
+                  "length": 395,
+                  "width": 237,
+                  "rotated": true
+                }
+              ],
+              "cuts": [
+                {
+                  "x1": 371,
+                  "y1": 10,
+                  "x2": 371,
+                  "y2": 1210
+                },
+                {
+                  "x1": 10,
+                  "y1": 792,
+                  "x2": 371,
+                  "y2": 792
+                },
+                {
+                  "x1": 973,
+                  "y1": 10,
+                  "x2": 973,
+                  "y2": 1210
+                },
+                {
+                  "x1": 375,
+                  "y1": 735,
+                  "x2": 973,
+                  "y2": 735
+                },
+                {
+                  "x1": 1558,
+                  "y1": 10,
+                  "x2": 1558,
+                  "y2": 1210
+                },
+                {
+                  "x1": 977,
+                  "y1": 735,
+                  "x2": 1558,
+                  "y2": 735
+                },
+                {
+                  "x1": 1562,
+                  "y1": 591,
+                  "x2": 2430,
+                  "y2": 591
+                },
+                {
+                  "x1": 2287,
+                  "y1": 10,
+                  "x2": 2287,
+                  "y2": 591
+                },
+                {
+                  "x1": 977,
+                  "y1": 1103,
+                  "x2": 1558,
+                  "y2": 1103
+                },
+                {
+                  "x1": 1555,
+                  "y1": 739,
+                  "x2": 1555,
+                  "y2": 1103
+                },
+                {
+                  "x1": 247,
+                  "y1": 796,
+                  "x2": 247,
+                  "y2": 1210
+                },
+                {
+                  "x1": 10,
+                  "y1": 1191,
+                  "x2": 247,
+                  "y2": 1191
+                },
+                {
+                  "x1": 612,
+                  "y1": 739,
+                  "x2": 612,
+                  "y2": 1210
+                },
+                {
+                  "x1": 375,
+                  "y1": 1134,
+                  "x2": 612,
+                  "y2": 1134
+                },
+                {
+                  "x1": 853,
+                  "y1": 739,
+                  "x2": 853,
+                  "y2": 1210
+                },
+                {
+                  "x1": 616,
+                  "y1": 1134,
+                  "x2": 853,
+                  "y2": 1134
+                }
+              ],
+              "utilization": 0.6885
+            },
+            {
+              "materialCode": "PB25-WHITE",
+              "sheetLength": 2800,
+              "sheetWidth": 2070,
+              "placements": [
+                {
+                  "rowKey": "r649925d6",
+                  "partKey": "table.top",
+                  "x": 10,
+                  "y": 10,
+                  "length": 1198,
+                  "width": 598,
+                  "rotated": true
+                }
+              ],
+              "cuts": [
+                {
+                  "x1": 608,
+                  "y1": 10,
+                  "x2": 608,
+                  "y2": 2060
+                },
+                {
+                  "x1": 10,
+                  "y1": 1208,
+                  "x2": 608,
+                  "y2": 1208
+                }
+              ],
+              "utilization": 0.1236
+            },
+            {
+              "materialCode": "PLY12-BWR",
+              "sheetLength": 2440,
+              "sheetWidth": 1220,
+              "placements": [
+                {
+                  "rowKey": "ra0d1bf56",
+                  "partKey": "table.cabinet.drawer.1.side.left",
+                  "x": 10,
+                  "y": 10,
+                  "length": 550,
+                  "width": 190,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "ra0d1bf56",
+                  "partKey": "table.cabinet.drawer.1.side.right",
+                  "x": 10,
+                  "y": 564,
+                  "length": 550,
+                  "width": 190,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "ra0d1bf56",
+                  "partKey": "table.cabinet.drawer.2.side.left",
+                  "x": 204,
+                  "y": 10,
+                  "length": 550,
+                  "width": 190,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "ra0d1bf56",
+                  "partKey": "table.cabinet.drawer.2.side.right",
+                  "x": 204,
+                  "y": 564,
+                  "length": 550,
+                  "width": 190,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "r43365361",
+                  "partKey": "table.cabinet.drawer.3.side.left",
+                  "x": 398,
+                  "y": 10,
+                  "length": 550,
+                  "width": 180,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "r43365361",
+                  "partKey": "table.cabinet.drawer.3.side.right",
+                  "x": 398,
+                  "y": 564,
+                  "length": 550,
+                  "width": 180,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "r2eb99121",
+                  "partKey": "table.cabinet.drawer.1.back",
+                  "x": 582,
+                  "y": 10,
+                  "length": 314,
+                  "width": 177,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "r2eb99121",
+                  "partKey": "table.cabinet.drawer.2.back",
+                  "x": 582,
+                  "y": 328,
+                  "length": 314,
+                  "width": 177,
+                  "rotated": true
+                },
+                {
+                  "rowKey": "r76dcbf36",
+                  "partKey": "table.cabinet.drawer.3.back",
+                  "x": 582,
+                  "y": 646,
+                  "length": 314,
+                  "width": 167,
+                  "rotated": true
+                }
+              ],
+              "cuts": [
+                {
+                  "x1": 200,
+                  "y1": 10,
+                  "x2": 200,
+                  "y2": 1210
+                },
+                {
+                  "x1": 10,
+                  "y1": 560,
+                  "x2": 200,
+                  "y2": 560
+                },
+                {
+                  "x1": 10,
+                  "y1": 1114,
+                  "x2": 200,
+                  "y2": 1114
+                },
+                {
+                  "x1": 394,
+                  "y1": 10,
+                  "x2": 394,
+                  "y2": 1210
+                },
+                {
+                  "x1": 204,
+                  "y1": 560,
+                  "x2": 394,
+                  "y2": 560
+                },
+                {
+                  "x1": 204,
+                  "y1": 1114,
+                  "x2": 394,
+                  "y2": 1114
+                },
+                {
+                  "x1": 578,
+                  "y1": 10,
+                  "x2": 578,
+                  "y2": 1210
+                },
+                {
+                  "x1": 398,
+                  "y1": 560,
+                  "x2": 578,
+                  "y2": 560
+                },
+                {
+                  "x1": 398,
+                  "y1": 1114,
+                  "x2": 578,
+                  "y2": 1114
+                },
+                {
+                  "x1": 759,
+                  "y1": 10,
+                  "x2": 759,
+                  "y2": 1210
+                },
+                {
+                  "x1": 582,
+                  "y1": 324,
+                  "x2": 759,
+                  "y2": 324
+                },
+                {
+                  "x1": 582,
+                  "y1": 642,
+                  "x2": 759,
+                  "y2": 642
+                },
+                {
+                  "x1": 582,
+                  "y1": 960,
+                  "x2": 759,
+                  "y2": 960
+                },
+                {
+                  "x1": 749,
+                  "y1": 646,
+                  "x2": 749,
+                  "y2": 960
+                }
+              ],
+              "utilization": 0.2619
+            }
+          ],
+          "kerf": 4,
+          "trim": 10,
+          "unplaced": []
+        },
+        "issues": [
+          {
+            "code": "furniture.weight_estimate",
+            "severity": "info",
+            "messageKey": "engine.furniture.issue.weight_estimate",
+            "params": {
+              "kg": 43.2
+            },
+            "entityIds": []
+          }
+        ]
+      },
+      "price": {
+        "currency": "INR",
+        "lines": [
+          {
+            "kind": "material",
+            "code": "HDF3-WHITE",
+            "description": "HDF 3 mm White (one side) (3 mm)",
+            "quantity": 0.3,
+            "unit": "sheet",
+            "unitCostMinor": 65000,
+            "costMinor": 19500
+          },
+          {
+            "kind": "material",
+            "code": "PB18-WHITE",
+            "description": "PB 18 mm Frosty White (18 mm)",
+            "quantity": 0.77,
+            "unit": "sheet",
+            "unitCostMinor": 215000,
+            "costMinor": 165550
+          },
+          {
+            "kind": "material",
+            "code": "PB25-WHITE",
+            "description": "PB 25 mm Frosty White (25 mm)",
+            "quantity": 0.14,
+            "unit": "sheet",
+            "unitCostMinor": 520000,
+            "costMinor": 72800
+          },
+          {
+            "kind": "material",
+            "code": "PLY12-BWR",
+            "description": "Plywood 12 mm BWR (12 mm)",
+            "quantity": 0.29,
+            "unit": "sheet",
+            "unitCostMinor": 250000,
+            "costMinor": 72500
+          },
+          {
+            "kind": "edge_band",
+            "code": "EB08-WHITE",
+            "description": "0.8 × 22 Frosty White",
+            "quantity": 9.21,
+            "unit": "m",
+            "unitCostMinor": 600,
+            "costMinor": 5526
+          },
+          {
+            "kind": "edge_band",
+            "code": "EB10-WHITE-28",
+            "description": "1.0 × 28 White (25 mm boards)",
+            "quantity": 3.99,
+            "unit": "m",
+            "unitCostMinor": 1000,
+            "costMinor": 3990
+          },
+          {
+            "kind": "hardware",
+            "code": "CON-CAM-15",
+            "description": "Cam lock 15 mm with connecting bolt",
+            "quantity": 14,
+            "unit": "piece",
+            "unitCostMinor": 900,
+            "costMinor": 12600
+          },
+          {
+            "kind": "hardware",
+            "code": "CON-DOWEL-8",
+            "description": "Wooden dowel 8 × 35 mm",
+            "quantity": 14,
+            "unit": "piece",
+            "unitCostMinor": 100,
+            "costMinor": 1400
+          },
+          {
+            "kind": "hardware",
+            "code": "HDL-BAR-160",
+            "description": "Bar handle, stainless steel, 160 mm (128 c/c)",
+            "quantity": 3,
+            "unit": "piece",
+            "unitCostMinor": 18000,
+            "costMinor": 54000
+          },
+          {
+            "kind": "hardware",
+            "code": "SCR-PACK",
+            "description": "Assembly screw pack (100 pcs, assorted)",
+            "quantity": 1,
+            "unit": "pack",
+            "unitCostMinor": 12000,
+            "costMinor": 12000
+          },
+          {
+            "kind": "hardware",
+            "code": "SLD-BB-550",
+            "description": "Ball-bearing slide 45 mm, full extension, soft-close, 550 mm",
+            "quantity": 3,
+            "unit": "pair",
+            "unitCostMinor": 60000,
+            "costMinor": 180000
+          },
+          {
+            "kind": "labour",
+            "code": "cutting_per_sheet",
+            "description": "Panel cutting",
+            "quantity": 1.5,
+            "unit": "sheet",
+            "unitCostMinor": 15000,
+            "costMinor": 22500
+          },
+          {
+            "kind": "labour",
+            "code": "edge_banding_per_meter",
+            "description": "Edge banding",
+            "quantity": 13.2,
+            "unit": "meter",
+            "unitCostMinor": 1200,
+            "costMinor": 15840
+          },
+          {
+            "kind": "labour",
+            "code": "drilling_per_hole",
+            "description": "Drilling (shelf pins, dowels, cams, handles)",
+            "quantity": 62,
+            "unit": "piece",
+            "unitCostMinor": 100,
+            "costMinor": 6200
+          },
+          {
+            "kind": "labour",
+            "code": "assembly_per_part",
+            "description": "Assembly per panel",
+            "quantity": 7,
+            "unit": "part",
+            "unitCostMinor": 4000,
+            "costMinor": 28000
+          },
+          {
+            "kind": "labour",
+            "code": "drawer_assembly_each",
+            "description": "Drawer assembly incl. slides",
+            "quantity": 3,
+            "unit": "piece",
+            "unitCostMinor": 25000,
+            "costMinor": 75000
+          },
+          {
+            "kind": "labour",
+            "code": "hardware_fitting_each",
+            "description": "Hardware fitting (handles, rods, legs, brackets…)",
+            "quantity": 3,
+            "unit": "piece",
+            "unitCostMinor": 2500,
+            "costMinor": 7500
+          },
+          {
+            "kind": "labour",
+            "code": "packing_per_item",
+            "description": "Packing & handling per item",
+            "quantity": 1,
+            "unit": "item",
+            "unitCostMinor": 30000,
+            "costMinor": 30000
+          }
+        ],
+        "materialCostMinor": 330350,
+        "edgeBandCostMinor": 9516,
+        "hardwareCostMinor": 260000,
+        "finishingCostMinor": 0,
+        "labourCostMinor": 185040,
+        "directCostMinor": 784906,
+        "overheadMinor": 78491,
+        "marginMinor": 302189,
+        "unitPriceMinor": 1165600,
+        "installationMinor": 150000,
+        "quantity": 1,
+        "totalBeforeTaxMinor": 1315600
+      },
+      "engineVersion": "1.0.0"
+    }
+  }
+}

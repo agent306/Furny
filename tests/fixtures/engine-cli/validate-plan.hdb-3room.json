@@ -1,0 +1,1909 @@
+{
+  "command": "validate-plan",
+  "request": {
+    "document": {
+      "schemaVersion": 1,
+      "meta": {
+        "defaultWallHeight": 2600,
+        "defaultWallThickness": 115,
+        "floorThickness": 150,
+        "northAngle": null,
+        "createdWith": "editor"
+      },
+      "nodes": {
+        "n_hdb0000001": {
+          "id": "n_hdb0000001",
+          "x": 0,
+          "y": 0
+        },
+        "n_hdb0000002": {
+          "id": "n_hdb0000002",
+          "x": 1600,
+          "y": 0
+        },
+        "n_hdb0000003": {
+          "id": "n_hdb0000003",
+          "x": 2900,
+          "y": 0
+        },
+        "n_hdb0000004": {
+          "id": "n_hdb0000004",
+          "x": 4700,
+          "y": 0
+        },
+        "n_hdb0000005": {
+          "id": "n_hdb0000005",
+          "x": 5900,
+          "y": 0
+        },
+        "n_hdb0000006": {
+          "id": "n_hdb0000006",
+          "x": 8300,
+          "y": 0
+        },
+        "n_hdb0000007": {
+          "id": "n_hdb0000007",
+          "x": 9700,
+          "y": 0
+        },
+        "n_hdb0000008": {
+          "id": "n_hdb0000008",
+          "x": 9700,
+          "y": -600
+        },
+        "n_hdb0000009": {
+          "id": "n_hdb0000009",
+          "x": 11000,
+          "y": -600
+        },
+        "n_hdb0000010": {
+          "id": "n_hdb0000010",
+          "x": 11000,
+          "y": 1900
+        },
+        "n_hdb0000011": {
+          "id": "n_hdb0000011",
+          "x": 11000,
+          "y": 3300
+        },
+        "n_hdb0000012": {
+          "id": "n_hdb0000012",
+          "x": 11000,
+          "y": 7400
+        },
+        "n_hdb0000013": {
+          "id": "n_hdb0000013",
+          "x": 7773,
+          "y": 7400
+        },
+        "n_hdb0000014": {
+          "id": "n_hdb0000014",
+          "x": 7700,
+          "y": 7400
+        },
+        "n_hdb0000015": {
+          "id": "n_hdb0000015",
+          "x": 4100,
+          "y": 7400
+        },
+        "n_hdb0000016": {
+          "id": "n_hdb0000016",
+          "x": 0,
+          "y": 7400
+        },
+        "n_hdb0000017": {
+          "id": "n_hdb0000017",
+          "x": 0,
+          "y": 3300
+        },
+        "n_hdb0000018": {
+          "id": "n_hdb0000018",
+          "x": 1600,
+          "y": 3300
+        },
+        "n_hdb0000019": {
+          "id": "n_hdb0000019",
+          "x": 4700,
+          "y": 3300
+        },
+        "n_hdb0000020": {
+          "id": "n_hdb0000020",
+          "x": 7773,
+          "y": 3300
+        },
+        "n_hdb0000021": {
+          "id": "n_hdb0000021",
+          "x": 8300,
+          "y": 3300
+        },
+        "n_hdb0000022": {
+          "id": "n_hdb0000022",
+          "x": 1600,
+          "y": 1900
+        },
+        "n_hdb0000023": {
+          "id": "n_hdb0000023",
+          "x": 2900,
+          "y": 1900
+        },
+        "n_hdb0000024": {
+          "id": "n_hdb0000024",
+          "x": 4700,
+          "y": 1900
+        },
+        "n_hdb0000025": {
+          "id": "n_hdb0000025",
+          "x": 5900,
+          "y": 1900
+        },
+        "n_hdb0000026": {
+          "id": "n_hdb0000026",
+          "x": 9700,
+          "y": 1900
+        },
+        "n_hdb0000027": {
+          "id": "n_hdb0000027",
+          "x": 4100,
+          "y": 8300
+        },
+        "n_hdb0000028": {
+          "id": "n_hdb0000028",
+          "x": 7700,
+          "y": 8300
+        }
+      },
+      "walls": {
+        "w_hdb0000001": {
+          "id": "w_hdb0000001",
+          "a": "n_hdb0000001",
+          "b": "n_hdb0000002",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000002": {
+          "id": "w_hdb0000002",
+          "a": "n_hdb0000002",
+          "b": "n_hdb0000003",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000003": {
+          "id": "w_hdb0000003",
+          "a": "n_hdb0000003",
+          "b": "n_hdb0000004",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000004": {
+          "id": "w_hdb0000004",
+          "a": "n_hdb0000004",
+          "b": "n_hdb0000005",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000005": {
+          "id": "w_hdb0000005",
+          "a": "n_hdb0000005",
+          "b": "n_hdb0000006",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000006": {
+          "id": "w_hdb0000006",
+          "a": "n_hdb0000006",
+          "b": "n_hdb0000007",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000007": {
+          "id": "w_hdb0000007",
+          "a": "n_hdb0000007",
+          "b": "n_hdb0000008",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000008": {
+          "id": "w_hdb0000008",
+          "a": "n_hdb0000008",
+          "b": "n_hdb0000009",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000009": {
+          "id": "w_hdb0000009",
+          "a": "n_hdb0000009",
+          "b": "n_hdb0000010",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000010": {
+          "id": "w_hdb0000010",
+          "a": "n_hdb0000010",
+          "b": "n_hdb0000011",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000011": {
+          "id": "w_hdb0000011",
+          "a": "n_hdb0000011",
+          "b": "n_hdb0000012",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000012": {
+          "id": "w_hdb0000012",
+          "a": "n_hdb0000012",
+          "b": "n_hdb0000013",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000013": {
+          "id": "w_hdb0000013",
+          "a": "n_hdb0000013",
+          "b": "n_hdb0000014",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000014": {
+          "id": "w_hdb0000014",
+          "a": "n_hdb0000014",
+          "b": "n_hdb0000015",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000015": {
+          "id": "w_hdb0000015",
+          "a": "n_hdb0000015",
+          "b": "n_hdb0000016",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000016": {
+          "id": "w_hdb0000016",
+          "a": "n_hdb0000016",
+          "b": "n_hdb0000017",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000017": {
+          "id": "w_hdb0000017",
+          "a": "n_hdb0000017",
+          "b": "n_hdb0000001",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000018": {
+          "id": "w_hdb0000018",
+          "a": "n_hdb0000015",
+          "b": "n_hdb0000027",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000019": {
+          "id": "w_hdb0000019",
+          "a": "n_hdb0000027",
+          "b": "n_hdb0000028",
+          "thickness": 115,
+          "height": 1000,
+          "kind": "half",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000020": {
+          "id": "w_hdb0000020",
+          "a": "n_hdb0000028",
+          "b": "n_hdb0000014",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "exterior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000021": {
+          "id": "w_hdb0000021",
+          "a": "n_hdb0000017",
+          "b": "n_hdb0000018",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000022": {
+          "id": "w_hdb0000022",
+          "a": "n_hdb0000018",
+          "b": "n_hdb0000019",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000023": {
+          "id": "w_hdb0000023",
+          "a": "n_hdb0000019",
+          "b": "n_hdb0000020",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000024": {
+          "id": "w_hdb0000024",
+          "a": "n_hdb0000020",
+          "b": "n_hdb0000021",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000025": {
+          "id": "w_hdb0000025",
+          "a": "n_hdb0000021",
+          "b": "n_hdb0000011",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000026": {
+          "id": "w_hdb0000026",
+          "a": "n_hdb0000002",
+          "b": "n_hdb0000022",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000027": {
+          "id": "w_hdb0000027",
+          "a": "n_hdb0000022",
+          "b": "n_hdb0000018",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000028": {
+          "id": "w_hdb0000028",
+          "a": "n_hdb0000004",
+          "b": "n_hdb0000024",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000029": {
+          "id": "w_hdb0000029",
+          "a": "n_hdb0000024",
+          "b": "n_hdb0000019",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000030": {
+          "id": "w_hdb0000030",
+          "a": "n_hdb0000006",
+          "b": "n_hdb0000021",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000031": {
+          "id": "w_hdb0000031",
+          "a": "n_hdb0000020",
+          "b": "n_hdb0000013",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000032": {
+          "id": "w_hdb0000032",
+          "a": "n_hdb0000022",
+          "b": "n_hdb0000023",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000033": {
+          "id": "w_hdb0000033",
+          "a": "n_hdb0000003",
+          "b": "n_hdb0000023",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000034": {
+          "id": "w_hdb0000034",
+          "a": "n_hdb0000024",
+          "b": "n_hdb0000025",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000035": {
+          "id": "w_hdb0000035",
+          "a": "n_hdb0000005",
+          "b": "n_hdb0000025",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000036": {
+          "id": "w_hdb0000036",
+          "a": "n_hdb0000007",
+          "b": "n_hdb0000026",
+          "thickness": 230,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        },
+        "w_hdb0000037": {
+          "id": "w_hdb0000037",
+          "a": "n_hdb0000026",
+          "b": "n_hdb0000010",
+          "thickness": 115,
+          "height": 2600,
+          "kind": "interior",
+          "justification": "center",
+          "material": "brick",
+          "colorHex": null
+        }
+      },
+      "openings": {
+        "o_hdb0000001": {
+          "id": "o_hdb0000001",
+          "wallId": "w_hdb0000016",
+          "kind": "door",
+          "type": "main_entrance",
+          "offset": 800,
+          "width": 1000,
+          "height": 2100,
+          "sillHeight": 0,
+          "hinge": "start",
+          "swing": "right",
+          "label": null
+        },
+        "o_hdb0000002": {
+          "id": "o_hdb0000002",
+          "wallId": "w_hdb0000022",
+          "kind": "door",
+          "type": "single_swing",
+          "offset": 2300,
+          "width": 900,
+          "height": 2100,
+          "sillHeight": 0,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000003": {
+          "id": "o_hdb0000003",
+          "wallId": "w_hdb0000023",
+          "kind": "door",
+          "type": "single_swing",
+          "offset": 2400,
+          "width": 900,
+          "height": 2100,
+          "sillHeight": 0,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000004": {
+          "id": "o_hdb0000004",
+          "wallId": "w_hdb0000031",
+          "kind": "door",
+          "type": "single_swing",
+          "offset": 700,
+          "width": 900,
+          "height": 2100,
+          "sillHeight": 0,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000005": {
+          "id": "o_hdb0000005",
+          "wallId": "w_hdb0000025",
+          "kind": "door",
+          "type": "single_swing",
+          "offset": 600,
+          "width": 800,
+          "height": 2100,
+          "sillHeight": 0,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000006": {
+          "id": "o_hdb0000006",
+          "wallId": "w_hdb0000032",
+          "kind": "door",
+          "type": "single_swing",
+          "offset": 650,
+          "width": 700,
+          "height": 2100,
+          "sillHeight": 0,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000007": {
+          "id": "o_hdb0000007",
+          "wallId": "w_hdb0000034",
+          "kind": "door",
+          "type": "single_swing",
+          "offset": 600,
+          "width": 700,
+          "height": 2100,
+          "sillHeight": 0,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000008": {
+          "id": "o_hdb0000008",
+          "wallId": "w_hdb0000037",
+          "kind": "door",
+          "type": "single_swing",
+          "offset": 650,
+          "width": 700,
+          "height": 2100,
+          "sillHeight": 0,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000009": {
+          "id": "o_hdb0000009",
+          "wallId": "w_hdb0000021",
+          "kind": "opening",
+          "type": "opening",
+          "offset": 800,
+          "width": 900,
+          "height": 2100,
+          "sillHeight": 0,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000010": {
+          "id": "o_hdb0000010",
+          "wallId": "w_hdb0000014",
+          "kind": "door",
+          "type": "sliding",
+          "offset": 1800,
+          "width": 2400,
+          "height": 2100,
+          "sillHeight": 0,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000011": {
+          "id": "o_hdb0000011",
+          "wallId": "w_hdb0000002",
+          "kind": "window",
+          "type": "casement",
+          "offset": 650,
+          "width": 600,
+          "height": 600,
+          "sillHeight": 1500,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000012": {
+          "id": "o_hdb0000012",
+          "wallId": "w_hdb0000003",
+          "kind": "window",
+          "type": "casement",
+          "offset": 900,
+          "width": 1200,
+          "height": 1200,
+          "sillHeight": 900,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000013": {
+          "id": "o_hdb0000013",
+          "wallId": "w_hdb0000005",
+          "kind": "window",
+          "type": "casement",
+          "offset": 1200,
+          "width": 1500,
+          "height": 1200,
+          "sillHeight": 900,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000014": {
+          "id": "o_hdb0000014",
+          "wallId": "w_hdb0000011",
+          "kind": "window",
+          "type": "casement",
+          "offset": 2050,
+          "width": 1500,
+          "height": 1200,
+          "sillHeight": 900,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000015": {
+          "id": "o_hdb0000015",
+          "wallId": "w_hdb0000001",
+          "kind": "window",
+          "type": "casement",
+          "offset": 800,
+          "width": 900,
+          "height": 1200,
+          "sillHeight": 900,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        },
+        "o_hdb0000016": {
+          "id": "o_hdb0000016",
+          "wallId": "w_hdb0000015",
+          "kind": "window",
+          "type": "casement",
+          "offset": 2050,
+          "width": 1800,
+          "height": 1200,
+          "sillHeight": 900,
+          "hinge": "start",
+          "swing": "left",
+          "label": null
+        }
+      },
+      "rooms": {
+        "r_hdb0000001": {
+          "id": "r_hdb0000001",
+          "anchor": {
+            "x": 800,
+            "y": 1650
+          },
+          "name": "Kitchen",
+          "type": "kitchen",
+          "floorFinish": "tile",
+          "floorColorHex": null,
+          "labelOffset": null,
+          "showArea": true
+        },
+        "r_hdb0000002": {
+          "id": "r_hdb0000002",
+          "anchor": {
+            "x": 2250,
+            "y": 950
+          },
+          "name": "Toilet 1",
+          "type": "toilet",
+          "floorFinish": "tile",
+          "floorColorHex": null,
+          "labelOffset": null,
+          "showArea": true
+        },
+        "r_hdb0000003": {
+          "id": "r_hdb0000003",
+          "anchor": {
+            "x": 3800,
+            "y": 2600
+          },
+          "name": "Bedroom 1",
+          "type": "bedroom",
+          "floorFinish": "wood",
+          "floorColorHex": null,
+          "labelOffset": null,
+          "showArea": true
+        },
+        "r_hdb0000004": {
+          "id": "r_hdb0000004",
+          "anchor": {
+            "x": 5300,
+            "y": 950
+          },
+          "name": "Toilet 2",
+          "type": "toilet",
+          "floorFinish": "tile",
+          "floorColorHex": null,
+          "labelOffset": null,
+          "showArea": true
+        },
+        "r_hdb0000005": {
+          "id": "r_hdb0000005",
+          "anchor": {
+            "x": 7000,
+            "y": 1650
+          },
+          "name": "Bedroom 2",
+          "type": "bedroom",
+          "floorFinish": "wood",
+          "floorColorHex": null,
+          "labelOffset": null,
+          "showArea": true
+        },
+        "r_hdb0000006": {
+          "id": "r_hdb0000006",
+          "anchor": {
+            "x": 10350,
+            "y": 650
+          },
+          "name": "Toilet 3",
+          "type": "toilet",
+          "floorFinish": "tile",
+          "floorColorHex": null,
+          "labelOffset": null,
+          "showArea": true
+        },
+        "r_hdb0000007": {
+          "id": "r_hdb0000007",
+          "anchor": {
+            "x": 9000,
+            "y": 2600
+          },
+          "name": "Dress",
+          "type": "dress",
+          "floorFinish": "wood",
+          "floorColorHex": null,
+          "labelOffset": null,
+          "showArea": true
+        },
+        "r_hdb0000008": {
+          "id": "r_hdb0000008",
+          "anchor": {
+            "x": 4000,
+            "y": 5350
+          },
+          "name": "Living Room",
+          "type": "living",
+          "floorFinish": "tile",
+          "floorColorHex": null,
+          "labelOffset": null,
+          "showArea": true
+        },
+        "r_hdb0000009": {
+          "id": "r_hdb0000009",
+          "anchor": {
+            "x": 9450,
+            "y": 5350
+          },
+          "name": "Bedroom 3",
+          "type": "bedroom",
+          "floorFinish": "wood",
+          "floorColorHex": null,
+          "labelOffset": null,
+          "showArea": true
+        },
+        "r_hdb0000010": {
+          "id": "r_hdb0000010",
+          "anchor": {
+            "x": 5900,
+            "y": 7850
+          },
+          "name": "Balcony",
+          "type": "balcony",
+          "floorFinish": "tile",
+          "floorColorHex": null,
+          "labelOffset": null,
+          "showArea": true
+        }
+      },
+      "placements": {},
+      "fixtures": {},
+      "annotations": {
+        "dimensions": {},
+        "labels": {}
+      },
+      "background": null,
+      "view": {
+        "mode2d": null,
+        "mode3d": null,
+        "lastMode": "2d"
+      }
+    }
+  },
+  "response": {
+    "ok": true,
+    "result": {
+      "valid": true,
+      "issues": [],
+      "migratedDocument": {
+        "schemaVersion": 1,
+        "meta": {
+          "defaultWallHeight": 2600,
+          "defaultWallThickness": 115,
+          "floorThickness": 150,
+          "northAngle": null,
+          "createdWith": "editor"
+        },
+        "nodes": {
+          "n_hdb0000001": {
+            "id": "n_hdb0000001",
+            "x": 0,
+            "y": 0
+          },
+          "n_hdb0000002": {
+            "id": "n_hdb0000002",
+            "x": 1600,
+            "y": 0
+          },
+          "n_hdb0000003": {
+            "id": "n_hdb0000003",
+            "x": 2900,
+            "y": 0
+          },
+          "n_hdb0000004": {
+            "id": "n_hdb0000004",
+            "x": 4700,
+            "y": 0
+          },
+          "n_hdb0000005": {
+            "id": "n_hdb0000005",
+            "x": 5900,
+            "y": 0
+          },
+          "n_hdb0000006": {
+            "id": "n_hdb0000006",
+            "x": 8300,
+            "y": 0
+          },
+          "n_hdb0000007": {
+            "id": "n_hdb0000007",
+            "x": 9700,
+            "y": 0
+          },
+          "n_hdb0000008": {
+            "id": "n_hdb0000008",
+            "x": 9700,
+            "y": -600
+          },
+          "n_hdb0000009": {
+            "id": "n_hdb0000009",
+            "x": 11000,
+            "y": -600
+          },
+          "n_hdb0000010": {
+            "id": "n_hdb0000010",
+            "x": 11000,
+            "y": 1900
+          },
+          "n_hdb0000011": {
+            "id": "n_hdb0000011",
+            "x": 11000,
+            "y": 3300
+          },
+          "n_hdb0000012": {
+            "id": "n_hdb0000012",
+            "x": 11000,
+            "y": 7400
+          },
+          "n_hdb0000013": {
+            "id": "n_hdb0000013",
+            "x": 7773,
+            "y": 7400
+          },
+          "n_hdb0000014": {
+            "id": "n_hdb0000014",
+            "x": 7700,
+            "y": 7400
+          },
+          "n_hdb0000015": {
+            "id": "n_hdb0000015",
+            "x": 4100,
+            "y": 7400
+          },
+          "n_hdb0000016": {
+            "id": "n_hdb0000016",
+            "x": 0,
+            "y": 7400
+          },
+          "n_hdb0000017": {
+            "id": "n_hdb0000017",
+            "x": 0,
+            "y": 3300
+          },
+          "n_hdb0000018": {
+            "id": "n_hdb0000018",
+            "x": 1600,
+            "y": 3300
+          },
+          "n_hdb0000019": {
+            "id": "n_hdb0000019",
+            "x": 4700,
+            "y": 3300
+          },
+          "n_hdb0000020": {
+            "id": "n_hdb0000020",
+            "x": 7773,
+            "y": 3300
+          },
+          "n_hdb0000021": {
+            "id": "n_hdb0000021",
+            "x": 8300,
+            "y": 3300
+          },
+          "n_hdb0000022": {
+            "id": "n_hdb0000022",
+            "x": 1600,
+            "y": 1900
+          },
+          "n_hdb0000023": {
+            "id": "n_hdb0000023",
+            "x": 2900,
+            "y": 1900
+          },
+          "n_hdb0000024": {
+            "id": "n_hdb0000024",
+            "x": 4700,
+            "y": 1900
+          },
+          "n_hdb0000025": {
+            "id": "n_hdb0000025",
+            "x": 5900,
+            "y": 1900
+          },
+          "n_hdb0000026": {
+            "id": "n_hdb0000026",
+            "x": 9700,
+            "y": 1900
+          },
+          "n_hdb0000027": {
+            "id": "n_hdb0000027",
+            "x": 4100,
+            "y": 8300
+          },
+          "n_hdb0000028": {
+            "id": "n_hdb0000028",
+            "x": 7700,
+            "y": 8300
+          }
+        },
+        "walls": {
+          "w_hdb0000001": {
+            "id": "w_hdb0000001",
+            "a": "n_hdb0000001",
+            "b": "n_hdb0000002",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000002": {
+            "id": "w_hdb0000002",
+            "a": "n_hdb0000002",
+            "b": "n_hdb0000003",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000003": {
+            "id": "w_hdb0000003",
+            "a": "n_hdb0000003",
+            "b": "n_hdb0000004",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000004": {
+            "id": "w_hdb0000004",
+            "a": "n_hdb0000004",
+            "b": "n_hdb0000005",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000005": {
+            "id": "w_hdb0000005",
+            "a": "n_hdb0000005",
+            "b": "n_hdb0000006",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000006": {
+            "id": "w_hdb0000006",
+            "a": "n_hdb0000006",
+            "b": "n_hdb0000007",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000007": {
+            "id": "w_hdb0000007",
+            "a": "n_hdb0000007",
+            "b": "n_hdb0000008",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000008": {
+            "id": "w_hdb0000008",
+            "a": "n_hdb0000008",
+            "b": "n_hdb0000009",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000009": {
+            "id": "w_hdb0000009",
+            "a": "n_hdb0000009",
+            "b": "n_hdb0000010",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000010": {
+            "id": "w_hdb0000010",
+            "a": "n_hdb0000010",
+            "b": "n_hdb0000011",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000011": {
+            "id": "w_hdb0000011",
+            "a": "n_hdb0000011",
+            "b": "n_hdb0000012",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000012": {
+            "id": "w_hdb0000012",
+            "a": "n_hdb0000012",
+            "b": "n_hdb0000013",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000013": {
+            "id": "w_hdb0000013",
+            "a": "n_hdb0000013",
+            "b": "n_hdb0000014",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000014": {
+            "id": "w_hdb0000014",
+            "a": "n_hdb0000014",
+            "b": "n_hdb0000015",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000015": {
+            "id": "w_hdb0000015",
+            "a": "n_hdb0000015",
+            "b": "n_hdb0000016",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000016": {
+            "id": "w_hdb0000016",
+            "a": "n_hdb0000016",
+            "b": "n_hdb0000017",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000017": {
+            "id": "w_hdb0000017",
+            "a": "n_hdb0000017",
+            "b": "n_hdb0000001",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000018": {
+            "id": "w_hdb0000018",
+            "a": "n_hdb0000015",
+            "b": "n_hdb0000027",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000019": {
+            "id": "w_hdb0000019",
+            "a": "n_hdb0000027",
+            "b": "n_hdb0000028",
+            "thickness": 115,
+            "height": 1000,
+            "kind": "half",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000020": {
+            "id": "w_hdb0000020",
+            "a": "n_hdb0000028",
+            "b": "n_hdb0000014",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "exterior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000021": {
+            "id": "w_hdb0000021",
+            "a": "n_hdb0000017",
+            "b": "n_hdb0000018",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000022": {
+            "id": "w_hdb0000022",
+            "a": "n_hdb0000018",
+            "b": "n_hdb0000019",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000023": {
+            "id": "w_hdb0000023",
+            "a": "n_hdb0000019",
+            "b": "n_hdb0000020",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000024": {
+            "id": "w_hdb0000024",
+            "a": "n_hdb0000020",
+            "b": "n_hdb0000021",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000025": {
+            "id": "w_hdb0000025",
+            "a": "n_hdb0000021",
+            "b": "n_hdb0000011",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000026": {
+            "id": "w_hdb0000026",
+            "a": "n_hdb0000002",
+            "b": "n_hdb0000022",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000027": {
+            "id": "w_hdb0000027",
+            "a": "n_hdb0000022",
+            "b": "n_hdb0000018",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000028": {
+            "id": "w_hdb0000028",
+            "a": "n_hdb0000004",
+            "b": "n_hdb0000024",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000029": {
+            "id": "w_hdb0000029",
+            "a": "n_hdb0000024",
+            "b": "n_hdb0000019",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000030": {
+            "id": "w_hdb0000030",
+            "a": "n_hdb0000006",
+            "b": "n_hdb0000021",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000031": {
+            "id": "w_hdb0000031",
+            "a": "n_hdb0000020",
+            "b": "n_hdb0000013",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000032": {
+            "id": "w_hdb0000032",
+            "a": "n_hdb0000022",
+            "b": "n_hdb0000023",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000033": {
+            "id": "w_hdb0000033",
+            "a": "n_hdb0000003",
+            "b": "n_hdb0000023",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000034": {
+            "id": "w_hdb0000034",
+            "a": "n_hdb0000024",
+            "b": "n_hdb0000025",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000035": {
+            "id": "w_hdb0000035",
+            "a": "n_hdb0000005",
+            "b": "n_hdb0000025",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000036": {
+            "id": "w_hdb0000036",
+            "a": "n_hdb0000007",
+            "b": "n_hdb0000026",
+            "thickness": 230,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          },
+          "w_hdb0000037": {
+            "id": "w_hdb0000037",
+            "a": "n_hdb0000026",
+            "b": "n_hdb0000010",
+            "thickness": 115,
+            "height": 2600,
+            "kind": "interior",
+            "justification": "center",
+            "material": "brick",
+            "colorHex": null
+          }
+        },
+        "openings": {
+          "o_hdb0000001": {
+            "id": "o_hdb0000001",
+            "wallId": "w_hdb0000016",
+            "kind": "door",
+            "type": "main_entrance",
+            "offset": 800,
+            "width": 1000,
+            "height": 2100,
+            "sillHeight": 0,
+            "hinge": "start",
+            "swing": "right",
+            "label": null
+          },
+          "o_hdb0000002": {
+            "id": "o_hdb0000002",
+            "wallId": "w_hdb0000022",
+            "kind": "door",
+            "type": "single_swing",
+            "offset": 2300,
+            "width": 900,
+            "height": 2100,
+            "sillHeight": 0,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000003": {
+            "id": "o_hdb0000003",
+            "wallId": "w_hdb0000023",
+            "kind": "door",
+            "type": "single_swing",
+            "offset": 2400,
+            "width": 900,
+            "height": 2100,
+            "sillHeight": 0,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000004": {
+            "id": "o_hdb0000004",
+            "wallId": "w_hdb0000031",
+            "kind": "door",
+            "type": "single_swing",
+            "offset": 700,
+            "width": 900,
+            "height": 2100,
+            "sillHeight": 0,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000005": {
+            "id": "o_hdb0000005",
+            "wallId": "w_hdb0000025",
+            "kind": "door",
+            "type": "single_swing",
+            "offset": 600,
+            "width": 800,
+            "height": 2100,
+            "sillHeight": 0,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000006": {
+            "id": "o_hdb0000006",
+            "wallId": "w_hdb0000032",
+            "kind": "door",
+            "type": "single_swing",
+            "offset": 650,
+            "width": 700,
+            "height": 2100,
+            "sillHeight": 0,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000007": {
+            "id": "o_hdb0000007",
+            "wallId": "w_hdb0000034",
+            "kind": "door",
+            "type": "single_swing",
+            "offset": 600,
+            "width": 700,
+            "height": 2100,
+            "sillHeight": 0,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000008": {
+            "id": "o_hdb0000008",
+            "wallId": "w_hdb0000037",
+            "kind": "door",
+            "type": "single_swing",
+            "offset": 650,
+            "width": 700,
+            "height": 2100,
+            "sillHeight": 0,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000009": {
+            "id": "o_hdb0000009",
+            "wallId": "w_hdb0000021",
+            "kind": "opening",
+            "type": "opening",
+            "offset": 800,
+            "width": 900,
+            "height": 2100,
+            "sillHeight": 0,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000010": {
+            "id": "o_hdb0000010",
+            "wallId": "w_hdb0000014",
+            "kind": "door",
+            "type": "sliding",
+            "offset": 1800,
+            "width": 2400,
+            "height": 2100,
+            "sillHeight": 0,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000011": {
+            "id": "o_hdb0000011",
+            "wallId": "w_hdb0000002",
+            "kind": "window",
+            "type": "casement",
+            "offset": 650,
+            "width": 600,
+            "height": 600,
+            "sillHeight": 1500,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000012": {
+            "id": "o_hdb0000012",
+            "wallId": "w_hdb0000003",
+            "kind": "window",
+            "type": "casement",
+            "offset": 900,
+            "width": 1200,
+            "height": 1200,
+            "sillHeight": 900,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000013": {
+            "id": "o_hdb0000013",
+            "wallId": "w_hdb0000005",
+            "kind": "window",
+            "type": "casement",
+            "offset": 1200,
+            "width": 1500,
+            "height": 1200,
+            "sillHeight": 900,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000014": {
+            "id": "o_hdb0000014",
+            "wallId": "w_hdb0000011",
+            "kind": "window",
+            "type": "casement",
+            "offset": 2050,
+            "width": 1500,
+            "height": 1200,
+            "sillHeight": 900,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000015": {
+            "id": "o_hdb0000015",
+            "wallId": "w_hdb0000001",
+            "kind": "window",
+            "type": "casement",
+            "offset": 800,
+            "width": 900,
+            "height": 1200,
+            "sillHeight": 900,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          },
+          "o_hdb0000016": {
+            "id": "o_hdb0000016",
+            "wallId": "w_hdb0000015",
+            "kind": "window",
+            "type": "casement",
+            "offset": 2050,
+            "width": 1800,
+            "height": 1200,
+            "sillHeight": 900,
+            "hinge": "start",
+            "swing": "left",
+            "label": null
+          }
+        },
+        "rooms": {
+          "r_hdb0000001": {
+            "id": "r_hdb0000001",
+            "anchor": {
+              "x": 800,
+              "y": 1650
+            },
+            "name": "Kitchen",
+            "type": "kitchen",
+            "floorFinish": "tile",
+            "floorColorHex": null,
+            "labelOffset": null,
+            "showArea": true
+          },
+          "r_hdb0000002": {
+            "id": "r_hdb0000002",
+            "anchor": {
+              "x": 2250,
+              "y": 950
+            },
+            "name": "Toilet 1",
+            "type": "toilet",
+            "floorFinish": "tile",
+            "floorColorHex": null,
+            "labelOffset": null,
+            "showArea": true
+          },
+          "r_hdb0000003": {
+            "id": "r_hdb0000003",
+            "anchor": {
+              "x": 3800,
+              "y": 2600
+            },
+            "name": "Bedroom 1",
+            "type": "bedroom",
+            "floorFinish": "wood",
+            "floorColorHex": null,
+            "labelOffset": null,
+            "showArea": true
+          },
+          "r_hdb0000004": {
+            "id": "r_hdb0000004",
+            "anchor": {
+              "x": 5300,
+              "y": 950
+            },
+            "name": "Toilet 2",
+            "type": "toilet",
+            "floorFinish": "tile",
+            "floorColorHex": null,
+            "labelOffset": null,
+            "showArea": true
+          },
+          "r_hdb0000005": {
+            "id": "r_hdb0000005",
+            "anchor": {
+              "x": 7000,
+              "y": 1650
+            },
+            "name": "Bedroom 2",
+            "type": "bedroom",
+            "floorFinish": "wood",
+            "floorColorHex": null,
+            "labelOffset": null,
+            "showArea": true
+          },
+          "r_hdb0000006": {
+            "id": "r_hdb0000006",
+            "anchor": {
+              "x": 10350,
+              "y": 650
+            },
+            "name": "Toilet 3",
+            "type": "toilet",
+            "floorFinish": "tile",
+            "floorColorHex": null,
+            "labelOffset": null,
+            "showArea": true
+          },
+          "r_hdb0000007": {
+            "id": "r_hdb0000007",
+            "anchor": {
+              "x": 9000,
+              "y": 2600
+            },
+            "name": "Dress",
+            "type": "dress",
+            "floorFinish": "wood",
+            "floorColorHex": null,
+            "labelOffset": null,
+            "showArea": true
+          },
+          "r_hdb0000008": {
+            "id": "r_hdb0000008",
+            "anchor": {
+              "x": 4000,
+              "y": 5350
+            },
+            "name": "Living Room",
+            "type": "living",
+            "floorFinish": "tile",
+            "floorColorHex": null,
+            "labelOffset": null,
+            "showArea": true
+          },
+          "r_hdb0000009": {
+            "id": "r_hdb0000009",
+            "anchor": {
+              "x": 9450,
+              "y": 5350
+            },
+            "name": "Bedroom 3",
+            "type": "bedroom",
+            "floorFinish": "wood",
+            "floorColorHex": null,
+            "labelOffset": null,
+            "showArea": true
+          },
+          "r_hdb0000010": {
+            "id": "r_hdb0000010",
+            "anchor": {
+              "x": 5900,
+              "y": 7850
+            },
+            "name": "Balcony",
+            "type": "balcony",
+            "floorFinish": "tile",
+            "floorColorHex": null,
+            "labelOffset": null,
+            "showArea": true
+          }
+        },
+        "placements": {},
+        "fixtures": {},
+        "annotations": {
+          "dimensions": {},
+          "labels": {}
+        },
+        "background": null,
+        "view": {
+          "mode2d": null,
+          "mode3d": null,
+          "lastMode": "2d"
+        }
+      },
+      "summary": {
+        "wallCount": 37,
+        "roomCount": 10,
+        "rooms": [
+          {
+            "id": "r_hdb0000003",
+            "name": "Bedroom 1",
+            "areaMm2": 6940338
+          },
+          {
+            "id": "r_hdb0000008",
+            "name": "Living Room",
+            "areaMm2": 29850964
+          },
+          {
+            "id": "r_hdb0000005",
+            "name": "Bedroom 2",
+            "areaMm2": 8688338
+          },
+          {
+            "id": "r_hdb0000001",
+            "name": "Kitchen",
+            "areaMm2": 4464506
+          },
+          {
+            "id": "r_hdb0000009",
+            "name": "Bedroom 3",
+            "areaMm2": 11996549
+          },
+          {
+            "id": "r_hdb0000004",
+            "name": "Toilet 2",
+            "areaMm2": 1874338
+          },
+          {
+            "id": "r_hdb0000002",
+            "name": "Toilet 1",
+            "areaMm2": 2047088
+          },
+          {
+            "id": "r_hdb0000010",
+            "name": "Balcony",
+            "areaMm2": 2451675
+          },
+          {
+            "id": "r_hdb0000006",
+            "name": "Toilet 3",
+            "areaMm2": 2490425
+          },
+          {
+            "id": "r_hdb0000007",
+            "name": "Dress",
+            "areaMm2": 5509506
+          }
+        ],
+        "totalAreaMm2": 76313727,
+        "bbox": {
+          "min": {
+            "x": -115,
+            "y": -715
+          },
+          "max": {
+            "x": 11115,
+            "y": 8358
+          }
+        }
+      }
+    }
+  }
+}

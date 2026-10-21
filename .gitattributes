@@ -13,3 +13,6 @@ README.md export-ignore
 # Upload fixtures are compared byte for byte (13 §20.12): never touch their line endings.
 tests/fixtures/uploads/* -text
 tests/fixtures/uploads/generate.py text eol=lf
+
+# The cut list CSV is compared byte for byte (BOM + CRLF, 08 §8.1).
+tests/fixtures/engine-cli/*.csv -text
