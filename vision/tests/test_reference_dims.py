@@ -33,8 +33,9 @@ from tests.support.reference import (
 pytestmark = pytest.mark.reference
 
 OUTER_OVERALL = {"top-overall": 11000, "bottom-overall": 11100, "right-mid": 7600, "right-overall": 8900}
-# recall, precision, free ends after Task 16c (HDB against its corrected truth)
-WALL_FLOOR = {"hdb-3room": (0.892, 0.963, 9), "brochure-2bhk": (0.912, 0.865, 17)}
+# recall, precision, free ends after Task 16c fix round 1 (HDB against its corrected truth; the
+# fix-round truth corrections, not the pipeline, moved HDB recall from 0.892 to 0.889)
+WALL_FLOOR = {"hdb-3room": (0.889, 0.963, 9), "brochure-2bhk": (0.912, 0.865, 17)}
 
 
 @pytest.fixture(scope="module")

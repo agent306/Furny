@@ -1,7 +1,7 @@
 {
  "source": "Hand-traced from hdb-3room.webp (Task 16b diagnostic truth, not the P2 fixture), corrected in Task 16c after the independent review (task-16-review.md): wall centre lines in source pixels read from gridded crops and perpendicular ink profiles. thickness: wall kind as in P2 (exterior 230, interior 115, half 115, black blocks and jog connectors 230); mm_per_unit = 11000 mm / 965 px and 7400 mm / 623 px averaged.",
  "method": {
-  "convention": "Controller ruling, Task 16c. A truth wall is the centre line of the drawn wall: a double line takes the midpoint of the face pair; a bold or filled stroke its centre; a bold outer stroke with a thin inner face their midpoint. Walls drawn as solid black blocks follow the block centre. Where the drawing jogs, the truth jogs too: two pieces plus a short connector (kind 'jog'). Doors, windows and passages are spanned. Isolated columns and piers are not walls; wall stubs >= 0.03 L (L = the plan region's long side, ~1110 source px, so >= 33 px) are walls.",
+  "convention": "Controller ruling, Task 16c. A truth wall is the centre line of the drawn wall: a double line takes the midpoint of the face pair; a bold or filled stroke its centre; a bold outer stroke with a thin inner face their midpoint. Walls drawn as solid black blocks follow the block centre. Where the drawing jogs, the truth jogs too: two pieces plus a short connector (kind 'jog'). Doors, windows and passages are spanned. Isolated columns and piers are not walls; wall stubs >= 0.03 L (L = the plan region's long side, ~1110 source px, so >= 33 px), measured from the centre line of the wall they leave like every truth wall, are walls.",
   "profile_check": "Every wall changed in Task 16c was checked with perpendicular profiles (median of five profiles 1 px apart, 0.5 px steps, gray < 200, < 235 for the faint toilet-3 faces) at 20/50/80 % of its length; the values are in task-16c-report.md.",
   "task_16c_changes": [
    "I16 added: toilet 3's top wall, V6t (980, 178) to T3r (1115, 178); faces 172.4 / 181.9 (window over x 995-1076, black pier x 1077-1105). X4 split at T3r.",
@@ -16,9 +16,14 @@
   ],
   "judgement_calls": [
    "X8 and X9 (lower part): the thin line 9-10 px inside the bold outer stroke (y 795.75 along x 150-427, x 154.5 along y 592-800, meeting at an inner corner) is read as the wall's inner face, so the centre line is the midpoint (y 800.5, x 150). Read as a window sill line instead, the centre would be the bold stroke (y 805.25, x 145.5), 4.75 px away.",
-   "Pier rule: the pier x 558-576, y 922-950 under the bottom black block protrudes 28 px from the block's face (38 px from its centre line); measured from the face it is below 0.03 L (33 px), so it is a pier, not a wall stub. Measured from the centre line it would be a stub.",
-   "X4 (bay's right wall, y 115-171) and X5 (bedroom 3's bottom wall) stay at the bold stroke (x 1115 from the 16b trace; y 811.5) as the Task 16 review verified them. Under the bold-outer-plus-thin-inner-face reading they would be at x 1118.4 (thin line at 1115 beside the bold at 1121.75) and y 807.5 (thin line at 803.5); both are within the 9.9 px exterior tolerance.",
+   "Pier rule (fix round 1): measured from the centre line of the wall it leaves, as every truth wall is: the pier x 558-576, y 922-950 under the bottom black block reaches 38 px from the block's centre line (y 912), >= 0.03 L (33 px), so it is a wall stub (B2p). Measured from the block's face it would be 28 px.",
+   "X4 (bay's right wall, y 115-171) reads the bold stroke with the thin inner line at 1115 as wall faces, like X8 / X9 (fix round 1): centre 1118.5. X5 (bedroom 3's bottom wall) stays at the bold stroke (y 811): the thin lines inside it are a double line (803 / 807), a window frame, as at B2.",
    "B2 right of the bottom block stays at the bold stroke: the thin double line 9 px inside it (y 913-916) is read as the balcony's window or railing frame, not an inner face."
+  ],
+  "task_16c_fix_round_1": [
+   "I12 runs at y 178 along its whole length (its face pair 173.3 / 182.5 centres at 177.8-177.9): new node B0 (938, 178), joined to B (938, 174) by the jog I12j on X2's line.",
+   "The pier under the bottom black block (x 558-576, y 922-950) is measured from the block's centre line (y 912) like the B2a stub: 38 px >= 0.03 L, so it is a wall stub, B2p (567, 912)-(567, 950) at the pier's centre; B2b split at Mp.",
+   "X4's upper part (the bay's right wall, y 115-171) reads like X8 / X9: the bold stroke (1121.75) with the thin inner face (1115.25) gives the midpoint 1118.5; D moves to (1118.5, 115), X4 ends at D2 (1118.5, 171) where the black block begins, the jog X4j joins the block's centre line at D3 (1115, 171) and X4c continues it to T3r."
   ]
  },
  "units": "source_px",
@@ -27,7 +32,7 @@
   "A": [146, 182],
   "B": [938, 174],
   "C": [938, 116],
-  "D": [1115, 115],
+  "D": [1118.5, 115],
   "E": [1115, 811],
   "O": [888, 810],
   "K": [832, 804],
@@ -68,7 +73,12 @@
   "M0": [427, 912],
   "M2": [575, 912],
   "M3": [575, 921.5],
-  "T3r": [1115, 178]
+  "T3r": [1115, 178],
+  "D2": [1118.5, 171],
+  "D3": [1115, 171],
+  "B0": [938, 178],
+  "Mp": [567, 912],
+  "Mq": [567, 950]
  },
  "walls": [
   {"id": "X1", "a": "A", "b": "V1t", "thickness": 230, "kind": "exterior"},
@@ -78,7 +88,9 @@
   {"id": "X1e", "a": "V5t", "b": "B", "thickness": 230, "kind": "exterior"},
   {"id": "X2", "a": "B", "b": "C", "thickness": 230, "kind": "exterior"},
   {"id": "X3", "a": "C", "b": "D", "thickness": 230, "kind": "exterior"},
-  {"id": "X4", "a": "D", "b": "T3r", "thickness": 230, "kind": "exterior"},
+  {"id": "X4", "a": "D", "b": "D2", "thickness": 230, "kind": "exterior"},
+  {"id": "X4j", "a": "D2", "b": "D3", "thickness": 230, "kind": "jog"},
+  {"id": "X4c", "a": "D3", "b": "T3r", "thickness": 230, "kind": "black"},
   {"id": "X4a", "a": "T3r", "b": "H4r", "thickness": 230, "kind": "exterior"},
   {"id": "X4b", "a": "H4r", "b": "E", "thickness": 230, "kind": "exterior"},
   {"id": "X5", "a": "E", "b": "O", "thickness": 230, "kind": "exterior"},
@@ -99,7 +111,9 @@
   {"id": "X9a", "a": "A2", "b": "A", "thickness": 230, "kind": "black"},
   {"id": "B1", "a": "I", "b": "M", "thickness": 230, "kind": "exterior"},
   {"id": "B2a", "a": "M0", "b": "M", "thickness": 230, "kind": "black"},
-  {"id": "B2b", "a": "M", "b": "M2", "thickness": 230, "kind": "black"},
+  {"id": "B2b", "a": "M", "b": "Mp", "thickness": 230, "kind": "black"},
+  {"id": "B2c", "a": "Mp", "b": "M2", "thickness": 230, "kind": "black"},
+  {"id": "B2p", "a": "Mp", "b": "Mq", "thickness": 230, "kind": "black"},
   {"id": "B2j", "a": "M2", "b": "M3", "thickness": 230, "kind": "jog"},
   {"id": "B2", "a": "M3", "b": "N", "thickness": 115, "kind": "half"},
   {"id": "B3", "a": "N", "b": "K", "thickness": 230, "kind": "exterior"},
@@ -119,7 +133,8 @@
   {"id": "I9b", "a": "H3l", "b": "W", "thickness": 230, "kind": "interior"},
   {"id": "I10", "a": "V5t", "b": "Y", "thickness": 115, "kind": "interior"},
   {"id": "I11", "a": "H3l", "b": "Y", "thickness": 115, "kind": "interior"},
-  {"id": "I12", "a": "B", "b": "V6t", "thickness": 115, "kind": "interior"},
+  {"id": "I12j", "a": "B", "b": "B0", "thickness": 230, "kind": "jog"},
+  {"id": "I12", "a": "B0", "b": "V6t", "thickness": 115, "kind": "interior"},
   {"id": "I13", "a": "V6t", "b": "H4l", "thickness": 115, "kind": "interior"},
   {"id": "I13b", "a": "H4l", "b": "V", "thickness": 115, "kind": "interior"},
   {"id": "I14", "a": "H4l", "b": "H4r", "thickness": 115, "kind": "interior"},

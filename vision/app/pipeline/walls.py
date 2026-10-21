@@ -109,8 +109,13 @@ EVIDENCE_CLUSTER_PX = 1.5  # ... (pieces less than this apart across are one lin
 EVIDENCE_STRIP = (
     0.75  # ... within 0.75 max(t, t_wall) beyond the runs' lines (frame lines run along the faces)
 )
-ARC_RADIUS = (0.8, 1.1)  # ... or a door swing arc of radius 0.8 .. 1.1 g about a jamb ...
-ARC_COVER = 0.6  # ... inked along 60 % of its quarter circle
+ARC_RADIUS = (0.85, 1.15)  # ... or a door swing: one thin arc of radius 0.85 .. 1.15 g about a jamb ...
+ARC_MIN_DEG = 60.0  # ... covering at least 60 degrees
+ARC_STEP_DEG = 2.0
+ARC_MAX_BREAK = 2  # steps
+ARC_MAX_RMS_PX = 1.0  # ... fitting its circle within 1 px RMS ...
+ARC_MIN_INLIERS = 0.6  # ... over 60 % of its pixels (read 3 degrees clear of the closed and open leaf)
+ARC_EDGE_DEG = 3.0
 JOG_MIN_PX = 1.0  # a bridge's line this far from a run's line gets a connector
 OUTSIDE_ANGLE_DEG = 3.0  # a dangling wall outside the outline along an extension line (within 3 degrees ...
 OUTSIDE_COVER = 0.5  # ... over half of its length) is that extension line (Task 16c)
@@ -140,6 +145,8 @@ class WallExtraction:
     raw: list[RawWall]
     theta0: float
     t_median: float
+    graph: WallGraph | None = None  # the wall graph of ``raw`` for ``graph_region``, when extraction built it
+    graph_region: Rect | None = None
 
 
 def _throttled(check: Check) -> Check:
@@ -708,7 +715,21 @@ def _march_free_ends(pieces: list[_Piece], wall: np.ndarray) -> None:
 # --- step 8: collinear runs and gap candidates ----------------------------------------------------------
 
 
-_Member = tuple[float, float, float, float, WallSource, str]  # s0, s1, offset, thickness, source, style
+@dataclass(frozen=True, slots=True)
+class _Item:
+    """A snapped piece as step 8 sees it: its stretch ``[s0, s1]`` along the group's direction, its offset
+    across, its drawn thickness ``t`` and the thickness ``t_gap`` its gaps are measured with (``t_wall``
+    for a bold stroke, ruling B2), its source and style and whether its ends are free."""
+
+    s0: float
+    s1: float
+    off: float
+    t: float
+    t_gap: float
+    source: WallSource
+    style: str
+    free0: bool
+    free1: bool
 
 
 @dataclass(slots=True)
@@ -717,36 +738,41 @@ class _Run:
     n: np.ndarray
     s0: float
     s1: float
-    members: list[_Member]
+    members: list[_Item]
     openings: list[tuple[float, float]]
     free0: bool
     free1: bool
 
-    def wall(self) -> RawWall:
-        lengths = [m[1] - m[0] for m in self.members]
+    def _mean(self, value: Callable[[_Item], float]) -> float:
+        """Length-weighted mean of ``value`` over the members."""
+        lengths = [m.s1 - m.s0 for m in self.members]
         total = math.fsum(lengths) or 1.0
-        off = math.fsum(m[2] * w for m, w in zip(self.members, lengths, strict=True)) / total
-        thick = math.fsum(m[3] * w for m, w in zip(self.members, lengths, strict=True)) / total
-        by_source: dict[WallSource, float] = defaultdict(float)
-        for m, w in zip(self.members, lengths, strict=True):
-            by_source[m[4]] += w
-        source = min(by_source, key=lambda s: (-by_source[s], _SOURCE_RANK[s]))
-        a = self.u * self.s0 + self.n * off
-        b = self.u * self.s1 + self.n * off
-        openings = tuple((o0 - self.s0, o1 - self.s0) for o0, o1 in self.openings)
-        return RawWall((float(a[0]), float(a[1])), (float(b[0]), float(b[1])), thick, source, openings)
+        return math.fsum(value(m) * w for m, w in zip(self.members, lengths, strict=True)) / total
+
+    def offset(self) -> float:
+        return self._mean(lambda m: m.off)
+
+    def thickness(self) -> float:
+        return self._mean(lambda m: m.t)
 
     def style(self) -> str:
         """The members' style covering most of the run's length."""
         by_style: dict[str, float] = defaultdict(float)
         for m in self.members:
-            by_style[m[5]] += m[1] - m[0]
+            by_style[m.style] += m.s1 - m.s0
         return min(by_style, key=lambda k: (-by_style[k], k))
 
-    def thickness(self) -> float:
-        lengths = [m[1] - m[0] for m in self.members]
-        return math.fsum(m[3] * w for m, w in zip(self.members, lengths, strict=True)) / (
-            math.fsum(lengths) or 1.0
+    def wall(self) -> RawWall:
+        by_source: dict[WallSource, float] = defaultdict(float)
+        for m in self.members:
+            by_source[m.source] += m.s1 - m.s0
+        source = min(by_source, key=lambda k: (-by_source[k], _SOURCE_RANK[k]))
+        off = self.offset()
+        a = self.u * self.s0 + self.n * off
+        b = self.u * self.s1 + self.n * off
+        openings = tuple((o0 - self.s0, o1 - self.s0) for o0, o1 in self.openings)
+        return RawWall(
+            (float(a[0]), float(a[1])), (float(b[0]), float(b[1])), self.thickness(), source, openings
         )
 
 
@@ -824,62 +850,71 @@ def _runs(
     for u, group in _direction_groups(pieces, theta0):
         poll()
         n = np.array((-u[1], u[0]))
-        items = []
+        items: list[_Item] = []
         for p in group:
             a, b = float(p.p0 @ u), float(p.p1 @ u)
-            off = float((p.p0 + p.p1) @ n) / 2.0
             fa, fb = (p.free0, p.free1) if a <= b else (p.free1, p.free0)
             t_gap = t_wall if p.bold and t_wall is not None else p.thickness
-            items.append((min(a, b), max(a, b), off, p.thickness, p.source, fa, fb, p.style, t_gap))
-        items.sort(key=lambda it: it[2])
-        lines: list[list[tuple[float, float, float, float, WallSource, bool, bool, str, float]]] = []
+            off = float((p.p0 + p.p1) @ n) / 2.0
+            items.append(_Item(min(a, b), max(a, b), off, p.thickness, t_gap, p.source, p.style, fa, fb))
+        items.sort(key=lambda it: it.off)
+        lines: list[list[_Item]] = []
         anchor_off, anchor_t = 0.0, 0.0
         for it in items:
-            tol = max(MERGE_OFFSET * min(anchor_t, it[3]), MERGE_OFFSET_MIN_PX)
-            if lines and abs(it[2] - anchor_off) <= tol:
+            tol = max(MERGE_OFFSET * min(anchor_t, it.t), MERGE_OFFSET_MIN_PX)
+            if lines and abs(it.off - anchor_off) <= tol:
                 lines[-1].append(it)
             else:
                 lines.append([it])
-                anchor_off, anchor_t = it[2], it[3]
+                anchor_off, anchor_t = it.off, it.t
         for line in lines:
-            line.sort(key=lambda it: (it[0], it[1]))
+            line.sort(key=lambda it: (it.s0, it.s1))
             run: _Run | None = None
-            last_t = last_tg = 0.0
-            for s0, s1, off, t, src, fa, fb, style, tg in line:
+            last = line[0]  # the member reaching furthest along the current run
+            for it in line:
                 if run is not None:
-                    gap = s0 - run.s1
-                    t_gap = (last_tg + tg) / 2.0
-                    similar = max(last_tg, tg) <= SIMILAR_THICKNESS * min(last_tg, tg)
-                    if gap <= MERGE_GAP * max(last_tg, tg):
+                    gap = it.s0 - run.s1
+                    if gap <= MERGE_GAP * max(_gap_thickness(last, it)):
                         pass
-                    elif (
-                        GAP_MIN * t_gap <= gap <= GAP_MAX * t_gap
-                        and similar
-                        and _gap_is_empty(
-                            wall, u, n, (off + _mean_offset(run)) / 2.0, run.s1, s0, GAP_BAND * min(last_t, t)
-                        )
+                    elif _is_opening(last, it, gap) and _gap_is_empty(
+                        wall, u, n, (it.off + run.offset()) / 2.0, run.s1, it.s0, GAP_BAND * min(last.t, it.t)
                     ):
-                        run.openings.append((run.s1, s0))
+                        run.openings.append((run.s1, it.s0))
                     else:
                         out.append(run)
                         run = None
                 if run is None:
-                    run = _Run(u, n, s0, s1, [], [], fa, fb)
-                elif s1 >= run.s1:
-                    run.free1 = fb
-                if s1 >= run.s1:
-                    run.s1 = s1
-                    last_t, last_tg = t, tg
-                run.members.append((s0, s1, off, t, src, style))
+                    run = _Run(u, n, it.s0, it.s1, [], [], it.free0, it.free1)
+                    last = it
+                elif it.s1 >= run.s1:
+                    run.free1 = it.free1
+                if it.s1 >= run.s1:
+                    run.s1 = it.s1
+                    last = it
+                run.members.append(it)
             if run is not None:
                 out.append(run)
     return out
 
 
-def _mean_offset(run: _Run) -> float:
-    lengths = [m[1] - m[0] for m in run.members]
-    total = math.fsum(lengths) or 1.0
-    return math.fsum(m[2] * w for m, w in zip(run.members, lengths, strict=True)) / total
+def _gap_thickness(a: _Item, b: _Item) -> tuple[float, float]:
+    """The thicknesses a gap between ``a`` and ``b`` is measured with: ``t_gap`` (``t_wall`` for a bold
+    stroke, ruling B2), except across a bold stroke and a piece of another style, where the drawn widths
+    count (Task 16c review, Important 1: otherwise a bold stroke and a double line look alike)."""
+    if a.style != b.style and "bold" in (a.style, b.style):
+        return a.t, b.t
+    return a.t_gap, b.t_gap
+
+
+def _is_opening(a: _Item, b: _Item, gap: float) -> bool:
+    """Step 8's gap candidate between ``a`` and ``b`` (emptiness aside): the same drawing style (ruling B2:
+    pieces of different styles are bridged only with opening evidence, ``_link_runs``), similar
+    thickness and ``1.5 t .. 18 t`` (ruling R-a) wide."""
+    if a.style != b.style:
+        return False
+    ta, tb = _gap_thickness(a, b)
+    t_gap = (ta + tb) / 2.0
+    return max(ta, tb) <= SIMILAR_THICKNESS * min(ta, tb) and GAP_MIN * t_gap <= gap <= GAP_MAX * t_gap
 
 
 def _point(run: _Run, s: float, off: float) -> Pt:
@@ -909,7 +944,7 @@ def _link_runs(
     groups: dict[tuple[float, float], list[int]] = defaultdict(list)  # runs of one direction group
     for k, r in enumerate(runs):  # share their direction exactly
         groups[(float(r.u[0]), float(r.u[1]))].append(k)
-    offs = [_mean_offset(r) for r in runs]
+    offs = [r.offset() for r in runs]
     thick = [r.thickness() for r in runs]
     for members in groups.values():
         poll()
@@ -950,7 +985,7 @@ def _link_runs(
         else:
             k = i if thick[i] >= thick[j] else j
             strip = EVIDENCE_STRIP * max(thick[k], t_wall or 0.0)
-            line = _opening_line(a, a_off, b_off, a.s1, b.s0, strip, thin, ink)
+            line = _opening_line(a, a_off, b_off, a.s1, b.s0, strip, thin, ink, thick[k])
             if line is None:
                 continue
             off = offs[k] if math.isnan(line) else line
@@ -980,6 +1015,7 @@ def _opening_line(
     strip: float,
     thin: np.ndarray,
     ink: np.ndarray,
+    thick: float,
 ) -> float | None:
     """Opening evidence in the gap ``[g0, g1]`` along ``run``'s line between offsets ``a_off`` and ``b_off``
     (ruling B2): the centre offset of the thin lines parallel to it (within 3 degrees) inside the gap's
@@ -1030,23 +1066,86 @@ def _opening_line(
         for g, toward in ((g0, run.u), (g1, -run.u))
         for off in (a_off, b_off)
     ]
-    if any(_door_arc(ink, c, toward, run.n * side, gap) for c, toward in jambs for side in (1.0, -1.0)):
+    if any(
+        _door_arc(ink, c, toward, run.n * side, gap, thick) for c, toward in jambs for side in (1.0, -1.0)
+    ):
         return math.nan
     return None
 
 
-def _door_arc(ink: np.ndarray, hinge: np.ndarray, toward: np.ndarray, out: np.ndarray, gap: float) -> bool:
-    """A door swing: ink along >= 60 % of the quarter circle about ``hinge`` from ``toward`` (the closed
-    leaf, across the gap) to ``out`` (the open leaf), for a radius of 0.8 .. 1.1 of the gap (within 2 px)."""
-    ang = np.linspace(0.0, math.pi / 2.0, 33)
-    dirs = np.cos(ang)[:, None] * toward[None, :] + np.sin(ang)[:, None] * out[None, :]
-    for radius in np.linspace(ARC_RADIUS[0] * gap, ARC_RADIUS[1] * gap, 7):
-        hit = np.zeros(len(ang), bool)
-        for dr in (-2.0, -1.0, 0.0, 1.0, 2.0):
-            hit |= sample(ink, hinge[None, :] + dirs * (radius + dr)) > 0
-        if float(hit.mean()) >= ARC_COVER:
+def _door_arc(
+    ink: np.ndarray, hinge: np.ndarray, toward: np.ndarray, out: np.ndarray, gap: float, t: float
+) -> bool:
+    """A door swing (Task 16c review, Important 4): one connected curved stroke in the quadrant from
+    ``toward`` (the closed leaf, across the gap) to ``out`` (the open leaf) about ``hinge`` that fits a
+    circle (trimmed least squares, RMS residual <= 1 px over >= 60 % of its pixels) of radius
+    ``0.85 .. 1.15`` of the gap, centred within ``0.5 t`` (+ 2 px) of ``hinge``, its inliers covering at
+    least 60 degrees with breaks of at most 2 degree-steps. Hatching crosses the quadrant as separate
+    straight strokes (no such circle); a tile grid is one lattice whose pixels mostly miss any circle."""
+    lo_r, hi_r = (ARC_RADIUS[0] - 0.05) * gap, (ARC_RADIUS[1] + 0.05) * gap
+    reach = hi_r + 0.5 * t + 4.0
+    h, w = ink.shape[:2]
+    x0, x1 = max(0, int(hinge[0] - reach)), min(w, int(hinge[0] + reach) + 1)
+    y0, y1 = max(0, int(hinge[1] - reach)), min(h, int(hinge[1] + reach) + 1)
+    if x1 <= x0 or y1 <= y0:
+        return False
+    yy, xx = np.mgrid[y0:y1, x0:x1]
+    v = np.stack([xx - hinge[0], yy - hinge[1]], axis=-1).astype(np.float64)
+    along, across = v @ toward, v @ out
+    r = np.hypot(along, across)
+    ang = np.degrees(np.arctan2(across, along))
+    zone = (r >= lo_r) & (r <= hi_r) & (ang >= ARC_EDGE_DEG) & (ang <= 90.0 - ARC_EDGE_DEG)  # not the leaves
+    patch = ((ink[y0:y1, x0:x1] > 0) & zone).astype(np.uint8)
+    min_px = math.radians(ARC_MIN_DEG) * ARC_RADIUS[0] * gap * 0.8
+    if patch.sum() < min_px:
+        return False
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(patch, connectivity=8)
+    for c in range(1, n):
+        if stats[c, cv2.CC_STAT_AREA] < min_px:
+            continue
+        cy, cx = np.nonzero(labels == c)
+        pts = np.column_stack([cx + x0, cy + y0]).astype(np.float64)
+        fit = _fit_circle(pts)
+        if fit is None:
+            continue
+        centre, radius, inl = fit
+        off = centre - hinge
+        if max(abs(float(off @ toward)), abs(float(off @ out))) > 0.5 * t + 2.0:
+            continue
+        if not ARC_RADIUS[0] * gap <= radius <= ARC_RADIUS[1] * gap:
+            continue
+        q = pts[inl] - centre
+        a = np.degrees(np.arctan2(q @ out, q @ toward))
+        bins = np.unique(np.clip(np.rint(a / ARC_STEP_DEG), -10, 100).astype(np.intp))
+        breaks = np.flatnonzero(np.diff(bins) > ARC_MAX_BREAK + 1)
+        starts = np.concatenate(([bins[0]], bins[breaks + 1]))
+        ends = np.concatenate((bins[breaks], [bins[-1]]))
+        if float((ends - starts).max()) * ARC_STEP_DEG >= ARC_MIN_DEG:
             return True
     return False
+
+
+def _fit_circle(pts: np.ndarray) -> tuple[np.ndarray, float, np.ndarray] | None:
+    """Trimmed algebraic circle fit: centre, radius and the inlier mask (residual <= 2 px), when the
+    inliers' RMS residual is <= ``ARC_MAX_RMS_PX`` and they are >= ``ARC_MIN_INLIERS`` of ``pts``."""
+    inl = np.ones(len(pts), bool)
+    centre, radius = np.zeros(2), 0.0
+    for _ in range(3):
+        q = pts[inl]
+        if len(q) < 10:
+            return None
+        a = np.column_stack([2.0 * q[:, 0], 2.0 * q[:, 1], np.ones(len(q))])
+        b = (q * q).sum(axis=1)
+        (cx, cy, c), *_ = np.linalg.lstsq(a, b, rcond=None)
+        radius2 = c + cx * cx + cy * cy
+        if radius2 <= 0:
+            return None
+        centre, radius = np.array((cx, cy)), math.sqrt(radius2)
+        inl = np.abs(np.hypot(*(pts - centre).T) - radius) <= 2.0
+    res = np.hypot(*(pts[inl] - centre).T) - radius
+    if inl.mean() < ARC_MIN_INLIERS or float(np.sqrt((res * res).mean())) > ARC_MAX_RMS_PX:
+        return None
+    return centre, radius, inl
 
 
 def _drop_leaves(runs: list[_Run]) -> list[_Run]:
@@ -1058,8 +1157,8 @@ def _drop_leaves(runs: list[_Run]) -> list[_Run]:
     """
     jambs: list[tuple[np.ndarray, float, np.ndarray, float, int]] = []
     for k, r in enumerate(runs):
-        off = _mean_offset(r)
-        t = max(m[3] for m in r.members)
+        off = r.offset()
+        t = max(m.t for m in r.members)
         for o0, o1 in r.openings:
             g = o1 - o0
             jambs.append((r.u * o0 + r.n * off, g, r.u, t, k))
@@ -1277,8 +1376,8 @@ def extract_walls(
     else:
         t_median = max(1.0, 2.0 * pre.t_thin)
     extensions = [s for s in segments if s.is_thin and any(touches_tick(s, d, pre.t_thin) for d in dims)]
-    raw = _drop_dangling_extensions(raw, extensions, crop, theta0, t_median, poll)
-    return WallExtraction(mask, source_full, raw, theta0, t_median)
+    raw, graph = _drop_dangling_extensions(raw, extensions, pre.region, theta0, t_median, poll)
+    return WallExtraction(mask, source_full, raw, theta0, t_median, graph, pre.region if graph else None)
 
 
 def _drop_dangling_extensions(
@@ -1288,8 +1387,9 @@ def _drop_dangling_extensions(
     theta0: float,
     t_median: float,
     poll: Check,
-) -> list[RawWall]:
-    """``raw`` without the walls that are extension lines outside the plan's outline (Task 16c).
+) -> tuple[list[RawWall], WallGraph | None]:
+    """``raw`` without the walls that are extension lines outside the plan's outline (Task 16c), and the
+    wall graph of the result when it was built (``walls_to_graph`` reuses it).
 
     The outline is the union of the bounded faces of the wall graph of ``raw``. A graph wall with a free
     end that lies outside it and runs along an extension line (a thin line touching a dimension tick,
@@ -1299,12 +1399,12 @@ def _drop_dangling_extensions(
     outline nothing is dropped. Repeats once for a chain of such walls."""
     for _ in range(2):
         if not raw or not extensions:
-            return raw
+            return raw, None
         graph = _graph_of(raw, region, theta0, t_median, poll)  # the graph `walls_to_graph` builds
         lines = [LineString([w.a, w.b]) for w in graph.walls if math.dist(w.a, w.b) > 0]
         faces = list(polygonize(unary_union(lines))) if lines else []
         if not faces:
-            return raw
+            return raw, graph
         outline = unary_union(faces).buffer(1.0)
         cuts = [
             w
@@ -1314,10 +1414,10 @@ def _drop_dangling_extensions(
             and any(_runs_along(w.a, w.b, e, w.thickness_px) for e in extensions)
         ]
         if not cuts:
-            return raw
+            return raw, graph
         for w in cuts:
             raw = [piece for r in raw for piece in _cut(r, w.a, w.b, w.thickness_px)]
-    return raw
+    return raw, None
 
 
 def _runs_along(a: Pt, b: Pt, e: Segment, thickness: float) -> bool:
@@ -1381,8 +1481,8 @@ def _trace_raw_walls(
     theta0: float,
     L: float,
     poll: Check,
-    thin: np.ndarray | None = None,
-    ink: np.ndarray | None = None,
+    thin: np.ndarray,
+    ink: np.ndarray,
 ) -> list[RawWall]:
     """Steps 6-8 on the region's wall mask (crop coordinates); ``thin`` (k, 4) are the thin candidate
     segments and ``ink`` the text-free ink, the opening evidence of ``_link_runs``."""
@@ -1401,13 +1501,7 @@ def _trace_raw_walls(
     _march_free_ends(pieces, wall)
     t_wall = _wall_thickness(pieces)
     runs = [r for r in _drop_leaves(_runs(pieces, theta0, wall, poll, t_wall)) if r.s1 - r.s0 > 1e-6]
-    links = _link_runs(
-        runs,
-        np.zeros((0, 4)) if thin is None else thin,
-        np.zeros_like(wall) if ink is None else ink,
-        t_wall,
-        poll,
-    )
+    links = _link_runs(runs, thin, ink, t_wall, poll)
     return [*(r.wall() for r in runs), *links]
 
 
@@ -1418,6 +1512,8 @@ def walls_to_graph(
     0.006 L)``, ``L`` = the region's long side and ``theta0_deg = ext.theta0``. Near-identical duplicate
     raw walls are dropped first. The raw walls' ``openings_px`` come back as ``graph.gaps`` (the gap
     candidates, ids consistent with ``graph.walls``)."""
+    if ext.graph is not None and ext.graph_region == region:
+        return ext.graph  # built by extraction's outline rule from the same raw walls
     return _graph_of(ext.raw, region, ext.theta0, ext.t_median, check_deadline)
 
 

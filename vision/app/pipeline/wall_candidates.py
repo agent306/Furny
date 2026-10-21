@@ -43,6 +43,7 @@ DOUBLE_OVERLAP = 0.6  # of the shorter segment
 HOLLOW_MAX, FILLED_MIN = 0.15, 0.85  # ink share of the strip between the two lines
 DOUBLE_CLAIM_TOL_PX = 1.0  # claims of one segment side may touch by this much
 REJOIN_GAP_THIN = 3.0  # thin pieces cut by a dimension line: within this many t_thin of it, this far apart
+REJOIN_ANGLE_DEG, REJOIN_OFFSET_PX = 1.5, 2.0  # ... on one line: within 1.5 degrees and 2 px
 
 _MAX_SAMPLES = 400_000  # vectorised work per block between polls
 _ANGLE_BUCKET_DEG = 2.0
@@ -257,7 +258,7 @@ def double_mask(
     mask = np.zeros((crop.h, crop.w), np.uint8)
     thin = [s for s in cands if s.is_thin]
     if dims is not None and dims.size and thin:
-        thin = _rejoined(thin, dims, t_thin)
+        thin = _rejoined(thin, dims, t_thin, poll)
     thin = [s for s in thin if s.length >= DOUBLE_MIN_LEN_FRAC * L]
     if len(thin) < 2:
         return mask
@@ -295,42 +296,81 @@ def double_mask(
     return mask
 
 
-def _rejoined(thin: list[Segment], dims: np.ndarray, t_thin: float) -> list[Segment]:
+def _rejoined(
+    thin: list[Segment], dims: np.ndarray, t_thin: float, poll: Check | None = None
+) -> list[Segment]:
     """Thin lines rejoined where a dimension line or its tick cut them (Task 16c). A piece with an end
     within ``3 t_thin`` of a dimension line (``dims``: (k, 4) end points), and the pieces collinear with it
     (within 1.5 degrees and 2 px) that overlap it or end at most ``3 t_thin`` from it, fuse whatever their
     measured widths: the segment stage keeps strokes more than 1.5x apart in width separate, and a thin
     line's width reads 1.9 or 3.8 px by chance. On HDB the "3200" line's end and tick cut both faces of the
-    bedroom-2 wall 25 px short of the wall they meet."""
-    reach = REJOIN_GAP_THIN * t_thin
-    ends = np.array([[s.p0, s.p1] for s in thin], np.float64).reshape(-1, 2)
-    d = _point_segment_distances(ends, dims[:, :2], dims[:, 2:]).min(axis=1).reshape(-1, 2)
-    picked = set(np.flatnonzero(d.min(axis=1) <= reach).tolist())
-    if not picked:
+    bedroom-2 wall 25 px short of the wall they meet.
+
+    Cost: the ends are tested against the dimension lines in blocks, and a picked piece is compared only
+    with the pieces of its own and the neighbouring 2-degree direction buckets inside an offset window
+    (sorted, as in ``_pair_candidates``); ``poll`` is called between blocks."""
+    poll = poll or (lambda: None)
+    if not thin:
         return thin
-    for i in sorted(picked):  # one round of collinear neighbours
-        for j, s in enumerate(thin):
-            if j not in picked and _continues(thin[i], s, reach):
-                picked.add(j)
+    reach = REJOIN_GAP_THIN * t_thin
+    p0 = np.array([s.p0 for s in thin], np.float64)
+    p1 = np.array([s.p1 for s in thin], np.float64)
+    ends = np.stack([p0, p1], axis=1).reshape(-1, 2)
+    near = np.zeros(len(ends), bool)
+    block = max(1, _MAX_SAMPLES // max(1, len(dims)))
+    for lo in range(0, len(ends), block):
+        poll()
+        near[lo : lo + block] = (
+            _point_segment_distances(ends[lo : lo + block], dims[:, :2], dims[:, 2:]) <= reach
+        ).any(axis=1)
+    seeds = np.flatnonzero(near.reshape(-1, 2).any(axis=1))
+    if seeds.size == 0:
+        return thin
+    length = np.maximum(np.hypot(*(p1 - p0).T), 1e-9)
+    unit = (p1 - p0) / length[:, None]
+    angle = np.degrees(np.arctan2(unit[:, 1], unit[:, 0])) % 180.0
+    n_buckets = round(180.0 / _ANGLE_BUCKET_DEG)
+    bucket = np.minimum((angle // _ANGLE_BUCKET_DEG).astype(np.intp), n_buckets - 1)
+    mid = (p0 + p1) / 2.0
+    index: dict[int, tuple[np.ndarray, np.ndarray, float]] = {}  # bucket -> (members by rho, rho, max length)
+    cos_tol = math.cos(math.radians(REJOIN_ANGLE_DEG))
+    picked = set(seeds.tolist())
+    for count, i in enumerate(seeds.tolist()):
+        if count % 64 == 0:
+            poll()
+        b = int(bucket[i])
+        for bk in ((b - 1) % n_buckets, b, (b + 1) % n_buckets):
+            if bk not in index:
+                members = np.flatnonzero(bucket == bk)
+                theta = math.radians((bk + 0.5) * _ANGLE_BUCKET_DEG)
+                rho = mid[members, 1] * math.cos(theta) - mid[members, 0] * math.sin(theta)
+                order = np.argsort(rho, kind="stable")
+                max_len = float(length[members].max()) if members.size else 0.0
+                index[bk] = (members[order], rho[order], max_len)
+            members, rho, max_len = index[bk]
+            if members.size == 0:
+                continue
+            theta = math.radians((bk + 0.5) * _ANGLE_BUCKET_DEG)
+            rho_i = mid[i, 1] * math.cos(theta) - mid[i, 0] * math.sin(theta)
+            half = REJOIN_OFFSET_PX + math.sin(math.radians(REJOIN_ANGLE_DEG + 2 * _ANGLE_BUCKET_DEG)) * (
+                length[i] + max_len + 2 * reach
+            )
+            lo, hi = np.searchsorted(rho, rho_i - half), np.searchsorted(rho, rho_i + half, side="right")
+            js = members[lo:hi]
+            if js.size == 0:
+                continue
+            u, n = unit[i], np.array((-unit[i][1], unit[i][0]))
+            q0, q1 = p0[js] - p0[i], p1[js] - p0[i]
+            ok = np.abs(unit[js] @ u) >= cos_tol
+            ok &= np.maximum(np.abs(q0 @ n), np.abs(q1 @ n)) <= REJOIN_OFFSET_PX
+            t0, t1 = q0 @ u, q1 @ u
+            ok &= (np.minimum(t0, t1) <= length[i] + reach) & (np.maximum(t0, t1) >= -reach)
+            picked.update(js[ok].tolist())
     if len(picked) < 2:
         return thin
     cut = [Segment(thin[k].id, thin[k].p0, thin[k].p1, t_thin, True, thin[k].source) for k in sorted(picked)]
     keep = [s for k, s in enumerate(thin) if k not in picked]
-    return [*keep, *merge_collinear(cut, gap_tol=reach)]
-
-
-def _continues(a: Segment, b: Segment, reach: float) -> bool:
-    """``b`` lies on ``a``'s line (within 1.5 degrees and 2 px) and overlaps it or ends within ``reach``."""
-    u = np.subtract(a.p1, a.p0) / max(a.length, 1e-9)
-    v = np.subtract(b.p1, b.p0) / max(b.length, 1e-9)
-    if abs(float(u @ v)) < math.cos(math.radians(1.5)):
-        return False
-    n = np.array((-u[1], u[0]))
-    q0, q1 = np.subtract(b.p0, a.p0), np.subtract(b.p1, a.p0)
-    if max(abs(float(q0 @ n)), abs(float(q1 @ n))) > 2.0:
-        return False
-    lo, hi = sorted((float(q0 @ u), float(q1 @ u)))
-    return lo <= a.length + reach and hi >= -reach
+    return [*keep, *merge_collinear(cut, gap_tol=reach, check_deadline=poll)]
 
 
 def _point_segment_distances(pts: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.ndarray:

@@ -413,17 +413,31 @@ def test_region_grouping_matches_the_pairwise_rule() -> None:
     assert len(calls) >= len(boxes) // 64
 
 
-def test_region_grouping_of_many_components_is_bounded_and_polls_the_deadline() -> None:
-    """2000+ wall components (a hatched sheet): grouping stays fast and stops at the deadline."""
+def test_region_grouping_of_many_components_is_bounded_and_polls_the_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """1600 wall components that stay apart under the 0.02 L closing (20 px squares 150 px apart on a 6000 px
+    sheet, the closing is 121 px; Task 16c review, Minor 2): the sweep groups them fast and stops at the
+    deadline."""
     from app.api.errors import VisionError
+    from app.pipeline import region as regionmod
 
-    thick = np.zeros((3000, 3000), np.uint8)
-    for k in range(2500):
-        y, x = divmod(k, 50)
-        thick[60 * y + 10 : 60 * y + 30, 60 * x + 10 : 60 * x + 30] = 255
+    thick = np.zeros((6000, 6000), np.uint8)
+    for k in range(1600):
+        y, x = divmod(k, 40)
+        thick[150 * y + 10 : 150 * y + 30, 150 * x + 10 : 150 * x + 30] = 255
+    seen: list[int] = []
+    real = regionmod._groups
+
+    def spy(boxes: np.ndarray, *args: object) -> np.ndarray:
+        seen.append(len(boxes))
+        return real(boxes, *args)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(regionmod, "_groups", spy)
     start = time.perf_counter()
     detect_plan_region(thick, np.zeros_like(thick), make_ctx())
     assert time.perf_counter() - start < 3.0
+    assert seen == [1600]
     ctx = make_ctx()
     ctx.deadline = 0.0
     with pytest.raises(VisionError) as err:
@@ -457,3 +471,41 @@ def test_lone_double_line_strip_does_not_grow_the_region() -> None:
     ink[100:1000, 300:302] = 255  # the pair turns a corner into a vertical pair: a wall outline
     ink[112:1000, 312:314] = 255
     assert binarize.double_line_strips(ink, 2.0, 2000).any()
+
+
+def _grid(img: np.ndarray, x0: int, y0: int, x1: int, y1: int, step: int) -> None:
+    for y in range(y0, y1 + 1, step):
+        img[y : y + 2, x0:x1] = 0
+    for x in range(x0, x1 + 1, step):
+        img[y0:y1, x : x + 2] = 0
+
+
+def _small_plan(style: str) -> np.ndarray:
+    pts = [(200, 300), (1100, 300), (1100, 1000), (200, 1000)]
+    walls = [SWall(pts[i], pts[(i + 1) % 4], 14, style) for i in range(4)]  # type: ignore[arg-type]
+    return render_plan((2400, 1700), [*walls, SWall((650, 300), (650, 1000), 14, style)])  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("style", ["filled", "double"])
+@pytest.mark.parametrize("case", ["table", "terrace", "hatch"])
+def test_grids_and_hatching_do_not_become_the_plan_region(style: str, case: str) -> None:
+    """Task 16c review, Important 2: a schedule table (40 px cells) at the sheet's right, a tiled terrace
+    (30 px grid) beside the plan and a 45-degree hatch block leave the region on the plan: periodic grids
+    and hatching make no double-line strips."""
+    base = _small_plan(style)
+    img = base.copy()
+    if case == "table":
+        _grid(img, 1500, 200, 2300, 1500, 40)
+    elif case == "terrace":
+        _grid(img, 1200, 300, 1700, 1000, 30)
+    else:
+        for k in range(-1400, 1400, 12):
+            cv2.line(img, (1500 + k, 1500), (1500 + k + 1300, 200), (0, 0, 0), 2)
+        img[:, :1450] = base[:, :1450]
+        img[:, 2350:] = 255
+        img[:150] = 255
+        img[1550:] = 255
+    alone = preprocess(page_of(base), make_ctx()).region
+    with_it = preprocess(page_of(img), make_ctx()).region
+    assert with_it == alone
+    assert alone.x < 200 and alone.x + alone.w > 1100 and alone.x + alone.w < 1250
