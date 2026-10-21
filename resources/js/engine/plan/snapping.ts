@@ -1,6 +1,7 @@
 /**
- * Point snapping (04 §5.1-§5.6, §5.10-§5.11): the spatial index over a derived
- * plan, `snapPoint` and the grid.
+ * Point snapping (04 §5.1, §5.3-§5.5, §5.10-§5.11): `snapPoint` and its
+ * settings. The index lives in `snapIndex.ts`, the grid in `grid.ts`; both are
+ * re-exported here so this is the one import for snapping.
  *
  * Plan space is x right, y down (04 §2.1). `snapPoint` runs on every pointer
  * move, so it only touches the index items near the cursor. Results are
@@ -8,8 +9,7 @@
  * arrays are sorted by entity id, hits are visited in index order, and ties go
  * to the earlier candidate.
  */
-import Flatbush from 'flatbush';
-import { EPS, ANGLE_TOL, ANGLE_TOL_DEG, roundMm } from '../geometry/tolerance';
+import { ANGLE_TOL, ANGLE_TOL_DEG, EPS, roundMm } from '../geometry/tolerance';
 import { distPointLine, intersectSegments } from '../geometry/segment';
 import {
     add,
@@ -18,7 +18,6 @@ import {
     dist,
     dot,
     len,
-    lerp,
     normDeg,
     normalize,
     perpLeft,
@@ -27,14 +26,30 @@ import {
     type Vec2,
 } from '../geometry/vec2';
 import type { UnitSystem } from '../units/types';
-import type { DerivedPlan } from './derive';
+import { gridPoint, rawPoint } from './grid';
 import {
-    fixtureFootprint,
-    placementFootprint,
-    type Footprint,
-    type FootprintProvider,
-} from './footprint';
-import type { PlanDocument } from './schema';
+    query,
+    type SnapIndex,
+    type SnapNodeItem,
+    type SnapWallItem,
+} from './snapIndex';
+
+export { gridStepFor, rawStepFor } from './grid';
+export { buildSnapIndex } from './snapIndex';
+export type {
+    SnapFaceItem,
+    SnapFootprintItem,
+    SnapIndex,
+    SnapItemIndex,
+    SnapKeyPointItem,
+    SnapNodeItem,
+    SnapWallItem,
+} from './snapIndex';
+
+/** Normalises `-0` so equal results compare equal and serialise alike. */
+const z = (n: number): number => (n === 0 ? 0 : n);
+
+type Box = readonly [number, number, number, number];
 
 export const SNAP_KINDS = [
     'endpoint',
@@ -128,246 +143,6 @@ export interface SnapResult {
 }
 
 // ---------------------------------------------------------------------------
-// Index (04 §5.2)
-// ---------------------------------------------------------------------------
-
-export interface SnapNodeItem {
-    id: string;
-    at: Vec2;
-}
-
-/** A valid wall's centre line with the derived values the snapper needs. */
-export interface SnapWallItem {
-    wallId: string;
-    a: Vec2;
-    b: Vec2;
-    nodeA: string;
-    nodeB: string;
-    /** Centre-line length. */
-    length: number;
-    /** Unit direction a to b. */
-    dir: Vec2;
-}
-
-export interface SnapFaceItem {
-    wallId: string;
-    side: 'left' | 'right';
-    a: Vec2;
-    b: Vec2;
-}
-
-export interface SnapFootprintItem {
-    id: string;
-    source: 'placement' | 'fixture';
-    footprint: Footprint;
-    elevation: number;
-    height: number;
-}
-
-export interface SnapKeyPointItem {
-    kind: 'wall_mid' | 'jamb';
-    at: Vec2;
-    wallId: string;
-    /** Set for `jamb`. */
-    openingId: string | null;
-}
-
-/** A Flatbush tree with the items it indexes, aligned by insertion order. */
-export interface SnapItemIndex<T> {
-    tree: Flatbush;
-    items: T[];
-}
-
-/** An item class is `null` when it has no items (Flatbush needs at least one). */
-export interface SnapIndex {
-    nodes: SnapItemIndex<SnapNodeItem> | null;
-    centerlines: SnapItemIndex<SnapWallItem> | null;
-    faces: SnapItemIndex<SnapFaceItem> | null;
-    footprints: SnapItemIndex<SnapFootprintItem> | null;
-    keyPoints: SnapItemIndex<SnapKeyPointItem> | null;
-    wallById: ReadonlyMap<string, SnapWallItem>;
-    /** Incident valid walls of every node, sorted by wall id. */
-    wallsAtNode: ReadonlyMap<string, readonly string[]>;
-}
-
-type Box = readonly [number, number, number, number];
-
-function buildClass<T>(
-    items: T[],
-    boxOf: (item: T) => Box,
-): SnapItemIndex<T> | null {
-    if (items.length === 0) return null;
-    const tree = new Flatbush(items.length);
-    for (const item of items) {
-        const [x0, y0, x1, y1] = boxOf(item);
-        tree.add(x0, y0, x1, y1);
-    }
-    tree.finish();
-    return { tree, items };
-}
-
-const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
-/** Normalises `-0` so equal results compare equal and serialise alike. */
-const z = (n: number): number => (n === 0 ? 0 : n);
-
-const segBox = (a: Vec2, b: Vec2): Box => [
-    Math.min(a.x, b.x),
-    Math.min(a.y, b.y),
-    Math.max(a.x, b.x),
-    Math.max(a.y, b.y),
-];
-
-const ringBox = (corners: readonly Vec2[]): Box => {
-    let x0 = Infinity;
-    let y0 = Infinity;
-    let x1 = -Infinity;
-    let y1 = -Infinity;
-    for (const c of corners) {
-        x0 = Math.min(x0, c.x);
-        y0 = Math.min(y0, c.y);
-        x1 = Math.max(x1, c.x);
-        y1 = Math.max(y1, c.y);
-    }
-    return [x0, y0, x1, y1];
-};
-
-/**
- * Builds the snap index of `geom` (rebuilt, never updated, whenever the
- * geometry changes). `footprints` resolves the size of furniture designs;
- * placements of unknown designs are not indexed.
- */
-export function buildSnapIndex(
-    doc: PlanDocument,
-    geom: DerivedPlan,
-    footprints: FootprintProvider,
-): SnapIndex {
-    const nodeItems: SnapNodeItem[] = Object.keys(doc.nodes)
-        .sort(cmp)
-        .map((id) => ({
-            id,
-            at: { x: doc.nodes[id]!.x, y: doc.nodes[id]!.y },
-        }));
-
-    const wallItems: SnapWallItem[] = [];
-    const faceItems: SnapFaceItem[] = [];
-    const keyItems: SnapKeyPointItem[] = [];
-    const wallById = new Map<string, SnapWallItem>();
-    for (const id of Object.keys(geom.walls).sort(cmp)) {
-        const derived = geom.walls[id]!;
-        const wall = doc.walls[id];
-        if (!wall) continue;
-        const [a, b] = derived.centerline;
-        const item: SnapWallItem = {
-            wallId: id,
-            a,
-            b,
-            nodeA: wall.a,
-            nodeB: wall.b,
-            length: derived.length,
-            dir: derived.dir,
-        };
-        wallItems.push(item);
-        wallById.set(id, item);
-        faceItems.push(
-            {
-                wallId: id,
-                side: 'left',
-                a: derived.leftFace[0],
-                b: derived.leftFace[1],
-            },
-            {
-                wallId: id,
-                side: 'right',
-                a: derived.rightFace[0],
-                b: derived.rightFace[1],
-            },
-        );
-        keyItems.push({
-            kind: 'wall_mid',
-            at: lerp(a, b, 0.5),
-            wallId: id,
-            openingId: null,
-        });
-    }
-    for (const id of Object.keys(geom.openings).sort(cmp)) {
-        const o = geom.openings[id]!;
-        keyItems.push(
-            {
-                kind: 'jamb',
-                at: lerp(o.jambStart.left, o.jambStart.right, 0.5),
-                wallId: o.wallId,
-                openingId: id,
-            },
-            {
-                kind: 'jamb',
-                at: lerp(o.jambEnd.left, o.jambEnd.right, 0.5),
-                wallId: o.wallId,
-                openingId: id,
-            },
-        );
-    }
-
-    const footprintItems: SnapFootprintItem[] = [];
-    for (const p of Object.values(doc.placements)) {
-        const size = footprints(p.designId);
-        if (size === null) continue;
-        footprintItems.push({
-            id: p.id,
-            source: 'placement',
-            footprint: placementFootprint(p, size),
-            elevation: p.elevation,
-            height: size.height,
-        });
-    }
-    for (const f of Object.values(doc.fixtures)) {
-        footprintItems.push({
-            id: f.id,
-            source: 'fixture',
-            footprint: fixtureFootprint(f),
-            elevation: f.elevation,
-            height: f.height,
-        });
-    }
-    footprintItems.sort((p, q) => cmp(p.id, q.id));
-
-    const wallsAtNode = new Map<string, readonly string[]>();
-    for (const id of Object.keys(geom.nodes).sort(cmp)) {
-        wallsAtNode.set(id, geom.nodes[id]!.wallIds);
-    }
-
-    return {
-        nodes: buildClass(nodeItems, (n) => [n.at.x, n.at.y, n.at.x, n.at.y]),
-        centerlines: buildClass(wallItems, (w) => segBox(w.a, w.b)),
-        faces: buildClass(faceItems, (f) => segBox(f.a, f.b)),
-        footprints: buildClass(footprintItems, (f) =>
-            ringBox(f.footprint.corners),
-        ),
-        keyPoints: buildClass(keyItems, (k) => [
-            k.at.x,
-            k.at.y,
-            k.at.x,
-            k.at.y,
-        ]),
-        wallById,
-        wallsAtNode,
-    };
-}
-
-/** Items of `cls` whose box meets the query box, in index (insertion) order. */
-function query<T>(
-    cls: SnapItemIndex<T> | null,
-    x0: number,
-    y0: number,
-    x1: number,
-    y1: number,
-): T[] {
-    if (cls === null) return [];
-    const hits = cls.tree.search(x0, y0, x1, y1).sort((p, q) => p - q);
-    return hits.map((i) => cls.items[i]!);
-}
-
-// ---------------------------------------------------------------------------
 // Settings, grid and rounding (04 §5.3, §5.6)
 // ---------------------------------------------------------------------------
 
@@ -391,58 +166,6 @@ export function defaultSnapSettings(system: UnitSystem): SnapSettings {
         angleStepDeg: 15,
         unitSystem: system,
     };
-}
-
-const RAW_STEPS = [1, 5, 10, 50, 100] as const;
-/** Positions finer than this many screen px are meaningless (§5.3). */
-const RAW_STEP_MAX_PX = 4;
-
-/** Rounding step in mm used when nothing snaps (§5.3). */
-export function rawStepFor(zoom: number): number {
-    let step = 1;
-    for (const s of RAW_STEPS) {
-        if (s * zoom <= RAW_STEP_MAX_PX) step = s;
-    }
-    return step;
-}
-
-interface GridLevel {
-    step: number;
-    major: number;
-}
-
-// Major spacings are literals so they carry no multiplication noise
-// (e.g. 25.4 x 12 = 304.8 exactly as printed).
-const METRIC_GRID: readonly GridLevel[] = [
-    { step: 10, major: 100 },
-    { step: 50, major: 250 },
-    { step: 100, major: 1000 },
-    { step: 500, major: 2500 },
-    { step: 1000, major: 10000 },
-    { step: 5000, major: 25000 },
-    { step: 10000, major: 100000 },
-];
-const IMPERIAL_GRID: readonly GridLevel[] = [
-    { step: 25.4, major: 304.8 },
-    { step: 152.4, major: 304.8 },
-    { step: 304.8, major: 1524 },
-    { step: 1524, major: 7620 },
-    { step: 3048, major: 6096 },
-    { step: 15240, major: 30480 },
-];
-/** The grid is drawn no denser than this many screen px per step. */
-const GRID_MIN_PX = 16;
-
-/** The smallest grid step that is at least 16 px wide, and its major spacing (mm). */
-export function gridStepFor(
-    zoom: number,
-    system: UnitSystem,
-): { step: number; major: number } {
-    const sequence = system === 'metric' ? METRIC_GRID : IMPERIAL_GRID;
-    const level =
-        sequence.find((l) => l.step * zoom >= GRID_MIN_PX) ??
-        sequence[sequence.length - 1]!;
-    return { step: level.step, major: level.major };
 }
 
 // ---------------------------------------------------------------------------
@@ -680,7 +403,12 @@ function surfaceCandidates(ctx: Ctx): LineCand[] {
     return out;
 }
 
-/** Wall extension lines (priority 7, §5.4). */
+/**
+ * Wall extension lines (priority 7, §5.4): the infinite line of a wall. Beyond
+ * an end it needs a node within max(600 mm, 60 px) of the cursor's projection;
+ * where the cursor projects onto the wall itself the line is kept for pairing
+ * (walls near the cursor are found through the centre-line index).
+ */
 function extensionCandidates(ctx: Ctx): LineCand[] {
     const { input, index, c, tol, exclude } = ctx;
     if (!input.settings.kinds.extension) return [];
@@ -688,36 +416,42 @@ function extensionCandidates(ctx: Ctx): LineCand[] {
     const r = reach + tol;
     const out: LineCand[] = [];
     const seen = new Set<string>();
+    const consider = (w: SnapWallItem): void => {
+        if (seen.has(w.wallId) || exclude.has(w.wallId)) return;
+        seen.add(w.wallId);
+        const s = dot(sub(c, w.a), w.dir);
+        const interior = s >= -EPS && s <= w.length + EPS;
+        const nearStart = interior ? s < w.length / 2 : s < 0;
+        const overshoot = interior ? 0 : nearStart ? -s : s - w.length;
+        if (overshoot > reach) return;
+        const off = Math.abs(cross(w.dir, sub(c, w.a)));
+        if (off > tol) return;
+        const anchor = nearStart ? w.a : w.b;
+        out.push({
+            prio: 7,
+            kind: 'extension',
+            dist: off,
+            p: anchor,
+            d: w.dir,
+            ray: false,
+            segLength: null,
+            guide: { kind: 'extension', a: anchor, b: null },
+            wallId: null,
+        });
+    };
+    for (const w of query(
+        index.centerlines,
+        c.x - tol,
+        c.y - tol,
+        c.x + tol,
+        c.y + tol,
+    )) {
+        consider(w);
+    }
     for (const n of query(index.nodes, c.x - r, c.y - r, c.x + r, c.y + r)) {
         for (const wallId of index.wallsAtNode.get(n.id) ?? []) {
-            if (seen.has(wallId) || exclude.has(wallId)) continue;
-            seen.add(wallId);
             const w = index.wallById.get(wallId);
-            if (w === undefined) continue;
-            const s = dot(sub(c, w.a), w.dir);
-            // Only the part beyond an end is an extension; inside, it is the wall itself.
-            if (s >= -EPS && s <= w.length + EPS) continue;
-            const beyondStart = s < 0;
-            const overshoot = beyondStart ? -s : s - w.length;
-            const anchorId = beyondStart ? w.nodeA : w.nodeB;
-            if (overshoot > reach || exclude.has(anchorId)) continue;
-            const off = Math.abs(cross(w.dir, sub(c, w.a)));
-            if (off > tol) continue;
-            out.push({
-                prio: 7,
-                kind: 'extension',
-                dist: off,
-                p: beyondStart ? w.a : w.b,
-                d: w.dir,
-                ray: false,
-                segLength: null,
-                guide: {
-                    kind: 'extension',
-                    a: beyondStart ? w.a : w.b,
-                    b: null,
-                },
-                wallId: null,
-            });
+            if (w !== undefined) consider(w);
         }
     }
     return out;
@@ -840,22 +574,32 @@ function angleCandidates(ctx: Ctx): LineCand[] {
     return out;
 }
 
-/** Resolves a single line candidate to the projection of the cursor on it. */
-function resolveLine(cand: LineCand, c: Vec2): Resolved {
-    const s = lineProjection(c, cand);
-    return resolveLineAt(cand, add(cand.p, scale(cand.d, s)), s, c);
+const isSurface = (l: LineCand): boolean =>
+    l.kind === 'on_wall' || l.kind === 'on_face';
+
+/** Centre-line parameter (mm from node a) of `at`, clamped to the wall. */
+function uOnWall(index: SnapIndex, wallId: string, at: Vec2): number | null {
+    const w = index.wallById.get(wallId);
+    if (w === undefined) return null;
+    return Math.min(w.length, Math.max(0, dot(sub(at, w.a), w.dir)));
 }
 
-function resolveLineAt(cand: LineCand, at: Vec2, s: number, c: Vec2): Resolved {
-    const onSegment = cand.kind === 'on_wall' || cand.kind === 'on_face';
+/** Resolves a single line candidate to the projection of the cursor on it. */
+function resolveLine(ctx: Ctx, cand: LineCand): Resolved {
+    const s = lineProjection(ctx.c, cand);
+    const at = add(cand.p, scale(cand.d, s));
+    const surface = isSurface(cand);
     return {
         prio: cand.prio,
         kind: cand.kind,
         at,
-        dist: dist(at, c),
+        dist: dist(at, ctx.c),
         nodeId: null,
-        wallId: onSegment ? cand.wallId : null,
-        u: cand.kind === 'on_wall' ? s : null,
+        wallId: surface ? cand.wallId : null,
+        u:
+            surface && cand.wallId !== null
+                ? uOnWall(ctx.index, cand.wallId, at)
+                : null,
         guides: cand.guide === null ? [] : [cand.guide],
         marker: null,
     };
@@ -880,30 +624,59 @@ const onLine = (cand: LineCand, s: number): boolean => {
     return true;
 };
 
-/** Guide-line intersections of priority 7-8 lines near the cursor (§5.5-5). */
-function guideIntersections(ctx: Ctx, lines: LineCand[]): Resolved[] {
+/**
+ * Crossings of line candidates near the cursor (§5.5-5). Walls and faces
+ * (priority 6) cross guide lines (extension, alignment, angle; 7-8) and guide
+ * lines cross each other; two walls crossing each other are `intersection`
+ * (a point candidate). A crossing of two guide lines is a `guide_intersection`
+ * (also with a wall or face, which then supplies `wallId` and `u`); an angle
+ * ray meeting a wall or face stays `on_wall` / `on_face`, as in the shift
+ * lock (§5.5-2). With `ray` set (the locked ray) only crossings with it count.
+ * Walls and faces pair first, so at equal distance they win the tie.
+ */
+function crossings(
+    ctx: Ctx,
+    lines: LineCand[],
+    ray: LineCand | null,
+): Resolved[] {
+    const gated = !ctx.input.settings.kinds.guide_intersection;
     const out: Resolved[] = [];
-    const guideLines = lines.filter((l) => l.prio >= 7);
-    for (let i = 0; i < guideLines.length; i += 1) {
-        for (let j = i + 1; j < guideLines.length; j += 1) {
-            const p = guideLines[i]!;
-            const q = guideLines[j]!;
-            const hit = crossLines(p, q);
-            if (hit === null || !onLine(p, hit.s) || !onLine(q, hit.t))
-                continue;
-            const d = dist(hit.at, ctx.c);
-            if (d > ctx.tol) continue;
-            out.push({
-                prio: 5,
-                kind: 'guide_intersection',
-                at: hit.at,
-                dist: d,
-                nodeId: null,
-                wallId: null,
-                u: null,
-                guides: [p.guide!, q.guide!],
-                marker: 'guide_intersection',
-            });
+    const consider = (p: LineCand, q: LineCand): void => {
+        const hit = crossLines(p, q);
+        if (hit === null || !onLine(p, hit.s) || !onLine(q, hit.t)) return;
+        const d = dist(hit.at, ctx.c);
+        if (d > ctx.tol) return;
+        const surface = isSurface(p) ? p : null;
+        const surfaceWall = surface?.wallId ?? null;
+        const asSurface = surface !== null && q.kind === 'angle';
+        if (!asSurface && gated) return;
+        out.push({
+            prio: 5,
+            kind: asSurface ? surface.kind : 'guide_intersection',
+            at: hit.at,
+            dist: d,
+            nodeId: null,
+            wallId: surface?.wallId ?? null,
+            u:
+                surfaceWall === null
+                    ? null
+                    : uOnWall(ctx.index, surfaceWall, hit.at),
+            guides: [p.guide, q.guide].filter((g) => g !== null),
+            marker: asSurface ? null : 'guide_intersection',
+        });
+    };
+    const surfaces = lines.filter(isSurface);
+    const guides = lines.filter((l) => !isSurface(l));
+    if (ray !== null) {
+        for (const l of [...surfaces, ...guides]) consider(l, ray);
+        return out;
+    }
+    for (const w of surfaces) {
+        for (const g of guides) consider(w, g);
+    }
+    for (let i = 0; i < guides.length; i += 1) {
+        for (let j = i + 1; j < guides.length; j += 1) {
+            consider(guides[i]!, guides[j]!);
         }
     }
     return out;
@@ -947,60 +720,18 @@ const projectOnLock = (lock: Lock, p: Vec2): Vec2 =>
         scale(lock.d, Math.max(0, dot(sub(p, lock.origin), lock.d))),
     );
 
-/** Line candidates seen from the locked ray: where the ray meets each of them. */
-function lockedCandidates(ctx: Ctx, lock: Lock, lines: LineCand[]): Resolved[] {
-    const ray: LineCand = {
-        prio: 8,
-        kind: 'angle',
-        dist: 0,
-        p: lock.origin,
-        d: lock.d,
-        ray: true,
-        segLength: null,
-        guide: { kind: 'angle', a: lock.origin, b: null },
-        wallId: null,
-    };
-    const out: Resolved[] = [];
-    for (const cand of lines) {
-        if (cand.kind === 'angle') continue;
-        const hit = crossLines(cand, ray);
-        if (hit === null || !onLine(cand, hit.s) || hit.t < -EPS) continue;
-        const d = dist(hit.at, ctx.c);
-        if (d > ctx.tol) continue;
-        if (cand.kind === 'on_wall' || cand.kind === 'on_face') {
-            out.push(resolveLineAt(cand, hit.at, hit.s, ctx.c));
-        } else {
-            out.push({
-                prio: 5,
-                kind: 'guide_intersection',
-                at: hit.at,
-                dist: d,
-                nodeId: null,
-                wallId: null,
-                u: null,
-                guides: [cand.guide!],
-                marker: 'guide_intersection',
-            });
-        }
-    }
-    return out;
-}
-
-function rawPoint(cursor: Vec2, zoom: number): Vec2 {
-    const step = rawStepFor(zoom);
-    return {
-        x: z(roundMm(cursor.x / step) * step),
-        y: z(roundMm(cursor.y / step) * step),
-    };
-}
-
-function gridPoint(cursor: Vec2, zoom: number, system: UnitSystem): Vec2 {
-    const { step } = gridStepFor(zoom, system);
-    return {
-        x: roundMm(cursor.x / step) * step,
-        y: roundMm(cursor.y / step) * step,
-    };
-}
+/** The locked ray as a line candidate, for pairing. */
+const lockRay = (lock: Lock): LineCand => ({
+    prio: 8,
+    kind: 'angle',
+    dist: 0,
+    p: lock.origin,
+    d: lock.d,
+    ray: true,
+    segLength: null,
+    guide: { kind: 'angle', a: lock.origin, b: null },
+    wallId: null,
+});
 
 const roundPointClean = (p: Vec2): Vec2 => ({
     x: z(roundMm(p.x)),
@@ -1040,13 +771,30 @@ function emptyResult(point: Vec2, origin: Vec2 | null): SnapResult {
 }
 
 /**
+ * The ids to ignore: `input.exclude` plus every wall of an excluded node, so a
+ * dragged node never snaps to its own walls (a deliberate widening of the
+ * literal 04 §5.1, which leaves that to the caller).
+ */
+function expandExclude(
+    input: SnapInput,
+    index: SnapIndex,
+): ReadonlySet<string> {
+    if (input.exclude.size === 0) return input.exclude;
+    const out = new Set(input.exclude);
+    for (const id of input.exclude) {
+        for (const wallId of index.wallsAtNode.get(id) ?? []) out.add(wallId);
+    }
+    return out;
+}
+
+/**
  * Snaps a cursor position (04 §5.5). The algorithm:
  *
  * 1. disabled or Alt: raw rounding;
  * 2. Shift with an origin: project onto the nearest 45° ray and only accept
  *    candidates on it;
  * 3.-4. point candidates (endpoint, intersection, midpoint, perpendicular);
- * 5. intersections of guide lines (extension, alignment, angle);
+ * 5. crossings of walls and guide lines (extension, alignment, angle);
  * 6. the best single wall, face or guide line;
  * 7. the grid, else raw rounding;
  * 8.-9. integer rounding and the origin readout.
@@ -1065,7 +813,13 @@ export function snapPoint(input: SnapInput, index: SnapIndex): SnapResult {
         lock = locked.lock;
         c = locked.projected;
     }
-    const ctx: Ctx = { input, index, c, tol, exclude: input.exclude };
+    const ctx: Ctx = {
+        input,
+        index,
+        c,
+        tol,
+        exclude: expandExclude(input, index),
+    };
 
     let best: Resolved | null = null;
 
@@ -1085,17 +839,11 @@ export function snapPoint(input: SnapInput, index: SnapIndex): SnapResult {
             ...alignmentCandidates(ctx),
             ...(lock === null ? angleCandidates(ctx) : []),
         ];
-        if (lock !== null) {
-            best = pickBest(lockedCandidates(ctx, lock, lines));
-        } else {
-            best = pickBest(
-                settings.kinds.guide_intersection
-                    ? guideIntersections(ctx, lines)
-                    : [],
-            );
-            if (best === null) {
-                best = pickBest(lines.map((l) => resolveLine(l, c)));
-            }
+        best = pickBest(
+            crossings(ctx, lines, lock === null ? null : lockRay(lock)),
+        );
+        if (best === null && lock === null) {
+            best = pickBest(lines.map((l) => resolveLine(ctx, l)));
         }
     }
 
@@ -1133,10 +881,14 @@ export function snapPoint(input: SnapInput, index: SnapIndex): SnapResult {
         guides: [],
         marker: null,
     };
-    const guides = [...chosen.guides];
-    if (lock !== null && !guides.some((g) => g.kind === 'angle')) {
-        guides.unshift({ kind: 'angle', a: lock.origin, b: null });
-    }
+    // The locked ray's own guide always leads.
+    const guides =
+        lock === null
+            ? chosen.guides
+            : [
+                  { kind: 'angle' as const, a: lock.origin, b: null },
+                  ...chosen.guides.filter((g) => g.kind !== 'angle'),
+              ];
     const point = roundPointClean(chosen.at);
     return {
         point,

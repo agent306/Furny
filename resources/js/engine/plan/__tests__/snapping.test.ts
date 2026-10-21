@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normDeg, type Vec2 } from '../../geometry/vec2';
+import { dist, normDeg, type Vec2 } from '../../geometry/vec2';
 import { mulberry32 } from '../../testing/random';
 import type { UnitSystem } from '../../units/types';
 import { derivePlanGeometry } from '../derive';
@@ -14,7 +14,9 @@ import {
     snapPoint,
     type SnapIndex,
     type SnapInput,
+    type SnapKind,
     type SnapResult,
+    type SnapSettings,
 } from '../snapping';
 import { emptyPlan, makeGridPlan, makeRectPlan } from '../testing/fixtures';
 import { buildHdb3Room } from '../testing/referencePlans';
@@ -62,6 +64,32 @@ function segmentsPlan(
         walls.push(id);
     }
     return { doc, nodeAt, walls };
+}
+
+/** Plan of orphan nodes only (alignment sources without walls). */
+function nodesPlan(points: ReadonlyArray<readonly [number, number]>): {
+    doc: PlanDocument;
+    ids: string[];
+} {
+    const doc = emptyPlan();
+    const ids = points.map(([x, y], i) => {
+        const id = `n_${String(i + 1).padStart(10, '0')}`;
+        doc.nodes[id] = { id, x, y };
+        return id;
+    });
+    return { doc, ids };
+}
+
+/** Adds orphan nodes to an existing plan. */
+function withNodes(
+    doc: PlanDocument,
+    points: ReadonlyArray<readonly [number, number]>,
+): PlanDocument {
+    points.forEach(([x, y], i) => {
+        const id = `n_${String(900 + i).padStart(10, '0')}`;
+        doc.nodes[id] = { id, x, y };
+    });
+    return doc;
 }
 
 const indexOf = (
@@ -349,7 +377,7 @@ describe('snapPoint priorities (04 5.4)', () => {
         expect(onWall.guides).toEqual([]);
     });
 
-    it('snaps to the crossing of two walls that share no node (intersection beats midpoint)', () => {
+    it('reports the crossing of two walls that share no node', () => {
         const { doc, walls } = segmentsPlan([
             [0, 2000, 4000, 2000],
             [1500, -1000, 1500, 3000],
@@ -362,7 +390,7 @@ describe('snapPoint priorities (04 5.4)', () => {
         expect(r.markers).toEqual([
             { kind: 'intersection', at: pt(1500, 2000) },
         ]);
-        // the midpoint of the vertical wall is the same point, so exclude one wall
+        // excluding one of the walls removes the crossing
         const r2 = snap(index, {
             cursor: pt(1520, 1990),
             exclude: new Set([walls[0]!]),
@@ -419,11 +447,23 @@ describe('snapPoint perpendicular', () => {
     });
 
     it('needs the foot to lie inside the wall', () => {
-        const r = snap(index, {
-            cursor: pt(5020, -30),
-            origin: pt(5000, 2000),
-        });
+        // the foot (4050, 0) is 50 mm beyond the end of the wall at x = 4000
+        const origin = pt(4050, 2000);
+        const cursor = pt(4040, -20);
+        expect(snap(index, { cursor, origin }).kind).toBe('endpoint');
+        const settings = defaultSnapSettings('metric');
+        settings.kinds.endpoint = false;
+        const r = snap(index, { cursor, origin, settings });
         expect(r.kind).not.toBe('perpendicular');
+        expect(r.wallId).toBeNull();
+        // and the same offset inside the wall does snap
+        const inside = snap(index, {
+            cursor: pt(3950, -20),
+            origin: pt(3960, 2000),
+            settings,
+        });
+        expect(inside.kind).toBe('perpendicular');
+        expect(inside.point).toEqual(pt(3960, 0));
     });
 
     it('needs an origin', () => {
@@ -520,7 +560,7 @@ describe('snapPoint guide lines', () => {
     });
 
     it('intersects an angle ray with an alignment line', () => {
-        const { doc } = segmentsPlan([[3000, 2000, 3000, 5000]]);
+        const { doc } = nodesPlan([[3000, 5000]]);
         const origin = pt(0, 0);
         // the 45 degree ray meets the vertical line x = 3000 at (3000, 3000)
         const r = snap(indexOf(doc), { cursor: pt(3020, 3010), origin });
@@ -763,7 +803,7 @@ describe('snapPoint shift (hard 45 degree lock)', () => {
     });
 
     it('meets a guide line on the ray as a guide_intersection', () => {
-        const { doc } = segmentsPlan([[3000, 2000, 3000, 5000]]);
+        const { doc } = nodesPlan([[3000, 5000]]);
         const r = snap(indexOf(doc), {
             cursor: pt(3020, 2990),
             origin: pt(0, 0),
@@ -773,7 +813,7 @@ describe('snapPoint shift (hard 45 degree lock)', () => {
         expect(r.point).toEqual(pt(3000, 3000));
         expect(r.guides).toEqual([
             { kind: 'angle', a: pt(0, 0), b: pt(3000, 3000) },
-            { kind: 'alignment', a: pt(3000, 2000), b: pt(3000, 3000) },
+            { kind: 'alignment', a: pt(3000, 5000), b: pt(3000, 3000) },
         ]);
         expect(r.markers).toEqual([
             { kind: 'guide_intersection', at: pt(3000, 3000) },
@@ -932,6 +972,553 @@ describe('snapPoint results are integer and deterministic', () => {
             });
             expect(r.kind).toBe('endpoint');
             expect(r.point).toEqual(pt(node.x, node.y));
+        }
+    });
+});
+
+interface Contest {
+    higher: Exclude<SnapKind, 'none'>;
+    lower: SnapKind;
+    doc: PlanDocument;
+    patch: Partial<SnapInput> & { cursor: Vec2 };
+    /** The loser's point is closer to the cursor than the winner's. */
+    closer: boolean;
+}
+
+const WALL_2000: Array<[number, number, number, number]> = [
+    [0, 2000, 4000, 2000],
+];
+
+// Every row puts both kinds in contention: switching the higher kind off must
+// hand the result to the lower one, which sits closer to the cursor.
+const CONTESTS: Contest[] = [
+    {
+        higher: 'endpoint',
+        lower: 'intersection',
+        doc: segmentsPlan([
+            ...WALL_2000,
+            [1500, -1000, 1500, 3000],
+            [1560, 2000, 1560, 4000],
+        ]).doc,
+        patch: { cursor: pt(1510, 2000) },
+        closer: true,
+    },
+    {
+        higher: 'intersection',
+        lower: 'midpoint',
+        doc: segmentsPlan([...WALL_2000, [1950, -1000, 1950, 3000]]).doc,
+        patch: { cursor: pt(2010, 2000) },
+        closer: true,
+    },
+    {
+        higher: 'midpoint',
+        lower: 'perpendicular',
+        doc: segmentsPlan(WALL_2000).doc,
+        patch: { cursor: pt(2050, 2005), origin: pt(2060, 5000) },
+        closer: true,
+    },
+    {
+        higher: 'perpendicular',
+        lower: 'guide_intersection',
+        doc: withNodes(segmentsPlan(WALL_2000).doc, [[1030, 4500]]),
+        patch: { cursor: pt(1035, 2003), origin: pt(1000, 5000) },
+        closer: true,
+    },
+    {
+        higher: 'guide_intersection',
+        lower: 'on_wall',
+        doc: withNodes(segmentsPlan(WALL_2000).doc, [[1030, 4500]]),
+        patch: { cursor: pt(1035, 2000) },
+        closer: true,
+    },
+    {
+        higher: 'on_wall',
+        lower: 'alignment',
+        doc: withNodes(segmentsPlan(WALL_2000).doc, [[3000, 2030]]),
+        patch: { cursor: pt(1000, 2025) },
+        closer: true,
+    },
+    {
+        higher: 'on_wall',
+        lower: 'extension',
+        doc: segmentsPlan([...WALL_2000, [0, 2040, 500, 2040]]).doc,
+        patch: { cursor: pt(1000, 2025) },
+        closer: true,
+    },
+    {
+        higher: 'alignment',
+        lower: 'angle',
+        doc: nodesPlan([[5000, 60]]).doc,
+        patch: { cursor: pt(2000, 25), origin: pt(0, 0) },
+        closer: true,
+    },
+    {
+        higher: 'extension',
+        lower: 'angle',
+        doc: segmentsPlan([[4000, 100, 6000, 300]]).doc,
+        patch: { cursor: pt(3600, 15), origin: pt(0, 0) },
+        closer: true,
+    },
+    {
+        higher: 'angle',
+        lower: 'grid',
+        doc: emptyPlan(),
+        patch: { cursor: pt(3100, 40), origin: pt(0, 0) },
+        closer: false,
+    },
+    {
+        higher: 'grid',
+        lower: 'none',
+        doc: emptyPlan(),
+        patch: { cursor: pt(1234, 5678) },
+        closer: false,
+    },
+    {
+        higher: 'on_face',
+        lower: 'grid',
+        doc: segmentsPlan([[0, 0, 4000, 0]]).doc,
+        patch: { cursor: pt(1000, 100), includeFaces: true },
+        closer: false,
+    },
+];
+
+function withoutKind(kind: Exclude<SnapKind, 'none'>): SnapSettings {
+    const settings = defaultSnapSettings('metric');
+    settings.kinds[kind] = false;
+    return settings;
+}
+
+describe('snapPoint priority chain (04 5.4)', () => {
+    it.each(CONTESTS)('$higher beats $lower', (c) => {
+        const index = indexOf(c.doc);
+        const on = snap(index, c.patch);
+        expect(on.kind).toBe(c.higher);
+        const off = snap(index, {
+            ...c.patch,
+            settings: withoutKind(c.higher),
+        });
+        expect(off.kind).toBe(c.lower);
+        if (c.closer) {
+            expect(dist(off.point, c.patch.cursor)).toBeLessThan(
+                dist(on.point, c.patch.cursor),
+            );
+        }
+    });
+
+    it('covers the chain from endpoint down to grid', () => {
+        const chain = CONTESTS.map((c) => `${c.higher}>${c.lower}`);
+        expect(chain).toEqual([
+            'endpoint>intersection',
+            'intersection>midpoint',
+            'midpoint>perpendicular',
+            'perpendicular>guide_intersection',
+            'guide_intersection>on_wall',
+            'on_wall>alignment',
+            'on_wall>extension',
+            'alignment>angle',
+            'extension>angle',
+            'angle>grid',
+            'grid>none',
+            'on_face>grid',
+        ]);
+    });
+
+    it.each(SNAP_KINDS.filter((k) => k !== 'none'))(
+        'the %s switch removes that kind',
+        (kind) => {
+            const c = CONTESTS.find((x) => x.higher === kind);
+            expect(c).toBeDefined();
+            const index = indexOf(c!.doc);
+            expect(snap(index, c!.patch).kind).toBe(kind);
+            const off = snap(index, {
+                ...c!.patch,
+                settings: withoutKind(kind),
+            });
+            expect(off.kind).not.toBe(kind);
+            expect(off.guides.some((g) => g.kind === (kind as string))).toBe(
+                false,
+            );
+            expect(off.markers.some((m) => m.kind === kind)).toBe(false);
+        },
+    );
+
+    it('prefers the closer of two candidates of the same priority', () => {
+        const { doc, ids } = nodesPlan([
+            [0, 0],
+            [100, 0],
+        ]);
+        const index = indexOf(doc);
+        expect(snap(index, { cursor: pt(70, 10) }).nodeId).toBe(ids[1]);
+        expect(snap(index, { cursor: pt(30, 10) }).nodeId).toBe(ids[0]);
+    });
+
+    it('picks the closest of several guide_intersections', () => {
+        const { doc } = nodesPlan([
+            [0, 3000],
+            [100, 3000],
+            [3000, 0],
+            [3000, 60],
+        ]);
+        const index = indexOf(doc);
+        const last = snap(index, { cursor: pt(60, 40) });
+        expect(last.kind).toBe('guide_intersection');
+        expect(last.point).toEqual(pt(100, 60));
+        const first = snap(index, { cursor: pt(20, 10) });
+        expect(first.kind).toBe('guide_intersection');
+        expect(first.point).toEqual(pt(0, 0));
+    });
+});
+
+describe('snapPoint guide lines crossing a wall interior (04 5.4, 5.5-5)', () => {
+    const slanted = (): PlanDocument =>
+        withNodes(segmentsPlan([[0, 0, 5000, 1000]]).doc, [[1500, 3000]]);
+    const length = Math.hypot(1500, 300);
+
+    it('crosses an alignment line with the wall as a guide_intersection', () => {
+        const { doc, walls } = segmentsPlan([[0, 0, 5000, 1000]]);
+        const index = indexOf(withNodes(doc, [[1500, 3000]]));
+        const r = snap(index, { cursor: pt(1540, 320) });
+        expect(r.kind).toBe('guide_intersection');
+        expect(r.point).toEqual(pt(1500, 300));
+        expect(r.wallId).toBe(walls[0]);
+        expect(r.u).toBeCloseTo(length, 6);
+        expect(r.guides).toEqual([
+            { kind: 'alignment', a: pt(1500, 3000), b: pt(1500, 300) },
+        ]);
+        expect(r.markers).toEqual([
+            { kind: 'guide_intersection', at: pt(1500, 300) },
+        ]);
+    });
+
+    it('still finds the crossing through the extension line alone', () => {
+        const index = indexOf(slanted());
+        const r = snap(index, {
+            cursor: pt(1540, 320),
+            settings: withoutKind('on_wall'),
+        });
+        expect(r.kind).toBe('guide_intersection');
+        expect(r.point).toEqual(pt(1500, 300));
+        expect(r.wallId).toBeNull();
+        expect(r.guides).toEqual([
+            { kind: 'extension', a: pt(0, 0), b: pt(1500, 300) },
+            { kind: 'alignment', a: pt(1500, 3000), b: pt(1500, 300) },
+        ]);
+    });
+
+    it('still finds the crossing through the wall alone', () => {
+        const r = snap(indexOf(slanted()), {
+            cursor: pt(1540, 320),
+            settings: withoutKind('extension'),
+        });
+        expect(r.kind).toBe('guide_intersection');
+        expect(r.point).toEqual(pt(1500, 300));
+    });
+
+    it('does not let a lone interior extension override on_wall', () => {
+        const index = indexOf(slanted());
+        const r = snap(index, { cursor: pt(3040, 600) });
+        expect(r.kind).toBe('on_wall');
+        expect(r.guides).toEqual([]);
+    });
+
+    it('is switched off with the guide_intersection toggle', () => {
+        const r = snap(indexOf(slanted()), {
+            cursor: pt(1540, 320),
+            settings: withoutKind('guide_intersection'),
+        });
+        expect(r.kind).toBe('on_wall');
+        expect(r.point).toEqual(pt(1542, 308));
+    });
+
+    describe.each([
+        ['without shift', false],
+        ['with shift', true],
+    ])('an angle ray meeting the wall %s', (_label, shift) => {
+        it('snaps to the crossing as on_wall with the angle guide', () => {
+            const { doc, walls } = segmentsPlan([[0, 0, 5000, 1000]]);
+            const r = snap(indexOf(doc), {
+                cursor: pt(520, 110),
+                origin: pt(500, -2000),
+                modifiers: { shift, alt: false },
+            });
+            expect(r.kind).toBe('on_wall');
+            expect(r.point).toEqual(pt(500, 100));
+            expect(r.wallId).toBe(walls[0]);
+            expect(r.u).toBeCloseTo(Math.hypot(500, 100), 6);
+            expect(r.guides).toEqual([
+                { kind: 'angle', a: pt(500, -2000), b: pt(500, 100) },
+            ]);
+            expect(r.displayAngleDeg).toBe(270);
+        });
+
+        it('meets the extension line as a guide_intersection without on_wall', () => {
+            const { doc } = segmentsPlan([[0, 0, 5000, 1000]]);
+            const r = snap(indexOf(doc), {
+                cursor: pt(520, 110),
+                origin: pt(500, -2000),
+                modifiers: { shift, alt: false },
+                settings: withoutKind('on_wall'),
+            });
+            expect(r.kind).toBe('guide_intersection');
+            expect(r.point).toEqual(pt(500, 100));
+            expect(r.guides.map((g) => g.kind).sort()).toEqual([
+                'angle',
+                'extension',
+            ]);
+        });
+    });
+});
+
+describe('snapPoint guide_intersection switch under shift', () => {
+    const { doc } = nodesPlan([[3000, 5000]]);
+    const index = indexOf(doc);
+
+    it('crosses the ray with an alignment line only while the switch is on', () => {
+        const patch = {
+            cursor: pt(3020, 2990),
+            origin: pt(0, 0),
+            modifiers: { shift: true, alt: false },
+        };
+        expect(snap(index, patch).kind).toBe('guide_intersection');
+        const off = snap(index, {
+            ...patch,
+            settings: withoutKind('guide_intersection'),
+        });
+        expect(off.kind).toBe('angle');
+        expect(off.point).toEqual(pt(3005, 3005));
+        expect(off.guides.map((g) => g.kind)).toEqual(['angle']);
+        expect(off.markers).toEqual([]);
+    });
+
+    it('is honoured without shift as well', () => {
+        const patch = { cursor: pt(3020, 3010), origin: pt(0, 0) };
+        expect(snap(index, patch).kind).toBe('guide_intersection');
+        const off = snap(index, {
+            ...patch,
+            settings: withoutKind('guide_intersection'),
+        });
+        expect(off.kind).toBe('alignment');
+        expect(off.point).toEqual(pt(3000, 3010));
+    });
+});
+
+describe('snapPoint exclude', () => {
+    it('drops an excluded node as an alignment source', () => {
+        const { doc, ids } = nodesPlan([[0, 3000]]);
+        const index = indexOf(doc);
+        expect(snap(index, { cursor: pt(30, 2000) }).kind).toBe('alignment');
+        const r = snap(index, {
+            cursor: pt(30, 2000),
+            exclude: new Set([ids[0]!]),
+        });
+        expect(r.kind).not.toBe('alignment');
+        expect(r.guides).toEqual([]);
+    });
+
+    it('drops an excluded wall as an extension source', () => {
+        const { doc, walls } = segmentsPlan([[0, 0, 4000, 0]]);
+        const index = indexOf(doc);
+        const settings = defaultSnapSettings('metric');
+        settings.kinds.alignment = false;
+        const cursor = pt(4400, 30);
+        expect(snap(index, { cursor, settings }).kind).toBe('extension');
+        const r = snap(index, {
+            cursor,
+            settings,
+            exclude: new Set([walls[0]!]),
+        });
+        expect(r.kind).not.toBe('extension');
+        expect(r.guides).toEqual([]);
+    });
+
+    it('drops an excluded anchor node as an extension source', () => {
+        const { doc, nodeAt } = segmentsPlan([[0, 0, 4000, 0]]);
+        const index = indexOf(doc);
+        const settings = defaultSnapSettings('metric');
+        settings.kinds.alignment = false;
+        const r = snap(index, {
+            cursor: pt(4400, 30),
+            settings,
+            exclude: new Set([nodeAt(4000, 0)]),
+        });
+        expect(r.kind).not.toBe('extension');
+    });
+
+    it('treats the walls of an excluded node as excluded (dragging a node)', () => {
+        const { doc, nodeAt, walls } = segmentsPlan([
+            [0, 0, 4000, 0],
+            [4000, 0, 4000, 3000],
+            [0, 2000, 2000, 2000],
+        ]);
+        const index = indexOf(doc);
+        const exclude = new Set([nodeAt(4000, 0)]);
+        const ownMid = snap(index, { cursor: pt(2000, 20), exclude });
+        expect(ownMid.kind).not.toBe('midpoint');
+        expect(ownMid.kind).not.toBe('on_wall');
+        expect(ownMid.wallId).toBeNull();
+        const otherOwn = snap(index, { cursor: pt(4020, 1500), exclude });
+        expect(otherOwn.wallId).toBeNull();
+        expect(otherOwn.kind).not.toBe('midpoint');
+        // untouched geometry still snaps, including the far node of a dragged wall
+        const free = snap(index, { cursor: pt(1000, 2020), exclude });
+        expect(free.kind).toBe('midpoint');
+        expect(free.wallId).toBe(walls[2]);
+        const far = snap(index, { cursor: pt(-20, 0), exclude });
+        expect(far.kind).toBe('endpoint');
+        expect(far.nodeId).toBe(nodeAt(0, 0));
+        // the caller's set is not modified
+        expect([...exclude]).toEqual([nodeAt(4000, 0)]);
+    });
+});
+
+describe('snapPoint reach and tolerance guards', () => {
+    const { doc } = segmentsPlan([[0, 0, 4000, 0]]);
+    const index = indexOf(doc);
+
+    it('reaches 600 mm past a wall end at zoom 1', () => {
+        expect(snap(index, { cursor: pt(4590, 5), zoom: 1 }).kind).toBe(
+            'extension',
+        );
+        expect(snap(index, { cursor: pt(4610, 5), zoom: 1 }).kind).not.toBe(
+            'extension',
+        );
+    });
+
+    it('reaches 60 px (1200 mm) past a wall end at zoom 0.05', () => {
+        expect(snap(index, { cursor: pt(5190, 20), zoom: 0.05 }).kind).toBe(
+            'extension',
+        );
+        const far = snap(index, { cursor: pt(5210, 20), zoom: 0.05 });
+        expect(far.kind).not.toBe('extension');
+        expect(far.kind).toBe('alignment');
+    });
+
+    it('does not report a wall crossing that is outside the tolerance', () => {
+        // two shallow walls cross at (5000, 50); both bounding boxes reach the cursor
+        const crossing = segmentsPlan([
+            [0, 0, 10000, 100],
+            [0, 100, 10000, 0],
+        ]).doc;
+        const walls = indexOf(crossing);
+        const far = snap(walls, { cursor: pt(6000, 50) });
+        expect(far.kind).toBe('on_wall');
+        const near = snap(walls, { cursor: pt(5030, 40) });
+        expect(near.kind).toBe('intersection');
+        expect(near.point).toEqual(pt(5000, 50));
+    });
+});
+
+describe('snapPoint alignment and angle details', () => {
+    it('keeps the node nearest the cursor when several share a line', () => {
+        for (const points of [
+            [
+                [0, 3000],
+                [0, 1000],
+            ],
+            [
+                [0, 1000],
+                [0, 3000],
+            ],
+        ] as const) {
+            const { doc } = nodesPlan(points);
+            const r = snap(indexOf(doc), { cursor: pt(30, 1200) });
+            expect(r.kind).toBe('alignment');
+            expect(r.point).toEqual(pt(0, 1200));
+            expect(r.guides).toEqual([
+                { kind: 'alignment', a: pt(0, 1000), b: pt(0, 1200) },
+            ]);
+        }
+    });
+
+    const empty = indexOf(emptyPlan());
+    const rad = (deg: number): number => (deg * Math.PI) / 180;
+
+    it('offers the parallel ray in the reverse direction too', () => {
+        const dir = pt(Math.cos(rad(20)), Math.sin(rad(20)));
+        const r = snap(empty, {
+            cursor: pt(-dir.x * 3000 + dir.y * 20, -dir.y * 3000 - dir.x * 20),
+            origin: pt(0, 0),
+            previousDir: dir,
+        });
+        expect(r.kind).toBe('angle');
+        expect(r.guides.map((g) => g.kind)).toEqual(['parallel']);
+        expect(r.displayAngleDeg).toBe(160);
+    });
+
+    it('skips a relative ray that coincides with a step ray', () => {
+        // 0.3 degrees off the 0 degree step ray: within the angle tolerance
+        const dir = pt(Math.cos(rad(0.3)), Math.sin(rad(0.3)));
+        const r = snap(empty, {
+            cursor: pt(dir.x * 3000, dir.y * 3000),
+            origin: pt(0, 0),
+            previousDir: dir,
+        });
+        expect(r.kind).toBe('angle');
+        expect(r.guides.map((g) => g.kind)).toEqual(['angle']);
+        expect(r.point).toEqual(pt(3000, 0));
+    });
+
+    it('keeps a relative ray that is clearly off the step rays', () => {
+        const dir = pt(Math.cos(rad(2)), Math.sin(rad(2)));
+        const r = snap(empty, {
+            cursor: pt(dir.x * 3000, dir.y * 3000),
+            origin: pt(0, 0),
+            previousDir: dir,
+        });
+        expect(r.guides.map((g) => g.kind)).toEqual(['parallel']);
+    });
+});
+
+describe('snapPoint on_face and wall parameters', () => {
+    it('sets the centre-line parameter of an on_face result', () => {
+        const { doc, walls } = segmentsPlan([[0, 0, 4000, 0]]);
+        const r = snap(indexOf(doc), {
+            cursor: pt(1000, 100),
+            includeFaces: true,
+        });
+        expect(r.kind).toBe('on_face');
+        expect(r.wallId).toBe(walls[0]);
+        expect(r.u).toBe(1000);
+    });
+});
+
+describe('buildSnapIndex determinism', () => {
+    function shuffled(doc: PlanDocument, seed: number): PlanDocument {
+        const random = mulberry32(seed);
+        const reorder = <T>(record: Record<string, T>): Record<string, T> => {
+            const keys = Object.keys(record);
+            for (let i = keys.length - 1; i > 0; i -= 1) {
+                const j = Math.floor(random() * (i + 1));
+                [keys[i], keys[j]] = [keys[j]!, keys[i]!];
+            }
+            return Object.fromEntries(keys.map((k) => [k, record[k]!]));
+        };
+        return {
+            ...doc,
+            nodes: reorder(doc.nodes),
+            walls: reorder(doc.walls),
+            openings: reorder(doc.openings),
+        };
+    }
+
+    it('gives the same results from a doc with shuffled entity order', () => {
+        const doc = buildHdb3Room();
+        const a = indexOf(doc);
+        const b = indexOf(shuffled(doc, 5));
+        expect(b.nodes!.items).toEqual(a.nodes!.items);
+        expect(b.centerlines!.items).toEqual(a.centerlines!.items);
+        expect(b.keyPoints!.items).toEqual(a.keyPoints!.items);
+        const random = mulberry32(3);
+        for (let i = 0; i < 300; i += 1) {
+            const patch = {
+                cursor: pt(random() * 12000 - 500, random() * 9000 - 500),
+                zoom: [0.05, 0.1, 0.4][i % 3]!,
+                origin:
+                    i % 2 === 0 ? pt(random() * 9000, random() * 7000) : null,
+                modifiers: { shift: i % 4 === 0, alt: false },
+                includeFaces: i % 5 === 0,
+            };
+            expect(snap(b, patch)).toEqual(snap(a, patch));
         }
     });
 });
