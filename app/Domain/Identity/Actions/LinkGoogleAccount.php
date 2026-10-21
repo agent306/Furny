@@ -102,6 +102,10 @@ final class LinkGoogleAccount
                     ->log('auth.google_linked');
             });
         } catch (UniqueConstraintViolationException) {
+            // The rolled-back write must not stay on the model: whoever saves it next (a `Login` listener, say)
+            // would repeat the failing update.
+            $user->refresh();
+
             // Another request took the Google account or the address between the check and the write.
             throw new GoogleAccountException($setEmail === null ? 'google_in_use' : 'email_unavailable');
         }
