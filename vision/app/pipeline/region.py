@@ -11,6 +11,7 @@ from app.utils.geometry import Rect, odd
 CLOSE_FRAC = 0.02  # closing kernel, fraction of the long edge
 NEAR_FRAC = 0.05  # components this close (fraction of the long edge) belong to one drawing
 SIBLING_MIN_SHARE = 0.30  # another drawing with this share of the main plan's wall pixels is warned about
+SURROUND_MIN_COVER = 0.50  # a solid drawing covering this share of a strip drawing's box makes it annotation
 MAX_COMPONENTS = 2000  # grouping bound: the largest components by wall pixels
 INK_LINK_FRAC = 0.005  # ink closing kernel for linking wall components, fraction of the long edge
 EXPAND_FRAC = 0.06  # dimension chains live outside the walls
@@ -106,10 +107,11 @@ def detect_plan_region(
     and the strips between double lines alike, i.e. its walls' centre-line length weighted by their drawn
     thickness. A rule or a title-block frame is one stroke narrower than a wall: it does not outweigh a
     plan of either kind (by length alone, the reviewer's 4200 px frame outweighed a 3900 px filled plan).
-    A strip drawing whose box holds a solid drawing of at least 30 % of its mass is that plan's annotation
-    (stacked dimension chains with their extension lines around a solid plan) and no candidate. Another
-    drawing
-    holding >= 30 % as much (a key-plan inset, a strip of site context) is excluded with the warning
+    A strip drawing whose box holds a solid drawing of at least 30 % of its mass, covering at least 50 % of
+    its box, is that plan's annotation (stacked dimension chains with their extension lines around a solid
+    plan: the HDB plan covers 0.72 of its ring's box) and no candidate. A solid stair or lift core inside a
+    double-line plan covers a few percent of the plan's box (fix round 4), so the plan stays. Another
+    drawing holding >= 30 % as much (a key-plan inset, a strip of site context) is excluded with the warning
     `plan_region_ambiguous {components}` (the main plan plus every such drawing). With no wall pixels at
     all the region is the whole image and nothing is warned (the validator reports `no_walls_detected`).
 
@@ -126,14 +128,20 @@ def detect_plan_region(
     if not thick.any() and not strips.any():
         return Rect(0, 0, w, h)
     solid = _drawings(thick, attached, ink, ctx)
-    # A strip drawing around a solid one of comparable mass is that plan's annotation (stacked dimension
-    # chains and their extension lines), not a plan of its own.
+    # A strip drawing around a solid one of comparable mass and extent is that plan's annotation (stacked
+    # dimension chains and their extension lines), not a plan of its own. A solid core inside a double-line
+    # plan has the mass but not the extent.
     drawings = [
         *solid,
         *(
             (box, mass)
             for box, mass in _drawings(strips, None, ink, ctx)
-            if not any(m >= SIBLING_MIN_SHARE * mass and _inside(b, box) for b, m in solid)
+            if not any(
+                m >= SIBLING_MIN_SHARE * mass
+                and _inside(b, box)
+                and b.w * b.h >= SURROUND_MIN_COVER * box.w * box.h
+                for b, m in solid
+            )
         ),
     ]
     mass = np.array([m for _, m in drawings], np.float64)
