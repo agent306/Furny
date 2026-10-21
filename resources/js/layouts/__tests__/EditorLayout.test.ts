@@ -192,7 +192,7 @@ describe('EditorLayout (15 §7.3)', () => {
         );
     });
 
-    it('is not a persistent layout: the title is the one h1', () => {
+    it("renders the title as the page's one h1 (the layout has no other heading)", () => {
         expect(mountEditor().findAll('h1')).toHaveLength(1);
     });
 
@@ -516,5 +516,117 @@ describe('EditorLayout Teleport targets exist at every breakpoint', () => {
         expect(wrapper.find('#inspector [data-test="props"]').exists()).toBe(
             true,
         );
+    });
+});
+
+describe('EditorLayout tablet inspector focus (15 §14 items 2-3)', () => {
+    beforeEach(() => setViewport(TABLET));
+
+    const toggle = (wrapper: ReturnType<typeof mountEditor>) =>
+        wrapper.get('[data-test="action"]').element as HTMLElement;
+    const escape = (target: Element, init: KeyboardEventInit = {}) =>
+        target.dispatchEvent(
+            new KeyboardEvent('keydown', {
+                key: 'Escape',
+                bubbles: true,
+                cancelable: true,
+                ...init,
+            }),
+        );
+
+    it('moves focus into the panel, onto the close button, when it opens', async () => {
+        const wrapper = mountEditor();
+
+        toggle(wrapper).focus();
+        await wrapper.setProps({ inspectorOpen: true });
+        await flushPromises();
+
+        expect(document.activeElement).toBe(
+            wrapper.get('[data-test="inspector-close"]').element,
+        );
+    });
+
+    it('closes on Escape while the focus is still on the toggle, and keeps the focus there', async () => {
+        const wrapper = mountEditor();
+
+        toggle(wrapper).focus();
+        await wrapper.setProps({ inspectorOpen: true });
+        await flushPromises();
+
+        // The user moves back to the toggle (the panel is non-modal) and presses Escape.
+        toggle(wrapper).focus();
+        escape(toggle(wrapper));
+        await flushPromises();
+
+        expect(wrapper.emitted('update:inspectorOpen')).toEqual([[false]]);
+        expect(wrapper.get('#inspector').isVisible()).toBe(false);
+        expect(document.activeElement).toBe(toggle(wrapper));
+    });
+
+    it('returns the focus to what had it before the panel opened, on Escape inside and on the close button', async () => {
+        const wrapper = mountEditor();
+
+        toggle(wrapper).focus();
+        await wrapper.setProps({ inspectorOpen: true });
+        await flushPromises();
+
+        escape(document.activeElement ?? document.body);
+        await flushPromises();
+
+        expect(document.activeElement).toBe(toggle(wrapper));
+
+        await wrapper.setProps({ inspectorOpen: true });
+        await flushPromises();
+        await wrapper.get('[data-test="inspector-close"]').trigger('click');
+        await flushPromises();
+
+        expect(document.activeElement).toBe(toggle(wrapper));
+    });
+
+    it('leaves the panel open when an inner popover handled Escape (defaultPrevented)', async () => {
+        const wrapper = mountEditor();
+
+        toggle(wrapper).focus();
+        await wrapper.setProps({ inspectorOpen: true });
+        await flushPromises();
+
+        const popover = document.createElement('div');
+
+        popover.addEventListener('keydown', (event) => event.preventDefault());
+        document.body.append(popover);
+        escape(popover);
+        await flushPromises();
+
+        expect(wrapper.emitted('update:inspectorOpen')).toBeUndefined();
+        expect(wrapper.get('#inspector').isVisible()).toBe(true);
+
+        popover.remove();
+    });
+
+    it('listens to Escape only while the tablet panel is open', async () => {
+        const wrapper = mountEditor();
+
+        escape(document.body);
+        await flushPromises();
+
+        expect(wrapper.emitted('update:inspectorOpen')).toBeUndefined();
+
+        await wrapper.setProps({ inspectorOpen: true });
+        wrapper.unmount();
+        escape(document.body);
+
+        expect(wrapper.emitted('update:inspectorOpen')).toBeUndefined();
+    });
+
+    it('does nothing for the focus on desktop, where the inspector is always there', async () => {
+        setViewport(DESKTOP);
+        const wrapper = mountEditor({ inspectorOpen: true });
+
+        toggle(wrapper).focus();
+        escape(toggle(wrapper));
+        await flushPromises();
+
+        expect(wrapper.emitted('update:inspectorOpen')).toBeUndefined();
+        expect(wrapper.get('#inspector').isVisible()).toBe(true);
     });
 });

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { computed, nextTick, onScopeDispose, ref, watch } from 'vue';
 import AppShell from '@/components/app/AppShell.vue';
 import OfflineBanner from '@/components/common/OfflineBanner.vue';
 import SaveStatusIndicator from '@/components/common/SaveStatusIndicator.vue';
@@ -74,6 +74,54 @@ const inspectorOpen = defineModel<boolean>('inspectorOpen', { default: false });
 const { t } = useI18n();
 const { isPhone, isDesktop } = useBreakpoint();
 const { width, setWidth } = useInspectorWidth();
+
+// The tablet panel (a non-modal sheet over the canvas): it takes focus when it
+// opens, closes on Escape wherever the focus is (unless an inner popover already
+// handled the key), and gives the focus back to what had it before.
+const inspector = ref<HTMLElement | null>(null);
+const tabletOpen = computed(
+    () => !isPhone.value && !isDesktop.value && inspectorOpen.value,
+);
+let returnFocusTo: HTMLElement | null = null;
+
+function onWindowKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape' && !event.defaultPrevented) {
+        inspectorOpen.value = false;
+    }
+}
+
+watch(
+    tabletOpen,
+    (open) => {
+        if (open) {
+            returnFocusTo =
+                document.activeElement instanceof HTMLElement
+                    ? document.activeElement
+                    : null;
+            window.addEventListener('keydown', onWindowKeydown);
+            void nextTick(() =>
+                inspector.value
+                    ?.querySelector<HTMLElement>(
+                        '[data-test="inspector-close"]',
+                    )
+                    ?.focus(),
+            );
+
+            return;
+        }
+
+        window.removeEventListener('keydown', onWindowKeydown);
+
+        if (returnFocusTo?.isConnected) {
+            returnFocusTo.focus();
+        }
+
+        returnFocusTo = null;
+    },
+    { immediate: true },
+);
+
+onScopeDispose(() => window.removeEventListener('keydown', onWindowKeydown));
 
 // Desktop: always. Tablet: while open. Phone: never (view only).
 const inspectorShown = computed(
@@ -216,6 +264,7 @@ function onResizeKey(event: KeyboardEvent): void {
                 <aside
                     v-show="inspectorShown"
                     id="inspector"
+                    ref="inspector"
                     :aria-label="t('a11y.inspector')"
                     :style="isDesktop ? { width: `${width}px` } : undefined"
                     :class="
@@ -223,7 +272,6 @@ function onResizeKey(event: KeyboardEvent): void {
                             ? 'shrink-0 overflow-y-auto'
                             : 'absolute inset-y-0 right-0 z-20 w-80 max-w-full overflow-y-auto border-l bg-background shadow-lg'
                     "
-                    @keydown.esc="!isDesktop && (inspectorOpen = false)"
                 >
                     <div
                         v-if="!isDesktop"
@@ -232,7 +280,7 @@ function onResizeKey(event: KeyboardEvent): void {
                         <Button
                             variant="ghost"
                             size="icon-lg"
-                            :aria-label="t('common.actions.close')"
+                            :aria-label="t('a11y.inspector_close')"
                             data-test="inspector-close"
                             @click="inspectorOpen = false"
                         >

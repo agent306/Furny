@@ -3,6 +3,7 @@
     "a11y.command_palette": "Command palette",
     "a11y.command_palette_description": "Search for a command to run…",
     "a11y.inspector": "Inspector",
+    "a11y.inspector_close": "Close inspector",
     "a11y.inspector_resize": "Resize the inspector",
     "a11y.main_navigation": "Main",
     "a11y.menu_description": "Navigate to a section of the app.",

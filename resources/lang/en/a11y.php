@@ -6,6 +6,7 @@ declare(strict_types=1);
 return [
     'breadcrumb' => 'Breadcrumb',
     'inspector' => 'Inspector',
+    'inspector_close' => 'Close inspector',
     'inspector_resize' => 'Resize the inspector',
     'main_navigation' => 'Main',
     'tab_bar' => 'Primary',
