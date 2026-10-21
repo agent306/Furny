@@ -52,3 +52,23 @@ it('leaves guests to the auth middleware', function (): void {
 
     $this->get('/_active-guest')->assertOk();
 });
+
+it('answers a JSON client with 401 inactive instead of a redirect', function (): void {
+    Route::middleware(['web', 'auth', 'active'])->get('/_active-json-stub', static fn (): string => 'stub');
+
+    $this->actingAs(User::factory()->inactive()->create())
+        ->getJson('/_active-json-stub')
+        ->assertUnauthorized()
+        ->assertExactJson(['code' => 'inactive']);
+
+    $this->assertGuest();
+});
+
+it('answers a machine path with 401 inactive without asking for JSON', function (): void {
+    Route::middleware(['web', 'auth', 'active'])->get('/webhooks/_active-stub', static fn (): string => 'stub');
+
+    $this->actingAs(User::factory()->inactive()->create())
+        ->get('/webhooks/_active-stub')
+        ->assertUnauthorized()
+        ->assertExactJson(['code' => 'inactive']);
+});

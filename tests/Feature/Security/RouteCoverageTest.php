@@ -10,8 +10,6 @@ use Tests\Support\Routing\AccessProbe;
 use Tests\Support\Routing\AccessStubs;
 use Tests\Support\Routing\RouteInventory;
 
-const AUDIENCES = ['guest', 'customer', 'staff', 'any', 'public', 'webhook'];
-
 it('lists every route in the access map', function (): void {
     $missing = array_values(array_diff(
         array_filter(array_column(RouteInventory::routes(), 'name')),
@@ -37,7 +35,7 @@ it('describes each entry with a known audience, permission and gate', function (
     foreach (RouteInventory::accessMap() as $name => $entry) {
         expect($entry)->toHaveKeys(['audience', 'permission', 'gate'], $name)
             ->and(array_keys($entry))->toBe(['audience', 'permission', 'gate'])
-            ->and($entry['audience'])->toBeIn(AUDIENCES)
+            ->and($entry['audience'])->toBeIn(AccessProbe::AUDIENCES)
             ->and($entry['permission'] === null || in_array($entry['permission'], $permissions, true))->toBeTrue("{$name}: unknown permission")
             ->and($entry['gate'] === null || in_array($entry['gate'], $gates, true))->toBeTrue("{$name}: unknown gate");
 

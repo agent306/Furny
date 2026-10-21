@@ -18,7 +18,7 @@ final class EnsureUserIsActive
         $user = $request->user();
 
         if ($user instanceof User && (! $user->is_active || $user->trashed())) {
-            return ForcedLogout::toLogin($request, 'auth.inactive');
+            return ForcedLogout::toLogin($request, 'inactive');
         }
 
         return $next($request);

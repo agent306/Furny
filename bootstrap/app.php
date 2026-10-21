@@ -20,6 +20,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Route;
 
 $app = Application::configure(basePath: dirname(__DIR__))
@@ -90,6 +91,20 @@ $app = Application::configure(basePath: dirname(__DIR__))
             'session.absolute' => EnforceAbsoluteSessionLifetime::class,
             'recent.auth' => RequireRecentAuthentication::class,
         ]);
+
+        // Route model binding must come after every check on who the user is and whether they may be here:
+        // otherwise a customer, an inactive user or an unenrolled admin would get 404 for a missing record and 403
+        // (or a redirect) for an existing one, which tells them whether it exists. Each call inserts the class
+        // just before SubstituteBindings, so the classes keep this order, after `auth`.
+        foreach ([
+            EnsureUserIsActive::class,
+            EnsureUserType::class,
+            EnsureCustomerOnboarded::class,
+            EnsureTwoFactorEnrolled::class,
+            EnforceAbsoluteSessionLifetime::class,
+        ] as $accessCheck) {
+            $middleware->prependToPriorityList(before: SubstituteBindings::class, prepend: $accessCheck);
+        }
 
         $middleware->web(append: [
             HandleAppearance::class,

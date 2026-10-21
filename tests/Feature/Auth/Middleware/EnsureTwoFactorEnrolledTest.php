@@ -78,6 +78,23 @@ it('redirects every other admin route for an unenrolled admin', function (): voi
         ->assertRedirectToRoute('admin.security.two-factor');
 });
 
+it('does not exempt near-miss route names', function (string $name): void {
+    Route::middleware(AccessStubs::ADMIN)->get('/admin/_near-miss-stub', static fn (): string => 'stub')->name($name);
+    AccessStubs::refresh();
+
+    $this->actingAs(User::factory()->admin()->withoutTwoFactor()->create())
+        ->get('/admin/_near-miss-stub')
+        ->assertRedirectToRoute('admin.security.two-factor');
+})->with([
+    'admin.security.two-factor-x',
+    'admin.security.two-factor.x',
+    'admin.two-factor.x',
+    'two-factorx',
+    'logout.other',
+    'xlogout',
+    'my.password.confirm',
+]);
+
 it('exempts exactly the routes of 13 section 5.10', function (): void {
     expect(EnsureTwoFactorEnrolled::EXEMPT)->toBe(['admin.security.two-factor', 'two-factor.*', 'password.confirm*', 'logout']);
 });

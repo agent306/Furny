@@ -18,9 +18,16 @@ final class RouteInventory
         'horizon.*', 'pulse', 'telescope*', 'storage.local*', 'boost.*', 'livewire.*', 'default-livewire.*',
     ];
 
-    /** The same for their unnamed routes, and the framework's health check. */
+    /** The same for their unnamed routes (an app route always has a name), and the framework's health check. */
     private const array VENDOR_URIS = [
         'up', 'horizon', 'horizon/*', 'pulse', 'pulse/*', 'telescope', 'telescope/*', '_boost/*', '_inertia/*', 'livewire-*', 'storage/*',
+    ];
+
+    /** Route name prefixes of master 6.6, and Fortify's own names. */
+    public const array ALLOWED_NAME_PREFIXES = [
+        'customer.', 'admin.', 'api.', 'auth.', 'account.', 'staff.', 'legal.', 'media.', 'health.', 'webhooks.', 'links.', 'notifications.', 'csp.',
+        'login', 'logout', 'register', 'password.', 'verification.', 'two-factor.', 'user-profile-information.', 'user-password.',
+        'welcome', 'manifest', 'fallback', 'unmatched.',
     ];
 
     /**
@@ -61,6 +68,6 @@ final class RouteInventory
 
     public static function isVendor(?string $name, string $uri): bool
     {
-        return ($name !== null && Str::is(self::VENDOR_NAMES, $name)) || Str::is(self::VENDOR_URIS, $uri);
+        return $name !== null ? Str::is(self::VENDOR_NAMES, $name) : Str::is(self::VENDOR_URIS, $uri);
     }
 }

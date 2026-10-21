@@ -10,6 +10,7 @@ use App\Domain\Identity\Models\User;
 use App\Http\Middleware\EnsureUserType;
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Auth\Middleware\RedirectIfAuthenticated;
+use Illuminate\Auth\Middleware\RequirePassword;
 use Illuminate\Routing\Route as LaravelRoute;
 use Illuminate\Routing\Router;
 use Illuminate\Session\Middleware\StartSession;
@@ -27,6 +28,14 @@ use Tests\TestCase;
  */
 final class AccessProbe
 {
+    public const array AUDIENCES = ['guest', 'customer', 'staff', 'any', 'public', 'webhook'];
+
+    /**
+     * Guest pages that legitimately send a signed-out visitor elsewhere: the 2FA challenge has nothing to
+     * challenge without a half-finished login.
+     */
+    private const array GUEST_REDIRECTS = ['two-factor.login' => 'login'];
+
     public function __construct(private readonly TestCase $test) {}
 
     /**
@@ -80,30 +89,86 @@ final class AccessProbe
         };
 
         $this->assert($expected, "{$name}: its middleware does not match the audience [{$audience}].");
+
+        $missing = array_values(array_filter(
+            $this->requiredStack($name, $audience),
+            fn (string $required): bool => ! in_array($required, self::aliasesOf($route), true),
+        ));
+
+        $this->assert($missing === [], "{$name}: it lacks the group middleware [".implode(', ', $missing).'] of its audience.');
+    }
+
+    /**
+     * The full middleware stack of the route group a customer or staff route belongs to (13 §1), as aliases.
+     *
+     * @return list<string>
+     */
+    private function requiredStack(string $name, string $audience): array
+    {
+        $type = match ($audience) {
+            'customer' => 'customer',
+            'staff' => 'staff',
+            default => null,
+        };
+
+        if ($type === null) {
+            return [];
+        }
+
+        return match (true) {
+            str_starts_with($name, 'customer.') => AccessStubs::CUSTOMER,
+            str_starts_with($name, 'admin.') => AccessStubs::ADMIN,
+            str_starts_with($name, 'api.') => ['web', 'auth', 'active', $type, 'throttle:api'],
+            default => ['web', 'auth', 'active', $type],
+        };
+    }
+
+    /**
+     * The route's own middleware names without their parameters, except that `throttle:x` keeps its limiter.
+     *
+     * @return list<string>
+     */
+    private static function aliasesOf(LaravelRoute $route): array
+    {
+        return array_values(array_map(
+            static fn (mixed $middleware): string => is_string($middleware) && ! str_starts_with($middleware, 'throttle:') ? explode(':', $middleware)[0] : (string) $middleware,
+            $route->gatherMiddleware(),
+        ));
     }
 
     private function checkGuest(string $name): void
     {
-        $this->assert($this->get($name)->getStatusCode() < 400, "{$name}: a guest cannot open it.");
-        $this->assert($this->get($name, User::factory()->create())->isRedirect(), "{$name}: a signed-in customer is not redirected away.");
-        $this->assert($this->get($name, User::factory()->owner()->create())->isRedirect(), "{$name}: a signed-in owner is not redirected away.");
+        $guest = $this->get($name);
+        $redirect = self::GUEST_REDIRECTS[$name] ?? null;
+
+        $this->assert(
+            $redirect === null ? $this->opened($guest) : $guest->isRedirect(route($redirect)),
+            "{$name}: a guest does not get ".($redirect === null ? 'the page.' : "a redirect to {$redirect}."),
+        );
+
+        foreach (['customer' => User::factory()->create(), 'owner' => User::factory()->owner()->create()] as $who => $user) {
+            $this->assert(
+                $this->get($name, $user)->isRedirect(url()->to((string) config('fortify.home'))),
+                "{$name}: a signed-in {$who} is not redirected to the home page.",
+            );
+        }
     }
 
     private function checkCustomer(string $name): void
     {
         $this->assert($this->redirectsTo($this->get($name), route('login')), "{$name}: a guest is not sent to login.");
         $this->assert($this->redirectsTo($this->get($name, User::factory()->owner()->create()), route('admin.dashboard')), "{$name}: staff are not sent to the admin dashboard.");
-        $this->assert($this->reached($this->get($name, User::factory()->create())), "{$name}: a customer cannot open it.");
+        $this->assert($this->opened($this->get($name, User::factory()->create())), "{$name}: a customer does not get the page.");
     }
 
     private function checkStaff(string $name, ?string $permission, ?string $gate): void
     {
         $this->assert($this->redirectsTo($this->get($name), route('login')), "{$name}: a guest is not sent to login.");
         $this->assert($this->get($name, User::factory()->create())->getStatusCode() === 403, "{$name}: a customer does not get 403.");
-        $this->assert($this->reached($this->get($name, User::factory()->owner()->create())), "{$name}: an owner cannot open it.");
+        $this->assert($this->opened($this->get($name, User::factory()->owner()->create())), "{$name}: an owner does not get the page.");
 
         if ($permission === null && $gate === null) {
-            $this->assert($this->reached($this->get($name, User::factory()->support()->create())), "{$name}: a support user cannot open it.");
+            $this->assert($this->opened($this->get($name, User::factory()->support()->create())), "{$name}: a support user does not get the page.");
 
             return;
         }
@@ -119,12 +184,14 @@ final class AccessProbe
     private function checkAny(string $name): void
     {
         $this->assert($this->redirectsTo($this->get($name), route('login')), "{$name}: a guest is not sent to login.");
-        $this->assert($this->reached($this->get($name, User::factory()->create())), "{$name}: a customer cannot open it.");
+
+        // Unverified, so the verification notice renders for them instead of redirecting away.
+        $this->assert($this->opened($this->get($name, User::factory()->unverified()->create()), $name), "{$name}: a signed-in customer does not get the page.");
     }
 
     private function checkPublic(string $name): void
     {
-        $this->assert($this->reached($this->get($name)), "{$name}: a guest cannot open it.");
+        $this->assert($this->opened($this->get($name)), "{$name}: a guest does not get the page.");
     }
 
     /** A staff role other than the owner that does not hold the permission (the owner gates are the owner's alone). */
@@ -159,13 +226,37 @@ final class AccessProbe
     }
 
     /**
-     * Opened, not bounced to the login page.
+     * The page itself (2xx), or the password confirmation a route behind `password.confirm` asks for. Any other
+     * redirect (login, onboarding, the 2FA page, the dashboard) is not "opened".
      *
      * @param  TestResponse<Response>  $response
      */
-    private function reached(TestResponse $response): bool
+    private function opened(TestResponse $response, ?string $routeName = null): bool
     {
-        return $response->getStatusCode() < 400 && ! $this->redirectsTo($response, route('login'));
+        if ($response->isSuccessful()) {
+            return true;
+        }
+
+        return $routeName !== null
+            && $this->behindPasswordConfirmation($routeName)
+            && $response->isRedirect(route('password.confirm'));
+    }
+
+    private function behindPasswordConfirmation(string $name): bool
+    {
+        $route = Route::getRoutes()->getByName($name);
+
+        if (! $route instanceof LaravelRoute) {
+            return false;
+        }
+
+        foreach (app(Router::class)->gatherRouteMiddleware($route) as $middleware) {
+            if (is_string($middleware) && str_starts_with($middleware, RequirePassword::class)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @param  TestResponse<Response>  $response */

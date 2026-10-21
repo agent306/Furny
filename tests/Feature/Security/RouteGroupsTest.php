@@ -9,17 +9,12 @@ use App\Http\Middleware\EnsureTwoFactorEnrolled;
 use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\EnsureUserType;
 use App\Http\Middleware\RequireRecentAuthentication;
+use Illuminate\Auth\Middleware\Authenticate;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Route;
 use Tests\Support\Routing\AccessStubs;
 use Tests\Support\Routing\RouteInventory;
-
-/** Route name prefixes of master 6.6, and Fortify's own names. */
-const ALLOWED_ROUTE_PREFIXES = [
-    'customer.', 'admin.', 'api.', 'auth.', 'account.', 'staff.', 'legal.', 'media.', 'health.', 'webhooks.', 'links.', 'notifications.', 'csp.',
-    'login', 'logout', 'register', 'password.', 'verification.', 'two-factor.', 'user-profile-information.', 'user-password.',
-    'welcome', 'manifest', 'fallback', 'unmatched.',
-];
 
 it('registers the middleware aliases of 13 section 1', function (): void {
     expect(app(Router::class)->getMiddleware())->toMatchArray([
@@ -85,7 +80,7 @@ it('names every route with an allowed prefix', function (): void {
     $offenders = array_filter(
         array_column(RouteInventory::routes(), 'name'),
         static function (?string $name): bool {
-            foreach (ALLOWED_ROUTE_PREFIXES as $prefix) {
+            foreach (RouteInventory::ALLOWED_NAME_PREFIXES as $prefix) {
                 if ($name !== null && str_starts_with($name, $prefix)) {
                     return false;
                 }
@@ -98,10 +93,31 @@ it('names every route with an allowed prefix', function (): void {
     expect(array_values($offenders))->toBe([]);
 });
 
-it('detects an unlisted prefix (the guard itself works)', function (): void {
+it('tells vendor routes from app routes (the guard itself works)', function (): void {
     expect(RouteInventory::isVendor('horizon.index', 'horizon/{view?}'))->toBeTrue()
         ->and(RouteInventory::isVendor('customer.dashboard', 'dashboard'))->toBeFalse()
         ->and(RouteInventory::isVendor(null, 'up'))->toBeTrue()
         ->and(RouteInventory::isVendor(null, 'livewire-abc123/livewire.js'))->toBeTrue()
-        ->and(RouteInventory::isVendor(null, 'orders'))->toBeFalse();
+        ->and(RouteInventory::isVendor(null, 'orders'))->toBeFalse()
+        // An app route is never skipped for its URI: only an unnamed route is.
+        ->and(RouteInventory::isVendor('customer.storage.index', 'storage/files'))->toBeFalse()
+        ->and(RouteInventory::isVendor('admin.pulse-report', 'pulse/report'))->toBeFalse()
+        ->and(RouteInventory::isVendor('admin.up', 'up'))->toBeFalse();
 });
+
+it('runs the access checks after auth and before route model binding on the real groups', function (string $name): void {
+    $stack = array_map(
+        static fn (mixed $middleware): string => is_string($middleware) ? strtok($middleware, ':') : '',
+        app(Router::class)->gatherRouteMiddleware(Route::getRoutes()->getByName($name)),
+    );
+    $position = static fn (string $class): int => (int) array_search($class, $stack, true);
+
+    $checks = array_values(array_filter([
+        Authenticate::class, EnsureUserIsActive::class, EnsureUserType::class, EnsureCustomerOnboarded::class,
+        EnsureTwoFactorEnrolled::class, EnforceAbsoluteSessionLifetime::class,
+    ], static fn (string $class): bool => in_array($class, $stack, true)));
+
+    expect($checks)->not->toBeEmpty()
+        ->and(array_map($position, $checks))->toBe(array_values(collect(array_map($position, $checks))->sort()->all()))
+        ->and($position(SubstituteBindings::class))->toBeGreaterThan($position(end($checks)));
+})->with(['customer.dashboard', 'admin.dashboard']);

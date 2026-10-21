@@ -62,9 +62,15 @@ final class ErrorPage
         return $page;
     }
 
+    /** A client that gets JSON or a bare response, never a page or a redirect: XHR/JSON callers and the machine paths. */
+    public static function wantsMachineResponse(Request $request): bool
+    {
+        return ! $request->header('X-Inertia') && ($request->expectsJson() || $request->is(...self::MACHINE_PATHS));
+    }
+
     private static function handles(int $status, Request $request): bool
     {
-        if (! $request->header('X-Inertia') && ($request->expectsJson() || $request->is(...self::MACHINE_PATHS))) {
+        if (self::wantsMachineResponse($request)) {
             return false;
         }
 

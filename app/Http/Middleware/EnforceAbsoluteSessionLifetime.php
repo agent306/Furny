@@ -16,7 +16,8 @@ use Symfony\Component\HttpFoundation\Response;
  * `session.absolute` (13 §6.1): staff sessions end `auth.staff_session_absolute_hours` (12 by default) after
  * sign-in, however active the user is. Customers are not affected.
  *
- * A staff session without a sign-in stamp starts its clock on the first request, so it is bounded as well.
+ * A staff session without a sign-in stamp starts its clock on the first request, so it is bounded as well. A stamp
+ * that is there but unreadable (not a positive integer, or in the future) ends the session: it fails closed.
  */
 final class EnforceAbsoluteSessionLifetime
 {
@@ -30,16 +31,18 @@ final class EnforceAbsoluteSessionLifetime
             return $next($request);
         }
 
-        $signedInAt = RecentAuthentication::timeOf($request->session()->get(RecentAuthentication::LOGIN_KEY));
+        $stamp = $request->session()->get(RecentAuthentication::LOGIN_KEY);
 
-        if ($signedInAt === null) {
+        if ($stamp === null) {
             $request->session()->put(RecentAuthentication::LOGIN_KEY, now()->getTimestamp());
 
             return $next($request);
         }
 
-        if ($signedInAt->addHours($this->settings->auth()->staffSessionAbsoluteHours)->isPast()) {
-            return ForcedLogout::toLogin($request, 'auth.session_expired');
+        $signedInAt = RecentAuthentication::timeOf($stamp);
+
+        if ($signedInAt === null || $signedInAt->addHours($this->settings->auth()->staffSessionAbsoluteHours)->isPast()) {
+            return ForcedLogout::toLogin($request, 'session_expired');
         }
 
         return $next($request);
