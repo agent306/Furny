@@ -309,3 +309,24 @@ export type {
     PipelineOutput,
     ResultOf,
 } from './commands/types';
+export { reconcileRoomMetas } from './plan/reconcile';
+export type { ReconcileResult } from './plan/reconcile';
+export { planPathToEntityId } from './plan/commands/paths';
+export {
+    PLAN_COMMAND_ERROR_CODES,
+    PLAN_COMMAND_KEY_PREFIX,
+    defaultPlanDefaults,
+    executePlanCommand,
+    planCommandMessage,
+    planPipeline,
+} from './plan/commands/pipeline';
+export type {
+    PlanCommandContext,
+    PlanCommandErrorCode,
+    PlanDefaults,
+} from './plan/commands/pipeline';
+export { postProcess } from './plan/commands/postprocess';
+export type { PostProcessInfo } from './plan/commands/postprocess';
+export { definePlanCommand } from './plan/commands/define';
+export { PLAN_COMMANDS, createPlanBus } from './plan/commands/registry';
+export type { PlanBusConfig, PlanCommandType } from './plan/commands/registry';

@@ -1,0 +1,66 @@
+import { newId as generateId } from '../../ids';
+import { createCommandBus } from '../../commands/bus';
+import type { AnyCommandDef, CommandBus } from '../../commands/types';
+import { createPlanDeriver } from '../derive';
+import type { FootprintProvider } from '../footprint';
+import type { PlanDocument } from '../schema';
+import { planPathToEntityId } from './paths';
+import {
+    PLAN_COMMAND_KEY_PREFIX,
+    defaultPlanDefaults,
+    planPipeline,
+    type PlanCommandContext,
+    type PlanDefaults,
+} from './pipeline';
+
+type PlanCommandRegistry = Record<
+    string,
+    AnyCommandDef<PlanDocument, PlanCommandContext>
+>;
+
+/**
+ * Every plan command by name (04 §6.6). Empty until the command tasks add
+ * their groups (`...WALL_COMMANDS`, ...) here.
+ */
+export const PLAN_COMMANDS = {} satisfies PlanCommandRegistry;
+
+export type PlanCommandType = keyof typeof PLAN_COMMANDS & string;
+
+export interface PlanBusConfig<M extends PlanCommandRegistry> {
+    initial: PlanDocument;
+    footprints: FootprintProvider;
+    /** Default: `defaultPlanDefaults(doc)` of the document each command runs on. */
+    defaults?: PlanDefaults;
+    /** Default: `engine/ids.ts::newId`. */
+    newId?: PlanCommandContext['newId'];
+    maxHistory?: number;
+    /** Default: `PLAN_COMMANDS`. Lets a caller run its own commands (tests, benches). */
+    registry?: M;
+}
+
+/**
+ * The plan command bus (04 §6.1, §6.4): the generic bus with the plan
+ * pipeline, patch-path mapping and a context built from one shared cached
+ * deriver, so the geometry of the document a command starts from is already
+ * cached when the pipeline derives the next one.
+ */
+export function createPlanBus<
+    M extends PlanCommandRegistry = typeof PLAN_COMMANDS,
+>(cfg: PlanBusConfig<M>): CommandBus<PlanDocument, PlanCommandContext, M> {
+    const deriver = createPlanDeriver();
+    return createCommandBus<PlanDocument, PlanCommandContext, M>({
+        initial: cfg.initial,
+        registry: cfg.registry ?? (PLAN_COMMANDS as unknown as M),
+        pipeline: planPipeline,
+        pathToEntityId: planPathToEntityId,
+        messageKeyPrefix: PLAN_COMMAND_KEY_PREFIX,
+        ...(cfg.maxHistory === undefined ? {} : { maxHistory: cfg.maxHistory }),
+        getContext: (doc) => ({
+            geometry: deriver.derive(doc),
+            derive: (d) => deriver.derive(d),
+            footprints: cfg.footprints,
+            defaults: cfg.defaults ?? defaultPlanDefaults(doc),
+            newId: cfg.newId ?? generateId,
+        }),
+    });
+}
