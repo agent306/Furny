@@ -148,6 +148,7 @@ it('allows exactly one default tax rate through a partial unique index', functio
         ->toContain('(is_default)')
         ->toContain('WHERE is_default');
 
+    TaxRate::query()->delete(); // the baseline seeding already holds the default rate (16 §4.1)
     TaxRate::factory()->default()->create();
     TaxRate::factory()->count(2)->create();
 

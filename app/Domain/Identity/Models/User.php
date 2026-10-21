@@ -6,6 +6,7 @@ namespace App\Domain\Identity\Models;
 
 use App\Domain\Ai\Models\AiCreditLedgerEntry;
 use App\Domain\Identity\Enums\LengthUnit;
+use App\Domain\Identity\Enums\OwnerGate;
 use App\Domain\Identity\Enums\UnitSystem;
 use App\Domain\Identity\Enums\UserType;
 use App\Domain\Orders\Models\Order;
@@ -24,12 +25,15 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Gate;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 use NotificationChannels\WebPush\HasPushSubscriptions;
 use Spatie\Image\Enums\Fit;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media as BaseMedia;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Traits\HasRoles;
 
 /**
  * 02 §1.1. `type`, `is_active`, the verification and onboarding timestamps and the Fortify
@@ -68,7 +72,7 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media as BaseMedia;
 final class User extends Authenticatable implements HasLocalePreference, HasMedia, MustVerifyEmail
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, HasPushSubscriptions, HasUlids, InteractsWithMedia, Notifiable, SoftDeletes, TwoFactorAuthenticatable;
+    use HasFactory, HasPushSubscriptions, HasRoles, HasUlids, InteractsWithMedia, Notifiable, SoftDeletes, TwoFactorAuthenticatable;
 
     /**
      * @return array<string, string>
@@ -199,6 +203,34 @@ final class User extends Authenticatable implements HasLocalePreference, HasMedi
     public function hasPassword(): bool
     {
         return $this->password !== null;
+    }
+
+    /**
+     * Names of every permission the user holds through roles, for the `auth.user.permissions` shared prop (13 §7.4).
+     *
+     * @return list<string>
+     */
+    public function permissionNames(): array
+    {
+        $names = $this->getAllPermissions()->map(static fn (Permission $permission): string => $permission->name)->all();
+        sort($names);
+
+        return $names;
+    }
+
+    /**
+     * The owner-only gates (13 §7.3) the user passes, for the `auth.user.abilities` shared prop (13 §7.4).
+     *
+     * @return list<string>
+     */
+    public function abilities(): array
+    {
+        $gate = Gate::forUser($this);
+
+        return array_values(array_map(
+            static fn (OwnerGate $ability): string => $ability->value,
+            array_filter(OwnerGate::cases(), static fn (OwnerGate $ability): bool => $gate->allows($ability->value)),
+        ));
     }
 
     /** Notifications render in the recipient's locale (12 §4.4). */

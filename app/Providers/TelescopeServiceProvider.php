@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
-use App\Domain\Identity\Models\User;
-use Illuminate\Support\Facades\Gate;
 use Laravel\Telescope\IncomingEntry;
 use Laravel\Telescope\Telescope;
 use Laravel\Telescope\TelescopeApplicationServiceProvider;
@@ -49,11 +47,11 @@ final class TelescopeServiceProvider extends TelescopeApplicationServiceProvider
     }
 
     /**
-     * Gate for non-local environments. Nobody is allowed until the dashboard gates
-     * (staff with role owner or admin, 17 §5.11 item 12) replace this definition.
+     * `viewTelescope` (active staff with role owner or admin, 17 §5.11 item 12) is defined by
+     * AuthServiceProvider, which is always registered; nothing is defined here.
      */
     protected function gate(): void
     {
-        Gate::define('viewTelescope', fn (User $user): bool => false);
+        // Intentionally empty.
     }
 }

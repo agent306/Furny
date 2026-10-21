@@ -72,17 +72,20 @@ it('casts edge bands, finishes, labour rates and tax rates', function (): void {
 
 it('soft deletes materials, edge bands, hardware items and finishes only', function (): void {
     foreach ([Material::class, EdgeBand::class, HardwareItem::class, Finish::class] as $model) {
+        $active = $model::query()->count();
+        $all = $model::withTrashed()->count();
         $row = $model::factory()->create();
         $row->delete();
 
-        expect($model::query()->count())->toBe(0)
-            ->and($model::withTrashed()->count())->toBe(1);
+        expect($model::query()->count())->toBe($active)
+            ->and($model::withTrashed()->count())->toBe($all + 1);
     }
 
+    $labours = LabourRate::query()->count();
     $labour = LabourRate::factory()->create();
     $labour->delete();
 
-    expect(LabourRate::query()->count())->toBe(0)
+    expect(LabourRate::query()->count())->toBe($labours)
         ->and(method_exists($labour, 'trashed'))->toBeFalse();
 });
 

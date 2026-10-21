@@ -118,9 +118,12 @@ return [
     /*
      * When set to true, the method for checking permissions will be registered on the gate.
      * Set this to false if you want to implement custom logic for checking permissions.
+     *
+     * Furny registers it itself in AuthServiceProvider, after the inactive-staff deny (13 §7.3):
+     * Gate::before callbacks run in registration order and the first non-null result wins.
      */
 
-    'register_permission_check_method' => true,
+    'register_permission_check_method' => false,
 
     /*
      * When set to true, Laravel\Octane\Events\OperationTerminated event listener will be registered

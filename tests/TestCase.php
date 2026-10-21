@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 use Spatie\LaravelPdf\Facades\Pdf;
+use Tests\Support\Seeders\TestBaselineSeeder;
 
 /**
  * Base test case (16 §2): PostgreSQL only, no network, faked object storage
@@ -18,6 +19,11 @@ use Spatie\LaravelPdf\Facades\Pdf;
  */
 abstract class TestCase extends BaseTestCase
 {
+    /** Baseline data (16 §4.1): roles, settings, tax rates and the starter catalog, seeded once per migrate. */
+    protected bool $seed = true;
+
+    protected string $seeder = TestBaselineSeeder::class;
+
     protected function setUp(): void
     {
         parent::setUp();

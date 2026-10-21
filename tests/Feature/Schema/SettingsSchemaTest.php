@@ -25,6 +25,7 @@ it('creates number_sequences keyed by a 40-character string', function (): void 
 
 it('nulls updated_by when the user is deleted', function (): void {
     $user = User::factory()->create();
+    AppSetting::query()->whereKey('units')->delete(); // the baseline seeding already holds this key (16 §4.1)
     AppSetting::query()->create(['key' => 'units', 'value' => [], 'updated_by' => $user->id]);
 
     DB::table('users')->where('id', $user->id)->delete();

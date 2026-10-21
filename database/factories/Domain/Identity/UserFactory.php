@@ -9,6 +9,7 @@ use App\Domain\Identity\Enums\StaffRole;
 use App\Domain\Identity\Enums\UnitSystem;
 use App\Domain\Identity\Enums\UserType;
 use App\Domain\Identity\Models\User;
+use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -16,8 +17,9 @@ use Illuminate\Support\Str;
 /**
  * Default state: an onboarded customer with a verified email, password "password" and accepted terms (16 §5.1).
  *
- * Staff role states (`owner()`, `admin()`, ...) set the user type and, for owner/admin, a confirmed TOTP
- * (`withoutTwoFactor()` removes it); the spatie role itself is assigned by the role seeding task.
+ * Staff role states (`owner()`, `admin()`, ...) set the user type, assign the spatie role (seeding the
+ * roles and permissions first when the database has none) and, for owner/admin, a confirmed TOTP
+ * (`withoutTwoFactor()` removes it). The role is assigned after insert, so it needs `create()`, not `make()`.
  *
  * @extends Factory<User>
  */
@@ -68,7 +70,11 @@ final class UserFactory extends Factory
             'email_verified_at' => now(),
             'terms_accepted_at' => now(),
             'onboarded_at' => now(),
-        ])->state($role->requiresTwoFactor() ? $this->confirmedTwoFactor() : []);
+        ])->state($role->requiresTwoFactor() ? $this->confirmedTwoFactor() : [])
+            ->afterCreating(static function (User $user) use ($role): void {
+                RolesAndPermissionsSeeder::ensureSeeded();
+                $user->assignRole($role->value);
+            });
     }
 
     public function owner(): static

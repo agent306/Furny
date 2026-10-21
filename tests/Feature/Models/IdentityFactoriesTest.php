@@ -15,6 +15,8 @@ use App\Domain\Identity\Models\StaffInvitation;
 use App\Domain\Identity\Models\User;
 use App\Domain\Shared\Enums\NotificationChannel;
 use Illuminate\Support\Facades\Hash;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 
 dataset('user states', [
     'customer' => ['customer', []],
@@ -85,6 +87,21 @@ it('gives owner and admin a confirmed TOTP unless withoutTwoFactor() (16 §5.1)'
         ->and(User::factory()->estimator()->create()->two_factor_confirmed_at)->toBeNull()
         ->and(User::factory()->production()->create()->two_factor_confirmed_at)->toBeNull()
         ->and(User::factory()->support()->create()->two_factor_confirmed_at)->toBeNull();
+});
+
+it('assigns the spatie role of every staff state, seeding roles on a fresh database', function (): void {
+    Role::query()->delete();
+    Permission::query()->delete();
+
+    foreach (StaffRole::cases() as $role) {
+        $user = User::factory()->{$role->value}()->create();
+
+        expect($user->getRoleNames()->all())->toBe([$role->value])
+            ->and($user->permissionNames())->toHaveCount(count($role->permissions()));
+    }
+
+    expect(User::factory()->staff('support')->create()->hasRole('support'))->toBeTrue()
+        ->and(User::factory()->create()->roles)->toHaveCount(0);
 });
 
 it('keeps the TOTP secrets encrypted and readable by Fortify', function (): void {

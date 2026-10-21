@@ -111,6 +111,7 @@ it('bumps once per write, not once per transaction', function (): void {
 
 it('leaves the version unchanged when the transaction of a create rolls back', function (string $model): void {
     $before = catalogVersion();
+    $rows = $model::query()->count();
 
     try {
         DB::transaction(function () use ($model): void {
@@ -124,7 +125,7 @@ it('leaves the version unchanged when the transaction of a create rolls back', f
 
     expect(storedCatalogVersion())->toBe($before)
         ->and(catalogVersion())->toBe($before)
-        ->and($model::query()->count())->toBe(0);
+        ->and($model::query()->count())->toBe($rows);
 })->with('catalog models');
 
 it('never reads or caches the version inside the writing transaction, so a rollback cannot poison the cache', function (): void {
