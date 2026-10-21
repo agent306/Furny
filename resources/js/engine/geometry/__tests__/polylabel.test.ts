@@ -84,4 +84,30 @@ describe('polylabel', () => {
         expect(Object.is(r.point.x, -0)).toBe(false);
         expect(Object.is(r.point.y, -0)).toBe(false);
     });
+
+    describe('very elongated polygons', () => {
+        it.each([1e6, 1e9])(
+            'costs the same for a 4 m wide strip of length %s mm',
+            (length) => {
+                const t0 = performance.now();
+                const r = polylabel({
+                    outer: rect(0, 0, length, 4000),
+                    holes: [],
+                });
+                expect(performance.now() - t0).toBeLessThan(200);
+                expect(r.distance).toBe(2000);
+                expect(r.point.y).toBe(2000);
+                expect(r.point.x).toBeGreaterThan(0);
+                expect(r.point.x).toBeLessThan(length);
+            },
+        );
+
+        it('returns the bbox corner with distance 0 for non-finite extents', () => {
+            const r = polylabel({
+                outer: rect(0, 0, Number.POSITIVE_INFINITY, 4000),
+                holes: [],
+            });
+            expect(r).toEqual({ point: { x: 0, y: 0 }, distance: 0 });
+        });
+    });
 });

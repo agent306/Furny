@@ -63,9 +63,21 @@ class CellQueue {
     }
 }
 
+/** Bounds on the work done for very elongated polygons (see `polylabel`). */
+const MAX_AXIS_CELLS = 64;
+const MAX_CELLS = 10_000;
+
 /**
  * The interior point farthest from the boundary and that distance. Search
  * stops when no cell can beat the best by more than `precision` mm.
+ *
+ * In a long strip every cell along the axis is equally far from the boundary,
+ * so none can be pruned and the search would refine the whole length down to
+ * `precision`: its cost grew with the polygon's extent (a 100 km corridor took
+ * minutes). The initial grid therefore has at most `MAX_AXIS_CELLS` cells along
+ * the long side, and the search stops after `MAX_CELLS` cells, keeping the
+ * best point found so far. Ordinary rooms need a few hundred cells, so their
+ * results are unchanged.
  */
 export function polylabel(
     p: PolygonWithHoles,
@@ -74,9 +86,13 @@ export function polylabel(
     const { min, max } = ringBBox(p.outer);
     const width = max.x - min.x;
     const height = max.y - min.y;
-    const cellSize = Math.min(width, height);
-    if (!(cellSize > 0))
+    const shortSide = Math.min(width, height);
+    if (!(shortSide > 0) || !Number.isFinite(Math.max(width, height)))
         return { point: { x: min.x + 0, y: min.y + 0 }, distance: 0 };
+    const cellSize = Math.max(
+        shortSide,
+        Math.max(width, height) / MAX_AXIS_CELLS,
+    );
 
     let seq = 0;
     const makeCell = (x: number, y: number, h: number): Cell => {
@@ -98,6 +114,7 @@ export function polylabel(
     for (let cell = queue.pop(); cell; cell = queue.pop()) {
         if (cell.d > best.d) best = cell;
         if (cell.max - best.d <= precision) continue;
+        if (seq >= MAX_CELLS) break;
         const h = cell.h / 2;
         queue.push(makeCell(cell.x - h, cell.y - h, h));
         queue.push(makeCell(cell.x + h, cell.y - h, h));

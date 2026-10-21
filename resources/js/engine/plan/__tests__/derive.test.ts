@@ -614,4 +614,15 @@ describe('derivePlanGeometry: node caps, union and bbox', () => {
         expect(Object.keys(plan.openings)).toHaveLength(40);
         expect(plan.issues.filter((i) => i.severity === 'warning')).toEqual([]);
     });
+
+    it.each([1e9, 1e12, Number.NaN, Number.POSITIVE_INFINITY])(
+        'derives in time independent of coordinate size (one node at %s)',
+        (far) => {
+            const doc = makeRectPlan(5000, 4000, 230);
+            doc.nodes['n_0000000001']!.x = far;
+            const t0 = performance.now();
+            derivePlanGeometry(doc);
+            expect(performance.now() - t0).toBeLessThan(200);
+        },
+    );
 });
