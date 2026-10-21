@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Domain\Identity\Enums\UserType;
 use App\Domain\Identity\Models\User;
 use App\Domain\Orders\Enums\ChangeProposalStatus;
 use App\Domain\Orders\Models\ChangeProposal;
@@ -51,7 +52,7 @@ describe('view', function (): void {
 });
 
 describe('staff abilities', function (): void {
-    it('need orders.propose_changes', function (string $ability, string $actor, bool|int|null $expected): void {
+    it('need orders.propose_changes and are 404 to the customer on a draft', function (string $ability, string $actor, bool|int|null $expected): void {
         $proposal = ChangeProposal::factory()->create();
         $user = PolicyActors::resolve($actor, $proposal->order->customer);
 
@@ -60,7 +61,7 @@ describe('staff abilities', function (): void {
         expect([$response->allowed(), $response->status()])->toBe(PolicyActors::outcome($expected));
     })->with(function (): iterable {
         foreach (['update', 'send', 'withdraw', 'addItem', 'removeItem', 'updateItemDraft'] as $ability) {
-            foreach (PolicyActors::staffOnly(PolicyActors::ESTIMATORS) as $actor => $expected) {
+            foreach (PolicyActors::staffOnlyDraft(PolicyActors::ESTIMATORS) as $actor => $expected) {
                 yield "{$ability} / {$actor}" => [$ability, $actor, $expected];
             }
         }
@@ -75,6 +76,23 @@ describe('staff abilities', function (): void {
         expect([$response->allowed(), $response->status()])->toBe(PolicyActors::outcome($expected));
     })->with(fn (): array => PolicyActors::rows(PolicyActors::staffOnly(PolicyActors::ESTIMATORS)));
 });
+
+it('hides a draft proposal from its customer for the decision too', function (string $actor, bool|int|null $expected): void {
+    $proposal = ChangeProposal::factory()->create();
+    $user = PolicyActors::resolve($actor, $proposal->order->customer);
+
+    $response = Gate::forUser($user)->inspect('decide', $proposal);
+
+    expect([$response->allowed(), $response->status()])->toBe(PolicyActors::outcome($expected));
+})->with(fn (): array => PolicyActors::rows(PolicyActors::hiddenDraft()));
+
+it('tells the customer 403 for staff abilities once the proposal is no longer a draft', function (string $ability): void {
+    $proposal = ChangeProposal::factory()->sent()->create();
+
+    $response = Gate::forUser($proposal->order->customer)->inspect($ability, $proposal);
+
+    expect([$response->allowed(), $response->status()])->toBe([false, 403]);
+})->with(['update', 'send', 'withdraw', 'addItem', 'removeItem', 'updateItemDraft']);
 
 it('leaves the decision to the order\'s customer, whatever the proposal status', function (string $actor, bool|int|null $expected): void {
     $proposal = ChangeProposal::factory()->sent()->create();
@@ -93,4 +111,25 @@ it('gives a customer holding a staff role no staff ability on any proposal', fun
     foreach (['update', 'send', 'withdraw', 'addItem', 'decide'] as $ability) {
         expect(Gate::forUser($customer)->inspect($ability, $proposal)->status())->toBe(404, $ability);
     }
+});
+
+it('never lets a user whose type is staff own an order, whatever the order\'s customer_id says', function (): void {
+    $proposal = ChangeProposal::factory()->sent()->create();
+    $formerCustomer = $proposal->order->customer;
+    $formerCustomer->forceFill(['type' => UserType::Staff])->save();
+    $gate = Gate::forUser($formerCustomer->fresh());
+
+    expect($gate->inspect('decide', $proposal)->allowed())->toBeFalse()
+        ->and($gate->inspect('view', $proposal)->allowed())->toBeFalse();
+});
+
+it('follows the customer of a soft-deleted order', function (): void {
+    $proposal = ChangeProposal::factory()->sent()->create();
+    $customer = $proposal->order->customer;
+    $proposal->order->delete();
+    $fresh = $proposal->fresh();
+
+    expect(Gate::forUser($customer)->allows('view', $fresh))->toBeTrue()
+        ->and(Gate::forUser($customer)->allows('decide', $fresh))->toBeTrue()
+        ->and(Gate::forUser(User::factory()->create())->inspect('view', $fresh)->status())->toBe(404);
 });

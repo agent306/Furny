@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Domain\Identity\Enums\UserType;
 use App\Domain\Identity\Models\User;
 use App\Domain\Orders\Enums\QuoteStatus;
 use App\Domain\Orders\Models\Order;
@@ -91,14 +92,14 @@ describe('create', function (): void {
 });
 
 describe('update and delete', function (): void {
-    it('are for staff with quotes.create on a draft quote', function (string $ability, string $actor, bool|int|null $expected): void {
+    it('are for staff with quotes.create on a draft quote, which its own customer cannot even see', function (string $ability, string $actor, bool|int|null $expected): void {
         $quote = Quote::factory()->create();
         $user = PolicyActors::resolve($actor, $quote->order->customer);
 
         $response = Gate::forUser($user)->inspect($ability, $quote);
 
         expect([$response->allowed(), $response->status()])->toBe(PolicyActors::outcome($expected));
-    })->with(fn (): iterable => quoteAbilityRows(['update', 'delete'], PolicyActors::staffOnly(PolicyActors::ESTIMATORS)));
+    })->with(fn (): iterable => quoteAbilityRows(['update', 'delete'], PolicyActors::staffOnlyDraft(PolicyActors::ESTIMATORS)));
 
     it('refuse a quote that is no longer a draft, with the quote_not_draft code', function (string $ability, QuoteStatus $status): void {
         $quote = Quote::factory()->state(['status' => $status])->create();
@@ -106,7 +107,7 @@ describe('update and delete', function (): void {
 
         $response = Gate::forUser($estimator)->inspect($ability, $quote);
 
-        expect([$response->allowed(), $response->status(), $response->code()])->toBe([false, 403, 'quote_not_draft'])
+        expect([$response->allowed(), $response->status(), $response->code()])->toBe([false, 422, 'quote_not_draft'])
             ->and($response->message())->toBe(trans_icu('quotes.errors.not_draft'))
             ->and($response->message())->not->toBe('quotes.errors.not_draft');
     })->with(function (): iterable {
@@ -126,14 +127,40 @@ describe('update and delete', function (): void {
     });
 });
 
-it('lets staff with quotes.send send a quote', function (string $actor, bool|int|null $expected): void {
+it('lets staff with quotes.send send a draft quote, which its own customer cannot even see', function (string $actor, bool|int|null $expected): void {
     $quote = Quote::factory()->create();
     $user = PolicyActors::resolve($actor, $quote->order->customer);
 
     $response = Gate::forUser($user)->inspect('send', $quote);
 
     expect([$response->allowed(), $response->status()])->toBe(PolicyActors::outcome($expected));
-})->with(fn (): array => PolicyActors::rows(PolicyActors::staffOnly(PolicyActors::ESTIMATORS)));
+})->with(fn (): array => PolicyActors::rows(PolicyActors::staffOnlyDraft(PolicyActors::ESTIMATORS)));
+
+it('tells the customer 403 for staff abilities once the quote is no longer a draft', function (string $ability): void {
+    $quote = Quote::factory()->sent()->create();
+
+    $response = Gate::forUser($quote->order->customer)->inspect($ability, $quote);
+
+    expect([$response->allowed(), $response->status()])->toBe([false, 403]);
+})->with(['viewCosts', 'send', 'update', 'delete']);
+
+it('shows costs of a draft quote to staff with quotes.view_costs and to nobody else, the customer being told 404', function (string $actor, bool|int|null $expected): void {
+    $quote = Quote::factory()->create();
+    $user = PolicyActors::resolve($actor, $quote->order->customer);
+
+    $response = Gate::forUser($user)->inspect('viewCosts', $quote);
+
+    expect([$response->allowed(), $response->status()])->toBe(PolicyActors::outcome($expected));
+})->with(fn (): array => PolicyActors::rows(PolicyActors::staffOnlyDraft(PolicyActors::ESTIMATORS)));
+
+it('hides a draft quote from its customer for accept, negotiate and decline too', function (string $ability, string $actor, bool|int|null $expected): void {
+    $quote = Quote::factory()->create();
+    $user = PolicyActors::resolve($actor, $quote->order->customer);
+
+    $response = Gate::forUser($user)->inspect($ability, $quote);
+
+    expect([$response->allowed(), $response->status()])->toBe(PolicyActors::outcome($expected));
+})->with(fn (): iterable => quoteAbilityRows(['accept', 'negotiate', 'decline'], PolicyActors::hiddenDraft()));
 
 it('leaves accepting, negotiating and declining to the order\'s customer, whatever the quote or order state', function (string $ability, string $actor, bool|int|null $expected): void {
     $quote = Quote::factory()->sent()->create();
@@ -154,4 +181,19 @@ it('gives a customer holding a staff role no staff ability on any quote', functi
         expect(Gate::forUser($customer)->inspect($ability, $quote)->status())->toBe(404, $ability)
             ->and(Gate::forUser($customer)->inspect($ability, $own)->status())->toBe(403, $ability);
     }
+});
+
+it('never lets a user whose type is staff own an order, whatever the order\'s customer_id says', function (): void {
+    $quote = Quote::factory()->sent()->create();
+    $order = $quote->order;
+    $formerCustomer = $order->customer;
+    $formerCustomer->forceFill(['type' => UserType::Staff])->save();
+    $gate = Gate::forUser($formerCustomer->fresh());
+
+    foreach (['view', 'acceptQuote', 'submit'] as $ability) {
+        expect($gate->inspect($ability, $order)->allowed())->toBeFalse($ability);
+    }
+
+    expect($gate->inspect('accept', $quote)->allowed())->toBeFalse()
+        ->and($gate->inspect('view', $quote)->allowed())->toBeFalse();
 });

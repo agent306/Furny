@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Domain\Identity\Enums\UserType;
 use App\Domain\Identity\Models\User;
 use App\Domain\Messaging\Models\Message;
 use App\Domain\Orders\Models\Order;
@@ -94,6 +95,17 @@ describe('create', function (): void {
                 ->and($gate->allows('createInternalNote', [Message::class, $order]))->toBeTrue()
                 ->and($gate->allows('viewThread', [Message::class, $order]))->toBeTrue();
         });
+
+        it('fails closed for a closed or cancelled order whose timestamp is missing', function (string $stateClass): void {
+            $order = Order::factory()->inState($stateClass)->state(['closed_at' => null, 'cancelled_at' => null])->create();
+
+            $response = Gate::forUser($order->customer)->inspect('create', [Message::class, $order]);
+
+            expect([$response->allowed(), $response->status(), $response->code()])->toBe([false, 422, 'thread_closed']);
+        })->with([
+            'closed' => Closed::class,
+            'cancelled' => Cancelled::class,
+        ]);
 
         it('is decided after ownership and before the verification of the contact', function (): void {
             $unverified = User::factory()->unverified()->create();
@@ -215,4 +227,32 @@ it('gives a customer holding a staff role no staff ability on other customers\' 
     $own = Order::factory()->inState(Submitted::class)->for(Project::factory()->forCustomer($customer), 'project')->create();
 
     expect(Gate::forUser($customer)->inspect('createInternalNote', [Message::class, $own])->status())->toBe(403);
+});
+
+describe('on a soft-deleted order', function (): void {
+    it('still serves the customer\'s thread and edits, and hides it from strangers', function (): void {
+        $order = Order::factory()->inState(Submitted::class)->create();
+        $message = Message::factory()->for($order)->state(['created_at' => CarbonImmutable::now()->subMinutes(2)])->create();
+        $customer = $order->customer;
+        $order->delete();
+        $fresh = Message::query()->findOrFail($message->id);
+
+        expect(Gate::forUser($customer)->allows('viewThread', [Message::class, $order]))->toBeTrue()
+            ->and(Gate::forUser($customer)->allows('update', $fresh))->toBeTrue()
+            ->and(Gate::forUser($customer)->allows('delete', $fresh))->toBeTrue()
+            ->and(Gate::forUser(User::factory()->create())->inspect('update', $fresh)->status())->toBe(404)
+            ->and(Gate::forUser(User::factory()->create())->inspect('viewThread', [Message::class, $order])->status())->toBe(404);
+    });
+});
+
+it('never lets a user whose type is staff own an order, whatever the order\'s customer_id says', function (): void {
+    $order = Order::factory()->inState(Submitted::class)->create();
+    $message = Message::factory()->for($order)->create();
+    $formerCustomer = $order->customer;
+    $formerCustomer->forceFill(['type' => UserType::Staff])->save();
+    $gate = Gate::forUser($formerCustomer->fresh());
+
+    expect($gate->allows('viewThread', [Message::class, $order]))->toBeFalse()
+        ->and($gate->allows('create', [Message::class, $order]))->toBeFalse()
+        ->and($gate->allows('update', $message))->toBeFalse();
 });

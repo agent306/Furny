@@ -39,10 +39,10 @@ final class OrderPolicy
         return $this->staffCanOnly($user, $order, PermissionName::OrdersView);
     }
 
-    /** T1: a customer orders from a project of their own. */
-    public function create(User $user, Project $project): Response
+    /** T1: a customer orders from a project of their own; without a project there is nothing to order from. */
+    public function create(User $user, ?Project $project = null): Response
     {
-        $own = $user->isCustomer() && $project->owner_id === $user->id;
+        $own = $project !== null && $user->isCustomer() && $project->owner_id === $user->id;
 
         return $this->allowOrDeny($own, $user, $own);
     }

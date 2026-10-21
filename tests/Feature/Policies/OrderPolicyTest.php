@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Domain\Identity\Enums\PermissionName;
+use App\Domain\Identity\Enums\UserType;
 use App\Domain\Identity\Models\User;
 use App\Domain\Orders\Models\Order;
 use App\Domain\Orders\States\Cancelled;
@@ -114,6 +115,26 @@ describe('owner-only abilities', function (): void {
 
         expect([$response->allowed(), $response->status()])->toBe(PolicyActors::outcome($expected));
     })->with(fn (): array => PolicyActors::rows(PolicyActors::ownerOrStaff([])));
+});
+
+it('denies create without a project instead of throwing', function (string $actor): void {
+    $user = PolicyActors::resolve($actor, User::factory()->create());
+
+    $response = Gate::forUser($user)->inspect('create', Order::class);
+
+    expect($response->allowed())->toBeFalse()
+        ->and($user->can('create', Order::class))->toBeFalse();
+})->with(['customer', 'staff-owner', 'support']);
+
+it('never lets a user whose type is staff own an order, whatever the order\'s customer_id says', function (): void {
+    $order = Order::factory()->inState(Submitted::class)->create();
+    $formerCustomer = $order->customer;
+    $formerCustomer->forceFill(['type' => UserType::Staff])->save();
+    $gate = Gate::forUser($formerCustomer->fresh());
+
+    foreach (['view', 'viewInternal', 'acceptQuote', 'submit', 'withdraw'] as $ability) {
+        expect($gate->inspect($ability, $order)->allowed())->toBeFalse($ability);
+    }
 });
 
 describe('staff abilities', function (): void {

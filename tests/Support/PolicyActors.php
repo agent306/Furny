@@ -104,4 +104,26 @@ final class PolicyActors
     {
         return ['customer' => 403] + self::ownerOrStaff($staffAllowed);
     }
+
+    /**
+     * Like `staffOnly()` for a draft quote or change proposal, which is staff-internal: the customer who
+     * owns the order is told 404 as well, as if the draft did not exist.
+     *
+     * @param  list<string>  $staffAllowed  staff actors holding the permission
+     * @return array<string, bool|int|null>
+     */
+    public static function staffOnlyDraft(array $staffAllowed): array
+    {
+        return ['customer' => 404] + self::staffOnly($staffAllowed);
+    }
+
+    /**
+     * Like `ownerOrStaff([])` for a draft: even the owning customer is told 404.
+     *
+     * @return array<string, bool|int|null>
+     */
+    public static function hiddenDraft(): array
+    {
+        return ['customer' => 404] + self::ownerOrStaff([]);
+    }
 }

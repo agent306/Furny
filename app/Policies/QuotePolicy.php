@@ -13,8 +13,8 @@ use App\Policies\Concerns\ChecksOrderOwnership;
 use Illuminate\Auth\Access\Response;
 
 /**
- * 13 §8.6. A customer owns a quote through its order; a draft quote is staff-internal, so the customer
- * is told 404 for it. Whether the quote can still be accepted, declined or negotiated is the state
+ * 13 §8.6. A customer owns a quote through its order; a draft quote is staff-internal, so its customer
+ * is told 404 for every ability. Whether the quote can still be accepted, declined or negotiated is the state
  * machine's call (09, P7).
  */
 final class QuotePolicy
@@ -23,7 +23,7 @@ final class QuotePolicy
 
     public function view(User $user, Quote $quote): Response
     {
-        return $this->ownerOnceVisibleOrStaffCan($user, $quote, $quote->status !== QuoteStatus::Draft, PermissionName::OrdersView);
+        return $this->ownerOrStaffCan($user, $quote, PermissionName::OrdersView);
     }
 
     public function downloadPdf(User $user, Quote $quote): Response
@@ -81,6 +81,6 @@ final class QuotePolicy
             return $response;
         }
 
-        return Response::denyWithStatus(403, trans_icu('quotes.errors.not_draft'), 'quote_not_draft');
+        return Response::denyWithStatus(422, trans_icu('quotes.errors.not_draft'), 'quote_not_draft');
     }
 }

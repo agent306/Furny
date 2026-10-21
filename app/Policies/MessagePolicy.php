@@ -96,15 +96,18 @@ final class MessagePolicy
         return $this->allowOrDeny($mayWrite && $message->author_id === $user->id && $message->kind === MessageKind::Text, $user, $own);
     }
 
-    /** Cancelled or closed for more than 90 days (to the second, so exactly 90 days is still open). */
+    /** Cancelled or closed for more than 90 days (to the second, so exactly 90 days is still open); no timestamp counts as closed. */
     private function isThreadClosed(Order $order): bool
     {
-        $closedAt = match ($order->state->key()) {
-            OrderStateKey::Cancelled => $order->cancelled_at,
-            OrderStateKey::Closed => $order->closed_at,
-            default => null,
-        };
+        $key = $order->state->key();
 
-        return $closedAt !== null && $closedAt->lt(CarbonImmutable::now()->subDays(self::THREAD_CLOSED_AFTER_DAYS));
+        if ($key !== OrderStateKey::Cancelled && $key !== OrderStateKey::Closed) {
+            return false;
+        }
+
+        $closedAt = $key === OrderStateKey::Cancelled ? $order->cancelled_at : $order->closed_at;
+
+        // A terminal order without its timestamp should not exist; it fails closed rather than staying open for ever.
+        return $closedAt === null || $closedAt->lt(CarbonImmutable::now()->subDays(self::THREAD_CLOSED_AFTER_DAYS));
     }
 }

@@ -6,15 +6,14 @@ namespace App\Policies;
 
 use App\Domain\Identity\Enums\PermissionName;
 use App\Domain\Identity\Models\User;
-use App\Domain\Orders\Enums\ChangeProposalStatus;
 use App\Domain\Orders\Models\ChangeProposal;
 use App\Domain\Orders\Models\Order;
 use App\Policies\Concerns\ChecksOrderOwnership;
 use Illuminate\Auth\Access\Response;
 
 /**
- * 13 §8.7. A customer owns a proposal through its order; a draft proposal is staff-internal, so the
- * customer is told 404 for it. Whether the proposal is still open is the state machine's call (09, P7).
+ * 13 §8.7. A customer owns a proposal through its order; a draft proposal is staff-internal, so its
+ * customer is told 404 for every ability. Whether the proposal is still open is the state machine's call (09, P7).
  */
 final class ChangeProposalPolicy
 {
@@ -22,7 +21,7 @@ final class ChangeProposalPolicy
 
     public function view(User $user, ChangeProposal $proposal): Response
     {
-        return $this->ownerOnceVisibleOrStaffCan($user, $proposal, $proposal->status !== ChangeProposalStatus::Draft, PermissionName::OrdersView);
+        return $this->ownerOrStaffCan($user, $proposal, PermissionName::OrdersView);
     }
 
     public function create(User $user, Order $order): Response
