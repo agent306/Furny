@@ -341,3 +341,54 @@ export {
     wallLength,
 } from './plan/commands/helpers';
 export type { EndpointRef, WallProps } from './plan/commands/helpers';
+export {
+    BOARD_TYPES,
+    CatalogEdgeBandSchema,
+    CatalogFinishSchema,
+    CatalogHardwareSchema,
+    CatalogLabourRateSchema,
+    CatalogMaterialSchema,
+    CatalogSnapshotSchema,
+    CatalogTaxRateSchema,
+    FINISH_TYPES,
+    HARDWARE_CATEGORIES,
+    HARDWARE_UNITS,
+    LABOUR_KEYS,
+    LABOUR_UNITS,
+    MATERIAL_ROLES,
+    PricingSettingsSchema,
+    SHEET_BILLING_MODES,
+    SURFACES,
+} from './catalog/snapshot';
+export type {
+    BoardType,
+    CatalogEdgeBand,
+    CatalogFinish,
+    CatalogHardware,
+    CatalogLabourRate,
+    CatalogMaterial,
+    CatalogSnapshot,
+    CatalogTaxRate,
+    FinishType,
+    HardwareCategory,
+    HardwareUnit,
+    LabourKey,
+    LabourUnit,
+    MaterialRole,
+    PricingSettings,
+    SheetBillingMode,
+    Surface,
+} from './catalog/snapshot';
+export {
+    HARDWARE_ROLE_KEYS,
+    HARDWARE_SPEC_SCHEMAS,
+    parseHardwareSpecs,
+} from './catalog/specs';
+export type {
+    HardwareRoleKey,
+    HardwareSpecs,
+    HardwareSpecsOf,
+} from './catalog/specs';
+export { indexCatalog } from './furniture/catalogIndex';
+export type { CatalogIndex } from './furniture/catalogIndex';
+export { DEFAULT_DENSITY } from './furniture/rules/weight';
