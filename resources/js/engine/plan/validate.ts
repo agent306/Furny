@@ -54,7 +54,7 @@ export type PlanIssueCode = (typeof PLAN_ISSUE_CODES)[number];
 
 const MESSAGE_KEY_PREFIX = 'plan_editor.issues.';
 /** Float noise allowance for the opening bounds test (mm). */
-const BOUNDS_TOL = 1e-6;
+export const BOUNDS_TOL = 1e-6;
 const CACHE_SIZE = 4;
 /** mm; collinear walls overlapping by no more than this are not reported. */
 const MIN_OVERLAP = 1;

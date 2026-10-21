@@ -870,7 +870,10 @@ export function reclampOpenings(
  * The next free label, `D{n}` for doors and `W{n}` for windows, where `n` is
  * one more than the largest number in an existing `D{n}` / `W{n}` label.
  */
-export function nextOpeningLabel(d: Doc, kind: 'door' | 'window'): string {
+export function nextOpeningLabel(
+    d: Pick<PlanDocument, 'openings'>,
+    kind: 'door' | 'window',
+): string {
     const letter = kind === 'door' ? 'D' : 'W';
     const pattern = new RegExp(`^${letter}(\\d+)$`);
     let largest = 0;

@@ -4,21 +4,23 @@
  *
  * `validate` and `run` share one planner per command: it reads the document
  * (or the draft) and returns the refusal or the values to write, so the two
- * can never disagree. `run` then only writes the values that differ, which
- * keeps a command that changes nothing patch-free (the bus drops its entry).
+ * can never disagree. A command that changes nothing writes the same values
+ * back; `mutative` records no patch for that, so the bus drops its entry.
  *
  * Params schemas check types only. Numeric ranges are checked by `validate`
  * so that an out-of-range value is `out_of_range` with `{ field, min, max }`
  * (04 §6.6) and not a generic `invalid_params`.
  *
- * Rulings carried by this file (logged in spec 19):
- * - Height above the wall top: `addOpening` reduces the height to
- *   `wall.height - sillHeight` (04 §6.6 says so for windows; it is applied to
- *   every kind, so a default door on a low wall also fits) and refuses
- *   `opening_too_tall` only when what is left is under the 300 mm minimum.
- *   `setOpeningProps` reduces a height that came from a kind default the same
- *   way. An explicit height or sill in `resizeOpening` / `setOpeningProps`,
- *   and a `moveOpening` to a lower wall, is refused `opening_too_tall`.
+ * Rulings carried by this file (ledgered for the spec 19 reconciliation):
+ * - Height above the wall top (04 §6.6): only a window is shortened, to
+ *   `wall.height - sillHeight`, by `addOpening` (explicit or default height)
+ *   and by `setOpeningProps` (a height that came from the new kind's default).
+ *   A door or opening whose default height does not fit is `opening_too_tall`;
+ *   an explicit height over `wall.height - sillHeight` is `out_of_range` on
+ *   `height` (max = what is left above the sill), as in the range table. A
+ *   sill that pushes an existing height over the top is `opening_too_tall`,
+ *   as is a `moveOpening` to a lower wall. Less than 300 mm above the sill is
+ *   always `opening_too_tall`.
  * - Like `setWallProps`, the height rule is judged only when the height, the
  *   sill or the wall changes, so an opening that is already too tall (a dirty
  *   import) can still be moved along its wall or flipped. Bounds and overlap
@@ -33,7 +35,6 @@
  *   change moves the kept edge by half a millimetre.
  */
 import { z } from 'zod';
-import type { Draft } from 'mutative';
 import { CommandAbort } from '../../commands/types';
 import { cmpId } from '../../compare';
 import { dist } from '../../geometry/vec2';
@@ -50,6 +51,7 @@ import {
 } from '../schema';
 import type { Opening, PlanDocument, Wall } from '../schema';
 import type { EngineMessage } from '../types';
+import { BOUNDS_TOL } from '../validate';
 import { definePlanCommand } from './define';
 import { nextOpeningLabel, overlaps, pushDeleted } from './helpers';
 import type { PlanCommandContext, PlanDefaults } from './pipeline';
@@ -68,8 +70,6 @@ type Doc = Pick<PlanDocument, 'nodes' | 'walls' | 'openings'>;
 type Kind = Opening['kind'];
 type Planned<T> = T | { error: EngineMessage };
 
-/** Float slack when testing integer offsets against a wall length (mm). */
-const SLACK = 1e-6;
 /** `[min, max]` characters of an opening label; `null` is no label. */
 const LABEL_RANGE = [1, 16] as const;
 
@@ -196,11 +196,11 @@ function checkTypeOfKind(
         : message('type_mismatch', { kind, type });
 }
 
-/** `out_of_range` unless the label is `null` or 1 to 16 characters. */
+/** `out_of_range` unless the label is `null` or 1 to 16 characters (code points). */
 function checkLabel(label: string | null, field: string): EngineMessage | null {
     return label === null
         ? null
-        : checkRange(field, label.length, ...LABEL_RANGE);
+        : checkRange(field, [...label].length, ...LABEL_RANGE);
 }
 
 /** The centre-line length of a wall, or the missing node. */
@@ -230,7 +230,10 @@ function checkPlacement(
     if (hasError(measured)) return measured.error;
     const { length } = measured;
     const half = at.width / 2;
-    if (at.offset < half - SLACK || at.offset > length - half + SLACK) {
+    if (
+        at.offset < half - BOUNDS_TOL ||
+        at.offset > length - half + BOUNDS_TOL
+    ) {
         return message('opening_no_fit', {
             wallId: wall.id,
             ...(selfId === null ? {} : { openingId: selfId }),
@@ -253,20 +256,31 @@ function checkPlacement(
     return null;
 }
 
+/** What to do with a height that reaches over the wall top. */
+type HeightRule =
+    /** Shorten it to what is left above the sill (windows). */
+    | { how: 'reduce' }
+    /** `opening_too_tall`. */
+    | { how: 'refuse' }
+    /** `out_of_range` on `field`: the caller gave this height. */
+    | { how: 'explicit'; field: string };
+
 /**
- * Keeps `sill + height` under the wall top. `reduce` shortens the height to
- * what is left above the sill, `refuse` is `opening_too_tall`; both refuse
- * when under the minimum height is left.
+ * Keeps `sill + height` under the wall top as `rule` says. Less than the
+ * minimum height above the sill is always `opening_too_tall`.
  */
 function fitHeight(
     wall: Wall,
     sill: number,
     height: number,
-    how: 'reduce' | 'refuse',
+    rule: HeightRule,
     openingId: string | null,
 ): Planned<{ height: number }> {
     const room = wall.height - sill;
-    if (room < OPENING_HEIGHT_RANGE[0] || (how === 'refuse' && height > room)) {
+    if (
+        room < OPENING_HEIGHT_RANGE[0] ||
+        (height > room && rule.how === 'refuse')
+    ) {
         return {
             error: message('opening_too_tall', {
                 wallId: wall.id,
@@ -274,6 +288,15 @@ function fitHeight(
                 sillHeight: sill,
                 height,
                 wallHeight: wall.height,
+            }),
+        };
+    }
+    if (height > room && rule.how === 'explicit') {
+        return {
+            error: message('out_of_range', {
+                field: rule.field,
+                min: OPENING_HEIGHT_RANGE[0],
+                max: room,
             }),
         };
     }
@@ -303,7 +326,7 @@ function planAdd(
             ? p.label
             : p.kind === 'opening'
               ? null
-              : nextOpeningLabel(doc as Draft<PlanDocument>, p.kind);
+              : nextOpeningLabel(doc, p.kind);
 
     const refusal =
         checkRange('width', width, ...OPENING_WIDTH_RANGE) ??
@@ -314,7 +337,13 @@ function planAdd(
         checkOpeningCapacity(doc);
     if (refusal !== null) return { error: refusal };
 
-    const fitted = fitHeight(wall, sillHeight, wanted, 'reduce', null);
+    const rule: HeightRule =
+        p.kind === 'window'
+            ? { how: 'reduce' }
+            : p.height === undefined
+              ? { how: 'refuse' }
+              : { how: 'explicit', field: 'height' };
+    const fitted = fitHeight(wall, sillHeight, wanted, rule, null);
     if (hasError(fitted)) return fitted;
     const placement = checkPlacement(doc, wall, { offset, width }, null);
     if (placement !== null) return { error: placement };
@@ -409,8 +438,8 @@ const moveOpening = definePlanCommand<MoveOpeningParams>({
         const plan = planMove(d, p);
         if (hasError(plan)) throw new CommandAbort(plan.error);
         const opening = d.openings[p.openingId]!;
-        if (opening.wallId !== plan.wallId) opening.wallId = plan.wallId;
-        if (opening.offset !== plan.offset) opening.offset = plan.offset;
+        opening.wallId = plan.wallId;
+        opening.offset = plan.offset;
     },
     mergeKey: (p) => `moveOpening:${p.openingId}`,
     mergeMode: 'replace',
@@ -451,21 +480,19 @@ function planResize(
               ? mm(o.offset - o.width / 2 + width / 2)
               : mm(o.offset + o.width / 2 - width / 2);
 
-    const wall = doc.walls[o.wallId];
-    if (wall !== undefined) {
-        if (height !== o.height || sillHeight !== o.sillHeight) {
-            const fitted = fitHeight(wall, sillHeight, height, 'refuse', o.id);
-            if (hasError(fitted)) return fitted;
-        }
-        if (offset !== o.offset || width !== o.width) {
-            const placement = checkPlacement(
-                doc,
-                wall,
-                { offset, width },
-                o.id,
-            );
-            if (placement !== null) return { error: placement };
-        }
+    if (!has(doc.walls, o.wallId)) return { error: notFound(o.wallId) };
+    const wall = doc.walls[o.wallId]!;
+    if (height !== o.height || sillHeight !== o.sillHeight) {
+        const rule: HeightRule =
+            p.height === undefined
+                ? { how: 'refuse' }
+                : { how: 'explicit', field: 'height' };
+        const fitted = fitHeight(wall, sillHeight, height, rule, o.id);
+        if (hasError(fitted)) return fitted;
+    }
+    if (offset !== o.offset || width !== o.width) {
+        const placement = checkPlacement(doc, wall, { offset, width }, o.id);
+        if (placement !== null) return { error: placement };
     }
     return { offset, width, height, sillHeight };
 }
@@ -482,12 +509,10 @@ const resizeOpening = definePlanCommand<ResizeOpeningParams>({
         const plan = planResize(d, p);
         if (hasError(plan)) throw new CommandAbort(plan.error);
         const opening = d.openings[p.openingId]!;
-        if (opening.offset !== plan.offset) opening.offset = plan.offset;
-        if (opening.width !== plan.width) opening.width = plan.width;
-        if (opening.height !== plan.height) opening.height = plan.height;
-        if (opening.sillHeight !== plan.sillHeight) {
-            opening.sillHeight = plan.sillHeight;
-        }
+        opening.offset = plan.offset;
+        opening.width = plan.width;
+        opening.height = plan.height;
+        opening.sillHeight = plan.sillHeight;
     },
     mergeKey: (p) => `resizeOpening:${p.openingId}`,
     mergeMode: 'replace',
@@ -548,10 +573,14 @@ function planProps(
         wall !== undefined &&
         (height !== o.height || sillHeight !== o.sillHeight)
     ) {
-        // only a height that came from the new kind's default is shortened
-        const how =
-            kindChanged && props.height === undefined ? 'reduce' : 'refuse';
-        const fitted = fitHeight(wall, sillHeight, height, how, o.id);
+        // only a window's height that came from its kind default is shortened
+        const rule: HeightRule =
+            props.height !== undefined
+                ? { how: 'explicit', field: 'props.height' }
+                : kind === 'window' && kindChanged
+                  ? { how: 'reduce' }
+                  : { how: 'refuse' };
+        const fitted = fitHeight(wall, sillHeight, height, rule, o.id);
         if (hasError(fitted)) return fitted;
         height = fitted.height;
     }
@@ -589,15 +618,7 @@ const setOpeningProps = definePlanCommand<SetOpeningPropsParams>({
             const opening = d.openings[id]!;
             const plan = planProps(d, opening, p.props, ctx.defaults);
             if (hasError(plan)) throw new CommandAbort(plan.error);
-            if (opening.kind !== plan.kind) opening.kind = plan.kind;
-            if (opening.type !== plan.type) opening.type = plan.type;
-            if (opening.height !== plan.height) opening.height = plan.height;
-            if (opening.sillHeight !== plan.sillHeight) {
-                opening.sillHeight = plan.sillHeight;
-            }
-            if (opening.hinge !== plan.hinge) opening.hinge = plan.hinge;
-            if (opening.swing !== plan.swing) opening.swing = plan.swing;
-            if (opening.label !== plan.label) opening.label = plan.label;
+            Object.assign(opening, plan);
         }
     },
     touchesGeometry: true,

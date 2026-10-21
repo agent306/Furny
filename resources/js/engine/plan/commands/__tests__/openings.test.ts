@@ -344,17 +344,9 @@ describe('addOpening', () => {
         expectUndoRestores(bus, start);
     });
 
-    it('reduces an explicit height too, and a door on a low wall', () => {
+    it('reduces an explicit window height that reaches over the wall top', () => {
         const { g, w } = oneWall({ height: 2000 });
         const bus = busOf(g);
-        const door = ok(
-            bus.execute('addOpening', {
-                wallId: w,
-                kind: 'door',
-                offset: 1000,
-            }),
-        );
-        expect(openingOf(bus, door.result.openingId).height).toBe(2000);
         const window = ok(
             bus.execute('addOpening', {
                 wallId: w,
@@ -365,6 +357,55 @@ describe('addOpening', () => {
             }),
         );
         expect(openingOf(bus, window.result.openingId).height).toBe(1200);
+    });
+
+    it('does not shorten a door or opening: the default is too_tall, an explicit height out_of_range', () => {
+        const { g, w } = oneWall({ height: 2000 });
+        const bus = busOf(g);
+        for (const kind of ['door', 'opening'] as const) {
+            expectRefusedUntouched(
+                bus,
+                () =>
+                    bus.execute('addOpening', {
+                        wallId: w,
+                        kind,
+                        offset: 1000,
+                    }),
+                'opening_too_tall',
+            );
+            // an explicit sill under the default height
+            expectRefusedUntouched(
+                bus,
+                () =>
+                    bus.execute('addOpening', {
+                        wallId: w,
+                        kind,
+                        offset: 1000,
+                        sillHeight: 200,
+                    }),
+                'opening_too_tall',
+            );
+            const e = refused(
+                bus.execute('addOpening', {
+                    wallId: w,
+                    kind,
+                    offset: 1000,
+                    height: 2100,
+                }),
+            );
+            expect(e.code).toBe('out_of_range');
+            expect(e.params).toEqual({ field: 'height', min: 300, max: 2000 });
+        }
+        expect(bus.history().undo).toHaveLength(0);
+        const r = ok(
+            bus.execute('addOpening', {
+                wallId: w,
+                kind: 'door',
+                offset: 1000,
+                height: 2000,
+            }),
+        );
+        expect(openingOf(bus, r.result.openingId).height).toBe(2000);
     });
 
     it('keeps a window that ends exactly at the wall top, and reduces down to 300', () => {
@@ -527,6 +568,13 @@ describe('addOpening', () => {
             max: 6000,
         });
         ok(add({ label: 'x'.repeat(16) })());
+        // length counts characters, not UTF-16 units: an emoji is one
+        ok(add({ label: '\u{1F6AA}'.repeat(16), offset: 4000 })());
+        expectRefusedUntouched(
+            bus,
+            add({ label: '\u{1F6AA}'.repeat(17), offset: 1000 }),
+            'out_of_range',
+        );
     });
 
     it('refuses when the plan already holds the most openings', () => {
@@ -909,7 +957,7 @@ describe('resizeOpening', () => {
                     height: 1501,
                     keep: 'center',
                 }),
-            'opening_too_tall',
+            'out_of_range',
         );
         expectRefusedUntouched(
             bus,
@@ -1105,6 +1153,56 @@ describe('setOpeningProps', () => {
         });
     });
 
+    it('a kind change to door or opening that does not fit under the wall is opening_too_tall', () => {
+        const { g, w } = oneWall({ height: 2000 });
+        const win = g.opening(w, 1000, 900, {
+            kind: 'window',
+            type: 'casement',
+            height: 1200,
+            sillHeight: 900,
+        });
+        const bus = busOf(g);
+        for (const kind of ['door', 'opening'] as const) {
+            expectRefusedUntouched(
+                bus,
+                () =>
+                    bus.execute('setOpeningProps', {
+                        openingIds: [win],
+                        props: { kind },
+                    }),
+                'opening_too_tall',
+            );
+        }
+        // a height that fits is accepted
+        ok(
+            bus.execute('setOpeningProps', {
+                openingIds: [win],
+                props: { kind: 'door', height: 2000 },
+            }),
+        );
+        expect(openingOf(bus, win)).toMatchObject({
+            kind: 'door',
+            sillHeight: 0,
+            height: 2000,
+        });
+    });
+
+    it('a kind change that leaves under 300 mm above the sill is opening_too_tall', () => {
+        const { g, w } = oneWall({ height: 1100 });
+        const door = g.opening(w, 1000, 900, { height: 1000 });
+        const bus = busOf(g);
+        // window sill 900 on a 1100 wall: 200 mm left
+        expectRefusedUntouched(
+            bus,
+            () =>
+                bus.execute('setOpeningProps', {
+                    openingIds: [door],
+                    props: { kind: 'window' },
+                }),
+            'opening_too_tall',
+        );
+    });
+
     it('sets type, hinge, swing, label and height on several openings at once', () => {
         const { g, w } = oneWall();
         const a = g.opening(w, 1000, 900);
@@ -1216,7 +1314,7 @@ describe('setOpeningProps', () => {
                     openingIds: [o],
                     props: { height: 1600 },
                 }),
-            'opening_too_tall',
+            'out_of_range',
         );
         expectRefusedUntouched(
             bus,
@@ -1433,6 +1531,67 @@ describe('with an opening that is already too tall', () => {
         ok(bus.execute('deleteOpenings', { openingIds: [o] }));
         for (let i = 0; i < 4; i += 1) expect(bus.undo()).toBe(true);
         expect(bus.getDoc()).toEqual(start);
+    });
+
+    it('can still be resized in width, with or without moving its edge', () => {
+        const { g, w } = oneWall({ height: 2000 });
+        const o = g.opening(w, 2000, 900, { height: 2100 });
+        const bus = busOf(g);
+        const start = bus.getDoc();
+        ok(
+            bus.execute('resizeOpening', {
+                openingId: o,
+                width: 1000,
+                keep: 'center',
+            }),
+        );
+        expect(openingOf(bus, o)).toMatchObject({
+            offset: 2000,
+            width: 1000,
+            height: 2100,
+        });
+        ok(
+            bus.execute('resizeOpening', {
+                openingId: o,
+                width: 1200,
+                keep: 'start',
+            }),
+        );
+        expect(openingOf(bus, o)).toMatchObject({
+            offset: 2100,
+            width: 1200,
+            height: 2100,
+        });
+        // changing the sill or the height re-judges it
+        expectRefusedUntouched(
+            bus,
+            () =>
+                bus.execute('resizeOpening', {
+                    openingId: o,
+                    sillHeight: 100,
+                    keep: 'center',
+                }),
+            'opening_too_tall',
+        );
+        for (let i = 0; i < 2; i += 1) expect(bus.undo()).toBe(true);
+        expect(bus.getDoc()).toEqual(start);
+    });
+});
+
+describe('with an opening whose wall is missing', () => {
+    it('refuses a resize as not_found', () => {
+        const { g } = oneWall();
+        const o = g.opening('w_0000000999', 1000, 900);
+        const bus = busOf(g);
+        const e = refused(
+            bus.execute('resizeOpening', {
+                openingId: o,
+                width: 1000,
+                keep: 'center',
+            }),
+        );
+        expect(e.code).toBe('not_found');
+        expect(e.params).toEqual({ id: 'w_0000000999' });
     });
 });
 
