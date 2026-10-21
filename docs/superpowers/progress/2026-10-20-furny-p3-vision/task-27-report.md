@@ -23,7 +23,7 @@ Status: DONE_WITH_CONCERNS (concerns at the end).
 - `vision/app/pipeline/labeling/agent.py` (new)
 - `vision/app/pipeline/labeling/llm.py`
 - `vision/app/pipeline/labeling/tools.py`
-- `vision/tests/test_agent.py` (extended; 29 tests now, 2 of them the Task 26 ones)
+- `vision/tests/test_agent.py` (extended; 28 tests now, 2 of them the Task 26 ones)
 - `vision/tests/test_annotate_tools.py` (2 tests for carries 3a and 3c)
 - `vision/tests/test_llm_labeler.py` (1 test replaced)
 - this report
