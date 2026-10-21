@@ -167,11 +167,12 @@ describe('validatePlan on valid documents', () => {
 });
 
 describe('validatePlan on the dirty import fixture', () => {
-    it('reports its crossing walls, orphan node and out-of-bounds window', () => {
+    it('reports its crossing and overlapping walls, orphan node and out-of-bounds window', () => {
         const issues = validate(makeDirtyPlan());
         expect(issues.map((i) => [i.code, i.severity])).toEqual([
             ['plan.orphan_node', 'warning'],
             ['plan.opening_out_of_bounds', 'error'],
+            ['plan.walls_intersect', 'warning'],
             ['plan.walls_intersect', 'warning'],
         ]);
     });
@@ -246,6 +247,61 @@ describe('plan.wall_degenerate', () => {
         const doc = rect();
         doc.walls[W(1)]!.a = 'n_gone000000';
         expect(validate(doc).map((i) => i.code)).toEqual(['plan.node_missing']);
+    });
+});
+
+describe('non-finite coordinates', () => {
+    it('reports a NaN-length wall as degenerate with length 0, never NaN', () => {
+        const doc = rect();
+        doc.nodes[N(1)]!.x = Number.NaN;
+        const degenerate = only(validate(doc), 'plan.wall_degenerate');
+        expect(degenerate.map((i) => i.entityIds[0])).toEqual([W(1), W(4)]);
+        for (const i of degenerate) expect(i.params.length).toBe(0);
+        const codes = new Set(validate(doc).map((i) => i.code));
+        expect(codes).toEqual(
+            new Set(['plan.wall_degenerate', 'plan.value_out_of_range']),
+        );
+    });
+
+    it('does not put NaN or Infinity into any issue params', () => {
+        const doc = rect();
+        addOpening(doc, O(1), W(1));
+        doc.nodes[N(2)]!.x = Number.NaN;
+        doc.nodes[N(3)]!.y = Number.POSITIVE_INFINITY;
+        for (const i of validate(doc)) {
+            for (const v of Object.values(i.params)) {
+                if (typeof v === 'number')
+                    expect(Number.isFinite(v)).toBe(true);
+            }
+        }
+    });
+});
+
+describe('untrusted input does not stall validation', () => {
+    it.each([1e12, Number.NaN, Number.POSITIVE_INFINITY])(
+        'skips derivation for a node at %s and still reports the range error',
+        (bad) => {
+            const doc = rect();
+            addMeta(doc, R(1), 2500, 2000);
+            doc.nodes[N(1)]!.x = bad;
+            const t0 = performance.now();
+            const issues = validate(doc);
+            expect(performance.now() - t0).toBeLessThan(100);
+            expect(issues.map((i) => [i.code, i.params.field])).toContainEqual([
+                'plan.value_out_of_range',
+                'node.x',
+            ]);
+            // Without derived rooms the anchor cannot be judged.
+            expect(only(issues, 'plan.room_anchor_outside')).toEqual([]);
+        },
+    );
+
+    it('derives rooms normally for in-range coordinates', () => {
+        const doc = rect();
+        addMeta(doc, R(1), -5000, -5000);
+        expect(validate(doc).map((i) => i.code)).toEqual([
+            'plan.room_anchor_outside',
+        ]);
     });
 });
 
@@ -359,6 +415,13 @@ describe('plan.opening_wall_missing', () => {
 });
 
 describe('plan.opening_out_of_bounds', () => {
+    it('accepts openings touching either end of the wall exactly', () => {
+        const doc = rect();
+        addOpening(doc, O(1), W(1), { offset: 450, width: 900 }); // 0..900
+        addOpening(doc, O(2), W(1), { offset: 4550, width: 900 }); // 4100..5000
+        expect(validate(doc)).toEqual([]);
+    });
+
     it('flags width/2 > offset (error)', () => {
         const doc = rect();
         addOpening(doc, O(1), W(1), { offset: 449, width: 900 });
@@ -500,12 +563,93 @@ describe('plan.walls_intersect', () => {
         expect(validate(doc)).toEqual([]);
     });
 
-    it('does not report collinear overlaps (04 §6.4 counts only point crossings)', () => {
+    it('flags a collinear overlap longer than 1 mm (warning, overlapMm)', () => {
         const doc = rect();
         addNode(doc, N(5), 1000, 0);
         addNode(doc, N(6), 3000, 0);
+        addWall(doc, W(5), N(5), N(6)); // inside wall 1, no shared node
+        expect(single(doc, 'plan.walls_intersect')).toEqual({
+            code: 'plan.walls_intersect',
+            severity: 'warning',
+            messageKey: 'plan_editor.issues.walls_intersect',
+            params: { overlapMm: 2000 },
+            entityIds: [W(1), W(5)],
+        });
+    });
+
+    it('ignores a collinear overlap of 1 mm and flags 2 mm', () => {
+        const doc = rect();
+        addNode(doc, N(5), 4999, 0);
+        addNode(doc, N(6), 6000, 0);
         addWall(doc, W(5), N(5), N(6));
-        expect(only(validate(doc), 'plan.walls_intersect')).toEqual([]);
+        expect(validate(doc)).toEqual([]);
+        doc.nodes[N(5)]!.x = 4998;
+        const issue = single(doc, 'plan.walls_intersect');
+        expect(issue.params).toEqual({ overlapMm: 2 });
+        expect(issue.entityIds).toEqual([W(1), W(5)]);
+    });
+
+    it('flags collinear walls A->B and A->C that run the same way from a shared node', () => {
+        const doc = rect();
+        addNode(doc, N(5), 3000, 0);
+        addWall(doc, W(5), N(1), N(5)); // n1 -> (3000, 0), inside wall 1
+        const issue = single(doc, 'plan.walls_intersect');
+        expect(issue.params).toEqual({ overlapMm: 3000 });
+        expect(issue.entityIds).toEqual([W(1), W(5)]);
+    });
+
+    it('does not flag collinear walls that run opposite ways from a shared node', () => {
+        const doc = rect();
+        addNode(doc, N(5), -2000, 0);
+        addWall(doc, W(5), N(1), N(5));
+        expect(validate(doc)).toEqual([]);
+    });
+
+    it('reports the same unordered node pair only as wall_duplicate', () => {
+        const doc = rect();
+        addWall(doc, W(5), N(1), N(2));
+        expect(validate(doc).map((i) => i.code)).toEqual([
+            'plan.wall_duplicate',
+        ]);
+    });
+
+    it('ignores near misses and flags an overshoot just over the tolerance', () => {
+        const through = (endY: number): PlanDocument => {
+            const doc = rect();
+            addNode(doc, N(5), 2500, -1000);
+            addNode(doc, N(6), 2500, endY);
+            addWall(doc, W(5), N(5), N(6)); // vertical, ends near wall 1 (y = 0)
+            return doc;
+        };
+        expect(validate(through(-2))).toEqual([]); // 2 mm short
+        expect(validate(through(0.4))).toEqual([]); // overshoot within tolerance
+        const hit = single(through(0.6), 'plan.walls_intersect'); // just over
+        expect(hit.entityIds).toEqual([W(1), W(5)]);
+        expect(single(through(1), 'plan.walls_intersect').params).toEqual({
+            x: 2500,
+            y: 0,
+        });
+    });
+
+    it('finds collinear walls that are a fraction of a millimetre apart', () => {
+        const doc = rect();
+        addNode(doc, N(5), 1000, 0.4);
+        addNode(doc, N(6), 3000, 0.4);
+        addWall(doc, W(5), N(5), N(6)); // parallel, 0.4 mm off wall 1
+        expect(single(doc, 'plan.walls_intersect').params).toEqual({
+            overlapMm: 2000,
+        });
+        doc.nodes[N(5)]!.y = 2;
+        doc.nodes[N(6)]!.y = 2; // 2 mm off: a near miss
+        expect(validate(doc)).toEqual([]);
+    });
+
+    it('ignores walls shorter than the minimum wall length when looking for crossings', () => {
+        const doc = rect();
+        addNode(doc, N(5), 2500, -4);
+        addNode(doc, N(6), 2500, 5);
+        addWall(doc, W(5), N(5), N(6)); // 9 mm long, crosses wall 1
+        expect(single(doc, 'plan.wall_degenerate').entityIds).toEqual([W(5)]);
     });
 
     it('reports each crossing pair once', () => {
@@ -682,6 +826,37 @@ describe('plan.too_large', () => {
     });
 });
 
+describe('plan.too_large: UTF-8 byte counting', () => {
+    const withLabel = (text: string): PlanDocument => {
+        const doc = rect();
+        doc.annotations.labels['t_0000000001'] = {
+            id: 't_0000000001',
+            position: { x: 0, y: 0 },
+            text,
+            fontSize: 250,
+            rotation: 0,
+        };
+        return doc;
+    };
+
+    it('counts a four-byte character as four bytes, not two UTF-16 units of three', () => {
+        // 400 000 emoji = 1.6 MB of UTF-8 (2.4 MB if counted 3 per UTF-16 unit).
+        const under = only(
+            validate(withLabel('\u{1F600}'.repeat(400_000))),
+            'plan.too_large',
+        );
+        expect(under).toEqual([]);
+        // 540 000 emoji = 2.16 MB, but only 1.08 M UTF-16 units.
+        const over = only(
+            validate(withLabel('\u{1F600}'.repeat(540_000))),
+            'plan.too_large',
+        );
+        expect(over).toHaveLength(1);
+        expect(over[0]!.params.kind).toBe('json');
+        expect(over[0]!.params.count as number).toBeGreaterThan(2_097_152);
+    });
+});
+
 describe('plan.value_out_of_range', () => {
     function rangeIssue(doc: PlanDocument): Issue {
         return single(doc, 'plan.value_out_of_range');
@@ -717,6 +892,20 @@ describe('plan.value_out_of_range', () => {
         expect(issue.entityIds).toEqual([W(2)]);
         doc.walls[W(2)]!.height = 299;
         expect(rangeIssue(doc).params.field).toBe('wall.height');
+    });
+
+    it('flags opening width 6001 (upper bound)', () => {
+        const doc = rect();
+        addOpening(doc, O(1), W(1), { width: 6001 });
+        const issues = only(validate(doc), 'plan.value_out_of_range');
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.params).toEqual({
+            field: 'opening.width',
+            min: 300,
+            max: 6000,
+        });
+        doc.openings[O(1)]!.width = 6000;
+        expect(only(validate(doc), 'plan.value_out_of_range')).toEqual([]);
     });
 
     it('flags opening width 299 (300..6000)', () => {
@@ -790,6 +979,55 @@ describe('plan.value_out_of_range', () => {
         expect(fields.sort()).toEqual(['fixture.x', 'room.anchor.y']);
     });
 
+    it('checks one coordinate each of a placement, label, dimension and background', () => {
+        const doc = rect();
+        doc.placements['f_0000000001'] = {
+            id: 'f_0000000001',
+            designId: 'd',
+            x: 1_000_001,
+            y: 0,
+            rotation: 0,
+            elevation: 0,
+            mirrored: false,
+            wallAttachment: null,
+        };
+        doc.annotations.labels['t_0000000001'] = {
+            id: 't_0000000001',
+            position: { x: 0, y: -1_000_001 },
+            text: 'x',
+            fontSize: 250,
+            rotation: 0,
+        };
+        doc.annotations.dimensions['d_0000000001'] = {
+            id: 'd_0000000001',
+            a: { x: 0, y: 0 },
+            b: { x: 1_000_001, y: 0 },
+            offset: 0,
+            attachedTo: null,
+        };
+        doc.background = {
+            importId: null,
+            mediaUuid: 'u',
+            pixelWidth: 1,
+            pixelHeight: 1,
+            mmPerPixel: 1,
+            position: { x: 0, y: 1_000_001 },
+            rotation: 0,
+            opacity: 1,
+            visible: true,
+            locked: false,
+        };
+        const found = only(validate(doc), 'plan.value_out_of_range').map(
+            (i) => [i.params.field, i.entityIds],
+        );
+        expect(found).toEqual([
+            ['placement.x', ['f_0000000001']],
+            ['label.position.y', ['t_0000000001']],
+            ['dimension.b.x', ['d_0000000001']],
+            ['background.position.y', []],
+        ]);
+    });
+
     it('flags background mmPerPixel <= 0 or non-finite', () => {
         const doc = rect();
         doc.background = {
@@ -846,6 +1084,11 @@ describe('validatePlan memoisation', () => {
         for (const d of docs.slice(1)) validatePlan(d);
         expect(validatePlan(docs[0]!)).not.toBe(first);
         expect(validatePlan(docs[0]!)).toEqual(first);
+    });
+
+    it('returns a frozen array', () => {
+        const issues = validatePlan(rect());
+        expect(Object.isFrozen(issues)).toBe(true);
     });
 
     it('treats a modified copy as a different document', () => {

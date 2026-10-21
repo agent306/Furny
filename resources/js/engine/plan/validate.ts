@@ -51,12 +51,16 @@ const MESSAGE_KEY_PREFIX = 'plan_editor.issues.';
 /** Float noise allowance for the opening bounds test (mm). */
 const BOUNDS_TOL = 1e-6;
 const CACHE_SIZE = 4;
+/** mm; collinear walls overlapping by no more than this are not reported. */
+const MIN_OVERLAP = 1;
 
 const cmpId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const sortedIds = (record: Record<string, unknown>): string[] =>
     Object.keys(record).sort(cmpId);
 /** Rounds to integer mm and normalises `-0`. */
 const mm = (v: number): number => roundMm(v) + 0;
+/** Like `mm`, but `0` for NaN and infinities so params stay finite numbers. */
+const finiteMm = (v: number): number => (Number.isFinite(v) ? mm(v) : 0);
 
 function issue(
     code: PlanIssueCode,
@@ -144,7 +148,7 @@ function wallDegenerate(placed: Map<string, Placed>): Issue[] {
             issue(
                 'plan.wall_degenerate',
                 'error',
-                { wallId: w.id, length: w.a === w.b ? 0 : mm(w.length) },
+                { wallId: w.id, length: w.a === w.b ? 0 : finiteMm(w.length) },
                 [w.id],
             ),
         );
@@ -241,7 +245,7 @@ function openingBounds(
     for (const id of sortedIds(doc.openings)) {
         const o = doc.openings[id]!;
         const wall = placed.get(o.wallId);
-        if (!wall) continue;
+        if (!wall || !Number.isFinite(wall.length)) continue;
         const half = o.width / 2;
         if (
             o.offset >= half - BOUNDS_TOL &&
@@ -338,13 +342,21 @@ function openingTooTall(doc: PlanDocument): Issue[] {
 }
 
 /**
- * Walls whose centre lines cross at a point interior to both (04 §6.4: a
- * `point` intersection strictly inside each wall). Shared nodes, T-junctions
- * (an endpoint on the other wall) and collinear overlaps are not crossings.
+ * Walls that cross without sharing a node (04 §6.4: a `point` intersection
+ * strictly inside both walls; params `{ x, y }`) and walls that overlap along
+ * a common line for more than `MIN_OVERLAP` mm (params `{ overlapMm }`), also
+ * when they share a node and run the same way from it. Not reported: walls
+ * meeting at a shared node (there a `point` hit lies on an end of both walls,
+ * so it is never interior), T-junctions (an endpoint on the other wall's
+ * interior), collinear walls running opposite ways from a shared node, and
+ * the same unordered node pair (that is `wall_duplicate`).
  */
 function wallsIntersect(placed: Map<string, Placed>): Issue[] {
     const walls = [...placed.values()].filter(
-        (w) => w.a !== w.b && w.length >= MIN_WALL_LENGTH,
+        (w) =>
+            w.a !== w.b &&
+            Number.isFinite(w.length) &&
+            w.length >= MIN_WALL_LENGTH,
     );
     if (walls.length < 2) return [];
     const index = new Flatbush(walls.length);
@@ -371,24 +383,37 @@ function wallsIntersect(placed: Map<string, Placed>): Issue[] {
         for (const j of near) {
             if (j <= i) continue;
             const other = walls[j]!;
+            // Same unordered node pair: reported as `wall_duplicate`.
             if (
-                w.a === other.a ||
-                w.a === other.b ||
-                w.b === other.a ||
-                w.b === other.b
+                (w.a === other.a && w.b === other.b) ||
+                (w.a === other.b && w.b === other.a)
             )
                 continue;
             const hit = intersectSegments(
                 { a: w.p, b: w.q },
                 { a: other.p, b: other.q },
             );
+            const ids: string[] = [w.id, other.id].sort(cmpId);
+            if (hit.kind === 'overlap') {
+                const overlap = (hit.t1 - hit.t0) * w.length;
+                if (overlap > MIN_OVERLAP) {
+                    out.push(
+                        issue(
+                            'plan.walls_intersect',
+                            'warning',
+                            { overlapMm: mm(overlap) },
+                            ids,
+                        ),
+                    );
+                }
+                continue;
+            }
             if (
                 hit.kind !== 'point' ||
                 !interior(hit.t, w.length) ||
                 !interior(hit.u, other.length)
             )
                 continue;
-            const ids: string[] = [w.id, other.id].sort(cmpId);
             out.push(
                 issue(
                     'plan.walls_intersect',
@@ -444,8 +469,13 @@ function tooLarge(doc: PlanDocument): Issue[] {
     return out;
 }
 
-function valuesInRange(doc: PlanDocument): Issue[] {
+/** Range issues, and whether every coordinate in the document is finite and within +-MAX_COORD. */
+function valuesInRange(doc: PlanDocument): {
+    issues: Issue[];
+    coordinatesOk: boolean;
+} {
     const out: Issue[] = [];
+    let coordinatesOk = true;
     const check = (
         entityId: string | null,
         field: string,
@@ -474,8 +504,10 @@ function valuesInRange(doc: PlanDocument): Issue[] {
         field: string,
         point: { x: number; y: number },
     ): void => {
+        const before = out.length;
         check(id, `${field}.x`, point.x, -MAX_COORD, MAX_COORD);
         check(id, `${field}.y`, point.y, -MAX_COORD, MAX_COORD);
+        if (out.length > before) coordinatesOk = false;
     };
 
     for (const id of sortedIds(doc.nodes)) coords(id, 'node', doc.nodes[id]!);
@@ -517,12 +549,19 @@ function valuesInRange(doc: PlanDocument): Issue[] {
             );
         }
     }
-    return out;
+    return { issues: out, coordinatesOk };
 }
 
 function runValidation(doc: PlanDocument, geom?: DerivedPlan): Issue[] {
     const placed = placeWalls(doc);
-    const issues = [
+    const ranges = valuesInRange(doc);
+    // Derivation is only attempted for coordinates it can be trusted with:
+    // untrusted documents (CLI input) must not be able to stall validation.
+    const derived =
+        Object.keys(doc.rooms).length === 0
+            ? null
+            : (geom ?? (ranges.coordinatesOk ? derivePlanGeometry(doc) : null));
+    return [
         ...nodeMissing(doc),
         ...wallDegenerate(placed),
         ...wallDuplicate(doc),
@@ -532,13 +571,10 @@ function runValidation(doc: PlanDocument, geom?: DerivedPlan): Issue[] {
         ...openingOverlap(doc),
         ...openingTooTall(doc),
         ...wallsIntersect(placed),
-        ...(Object.keys(doc.rooms).length > 0
-            ? roomAnchors(doc, geom ?? derivePlanGeometry(doc))
-            : []),
+        ...(derived ? roomAnchors(doc, derived) : []),
         ...tooLarge(doc),
-        ...valuesInRange(doc),
+        ...ranges.issues,
     ];
-    return issues;
 }
 
 /** Least recently used last. Holds the results for the last four documents. */
@@ -548,6 +584,9 @@ const cache: Array<{ doc: PlanDocument; issues: Issue[] }> = [];
  * Validates a plan document (03 §1.1). Memoised by document identity (last 4
  * documents); `geom` is only used to avoid re-deriving when the caller has
  * the derived plan of this same input. Issues are ordered by rule, then id.
+ * The returned array is frozen. Room anchors are judged against derived rooms,
+ * so that check is skipped when a coordinate is non-finite or beyond +-MAX_COORD
+ * (the range issues are still reported).
  */
 export function validatePlan(doc: PlanDocument, geom?: DerivedPlan): Issue[] {
     const at = cache.findIndex((entry) => entry.doc === doc);
@@ -556,7 +595,7 @@ export function validatePlan(doc: PlanDocument, geom?: DerivedPlan): Issue[] {
         cache.push(entry!);
         return entry!.issues;
     }
-    const issues = runValidation(doc, geom);
+    const issues = Object.freeze(runValidation(doc, geom)) as Issue[];
     cache.push({ doc, issues });
     if (cache.length > CACHE_SIZE) cache.shift();
     return issues;
