@@ -31,9 +31,10 @@ describe('package manager and pinned packages', () => {
             'vite.config.ts',
             'resources/views/app.blade.php',
             'resources/css/app.css',
+            'resources/js/pages/Welcome.vue',
         ]) {
             expect(readFileSync(f, 'utf8')).not.toMatch(
-                /bunny|fonts\.googleapis/,
+                /bunny|fonts\.googleapis|rsms\.me/,
             );
         }
     });

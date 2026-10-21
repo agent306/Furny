@@ -14,7 +14,7 @@ export default defineConfig({
         noExternal: true,
     },
     build: {
-        ssr: fileURLToPath(new URL('./src/cli.ts', import.meta.url)),
+        ssr: fileURLToPath(new URL('./src/main.ts', import.meta.url)),
         target: 'node22',
         outDir: fileURLToPath(new URL('./dist', import.meta.url)),
         emptyOutDir: true,

@@ -1,5 +1,4 @@
 /// <reference types="node" />
-import { pathToFileURL } from 'node:url';
 import { ENGINE_VERSION } from '@/engine';
 
 /** Response envelope of every engine CLI command (01 §5.4). */
@@ -68,10 +67,4 @@ export async function main(): Promise<void> {
 
     process.stdout.write(`${JSON.stringify(response)}\n`);
     process.exitCode = 0;
-}
-
-const entry = process.argv[1];
-
-if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
-    void main();
 }
