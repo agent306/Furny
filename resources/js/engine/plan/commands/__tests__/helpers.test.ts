@@ -1,16 +1,9 @@
-import { create, type Draft } from 'mutative';
+import { create } from 'mutative';
 import { describe, expect, it } from 'vitest';
-import { CommandAbort, type CommandOutput } from '../../../commands/types';
+import { CommandAbort } from '../../../commands/types';
 import { dist } from '../../../geometry/vec2';
-import { testIds } from '../../../testing/ids';
 import type { IdPrefix } from '../../../ids';
-import type {
-    FurniturePlacement,
-    Opening,
-    PlanDocument,
-    Wall,
-} from '../../schema';
-import { emptyPlan } from '../../testing/fixtures';
+import type { PlanDocument, Wall } from '../../schema';
 import { definePlanCommand } from '../define';
 import {
     insertWallSegment,
@@ -24,121 +17,18 @@ import {
     type WallProps,
 } from '../helpers';
 import { createPlanBus } from '../registry';
+import {
+    Graph,
+    oneWall,
+    PROPS,
+    type GraphDoc,
+    type GraphOut,
+} from '../../testing/graph';
 
 // ---- fixtures ----------------------------------------------------------------
 
-type Doc = Draft<PlanDocument>;
-type NewId = (prefix: IdPrefix) => string;
-type Out = CommandOutput<unknown>;
-
-const PROPS: WallProps = {
-    thickness: 115,
-    height: 2700,
-    kind: 'interior',
-    justification: 'center',
-    material: 'brick',
-    colorHex: null,
-};
-
-/** Builds a wall graph; ids come from the same factory the helpers will use. */
-class Graph {
-    readonly ids: NewId = testIds();
-    doc: PlanDocument = emptyPlan();
-
-    node(x: number, y: number): string {
-        const id = this.ids('n');
-        this.doc.nodes[id] = { id, x, y };
-        return id;
-    }
-
-    wall(a: string, b: string, props: Partial<WallProps> = {}): string {
-        const id = this.ids('w');
-        this.doc.walls[id] = { ...PROPS, ...props, id, a, b };
-        return id;
-    }
-
-    opening(
-        wallId: string,
-        offset: number,
-        width: number,
-        over: Partial<Opening> = {},
-    ): string {
-        const id = this.ids('o');
-        this.doc.openings[id] = {
-            id,
-            wallId,
-            kind: 'door',
-            type: 'single_swing',
-            offset,
-            width,
-            height: 2100,
-            sillHeight: 0,
-            hinge: 'start',
-            swing: 'left',
-            label: null,
-            ...over,
-        };
-        return id;
-    }
-
-    placement(
-        wallId: string,
-        side: 'left' | 'right',
-        x: number,
-        y: number,
-    ): string {
-        const id = this.ids('f');
-        const p: FurniturePlacement = {
-            id,
-            designId: 'des_x',
-            x,
-            y,
-            rotation: 0,
-            elevation: 0,
-            mirrored: false,
-            wallAttachment: { wallId, side },
-        };
-        this.doc.placements[id] = p;
-        return id;
-    }
-
-    dimension(wallId: string): string {
-        const id = this.ids('d');
-        this.doc.annotations.dimensions[id] = {
-            id,
-            a: { x: 0, y: 0 },
-            b: { x: 1, y: 1 },
-            offset: 300,
-            attachedTo: { kind: 'wall', wallId, face: 'left' },
-        };
-        return id;
-    }
-
-    /** The graph after `recipe` ran on a mutative draft with this factory. */
-    run<T>(recipe: (d: Doc, ctx: { newId: NewId }, out: Out) => T): {
-        doc: PlanDocument;
-        value: T;
-        out: Out;
-    } {
-        const out: Out = { result: undefined, warnings: [], deletedIds: [] };
-        let value!: T;
-        const doc = create(this.doc, (d) => {
-            value = recipe(d as Doc, { newId: this.ids }, out);
-        });
-        return { doc, value, out };
-    }
-
-    /** The abort code `recipe` throws. */
-    abortOf(recipe: (d: Doc, ctx: { newId: NewId }, out: Out) => unknown) {
-        try {
-            this.run(recipe);
-        } catch (error) {
-            if (error instanceof CommandAbort) return error.reason;
-            throw error;
-        }
-        throw new Error('expected a CommandAbort');
-    }
-}
+type Doc = GraphDoc;
+type Out = GraphOut;
 
 const wallsOf = (doc: PlanDocument): Wall[] =>
     Object.values(doc.walls).sort((p, q) => (p.id < q.id ? -1 : 1));
@@ -150,20 +40,6 @@ const at = (doc: PlanDocument, id: string): [number, number] => [
 
 const endsOf = (doc: PlanDocument, wallId: string): string =>
     `${at(doc, doc.walls[wallId]!.a)}>${at(doc, doc.walls[wallId]!.b)}`;
-
-/** A horizontal wall (0,0)-(5000,0) with distinguishable properties. */
-function oneWall() {
-    const g = new Graph();
-    const a = g.node(0, 0);
-    const b = g.node(5000, 0);
-    const w = g.wall(a, b, {
-        thickness: 230,
-        kind: 'exterior',
-        material: 'concrete',
-        colorHex: '#aabbcc',
-    });
-    return { g, a, b, w };
-}
 
 // ---- wallLength ------------------------------------------------------------
 

@@ -2,159 +2,28 @@ import { describe, expect, it } from 'vitest';
 import type { ExecuteResult } from '../../../commands/types';
 import { mulberry32 } from '../../../testing/random';
 import { testIds } from '../../../testing/ids';
-import type { IdPrefix } from '../../../ids';
 import { derivePlanGeometry } from '../../derive';
-import type {
-    DimensionAnnotation,
-    FurniturePlacement,
-    Opening,
-    PlanDocument,
-    RoomMeta,
-    Wall,
-} from '../../schema';
+import type { PlanDocument, Wall } from '../../schema';
 import {
-    emptyPlan,
     makeDirtyPlan,
     makeGridPlan,
     makeRectPlan,
 } from '../../testing/fixtures';
 import { planErrorKeys, validatePlan } from '../../validate';
 import type { PlanCommandContext } from '../pipeline';
-import { PLAN_COMMANDS, createPlanBus } from '../registry';
+import { PLAN_COMMANDS } from '../registry';
 import { WALL_COMMANDS } from '../walls';
+import {
+    Graph,
+    busOf,
+    ok,
+    oneWall as sharedOneWall,
+    planBus,
+    refused,
+    type NewId,
+} from '../../testing/graph';
 
 // ---- fixtures ----------------------------------------------------------------
-
-type NewId = (prefix: IdPrefix) => string;
-
-const FOOTPRINT = { width: 1000, depth: 500, height: 700 };
-
-/** Builds a wall graph by hand; ids come from the factory the bus will use. */
-class Graph {
-    readonly ids: NewId = testIds();
-    doc: PlanDocument = emptyPlan();
-
-    node(x: number, y: number): string {
-        const id = this.ids('n');
-        this.doc.nodes[id] = { id, x, y };
-        return id;
-    }
-
-    wall(a: string, b: string, over: Partial<Wall> = {}): string {
-        const id = this.ids('w');
-        this.doc.walls[id] = {
-            id,
-            a,
-            b,
-            thickness: 115,
-            height: 2700,
-            kind: 'interior',
-            justification: 'center',
-            material: 'brick',
-            colorHex: null,
-            ...over,
-        };
-        return id;
-    }
-
-    opening(
-        wallId: string,
-        offset: number,
-        width: number,
-        over: Partial<Opening> = {},
-    ): string {
-        const id = this.ids('o');
-        this.doc.openings[id] = {
-            id,
-            wallId,
-            kind: 'door',
-            type: 'single_swing',
-            offset,
-            width,
-            height: 2100,
-            sillHeight: 0,
-            hinge: 'start',
-            swing: 'left',
-            label: null,
-            ...over,
-        };
-        return id;
-    }
-
-    placement(
-        wallId: string,
-        side: 'left' | 'right',
-        x: number,
-        y: number,
-    ): string {
-        const id = this.ids('f');
-        const p: FurniturePlacement = {
-            id,
-            designId: 'des_x',
-            x,
-            y,
-            rotation: 0,
-            elevation: 0,
-            mirrored: false,
-            wallAttachment: { wallId, side },
-        };
-        this.doc.placements[id] = p;
-        return id;
-    }
-
-    dimension(wallId: string, face: 'left' | 'right' | 'center'): string {
-        const id = this.ids('d');
-        const d: DimensionAnnotation = {
-            id,
-            a: { x: 0, y: 0 },
-            b: { x: 1, y: 1 },
-            offset: 300,
-            attachedTo: { kind: 'wall', wallId, face },
-        };
-        this.doc.annotations.dimensions[id] = d;
-        return id;
-    }
-
-    meta(name: string, x: number, y: number): string {
-        const id = this.ids('r');
-        const m: RoomMeta = {
-            id,
-            anchor: { x, y },
-            name,
-            type: 'other',
-            floorFinish: 'tile',
-            floorColorHex: null,
-            labelOffset: null,
-            showArea: true,
-        };
-        this.doc.rooms[id] = m;
-        return id;
-    }
-}
-
-function planBus(doc: PlanDocument, ids: NewId) {
-    return createPlanBus({
-        initial: doc,
-        footprints: () => FOOTPRINT,
-        newId: ids,
-    });
-}
-
-function busOf(g: Graph) {
-    return planBus(g.doc, g.ids);
-}
-
-/** The value of a successful execute. */
-function ok<T>(r: ExecuteResult<T>): Extract<ExecuteResult<T>, { ok: true }> {
-    if (!r.ok) throw new Error(`expected ok, got ${r.error.code}`);
-    return r;
-}
-
-/** The error of a refused execute. */
-function refused<T>(r: ExecuteResult<T>) {
-    if (r.ok) throw new Error('expected an error');
-    return r.error;
-}
 
 const pt = (x: number, y: number) => ({ point: { x, y } });
 
@@ -170,18 +39,10 @@ const endsOf = (doc: PlanDocument, w: Wall): string => {
     return `${a.x},${a.y}>${b.x},${b.y}`;
 };
 
-/** A horizontal 5000 mm wall (0,0)-(5000,0) with distinguishable properties. */
+/** `oneWall` of the shared builders plus its bus. */
 function oneWall() {
-    const g = new Graph();
-    const a = g.node(0, 0);
-    const b = g.node(5000, 0);
-    const w = g.wall(a, b, {
-        thickness: 230,
-        kind: 'exterior',
-        material: 'concrete',
-        colorHex: '#aabbcc',
-    });
-    return { g, a, b, w, bus: busOf(g) };
+    const one = sharedOneWall();
+    return { ...one, bus: busOf(one.g) };
 }
 
 /** A horizontal wall split at N (x = 2500) into two equal walls, plus a stem going down. */

@@ -30,6 +30,13 @@
  *   position to whole millimetres.
  * - `moveWall` has no node merge on finalize (04 §6.6 only asks for
  *   `splitIntersections`).
+ * - `moveWall` refuses (`wall_too_short`) when a neighbour would turn round
+ *   (its new direction against the old one has a dot product <= 0), even if
+ *   it would still be `MIN_WALL_LENGTH` long.
+ * - `setWallLength` never merges its own wall away: a moved end that would
+ *   snap onto the fixed end, or onto a node under `MIN_WALL_LENGTH` from it,
+ *   is refused `wall_too_short`. A length that would put the moved end
+ *   outside the coordinate range is `out_of_range` on `length`.
  * - `setWallLength.movedNodeId` is the node that was moved; with the finalize
  *   merge it may no longer exist.
  * - Pre-existing opening overlaps do not block a move (Task 22 ruling,
@@ -53,6 +60,7 @@ import {
     add,
     dist,
     dot,
+    len,
     normalize,
     perpLeft,
     roundPoint,
@@ -389,13 +397,19 @@ function checkWallMove(doc: Graph, p: MoveWallParams): EngineMessage | null {
     for (const w of touchedWalls(doc, wall)) {
         const missing = missingEnd(doc, w);
         if (missing !== null) return missing;
-        const short = checkLength(
-            w.id,
-            dist(
-                moves.get(w.a) ?? pointOf(doc, w.a),
-                moves.get(w.b) ?? pointOf(doc, w.b),
-            ),
+        const was = sub(pointOf(doc, w.b), pointOf(doc, w.a));
+        const now = sub(
+            moves.get(w.b) ?? pointOf(doc, w.b),
+            moves.get(w.a) ?? pointOf(doc, w.a),
         );
+        // a neighbour that would turn round is refused whatever its length
+        if (w.id !== wall.id && dot(now, was) <= 0) {
+            return message('wall_too_short', {
+                wallId: w.id,
+                length: mm(len(now)),
+            });
+        }
+        const short = checkLength(w.id, len(now));
         if (short !== null) return short;
     }
     return null;
@@ -408,10 +422,8 @@ const moveWall = definePlanCommand<MoveWallParams>({
     validate: (doc, p) => checkWallMove(doc, p),
     run(d, p, ctx, out) {
         const wall = d.walls[p.wallId]!;
-        const moves = wallMoveTargets(d, wall, mm(p.distance)) as Map<
-            string,
-            Vec2
-        >;
+        const moves = wallMoveTargets(d, wall, mm(p.distance));
+        if (!(moves instanceof Map)) throw new CommandAbort(moves);
         const touched = touchedWalls(d, wall).map((w) => ({
             id: w.id,
             oldLength: wallLength(d, w.id),
@@ -447,7 +459,7 @@ const moveWall = definePlanCommand<MoveWallParams>({
 function lengthTarget(
     doc: Graph,
     p: SetWallLengthParams,
-): { movingId: string; to: Vec2 } | { error: EngineMessage } {
+): { movingId: string; fixedId: string; to: Vec2 } | { error: EngineMessage } {
     const wall = doc.walls[p.wallId];
     if (wall === undefined) return { error: notFound(p.wallId) };
     const missing = missingEnd(doc, wall);
@@ -469,9 +481,25 @@ function lengthTarget(
             error: message('wall_too_short', { wallId: wall.id, length: 0 }),
         };
     }
+    const unit = normalize(way);
+    // the longest wall that keeps the moved end inside the coordinate range
+    let longest = MAX_SPAN;
+    for (const [from, step] of [
+        [fixed.x, unit.x],
+        [fixed.y, unit.y],
+    ] as const) {
+        if (Math.abs(step) < 1e-9) continue;
+        longest = Math.min(
+            longest,
+            Math.floor(((step > 0 ? MAX_COORD : -MAX_COORD) - from) / step),
+        );
+    }
+    const reach = checkRange('length', length, MIN_WALL_LENGTH, longest);
+    if (reach !== null) return { error: reach };
     return {
         movingId,
-        to: roundedPoint(add(fixed, scale(normalize(way), length))),
+        fixedId,
+        to: roundedPoint(add(fixed, scale(unit, length))),
     };
 }
 
@@ -490,6 +518,16 @@ const setWallLength = definePlanCommand<
     validate(doc, p) {
         const target = lengthTarget(doc, p);
         if ('error' in target) return target.error;
+        // The wall is never merged away: a moved end that would snap onto
+        // (or next to) its fixed end leaves it under the minimum length.
+        const snap = findSnapTarget(doc, target.movingId, target.to);
+        if (snap !== null) {
+            const short = checkLength(
+                p.wallId,
+                dist(pointOf(doc, target.fixedId), snap.at),
+            );
+            if (short !== null) return short;
+        }
         return checkNodeMove(doc, target.movingId, target.to, true);
     },
     run(d, p, ctx, out) {

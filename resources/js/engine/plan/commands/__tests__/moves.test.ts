@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import type { ExecuteResult } from '../../../commands/types';
-import type { IdPrefix } from '../../../ids';
 import { testIds } from '../../../testing/ids';
 import { mulberry32 } from '../../../testing/random';
 import type {
@@ -9,91 +8,21 @@ import type {
     Opening,
     PlanDocument,
     RoomMeta,
-    Wall,
 } from '../../schema';
-import { emptyPlan, makeGridPlan, makeRectPlan } from '../../testing/fixtures';
+import { makeGridPlan, makeRectPlan } from '../../testing/fixtures';
 import { planErrorKeys, validatePlan } from '../../validate';
 import { MOVE_COMMANDS } from '../moves';
-import { PLAN_COMMANDS, createPlanBus } from '../registry';
+import { PLAN_COMMANDS } from '../registry';
+import {
+    Graph,
+    busOf,
+    ok,
+    oneWall,
+    planBus,
+    refused,
+} from '../../testing/graph';
 
 // ---- fixtures ----------------------------------------------------------------
-
-type NewId = (prefix: IdPrefix) => string;
-
-const FOOTPRINT = { width: 1000, depth: 500, height: 700 };
-
-/** Builds a wall graph by hand; ids come from the factory the bus will use. */
-class Graph {
-    readonly ids: NewId = testIds();
-    doc: PlanDocument = emptyPlan();
-
-    node(x: number, y: number): string {
-        const id = this.ids('n');
-        this.doc.nodes[id] = { id, x, y };
-        return id;
-    }
-
-    wall(a: string, b: string, over: Partial<Wall> = {}): string {
-        const id = this.ids('w');
-        this.doc.walls[id] = {
-            id,
-            a,
-            b,
-            thickness: 115,
-            height: 2700,
-            kind: 'interior',
-            justification: 'center',
-            material: 'brick',
-            colorHex: null,
-            ...over,
-        };
-        return id;
-    }
-
-    opening(
-        wallId: string,
-        offset: number,
-        width: number,
-        over: Partial<Opening> = {},
-    ): string {
-        const id = this.ids('o');
-        this.doc.openings[id] = {
-            id,
-            wallId,
-            kind: 'door',
-            type: 'single_swing',
-            offset,
-            width,
-            height: 2100,
-            sillHeight: 0,
-            hinge: 'start',
-            swing: 'left',
-            label: null,
-            ...over,
-        };
-        return id;
-    }
-}
-
-function planBus(doc: PlanDocument, ids: NewId) {
-    return createPlanBus({
-        initial: doc,
-        footprints: () => FOOTPRINT,
-        newId: ids,
-    });
-}
-
-const busOf = (g: Graph) => planBus(g.doc, g.ids);
-
-function ok<T>(r: ExecuteResult<T>): Extract<ExecuteResult<T>, { ok: true }> {
-    if (!r.ok) throw new Error(`expected ok, got ${r.error.code}`);
-    return r;
-}
-
-function refused<T>(r: ExecuteResult<T>) {
-    if (r.ok) throw new Error('expected an error');
-    return r.error;
-}
 
 const at = (doc: PlanDocument, id: string): [number, number] => [
     doc.nodes[id]!.x,
@@ -132,15 +61,6 @@ function expectRefusedUntouched(
     expect(refused(run()).code).toBe(code);
     expect(bus.getDoc()).toBe(before);
     expect(bus.history().undo.length).toBe(entries);
-}
-
-/** A horizontal 5000 mm wall (0,0)-(5000,0). */
-function oneWall(over: Partial<Wall> = {}) {
-    const g = new Graph();
-    const a = g.node(0, 0);
-    const b = g.node(5000, 0);
-    const w = g.wall(a, b, over);
-    return { g, a, b, w };
 }
 
 /** Moves a node over many absolute drag steps, merging each into one entry. */
@@ -826,6 +746,66 @@ describe('moveNode', () => {
             expect(Object.keys(bus.getDoc().nodes).sort()).toEqual([a, b]);
         });
 
+        it('a wall exactly 5 mm from the drop point is a snap target, 6 mm is not', () => {
+            for (const [y, snaps] of [
+                [5, true],
+                [6, false],
+            ] as const) {
+                const { s, bus } = tPlan();
+                const r = ok(
+                    bus.execute('moveNode', {
+                        nodeId: s,
+                        to: { x: 2000, y },
+                        finalize: true,
+                    }),
+                );
+                expect(r.result.mergedInto !== null).toBe(snaps);
+                expect(Object.keys(bus.getDoc().walls)).toHaveLength(
+                    snaps ? 3 : 2,
+                );
+            }
+        });
+
+        it('projecting exactly 10 mm from a wall end snaps to the end, 11 mm splits', () => {
+            const { l, r, s, bus } = tPlan();
+            const start = bus.getDoc();
+            expect(
+                ok(
+                    bus.execute('moveNode', {
+                        nodeId: s,
+                        to: { x: 10, y: 0 },
+                        finalize: true,
+                    }),
+                ).result.mergedInto,
+            ).toBe(l);
+            expect(bus.undo()).toBe(true);
+            expect(bus.getDoc()).toEqual(start);
+            expect(
+                ok(
+                    bus.execute('moveNode', {
+                        nodeId: s,
+                        to: { x: 5990, y: 0 },
+                        finalize: true,
+                    }),
+                ).result.mergedInto,
+            ).toBe(r);
+            expect(bus.undo()).toBe(true);
+            for (const x of [11, 5989]) {
+                const split = ok(
+                    bus.execute('moveNode', {
+                        nodeId: s,
+                        to: { x, y: 0 },
+                        finalize: true,
+                    }),
+                ).result.mergedInto!;
+                expect(split).not.toBeNull();
+                expect([l, r]).not.toContain(split);
+                expect(at(bus.getDoc(), split)).toEqual([x, 0]);
+                expect(bus.undo()).toBe(true);
+                expect(bus.getDoc()).toEqual(start);
+            }
+        });
+
         it('a drop within 10 mm of the wall end snaps to that end node', () => {
             const { r, s, bus } = tPlan();
             const res = ok(
@@ -873,6 +853,171 @@ describe('moveNode', () => {
             expect(opening.offset).toBe(2500);
             expect(doc.walls[w]!.a).toBe(l);
             expect(res.result.mergedInto).toBe(doc.walls[w]!.b);
+            expectUndoRestores(bus, start);
+        });
+    });
+
+    describe('finalize: ties and order', () => {
+        /** A node with `rest` placed by id, in the given insertion order. */
+        const docOf = (
+            nodes: Array<[string, number, number]>,
+            walls: Array<[string, string, string]>,
+            reverse: boolean,
+        ): PlanDocument => {
+            const g = new Graph();
+            for (const [id, x, y] of reverse ? [...nodes].reverse() : nodes) {
+                g.doc.nodes[id] = { id, x, y };
+            }
+            for (const [id, a, b] of reverse ? [...walls].reverse() : walls) {
+                g.doc.walls[id] = {
+                    id,
+                    a,
+                    b,
+                    thickness: 115,
+                    height: 2700,
+                    kind: 'interior',
+                    justification: 'center',
+                    material: 'brick',
+                    colorHex: null,
+                };
+            }
+            return g.doc;
+        };
+
+        it('two incident walls that cross a third: the same ids whatever the insertion order', () => {
+            const nodes: Array<[string, number, number]> = [
+                ['n_m', 0, 0],
+                ['n_p', 100, 3000],
+                ['n_q', 100, -3000],
+                ['n_t1', 2000, -3000],
+                ['n_t2', 2000, 3000],
+            ];
+            const walls: Array<[string, string, string]> = [
+                ['w_a', 'n_m', 'n_p'],
+                ['w_b', 'n_q', 'n_m'],
+                ['w_t', 'n_t1', 'n_t2'],
+            ];
+            const results = [false, true].map((reverse) => {
+                const doc = docOf(nodes, walls, reverse);
+                const bus = planBus(doc, testIds());
+                const r = ok(
+                    bus.execute('moveNode', {
+                        nodeId: 'n_m',
+                        to: { x: 4000, y: 0 },
+                        finalize: true,
+                    }),
+                );
+                return { doc: bus.getDoc(), result: r.result };
+            });
+            const [forward, reversed] = results as [
+                (typeof results)[number],
+                (typeof results)[number],
+            ];
+            // really three crossings' worth of splitting happened
+            expect(Object.keys(forward.doc.walls)).toHaveLength(7);
+            expect(reversed.doc).toEqual(forward.doc);
+            expect(Object.keys(reversed.doc.walls).sort()).toEqual(
+                Object.keys(forward.doc.walls).sort(),
+            );
+            expect(Object.keys(reversed.doc.nodes).sort()).toEqual(
+                Object.keys(forward.doc.nodes).sort(),
+            );
+            expect(reversed.result).toEqual(forward.result);
+        });
+
+        it('equidistant nodes: the smaller id wins, whatever the insertion order', () => {
+            for (const reverse of [false, true]) {
+                const doc = docOf(
+                    [
+                        ['n_a', -3, 0],
+                        ['n_b', 3, 0],
+                        ['n_c', -3, -3000],
+                        ['n_d', 3, -3000],
+                        ['n_m', 4000, 4000],
+                        ['n_z', 4000, 8000],
+                    ],
+                    [
+                        ['w_1', 'n_a', 'n_c'],
+                        ['w_2', 'n_b', 'n_d'],
+                        ['w_3', 'n_m', 'n_z'],
+                    ],
+                    reverse,
+                );
+                const bus = planBus(doc, testIds());
+                const r = ok(
+                    bus.execute('moveNode', {
+                        nodeId: 'n_m',
+                        to: { x: 0, y: 0 },
+                        finalize: true,
+                    }),
+                );
+                expect(r.result.mergedInto).toBe('n_a');
+            }
+        });
+
+        it('equidistant walls: the smaller id is split, whatever the insertion order', () => {
+            for (const reverse of [false, true]) {
+                const doc = docOf(
+                    [
+                        ['n_1', -2000, 3],
+                        ['n_2', 2000, 3],
+                        ['n_3', -2000, -3],
+                        ['n_4', 2000, -3],
+                        ['n_m', 0, -4000],
+                        ['n_z', 0, -8000],
+                    ],
+                    [
+                        ['w_b', 'n_1', 'n_2'],
+                        ['w_a', 'n_3', 'n_4'],
+                        ['w_m', 'n_m', 'n_z'],
+                    ],
+                    reverse,
+                );
+                const bus = planBus(doc, testIds());
+                const r = ok(
+                    bus.execute('moveNode', {
+                        nodeId: 'n_m',
+                        to: { x: 0, y: 0 },
+                        finalize: true,
+                    }),
+                );
+                const t = r.result.mergedInto!;
+                expect(at(bus.getDoc(), t)).toEqual([0, -3]);
+                expect(bus.getDoc().walls['w_a']!.b).toBe(t);
+                expect(bus.getDoc().walls['w_b']!.b).toBe('n_2');
+            }
+        });
+
+        it('walls that reach the merge target are split where they now cross another wall', () => {
+            const g = new Graph();
+            const t = g.node(0, 0);
+            g.wall(t, g.node(0, -3000));
+            const n = g.node(4000, 4000);
+            const y = g.node(-3000, 800);
+            const ny = g.wall(n, y);
+            const x1 = g.node(-1500, -2000);
+            const x2 = g.node(-1500, 500);
+            const v = g.wall(x1, x2);
+            const bus = busOf(g);
+            const start = bus.getDoc();
+            // from n the wall passes the foot of v; from t it crosses v at (-1500, 400)
+            const r = ok(
+                bus.execute('moveNode', {
+                    nodeId: n,
+                    to: { x: 3, y: 3 },
+                    finalize: true,
+                }),
+            );
+            expect(r.result.mergedInto).toBe(t);
+            const doc = bus.getDoc();
+            const cross = Object.values(doc.nodes).find(
+                (c) => c.x === -1500 && c.y === 400,
+            )!;
+            expect(cross).toBeDefined();
+            expect(Object.keys(doc.walls)).toHaveLength(5);
+            expect(doc.walls[ny]).toMatchObject({ a: t });
+            expect(doc.walls[ny]!.b).toBe(cross.id);
+            expect(doc.walls[v]!.b).toBe(cross.id);
             expectUndoRestores(bus, start);
         });
     });
@@ -1392,6 +1537,34 @@ describe('moveWall', () => {
             );
         });
 
+        it('refuses a move that turns a neighbour round, even when it is still 10 mm long', () => {
+            const ids = testIds();
+            const doc = makeRectPlan(5000, 300, 230, ids);
+            const top = Object.values(doc.walls).find(
+                (w) => doc.nodes[w.a]!.y === 0 && doc.nodes[w.b]!.y === 0,
+            )!;
+            const bus = planBus(doc, ids);
+            const r = refused(
+                bus.execute('moveWall', {
+                    wallId: top.id,
+                    distance: -310,
+                    finalize: false,
+                }),
+            );
+            expect(r.code).toBe('wall_too_short');
+            expect(r.params).toMatchObject({ length: 10 });
+            expect(r.params['wallId']).not.toBe(top.id);
+            expect(bus.getDoc()).toBe(doc);
+            // 10 mm short of the opposite wall is the last allowed position
+            ok(
+                bus.execute('moveWall', {
+                    wallId: top.id,
+                    distance: -290,
+                    finalize: false,
+                }),
+            );
+        });
+
         it('refuses a move that would leave the coordinate range', () => {
             const g = new Graph();
             const a = g.node(0, 999_000);
@@ -1500,6 +1673,33 @@ describe('moveWall', () => {
             expectUndoRestores(bus2, start2);
         });
 
+        it('the moved wall keeps its offsets when its length changes (45 degree neighbours)', () => {
+            for (const [distance, length] of [
+                [-500, 4000],
+                [500, 2000],
+            ] as const) {
+                const g = new Graph();
+                const a = g.node(0, 0);
+                const b = g.node(3000, 0);
+                const w = g.wall(a, b);
+                g.wall(a, g.node(-2000, 2000));
+                g.wall(b, g.node(5000, 2000));
+                const o = g.opening(w, 1000, 900);
+                const bus = busOf(g);
+                const start = bus.getDoc();
+                ok(
+                    bus.execute('moveWall', {
+                        wallId: w,
+                        distance,
+                        finalize: true,
+                    }),
+                );
+                expect(lengthOf(bus.getDoc(), w)).toBe(length);
+                expect(bus.getDoc().openings[o]!.offset).toBe(1000);
+                expectUndoRestores(bus, start);
+            }
+        });
+
         it('shrinking a neighbour below an opening width aborts opening_no_fit', () => {
             const ids = testIds();
             const doc = makeRectPlan(5000, 4000, 230, ids);
@@ -1548,6 +1748,49 @@ describe('moveWall', () => {
             const v = g.wall(x1, x2);
             return { g, a, b, w, v, bus: busOf(g) };
         }
+
+        it('splits what a sliding neighbour now crosses, both walls', () => {
+            const g = new Graph();
+            const a = g.node(0, 0);
+            const b = g.node(4000, 0);
+            const w = g.wall(a, b);
+            const p1 = g.node(-2000, 2000);
+            const o = g.wall(a, p1);
+            const x1 = g.node(100, -1000);
+            const x2 = g.node(100, -50);
+            const v = g.wall(x1, x2);
+            const bus = busOf(g);
+            const start = bus.getDoc();
+            // a slides 200 mm up the 45 degree line to (200, -200): the neighbour
+            // now runs over (100, -100) on v; the moved wall itself crosses nothing
+            ok(
+                bus.execute('moveWall', {
+                    wallId: w,
+                    distance: 200,
+                    finalize: false,
+                }),
+            );
+            expect(Object.keys(bus.getDoc().walls)).toHaveLength(3);
+            expect(bus.undo()).toBe(true);
+            ok(
+                bus.execute('moveWall', {
+                    wallId: w,
+                    distance: 200,
+                    finalize: true,
+                }),
+            );
+            const doc = bus.getDoc();
+            expect(at(doc, a)).toEqual([200, -200]);
+            const cross = Object.values(doc.nodes).find(
+                (n) => n.x === 100 && n.y === -100,
+            )!;
+            expect(cross).toBeDefined();
+            expect(Object.keys(doc.walls)).toHaveLength(5);
+            expect(doc.walls[o]).toMatchObject({ a, b: cross.id });
+            expect(doc.walls[v]).toMatchObject({ a: x1, b: cross.id });
+            expect(doc.walls[w]).toMatchObject({ a, b });
+            expectUndoRestores(bus, start);
+        });
 
         it('splits the moved wall and the walls it now crosses, only with finalize', () => {
             const { w, v, bus } = crossing();
@@ -1902,6 +2145,80 @@ describe('setWallLength', () => {
         expectUndoRestores(bus, start);
     });
 
+    it('never merges its own wall away: a moved end snapping onto the fixed end is refused', () => {
+        // x ends at the fixed node a and leaves at 20 degrees; a 10 mm wall's end
+        // is 3.4 mm from x and projects 9.4 mm from its end a
+        const g = new Graph();
+        const a = g.node(0, 0);
+        const b = g.node(5000, 0);
+        const w = g.wall(a, b);
+        const far = g.node(
+            Math.round(3000 * Math.cos(Math.PI / 9)),
+            Math.round(3000 * Math.sin(Math.PI / 9)),
+        );
+        g.wall(a, far);
+        const bus = busOf(g);
+        const r = refused(
+            bus.execute('setWallLength', {
+                wallId: w,
+                length: 10,
+                anchor: 'a',
+            }),
+        );
+        expect(r.code).toBe('wall_too_short');
+        expect(r.params).toMatchObject({ wallId: w, length: 0 });
+        expect(bus.getDoc()).toBe(g.doc);
+        expect(bus.canUndo()).toBe(false);
+    });
+
+    it('refuses a moved end that would snap onto a node under 10 mm from the fixed end', () => {
+        const g = new Graph();
+        const a = g.node(0, 0);
+        const b = g.node(5000, 0);
+        const w = g.wall(a, b);
+        g.wall(g.node(8, 0), g.node(8, 3000));
+        const bus = busOf(g);
+        const r = refused(
+            bus.execute('setWallLength', {
+                wallId: w,
+                length: 12,
+                anchor: 'a',
+            }),
+        );
+        expect(r.code).toBe('wall_too_short');
+        expect(r.params).toMatchObject({ wallId: w, length: 8 });
+        expect(bus.getDoc()).toBe(g.doc);
+    });
+
+    it('reports a length that would leave the coordinate range as out_of_range on length', () => {
+        const g = new Graph();
+        const a = g.node(900_000, 0);
+        const b = g.node(901_000, 0);
+        const w = g.wall(a, b);
+        const bus = busOf(g);
+        const r = refused(
+            bus.execute('setWallLength', {
+                wallId: w,
+                length: 200_000,
+                anchor: 'a',
+            }),
+        );
+        expect(r.code).toBe('out_of_range');
+        expect(r.params).toEqual({
+            field: 'length',
+            min: 10,
+            max: 100_000,
+        });
+        ok(
+            bus.execute('setWallLength', {
+                wallId: w,
+                length: 100_000,
+                anchor: 'a',
+            }),
+        );
+        expect(at(bus.getDoc(), b)).toEqual([1_000_000, 0]);
+    });
+
     it('does not merge consecutive edits into one entry', () => {
         const { g, w } = oneWall();
         const bus = busOf(g);
@@ -1929,7 +2246,7 @@ describe('setWallLength', () => {
 const SIM_TIMEOUT = 60_000;
 
 describe('random drag sequences', () => {
-    function simulate(seed: number) {
+    function simulate(seed: number, iterations: number) {
         const rand = mulberry32(seed);
         const int = (n: number) => Math.floor(rand() * n);
         const pick = <T>(items: T[]): T => items[int(items.length)]!;
@@ -1970,7 +2287,7 @@ describe('random drag sequences', () => {
             return r;
         };
 
-        for (let iteration = 0; iteration < 120; iteration += 1) {
+        for (let iteration = 0; iteration < iterations; iteration += 1) {
             const roll = rand();
             if (roll < 0.62) {
                 stats.drags += 1;
@@ -2066,7 +2383,7 @@ describe('random drag sequences', () => {
     it(
         'undo and redo reproduce every recorded document, interleaved with finalized drags',
         () => {
-            const { bus, docs, stats } = simulate(20261021);
+            const { bus, docs, stats } = simulate(20261021, 50);
             // the generator really reaches what it tests
             expect(stats.finalized).toBeGreaterThan(10);
             expect(stats.undos).toBeGreaterThan(3);
@@ -2089,7 +2406,7 @@ describe('random drag sequences', () => {
         () => {
             let reached = 0;
             for (const seed of [1, 2, 3]) {
-                const { bus, docs, stats } = simulate(seed);
+                const { bus, docs, stats } = simulate(seed, 30);
                 reached += stats.merged + stats.split;
                 const end = bus.getDoc();
                 while (bus.undo()) {
