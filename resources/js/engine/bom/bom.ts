@@ -14,7 +14,7 @@ import type { Issue } from '../plan/types';
 import { ENGINE_VERSION } from '../version';
 import { cutSize } from './cutSizes';
 import { edgeBandLengths } from './edgeBanding';
-import { ceilDivBig, product, toSafeNumber } from './intMath';
+import { ceilDivBig, product, toSafeNumber } from '../money';
 import { nestSheets } from './nesting';
 import { rowIdentity, rowKeyOfIdentity } from './rowKey';
 import type {

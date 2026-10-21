@@ -9,7 +9,7 @@ import { cmpId } from '../compare';
 import { EDGE_IDS, type EdgeId } from '../furniture/schema';
 import type { Part } from '../furniture/types';
 import { EDGE_ALLOWANCE_MM, EDGE_WASTE_PERMILLE } from './constants';
-import { ceilDivBig, product } from './intMath';
+import { ceilDivBig, product } from '../money';
 
 const EDGE_LENGTH_OF: Record<EdgeId, 'length' | 'width'> = {
     L1: 'length',

@@ -50,13 +50,27 @@ export function roundHalfUpDiv(n: number, d: number): number {
     return toNumber(divRound(int(n, 'n'), positive(d, 'd')));
 }
 
+/** ceil(n / d) for n >= 0, d > 0, on BigInts (exact beyond 2^53); the result must be a safe integer. */
+export function ceilDivBig(n: bigint, d: bigint): number {
+    if (n < 0n) throw new RangeError(`n must be >= 0, got ${n}`);
+    if (d <= 0n) throw new RangeError(`d must be > 0, got ${d}`);
+    return toNumber((n + d - 1n) / d);
+}
+
 /** ceil(n / d) for n >= 0, d > 0. */
 export function ceilDiv(n: number, d: number): number {
     const bn = int(n, 'n');
     if (bn < 0n) throw new RangeError(`n must be >= 0, got ${n}`);
-    const bd = positive(d, 'd');
-    return toNumber((bn + bd - 1n) / bd);
+    return ceilDivBig(bn, positive(d, 'd'));
 }
+
+/** Product of safe integers, exact (BOM totals, 08 §1); convert the result with `toSafeNumber`. */
+export function product(...factors: number[]): bigint {
+    return factors.reduce((out, f) => out * int(f, 'operand'), 1n);
+}
+
+/** `value` as a number; throws when it is not a safe integer. */
+export { toNumber as toSafeNumber };
 
 /** roundHalfUpDiv(amount x bps, 10000) */
 export function applyBps(amountMinor: number, bps: number): number {

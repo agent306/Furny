@@ -16,11 +16,13 @@ import { indexCatalog } from '../furniture/catalogIndex';
 import {
     applyBps,
     ceilDiv,
+    ceilDivBig,
     costFromHundredths,
     grossUp,
+    product,
     roundUpToStep,
+    toSafeNumber,
 } from '../money';
-import { ceilDivBig, product, toSafeNumber } from './intMath';
 import type { Bom } from './types';
 
 export interface PriceOptions {
