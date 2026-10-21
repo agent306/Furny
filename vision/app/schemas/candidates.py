@@ -1,7 +1,7 @@
 """Intermediate (pre-assembly) candidate types shared by the pipeline stages (06 section 7-8).
 
 Extended task by task; this module currently holds ``ParsedText``, ``TextToken``, ``Segment``,
-``DimensionLine`` and ``DimensionSpan``.
+``DimensionLine``, ``DimensionSpan``, ``RawWall``, ``WallCandidate``, ``GapCandidate`` and ``WallGraph``.
 """
 
 import math
@@ -117,3 +117,60 @@ class DimensionSpan:
     kind: Literal["chain_segment", "overall"]
     near_text_ids: list[str]
     line_id: str
+
+
+WallSource = Literal["filled", "double_line", "single_line", "vector"]
+
+
+@dataclass(frozen=True, slots=True)
+class RawWall:
+    """A straight wall centre line before graph building (06 section 8.1 steps 1-8), in pixels.
+
+    ``openings_px`` are intervals ``(u0, u1)`` of known gaps (door/window candidates) measured along the
+    centre line from ``p0``; ``build_wall_graph`` re-bases them onto the final wall.
+    """
+
+    p0: Pt
+    p1: Pt
+    thickness_px: float
+    source: WallSource
+    openings_px: tuple[tuple[float, float], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class WallCandidate:
+    """A wall of the snapped graph (06 section 8.1 steps 9-10), in pixels.
+
+    ``a``/``b`` are the positions of nodes ``a_node``/``b_node``; ``a`` precedes ``b`` in the nodes'
+    (y, x) order. ``free_ends`` counts the ends (0..2) whose node touches no other wall.
+    ``openings_px`` are disjoint sorted intervals ``(u0, u1)`` along the centre line from ``a``.
+    """
+
+    id: str
+    a: Pt
+    b: Pt
+    a_node: str
+    b_node: str
+    thickness_px: float
+    source: WallSource
+    evidence: float
+    free_ends: int
+    openings_px: tuple[tuple[float, float], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class GapCandidate:
+    """An opening candidate ``[u0, u1]`` along wall ``wall_id`` from its ``a`` end, in pixels."""
+
+    wall_id: str
+    u0: float
+    u1: float
+
+
+@dataclass(frozen=True, slots=True)
+class WallGraph:
+    """Snapped wall graph: ``nodes`` by id (``N1..``), ``walls`` sorted by id (``W1..``), ``gaps``."""
+
+    nodes: dict[str, Pt]
+    walls: list[WallCandidate]
+    gaps: list[GapCandidate]
