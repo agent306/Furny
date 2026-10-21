@@ -1,5 +1,5 @@
 import { IntlMessageFormat } from 'intl-messageformat';
-import type { Formats, PrimitiveType } from 'intl-messageformat';
+import type { Formatters, PrimitiveType } from 'intl-messageformat';
 import { ref } from 'vue';
 import type { App, InjectionKey, Ref } from 'vue';
 
@@ -68,19 +68,33 @@ function simpleArguments(
     }
 }
 
-function zonedFormats(timeZone: string | undefined): Partial<Formats> {
-    if (!timeZone) {
-        return {};
-    }
-
-    const zoned = (styles: Record<string, unknown>) =>
-        Object.fromEntries(
-            Object.keys(styles).map((style) => [style, { timeZone }]),
-        );
+/**
+ * Intl formatters bound to the user's time zone. Going through `formatters`
+ * (rather than per-style `formats`) also covers bare `{at, date}` and ICU
+ * skeletons such as `{at, date, ::yyyyMMMd}`.
+ */
+function zonedFormatters(timeZone: string): Formatters {
+    const cache = new Map<string, Intl.DateTimeFormat>();
 
     return {
-        date: zoned(IntlMessageFormat.formats.date),
-        time: zoned(IntlMessageFormat.formats.time),
+        getDateTimeFormat(...args) {
+            const [locales, options] = args;
+            const cacheKey = JSON.stringify([locales, options]);
+            let format = cache.get(cacheKey);
+
+            if (!format) {
+                format = new Intl.DateTimeFormat(locales, {
+                    timeZone,
+                    ...options,
+                });
+                cache.set(cacheKey, format);
+            }
+
+            return format;
+        },
+        getNumberFormat: (locales, options) =>
+            new Intl.NumberFormat(locales, options),
+        getPluralRules: (...args) => new Intl.PluralRules(...args),
     };
 }
 
@@ -94,7 +108,9 @@ export function createI18n(options: I18nOptions): I18nPlugin {
     const { messages } = options;
     const locale = ref(options.locale);
     const formatLocale = options.numberLocale ?? options.locale;
-    const formats = zonedFormats(options.timeZone);
+    const formatters = options.timeZone
+        ? zonedFormatters(options.timeZone)
+        : undefined;
     // `null` remembers a message that failed to compile so it is not parsed again.
     const compiled = new Map<string, Compiled | null>();
 
@@ -109,7 +125,8 @@ export function createI18n(options: I18nOptions): I18nPlugin {
             const formatter = new IntlMessageFormat(
                 message,
                 formatLocale,
-                formats,
+                undefined,
+                { formatters },
             );
 
             const found = {

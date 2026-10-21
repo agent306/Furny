@@ -33,6 +33,9 @@ const messages = {
     'a.plain': 'Plain text',
     'a.when': 'On {at, date, medium} at {at, time, short}',
     'a.status': '{status, select, open {Open for {name}} other {Closed}}',
+    'a.bareDate': '{at, date}',
+    'a.dateSkeleton': '{at, date, ::yyyyMMMd}',
+    'a.timeSkeleton': '{at, time, ::hm}',
     'a.broken': '{count, plural, one {#}',
 };
 
@@ -105,15 +108,36 @@ describe('t()', () => {
         expect(construct).toHaveBeenCalledTimes(2);
     });
 
-    it('formats dates in the configured time zone', () => {
+    describe('in the configured time zone', () => {
+        // 23:30 UTC on 1 March is 05:00 on 2 March in Asia/Kolkata.
         const at = new Date('2026-03-01T23:30:00Z');
+        const kolkata = () => setup({ timeZone: 'Asia/Kolkata' });
 
-        expect(
-            setup({ timeZone: 'Asia/Kolkata' }).t('a.when', { at }),
-        ).toContain('Mar 2, 2026');
-        expect(setup({ timeZone: 'UTC' }).t('a.when', { at })).toContain(
-            'Mar 1, 2026',
-        );
+        it('formats named date and time styles', () => {
+            const out = kolkata().t('a.when', { at });
+
+            expect(out).toContain('Mar 2, 2026');
+            expect(out).toContain('5:00');
+        });
+
+        it('formats a bare date argument', () => {
+            expect(kolkata().t('a.bareDate', { at })).toContain('3/2/2026');
+        });
+
+        it('formats date and time skeletons', () => {
+            const { t } = kolkata();
+
+            expect(t('a.dateSkeleton', { at })).toContain('Mar 2, 2026');
+            expect(t('a.timeSkeleton', { at })).toContain('5:00');
+        });
+
+        it('keeps UTC when the time zone is UTC', () => {
+            const { t } = setup({ timeZone: 'UTC' });
+
+            expect(t('a.bareDate', { at })).toContain('3/1/2026');
+            expect(t('a.dateSkeleton', { at })).toContain('Mar 1, 2026');
+            expect(t('a.timeSkeleton', { at })).toContain('11:30');
+        });
     });
 });
 

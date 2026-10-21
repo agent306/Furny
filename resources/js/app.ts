@@ -10,9 +10,10 @@ const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 const DEFAULT_LOCALE = 'en';
 
 // One chunk per locale (15 §15.3); `manifest.json` is not a locale.
-const catalogues = import.meta.glob<{ default: Record<string, string> }>(
+const catalogues = import.meta.glob<{ default: Record<string, string> }>([
     './lang/generated/*.json',
-);
+    '!./lang/generated/manifest.json',
+]);
 
 // `withApp` is synchronous, so the locale is read from the initial page here
 // to load its messages before the app is created.
@@ -38,7 +39,12 @@ function initialLocale(): string {
 async function loadMessages(locale: string): Promise<Record<string, string>> {
     const load = catalogues[`./lang/generated/${locale}.json`];
 
-    return load ? (await load()).default : {};
+    try {
+        return load ? (await load()).default : {};
+    } catch {
+        // A failed chunk load must not stop the app from mounting; it boots with keys.
+        return {};
+    }
 }
 
 const locale = initialLocale();
