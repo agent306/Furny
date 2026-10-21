@@ -4,7 +4,7 @@ import { cyrb53 } from '../../../geometry/hash';
 import type { PlanDocument } from '../../schema';
 import { FOOTPRINT, Graph, busOf, ok, refused } from '../../testing/graph';
 import { definePlanCommand } from '../define';
-import type { PlanFragment } from '../fragment';
+import { mayAddNoWall, type PlanFragment } from '../fragment';
 import { PLAN_COMMANDS, createPlanBus } from '../registry';
 
 // ---- fixtures ----------------------------------------------------------------
@@ -1018,5 +1018,37 @@ describe('deleteEntities', () => {
                 'not_found',
             ).params,
         ).toEqual({ id: 'f_zzzzzzzzzz' });
+    });
+});
+
+describe('mayAddNoWall (insertFragment dry-run skip)', () => {
+    const { g } = room();
+    const doc = g.doc;
+    const span = (a: [number, number], b: [number, number]) => ({
+        a: { x: a[0], y: a[1] },
+        b: { x: b[0], y: b[1] },
+    });
+
+    it('is false for a wall in empty space: the dry run is skipped', () => {
+        expect(mayAddNoWall(doc, span([8000, 0], [12000, 0]), [])).toBe(false);
+        // crossing and touching walls still add a wall
+        expect(mayAddNoWall(doc, span([2500, -500], [2500, 3500]), [])).toBe(
+            false,
+        );
+        expect(mayAddNoWall(doc, span([5000, 0], [9000, 0]), [])).toBe(false);
+    });
+
+    it('is true when an existing wall covers the segment', () => {
+        expect(mayAddNoWall(doc, span([1000, 0], [2000, 0]), [[0, 1]])).toBe(
+            true,
+        );
+    });
+
+    it('is true when an existing wall lies on both ends of the segment', () => {
+        expect(mayAddNoWall(doc, span([0, 0], [5000, 0]), [])).toBe(true);
+    });
+
+    it('is true for a segment whose ends could resolve to one node', () => {
+        expect(mayAddNoWall(doc, span([8000, 0], [8010, 0]), [])).toBe(true);
     });
 });

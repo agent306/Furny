@@ -234,6 +234,30 @@ function addsWall(
     return true;
 }
 
+/**
+ * Whether pasting `seg` might add no wall (`wall_duplicate`), so `addsWall`
+ * must try it. `false` is certain: `wall_duplicate` needs both ends to resolve
+ * to one node (the ends then lie within two merge tolerances of each other) or
+ * every part of the segment to be covered or already joined, and both need an
+ * existing wall along the segment (`covered`) or one with both ends on it.
+ * Large pastes into empty space skip the dry run entirely.
+ */
+export function mayAddNoWall(
+    d: Doc,
+    seg: Seg,
+    covered: ReadonlyArray<[number, number]>,
+): boolean {
+    if (dist(seg.a, seg.b) <= 4 * NODE_MERGE_TOL || covered.length > 0) {
+        return true;
+    }
+    return Object.values(d.walls).some(
+        (wall) =>
+            hasEnds(d, wall) &&
+            closestPointOnSeg(pointOf(d, wall.a), seg).dist <= NODE_MERGE_TOL &&
+            closestPointOnSeg(pointOf(d, wall.b), seg).dist <= NODE_MERGE_TOL,
+    );
+}
+
 /** A pasted fragment wall: where it lands and what existing walls covered of it. */
 interface Line {
     seg: Seg;
@@ -373,9 +397,15 @@ function pasteFragment(
     const lines = new Map<string, Line>();
     for (const wall of sortedValues(f.walls)) {
         const props = wallProps(wall);
-        if (!addsWall(d, refOf(wall.a), refOf(wall.b), props)) continue;
         const seg = { a: shift(f.nodes[wall.a]!), b: shift(f.nodes[wall.b]!) };
-        lines.set(wall.id, { seg, covered: coveredSpans(d, seg) });
+        const covered = coveredSpans(d, seg);
+        if (
+            mayAddNoWall(d, seg, covered) &&
+            !addsWall(d, refOf(wall.a), refOf(wall.b), props)
+        ) {
+            continue;
+        }
+        lines.set(wall.id, { seg, covered });
         for (const end of [wall.a, wall.b]) {
             idMap[end] ??= resolveEndpoint(d, refOf(end), ctx, out);
         }
