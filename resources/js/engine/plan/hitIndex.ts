@@ -284,23 +284,23 @@ export function buildHitIndex(
     }
 
     // Room labels: the text items of the room's drawing group at its label point.
-    const roomGroups = new Map<string, DrawGroup[]>();
+    const roomItems = new Map<string, DrawItem[]>();
     for (const g of groupsOf(drawing, 'TEXT', 'room')) {
         const key = g.entityId ?? '';
-        roomGroups.set(key, [...(roomGroups.get(key) ?? []), g]);
+        const items = roomItems.get(key);
+        if (items) items.push(...g.items);
+        else roomItems.set(key, [...g.items]);
     }
     const roomLabels: Entry[] = [];
     const rooms: Entry[] = [];
     for (const room of geom.rooms) {
         const id = room.metaId ?? `face:${room.faceKey}`;
-        const items = (roomGroups.get(room.metaId ?? '') ?? [])
-            .flatMap((g) => g.items)
-            .filter(
-                (i) =>
-                    i.t === 'text' &&
-                    Math.abs(i.at.x - room.labelPoint.x) <= LABEL_MATCH &&
-                    Math.abs(i.at.y - room.labelPoint.y) <= LABEL_MATCH,
-            );
+        const items = (roomItems.get(room.metaId ?? '') ?? []).filter(
+            (i) =>
+                i.t === 'text' &&
+                Math.abs(i.at.x - room.labelPoint.x) <= LABEL_MATCH &&
+                Math.abs(i.at.y - room.labelPoint.y) <= LABEL_MATCH,
+        );
         const shapes = textShapes(items);
         if (shapes.length > 0) roomLabels.push(entry(id, 'room_label', shapes));
         rooms.push(
