@@ -222,24 +222,37 @@ function splitAtNode(d: Doc, wallId: string, nodeId: string, ctx: Ids): string {
  * returns the new node's id. A cut strictly inside an opening aborts with
  * `split_through_opening`; a point projecting outside the open interval
  * `(MIN_WALL_LENGTH, length - MIN_WALL_LENGTH)` aborts `wall_too_short`.
+ *
+ * With `inclusive` the interval is closed, so a cut exactly `MIN_WALL_LENGTH`
+ * from an end is allowed (the `splitWall` command's range, 04 §6.6); the
+ * rounded node must then still leave both parts at least `MIN_WALL_LENGTH`
+ * long, else the call aborts `wall_too_short`.
  */
 export function splitWallAt(
     d: Doc,
     wallId: string,
     point: Vec2,
     ctx: Ids,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- uniform helper signature (04 §6.5)
     _out: Out,
+    opts: { inclusive?: boolean } = {},
 ): string {
     const wall = wallOf(d, wallId);
     const { a, b } = segmentOf(d, wall);
     const length = dist(a, b);
     const u = length < 1e-9 ? 0 : dot(sub(point, a), sub(b, a)) / length;
     // never a zero-length wall or a node on top of an end
-    if (!(u > MIN_WALL_LENGTH && u < length - MIN_WALL_LENGTH)) {
+    const inside = opts.inclusive
+        ? u >= MIN_WALL_LENGTH - SLACK && u <= length - MIN_WALL_LENGTH + SLACK
+        : u > MIN_WALL_LENGTH && u < length - MIN_WALL_LENGTH;
+    if (!inside) fail('wall_too_short', { wallId, length: mm(length) });
+    const at = roundedPoint(add(a, scale(sub(b, a), u / length)));
+    if (
+        opts.inclusive &&
+        (dist(a, at) < MIN_WALL_LENGTH - SLACK ||
+            dist(at, b) < MIN_WALL_LENGTH - SLACK)
+    ) {
         fail('wall_too_short', { wallId, length: mm(length) });
     }
-    const at = roundedPoint(add(a, scale(sub(b, a), u / length)));
     const nodeId = ctx.newId('n');
     d.nodes[nodeId] = { id: nodeId, x: at.x, y: at.y };
     splitAtNode(d, wallId, nodeId, ctx);

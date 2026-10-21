@@ -19,6 +19,17 @@ import {
 } from '../geometry/tolerance';
 import { dist, type Vec2 } from '../geometry/vec2';
 import { derivePlanGeometry, type DerivedPlan } from './derive';
+import {
+    MAX_FIXTURES,
+    MAX_JSON_BYTES,
+    MAX_OPENINGS,
+    MAX_PLACEMENTS,
+    MAX_WALLS,
+    OPENING_SILL_RANGE,
+    OPENING_WIDTH_RANGE,
+    WALL_HEIGHT_RANGE,
+    WALL_THICKNESS_RANGE,
+} from './limits';
 import { isAnchorInsideRoom } from './rooms';
 import type { PlanDocument } from './schema';
 import type { Issue } from './types';
@@ -40,13 +51,6 @@ export const PLAN_ISSUE_CODES = [
 ] as const;
 
 export type PlanIssueCode = (typeof PLAN_ISSUE_CODES)[number];
-
-/** Limits of 03 §1.1 `plan.too_large`. */
-const MAX_WALLS = 2000;
-const MAX_OPENINGS = 1000;
-const MAX_PLACEMENTS = 500;
-const MAX_FIXTURES = 1000;
-const MAX_JSON_BYTES = 2_097_152;
 
 const MESSAGE_KEY_PREFIX = 'plan_editor.issues.';
 /** Float noise allowance for the opening bounds test (mm). */
@@ -513,13 +517,13 @@ function valuesInRange(doc: PlanDocument): {
     for (const id of sortedIds(doc.nodes)) coords(id, 'node', doc.nodes[id]!);
     for (const id of sortedIds(doc.walls)) {
         const w = doc.walls[id]!;
-        check(id, 'wall.thickness', w.thickness, 50, 1000);
-        check(id, 'wall.height', w.height, 300, 10_000);
+        check(id, 'wall.thickness', w.thickness, ...WALL_THICKNESS_RANGE);
+        check(id, 'wall.height', w.height, ...WALL_HEIGHT_RANGE);
     }
     for (const id of sortedIds(doc.openings)) {
         const o = doc.openings[id]!;
-        check(id, 'opening.width', o.width, 300, 6000);
-        check(id, 'opening.sillHeight', o.sillHeight, 0, 3000);
+        check(id, 'opening.width', o.width, ...OPENING_WIDTH_RANGE);
+        check(id, 'opening.sillHeight', o.sillHeight, ...OPENING_SILL_RANGE);
     }
     for (const id of sortedIds(doc.rooms))
         coords(id, 'room.anchor', doc.rooms[id]!.anchor);

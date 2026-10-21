@@ -398,6 +398,54 @@ describe('addWall', () => {
         });
     });
 
+    it('rounds thickness and height before the range check', () => {
+        const { bus } = oneWall();
+        const base = { from: pt(0, 1000), to: pt(1000, 1000) };
+        const r = ok(bus.execute('addWall', { ...base, thickness: 49.6 }));
+        expect(bus.getDoc().walls[r.result.wallIds[0]!]!.thickness).toBe(50);
+        expect(
+            refused(
+                bus.execute('addWall', {
+                    ...base,
+                    to: pt(1000, 2000),
+                    thickness: 49.4,
+                }),
+            ).params,
+        ).toEqual({ field: 'thickness', min: 50, max: 1000 });
+        ok(
+            bus.execute('addWall', {
+                from: pt(0, 3000),
+                to: pt(500, 3000),
+                thickness: 1000.4,
+            }),
+        );
+        expect(
+            refused(
+                bus.execute('addWall', {
+                    from: pt(0, 4000),
+                    to: pt(500, 4000),
+                    thickness: 1000.6,
+                }),
+            ).code,
+        ).toBe('out_of_range');
+        expect(
+            refused(
+                bus.execute('addWall', {
+                    from: pt(0, 5000),
+                    to: pt(500, 5000),
+                    height: 299.4,
+                }),
+            ).code,
+        ).toBe('out_of_range');
+        ok(
+            bus.execute('addWall', {
+                from: pt(0, 6000),
+                to: pt(500, 6000),
+                height: 299.6,
+            }),
+        );
+    });
+
     it('rounds free points to integer millimetres', () => {
         const g = new Graph();
         const bus = busOf(g);
@@ -516,6 +564,130 @@ describe('addWall', () => {
             code: 'too_large',
             params: { kind: 'walls', count: 2000, max: 2000 },
         });
+    });
+});
+
+describe('wall count limit (2000)', () => {
+    /** A target wall (0,0)-(4000,0) plus isolated filler walls up to `total` walls. */
+    function plan(total: number) {
+        const g = new Graph();
+        const target = g.wall(g.node(0, 0), g.node(4000, 0));
+        for (let i = 1; i < total; i += 1) {
+            const x = 20000 + (i % 50) * 300;
+            const y = 20000 + Math.floor(i / 50) * 300;
+            g.wall(g.node(x, y), g.node(x + 100, y));
+        }
+        expect(Object.keys(g.doc.walls)).toHaveLength(total);
+        return { g, target };
+    }
+    const ctx = {} as PlanCommandContext;
+
+    it('addWall adds the last wall at 1999 and is refused at 2000', () => {
+        const { g } = plan(1999);
+        const bus = busOf(g);
+        ok(bus.execute('addWall', { from: pt(0, 1000), to: pt(1000, 1000) }));
+        expect(Object.keys(bus.getDoc().walls)).toHaveLength(2000);
+        const error = refused(
+            bus.execute('addWall', { from: pt(0, 2000), to: pt(1000, 2000) }),
+        );
+        expect(error).toMatchObject({
+            code: 'too_large',
+            messageKey: 'engine.plan.command.too_large',
+            params: { kind: 'walls', count: 2000, max: 2000 },
+        });
+    });
+
+    it('a crossing that splits walls is too_large, not introduces_error', () => {
+        const { g } = plan(1999);
+        const bus = busOf(g);
+        const start = bus.getDoc();
+        // 1 split of the target + 2 new walls = 2002
+        const error = refused(
+            bus.execute('addWall', {
+                from: pt(2000, -1000),
+                to: pt(2000, 1000),
+            }),
+        );
+        expect(error).toMatchObject({
+            code: 'too_large',
+            params: { kind: 'walls', count: 2002, max: 2000 },
+        });
+        expect(bus.getDoc()).toBe(start);
+        // the same crossing fits when it ends at exactly 2000 walls
+        const small = plan(1997);
+        const smallBus = busOf(small.g);
+        ok(
+            smallBus.execute('addWall', {
+                from: pt(2000, -1000),
+                to: pt(2000, 1000),
+            }),
+        );
+        expect(Object.keys(smallBus.getDoc().walls)).toHaveLength(2000);
+    });
+
+    it('a crossing chain is too_large in run', () => {
+        const { g } = plan(1998);
+        const error = refused(
+            busOf(g).execute('addWallChain', {
+                points: [pt(2000, -1000), pt(2000, 1000)],
+                closed: false,
+            }),
+        );
+        expect(error).toMatchObject({
+            code: 'too_large',
+            params: { count: 2001 },
+        });
+    });
+
+    it('open chains: 2 points need 1 wall, 3 points need 2', () => {
+        const chain = (count: number, closed: boolean, points: number) =>
+            WALL_COMMANDS.addWallChain.validate(
+                plan(count).g.doc,
+                {
+                    points: [
+                        pt(0, 5000),
+                        pt(1000, 5000),
+                        pt(1000, 6000),
+                        pt(0, 6000),
+                    ].slice(0, points),
+                    closed,
+                },
+                ctx,
+            );
+        expect(chain(1999, false, 2)).toBeNull();
+        expect(chain(1999, false, 3)).toMatchObject({ code: 'too_large' });
+        expect(chain(1998, false, 3)).toBeNull();
+        expect(chain(1998, false, 4)).toMatchObject({ code: 'too_large' });
+        // closed chains add as many walls as points
+        expect(chain(1997, true, 3)).toBeNull();
+        expect(chain(1998, true, 3)).toMatchObject({ code: 'too_large' });
+        expect(chain(1996, true, 4)).toBeNull();
+        expect(chain(1997, true, 4)).toMatchObject({ code: 'too_large' });
+    });
+
+    it('splitWall adds one wall: fine at 1999, too_large at 2000', () => {
+        const at1999 = plan(1999);
+        const bus = busOf(at1999.g);
+        ok(bus.execute('splitWall', { wallId: at1999.target, at: 1000 }));
+        expect(Object.keys(bus.getDoc().walls)).toHaveLength(2000);
+        const full = plan(2000);
+        expect(
+            WALL_COMMANDS.splitWall.validate(
+                full.g.doc,
+                { wallId: full.target, at: 1000 },
+                ctx,
+            ),
+        ).toMatchObject({
+            code: 'too_large',
+            params: { kind: 'walls', count: 2000, max: 2000 },
+        });
+        expect(
+            WALL_COMMANDS.splitWall.validate(
+                at1999.g.doc,
+                { wallId: at1999.target, at: 1000 },
+                ctx,
+            ),
+        ).toBeNull();
     });
 });
 
@@ -777,13 +949,56 @@ describe('splitWall', () => {
         }
     });
 
-    it('cannot split a 20 mm wall in two: the helper refuses the stub', () => {
+    it('splits a 20 mm wall into two 10 mm walls', () => {
         const g = new Graph();
         const w = g.wall(g.node(0, 0), g.node(20, 0));
         const bus = busOf(g);
-        expect(
-            refused(bus.execute('splitWall', { wallId: w, at: 10 })).code,
-        ).toBe('wall_too_short');
+        const r = ok(bus.execute('splitWall', { wallId: w, at: 10 }));
+        expect(bus.getDoc().nodes[r.result.nodeId]).toMatchObject({
+            x: 10,
+            y: 0,
+        });
+    });
+
+    it('has an inclusive range on a wall of non-integer length', () => {
+        // length 1000.0005: the range is [10, 990]
+        const g = new Graph();
+        const w = g.wall(g.node(0, 0), g.node(1000, 1));
+        const bus = busOf(g);
+        const start = bus.getDoc();
+        for (const at of [9, 991]) {
+            expect(
+                refused(bus.execute('splitWall', { wallId: w, at })).params,
+            ).toEqual({ field: 'at', min: 10, max: 990 });
+        }
+        for (const at of [10, 990]) {
+            const r = ok(bus.execute('splitWall', { wallId: w, at }));
+            const doc = bus.getDoc();
+            const node = doc.nodes[r.result.nodeId]!;
+            expect(Math.hypot(node.x, node.y)).toBeGreaterThanOrEqual(
+                10 - 1e-6,
+            );
+            expect(
+                Math.hypot(1000 - node.x, 1 - node.y),
+            ).toBeGreaterThanOrEqual(10 - 1e-6);
+            expect(bus.undo()).toBe(true);
+            expect(bus.getDoc()).toEqual(start);
+        }
+    });
+
+    it('refuses a boundary cut on a diagonal whose rounded node would leave a stub', () => {
+        // (0,0)-(1000,1000): at = 10 rounds to (7,7), 9.9 mm from the end
+        const g = new Graph();
+        const w = g.wall(g.node(0, 0), g.node(1000, 1000));
+        const bus = busOf(g);
+        const start = bus.getDoc();
+        for (const at of [10, 1404]) {
+            expect(
+                refused(bus.execute('splitWall', { wallId: w, at })).code,
+            ).toBe('wall_too_short');
+        }
+        ok(bus.execute('splitWall', { wallId: w, at: 12 }));
+        expect(bus.getDoc()).not.toBe(start);
     });
 
     it('rounds at to a whole millimetre first', () => {
@@ -980,7 +1195,7 @@ describe('mergeCollinearWalls', () => {
             g.wall(n, g.node(5000, dy));
             const bus = busOf(g);
             const r = bus.execute('mergeCollinearWalls', { nodeId: n });
-            if (code === null) expect(r.ok).toBe(true);
+            if (code === null) expect(r.ok, JSON.stringify(r)).toBe(true);
             else expect(refused(r).code).toBe(code);
         }
     });
@@ -1107,15 +1322,31 @@ describe('deleteWalls', () => {
         expectUndoRestores(bus, start);
     });
 
-    it('deletes several walls at once, every node that becomes free and the metas of lost rooms', () => {
-        const rect = makeRectPlan(4000, 3000, 230);
+    it('deletes several walls at once and every node that becomes free; the metas of the lost room stay orphaned', () => {
         const ids = testIds();
+        const rect = makeRectPlan(4000, 3000, 230, ids);
+        const meta = ids('r');
+        rect.rooms[meta] = {
+            id: meta,
+            anchor: { x: 2000, y: 1500 },
+            name: 'Hall',
+            type: 'other',
+            floorFinish: 'tile',
+            floorColorHex: null,
+            labelOffset: null,
+            showArea: true,
+        };
         const bus = planBus(rect, ids);
+        const start = bus.getDoc();
         const walls = Object.keys(rect.walls);
         const r = ok(bus.execute('deleteWalls', { wallIds: walls }));
         expect(Object.keys(bus.getDoc().nodes)).toHaveLength(0);
         expect(Object.keys(bus.getDoc().walls)).toHaveLength(0);
         expect(r.result.deletedIds).toHaveLength(walls.length + 4);
+        // 04 4.4 b-3.3: a meta whose room is gone stays, so a redrawn room keeps its name
+        expect(bus.getDoc().rooms[meta]).toEqual(rect.rooms[meta]);
+        expect(r.result.deletedIds).not.toContain(meta);
+        expectUndoRestores(bus, start);
     });
 
     it('refuses unknown walls and an empty list', () => {
@@ -1266,6 +1497,40 @@ describe('setWallProps', () => {
                 params: { command: 'setWallProps', field: 'props.colorHex' },
             });
         }
+    });
+
+    it('rounds thickness before the range check: 49.6 is 50, 49.4 is out of range', () => {
+        const { w, bus } = oneWall();
+        ok(
+            bus.execute('setWallProps', {
+                wallIds: [w],
+                props: { thickness: 49.6 },
+            }),
+        );
+        expect(bus.getDoc().walls[w]!.thickness).toBe(50);
+        expect(
+            refused(
+                bus.execute('setWallProps', {
+                    wallIds: [w],
+                    props: { thickness: 49.4 },
+                }),
+            ).params,
+        ).toEqual({ field: 'props.thickness', min: 50, max: 1000 });
+        ok(
+            bus.execute('setWallProps', {
+                wallIds: [w],
+                props: { thickness: 1000.4 },
+            }),
+        );
+        expect(bus.getDoc().walls[w]!.thickness).toBe(1000);
+        expect(
+            refused(
+                bus.execute('setWallProps', {
+                    wallIds: [w],
+                    props: { thickness: 1000.6 },
+                }),
+            ).code,
+        ).toBe('out_of_range');
     });
 
     it('checks ranges with out_of_range', () => {
@@ -1724,6 +1989,144 @@ describe('determinism', () => {
     }
 });
 
+describe('key order of the document', () => {
+    /** The same document with every record's keys inserted in reverse order. */
+    function reverseKeys(doc: PlanDocument): PlanDocument {
+        const flip = <T extends object>(record: T): T =>
+            Object.fromEntries(Object.entries(record).reverse()) as T;
+        return {
+            ...doc,
+            nodes: flip(doc.nodes),
+            walls: flip(doc.walls),
+            openings: flip(doc.openings),
+            rooms: flip(doc.rooms),
+            placements: flip(doc.placements),
+            annotations: {
+                dimensions: flip(doc.annotations.dimensions),
+                labels: flip(doc.annotations.labels),
+            },
+        };
+    }
+
+    /** JSON with every object's keys sorted. */
+    function canonical(value: unknown): string {
+        const sort = (v: unknown): unknown =>
+            Array.isArray(v)
+                ? v.map(sort)
+                : v !== null && typeof v === 'object'
+                  ? Object.fromEntries(
+                        Object.entries(v)
+                            .sort(([p], [q]) => (p < q ? -1 : p > q ? 1 : 0))
+                            .map(([k, x]) => [k, sort(x)]),
+                    )
+                  : v;
+        return JSON.stringify(sort(value));
+    }
+
+    /** A grid with two named rooms and an attached placement and dimension. */
+    function fixture(): { ids: NewId; doc: PlanDocument } {
+        const ids = testIds();
+        const doc = makeGridPlan(3, 3, 3000, ids);
+        const wall = Object.keys(doc.walls).sort()[0]!;
+        for (const [x, y] of [
+            [1500, 1500],
+            [4500, 1500],
+        ] as const) {
+            const id = ids('r');
+            doc.rooms[id] = {
+                id,
+                anchor: { x, y },
+                name: `Room ${id}`,
+                type: 'other',
+                floorFinish: 'tile',
+                floorColorHex: null,
+                labelOffset: null,
+                showArea: true,
+            };
+        }
+        const f = ids('f');
+        doc.placements[f] = {
+            id: f,
+            designId: 'des_x',
+            x: 1500,
+            y: 0,
+            rotation: 0,
+            elevation: 0,
+            mirrored: false,
+            wallAttachment: { wallId: wall, side: 'left' },
+        };
+        return { ids, doc };
+    }
+
+    type Pick = (doc: PlanDocument) => { walls: string[]; nodes: string[] };
+    const sorted: Pick = (doc) => ({
+        walls: Object.keys(doc.walls).sort(),
+        nodes: Object.keys(doc.nodes).sort(),
+    });
+
+    const scenarios: Record<
+        string,
+        (bus: ReturnType<typeof busOf>, doc: PlanDocument) => unknown
+    > = {
+        addWall: (bus) =>
+            bus.execute('addWall', {
+                from: pt(4000, -500),
+                to: pt(4000, 9500),
+            }),
+        addWallChain: (bus) =>
+            bus.execute('addWallChain', {
+                points: [pt(1000, -500), pt(1000, 3500), pt(7000, 3500)],
+                closed: false,
+            }),
+        splitWall: (bus, doc) =>
+            bus.execute('splitWall', {
+                wallId: sorted(doc).walls[3]!,
+                at: 2500,
+            }),
+        mergeCollinearWalls: (bus, doc) => {
+            const s = ok(
+                bus.execute('splitWall', {
+                    wallId: sorted(doc).walls[0]!,
+                    at: 2500,
+                }),
+            );
+            return bus.execute('mergeCollinearWalls', {
+                nodeId: s.result.nodeId,
+            });
+        },
+        deleteWalls: (bus, doc) =>
+            bus.execute('deleteWalls', {
+                wallIds: sorted(doc).walls.slice(0, 4),
+            }),
+        deleteNode: (bus, doc) =>
+            bus.execute('deleteNode', { nodeId: sorted(doc).nodes[5]! }),
+        setWallProps: (bus, doc) =>
+            bus.execute('setWallProps', {
+                wallIds: [...sorted(doc).walls.slice(0, 3)].reverse(),
+                props: { thickness: 160, colorHex: '#ABCDEF' },
+            }),
+    };
+
+    for (const [name, scenario] of Object.entries(scenarios)) {
+        it(`${name} gives the same result and document for reversed key order`, () => {
+            const run = (reverse: boolean) => {
+                const { ids, doc } = fixture();
+                const input = reverse ? reverseKeys(doc) : doc;
+                const bus = planBus(input, ids);
+                const result = scenario(bus, input);
+                const r = result as ExecuteResult<unknown>;
+                expect(r.ok, JSON.stringify(r)).toBe(true);
+                return canonical({
+                    result: r.ok ? r.result : null,
+                    deleted: r.ok ? [...r.deletedIds].sort() : null,
+                    doc: bus.getDoc(),
+                });
+            };
+            expect(run(true)).toBe(run(false));
+        });
+    }
+});
+
 // ---- random sequences ---------------------------------------------------------------------------------
 
 /** 200 commands with a full validation each take a few seconds. */
@@ -1749,6 +2152,7 @@ describe('random wall command sequences', () => {
         const bus = planBus(start, ids);
         const docs: PlanDocument[] = [start];
         const okByType = new Map<string, number>();
+        let lastProps: string[] | null = null;
         const coord = (): number =>
             rand() < 0.6 ? pick([0, 3000, 6000, 9000]) + int(7) - 3 : int(9001);
         const ref = (doc: PlanDocument) =>
@@ -1810,18 +2214,30 @@ describe('random wall command sequences', () => {
             } else if (type === 'deleteNode') {
                 r = bus.execute('deleteNode', { nodeId: pick(nodeIds) });
             } else {
-                r = bus.execute('setWallProps', {
-                    wallIds: [pick(wallIds)],
-                    props: pick([
-                        { thickness: 100 + int(200) },
-                        { height: 2000 + int(1500) },
-                        { colorHex: '#A1B2C3' },
-                        {
-                            kind: 'partition' as const,
-                            material: 'drywall' as const,
-                        },
-                    ]),
-                });
+                // half the edits repeat the previous one's walls and merge into its entry
+                const previous: string[] = lastProps ?? [];
+                const merge: boolean = previous.length > 0 && rand() < 0.5;
+                const target: string[] =
+                    merge && previous.every((id) => wallIds.includes(id))
+                        ? previous
+                        : [pick(wallIds)];
+                lastProps = target;
+                r = bus.execute(
+                    'setWallProps',
+                    {
+                        wallIds: target,
+                        props: pick([
+                            { thickness: 100 + int(200) },
+                            { height: 2000 + int(1500) },
+                            { colorHex: '#A1B2C3' },
+                            {
+                                kind: 'partition' as const,
+                                material: 'drywall' as const,
+                            },
+                        ]),
+                    },
+                    { merge },
+                );
             }
             if (!r.ok) {
                 expect(bus.getDoc()).toBe(doc);
@@ -1834,7 +2250,11 @@ describe('random wall command sequences', () => {
                 expect(before.has(key)).toBe(true);
             }
             if (next !== doc) {
-                docs.push(next);
+                // a merge replaces the top entry's document (or drops the
+                // entry when it returned to the start)
+                const entries = bus.history().undo.length;
+                docs.length = entries + 1;
+                docs[entries] = next;
                 okByType.set(type, (okByType.get(type) ?? 0) + 1);
             }
         }

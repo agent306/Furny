@@ -26,7 +26,7 @@ import { z } from 'zod';
 import type { Draft } from 'mutative';
 import { CommandAbort, type CommandOutput } from '../../commands/types';
 import { cmpId } from '../../compare';
-import { MAX_COORD, MIN_WALL_LENGTH, roundMm } from '../../geometry/tolerance';
+import { MIN_WALL_LENGTH } from '../../geometry/tolerance';
 import {
     add,
     dist,
@@ -36,6 +36,7 @@ import {
     sub,
     type Vec2,
 } from '../../geometry/vec2';
+import { WALL_HEIGHT_RANGE, WALL_THICKNESS_RANGE } from '../limits';
 import { WALL_KINDS, WALL_MATERIALS } from '../schema';
 import type { PlanDocument, Wall } from '../schema';
 import type { EngineMessage } from '../types';
@@ -49,59 +50,24 @@ import {
     pushDeleted,
     resolveEndpoint,
     splitWallAt,
-    type EndpointRef,
     type WallProps,
 } from './helpers';
+import type { PlanCommandContext } from './pipeline';
 import {
-    planCommandMessage,
-    type PlanCommandContext,
-    type PlanCommandErrorCode,
-} from './pipeline';
+    assertWallCapacity,
+    checkCapacity,
+    checkRange,
+    checkRef,
+    fail,
+    has,
+    message,
+    mm,
+    notFound,
+} from './validators';
 
 type Doc = Draft<PlanDocument>;
 type Out = CommandOutput<unknown>;
 type Graph = Pick<PlanDocument, 'nodes' | 'walls'>;
-
-// ---- limits (04 §6.6 intro, 03 §1.1) ------------------------------------------------
-
-const THICKNESS_RANGE = [50, 1000] as const;
-const HEIGHT_RANGE = [300, 10000] as const;
-/** `plan.too_large` (03 §1.1). */
-const MAX_WALLS = 2000;
-
-/** `roundMm` without a negative zero. */
-const mm = (v: number): number => roundMm(v) + 0;
-
-// ---- messages -----------------------------------------------------------------------------
-
-function message(
-    code: PlanCommandErrorCode,
-    params: Record<string, string | number> = {},
-): EngineMessage {
-    return planCommandMessage(code, params);
-}
-
-function fail(
-    code: PlanCommandErrorCode,
-    params: Record<string, string | number> = {},
-): never {
-    throw new CommandAbort(message(code, params));
-}
-
-const notFound = (id: string): EngineMessage => message('not_found', { id });
-
-function checkRange(
-    field: string,
-    value: number,
-    min: number,
-    max: number,
-): EngineMessage | null {
-    return value < min || value > max
-        ? message('out_of_range', { field, min, max })
-        : null;
-}
-
-const has = (record: object, id: string): boolean => Object.hasOwn(record, id);
 
 // ---- params schemas -------------------------------------------------------------------------
 
@@ -177,20 +143,6 @@ type SetWallPropsParams = z.infer<typeof SetWallPropsSchema>;
 
 // ---- shared validation ---------------------------------------------------------------------------
 
-function checkRef(
-    doc: PlanDocument,
-    ref: EndpointRef,
-    field: string,
-): EngineMessage | null {
-    if ('nodeId' in ref) {
-        return has(doc.nodes, ref.nodeId) ? null : notFound(ref.nodeId);
-    }
-    return (
-        checkRange(`${field}.point.x`, ref.point.x, -MAX_COORD, MAX_COORD) ??
-        checkRange(`${field}.point.y`, ref.point.y, -MAX_COORD, MAX_COORD)
-    );
-}
-
 function checkSizes(
     p: { thickness?: number | undefined; height?: number | undefined },
     prefix = '',
@@ -201,20 +153,12 @@ function checkSizes(
             : checkRange(
                   `${prefix}thickness`,
                   mm(p.thickness),
-                  ...THICKNESS_RANGE,
+                  ...WALL_THICKNESS_RANGE,
               )) ??
         (p.height === undefined
             ? null
-            : checkRange(`${prefix}height`, mm(p.height), ...HEIGHT_RANGE))
+            : checkRange(`${prefix}height`, mm(p.height), ...WALL_HEIGHT_RANGE))
     );
-}
-
-/** Refuses when `count` more walls would not fit in the plan (`plan.too_large`). */
-function checkCapacity(doc: PlanDocument, count: number): EngineMessage | null {
-    const walls = Object.keys(doc.walls).length;
-    return walls + count > MAX_WALLS
-        ? message('too_large', { kind: 'walls', count: walls, max: MAX_WALLS })
-        : null;
 }
 
 /** The properties of a new wall: the given ones over the document defaults (04 §6.6 `addWall`). */
@@ -282,6 +226,7 @@ const addWall = definePlanCommand<AddWallParams, AddWallResult>({
             ctx,
             out,
         );
+        assertWallCapacity(d);
         out.result = { wallIds, startNodeId: from, endNodeId: to };
     },
     touchesGeometry: true,
@@ -340,6 +285,7 @@ const addWallChain = definePlanCommand<AddWallChainParams, AddWallChainResult>({
         }
         if (p.closed) draw(nodeIds[nodeIds.length - 1]!, nodeIds[0]!);
         if (wallIds.length === 0) fail('wall_duplicate');
+        assertWallCapacity(d);
         out.result = { wallIds, nodeIds };
     },
     touchesGeometry: true,
@@ -369,29 +315,23 @@ const splitWall = definePlanCommand<SplitWallParams, SplitWallResult>({
         const length = lengthIn(doc, wall);
         if (typeof length !== 'number') return length;
         // an integer distance is in range exactly when it is <= floor(max)
-        return checkRange(
-            'at',
-            mm(p.at),
-            MIN_WALL_LENGTH,
-            Math.floor(length - MIN_WALL_LENGTH + 1e-9),
+        return (
+            checkRange(
+                'at',
+                mm(p.at),
+                MIN_WALL_LENGTH,
+                Math.floor(length - MIN_WALL_LENGTH + 1e-9),
+            ) ?? checkCapacity(doc, 1)
         );
     },
     run(d, p, ctx, out) {
         const wall = d.walls[p.wallId]!;
         const a = pointOf(d, wall.a);
         const b = pointOf(d, wall.b);
-        const length = dist(a, b);
-        // `splitWallAt` keeps strictly more than MIN_WALL_LENGTH from the
-        // ends; the closed range of 04 §6.6 is reached by nudging the
-        // boundary values inwards by a micron.
-        const nudge = 1e-3;
-        let u = mm(p.at);
-        if (u - MIN_WALL_LENGTH < nudge) u = MIN_WALL_LENGTH + nudge;
-        else if (length - u - MIN_WALL_LENGTH < nudge) {
-            u = length - MIN_WALL_LENGTH - nudge;
-        }
-        const point = add(a, scale(sub(b, a), u / length));
-        const nodeId = splitWallAt(d, p.wallId, point, ctx, out);
+        const point = add(a, scale(sub(b, a), mm(p.at) / dist(a, b)));
+        const nodeId = splitWallAt(d, p.wallId, point, ctx, out, {
+            inclusive: true,
+        });
         const tail = Object.values(d.walls).find(
             (w) => w.a === nodeId && w.id !== p.wallId,
         );
@@ -464,10 +404,11 @@ const flipSide = (side: 'left' | 'right'): 'left' | 'right' =>
     side === 'left' ? 'right' : 'left';
 
 /**
- * Joins the two walls at `nodeId` into the one with the smaller id (04 §6.6):
- * its end at the node moves to the far node of the other wall, which and its
- * openings, placements and dimensions are handed over, then it and the node
- * are deleted.
+ * Joins the two walls at `nodeId` into the one with the smaller id (04 §6.6).
+ * Its end at the node moves to the far node of the other wall; the other
+ * wall's openings, placements and dimensions are handed over to it and the
+ * other wall is deleted. The node is left without walls for the post-process
+ * to delete.
  */
 function mergeAtNode(d: Doc, nodeId: string, out: Out): MergeCollinearResult {
     const plan = planMerge(d, nodeId);
@@ -523,9 +464,8 @@ function mergeAtNode(d: Doc, nodeId: string, out: Out): MergeCollinearResult {
     }
 
     const result = { keptWallId: kept.id, removedWallId: removed.id };
+    // The node is left without walls; the post-process deletes it (04 §6.4 step 1).
     deleteWall(d, removed.id, out);
-    delete d.nodes[nodeId];
-    pushDeleted(out, nodeId);
     return result;
 }
 
@@ -549,6 +489,13 @@ const mergeCollinearWalls = definePlanCommand<
 // ---- deleteWalls / deleteNode ----------------------------------------------------------------------
 
 export interface DeleteResult {
+    /**
+     * Every id the command deleted: walls, openings, nodes, merged-away walls,
+     * and the dimensions and room metas the post-process deletes afterwards.
+     * It is the very array of `ExecuteResult.deletedIds` (the post-process
+     * appends to it after `run` returns), so it is complete once `execute`
+     * has returned; do not mutate it.
+     */
     deletedIds: string[];
 }
 
@@ -557,12 +504,13 @@ const wallCount = (d: Graph, nodeId: string): number =>
         .length;
 
 /**
- * Deletes walls (04 §6.6) with their openings; the attached dimensions are
- * deleted and the attached placements detached by the pipeline's post-process
- * (04 §6.4 steps 2 and 3), in the same entry. The
- * nodes no wall uses any more go too (also `extraNodes`), and every remaining
- * end node left with two walls that `mergeCollinearWalls` accepts is merged,
- * so removing the branch of a T leaves one straight wall.
+ * Deletes walls (04 §6.6) together with their openings. Dimensions attached
+ * to them are deleted and placements attached to them are detached by the
+ * pipeline's post-process (04 §6.4 steps 2 and 3), in the same history entry.
+ * Nodes that no wall uses any more are deleted too, including `extraNodes`.
+ * Every remaining end node left with exactly two walls that
+ * `mergeCollinearWalls` accepts is merged, so removing the branch of a T
+ * leaves one straight wall.
  */
 function removeWalls(
     d: Doc,
