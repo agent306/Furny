@@ -3,13 +3,14 @@ import { toast } from 'vue-sonner';
 import type { FlashMessages } from '@/types/inertia';
 
 // The server → client toast bridge (15 §10.3). Flash messages arrive as the
-// shared `flash` prop: already translated strings, rendered as TEXT. They are
-// never turned into markup or a rich toast; vue-sonner prints a string title as text.
+// native top-level `flash` of an Inertia page (`Inertia::flash(...)`): already
+// translated strings, rendered as TEXT. They are never turned into markup or a
+// rich toast; vue-sonner prints a string title as text.
 
 export type FlashType = keyof FlashMessages;
 
 /** `id` is optional: a controller that wants cross-visit dedupe can send one. */
-export type FlashPayload = Partial<FlashMessages> & { id?: string | null };
+export type FlashPayload = FlashMessages & { id?: string | null };
 
 /** Display time per type; errors stay longest (15 §10.3). The Toaster adds the close button. */
 export const FLASH_DURATION_MS: Record<FlashType, number> = {
@@ -28,9 +29,10 @@ export type FlashBridge = {
 };
 
 /**
- * One visit's flash is one object (a partial reload keeps the same object, a new
- * response brings a new one), so remembering the object is "once per visit". An
- * explicit `id` also dedupes across objects.
+ * Inertia announces each response's flash once (the `flash` router event) and
+ * keeps the same object on the page, so remembering the object makes the mount
+ * read and the event agree: "once per visit". An explicit `id` also dedupes
+ * across objects.
  */
 export function createFlashBridge(): FlashBridge {
     const shownObjects = new WeakSet<object>();

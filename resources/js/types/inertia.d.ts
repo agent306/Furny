@@ -16,11 +16,16 @@ export type FeatureFlags = {
     captcha: boolean;
 };
 
+/**
+ * The top-level `flash` of a page (Inertia v3 `Inertia::flash()`), not a prop: Inertia sends
+ * it once and the browser history never keeps it, so Back does not show a toast again. Already
+ * translated strings; only the keys that were flashed are present.
+ */
 export type FlashMessages = {
-    success: string | null;
-    error: string | null;
-    info: string | null;
-    warning: string | null;
+    success?: string;
+    error?: string;
+    info?: string;
+    warning?: string;
 };
 
 export type HealthBanner = {
@@ -34,8 +39,6 @@ export type SharedPageProps = {
     auth: { user: App.Domain.Identity.Data.AuthUserData | null };
     business: App.Domain.Settings.Data.BusinessPublicData;
     features: FeatureFlags;
-    /** Already-translated strings. */
-    flash: FlashMessages;
     i18n: { locale: string; hash: string };
     /** Authenticated users only. */
     unreadNotifications?: number;
@@ -48,5 +51,6 @@ export type SharedPageProps = {
 declare module '@inertiajs/core' {
     export interface InertiaConfig {
         sharedPageProps: SharedPageProps;
+        flashDataType: FlashMessages;
     }
 }

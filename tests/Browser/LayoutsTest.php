@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Domain\Identity\Models\User;
+use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 /** 15 §14 item 12: usable from 320 px up, never a horizontal page scroll. */
 const NO_HORIZONTAL_SCROLL = 'document.documentElement.scrollWidth <= window.innerWidth';
@@ -95,3 +97,36 @@ it('has no serious accessibility violations on the public and dashboard pages', 
 
     visit($path)->assertNoAccessibilityIssues(1);
 })->with(['/', '/terms', '/privacy', '/admin']);
+
+it('shows a flash toast once and does not replay it on Back', function (): void {
+    Route::middleware(['web', 'auth'])->get('/_flashed', function () {
+        Inertia::flash('success', 'Saved for real.');
+
+        return redirect('/dashboard');
+    });
+    $this->actingAs(User::factory()->create());
+
+    $page = visit('/_flashed')->resize(1280, 800);
+
+    $page->assertSee('Saved for real.');
+
+    // Count every toast added from now on, then leave and come Back.
+    $page->script('window.__toasts = 0; new MutationObserver((records) => records.forEach((r) => r.addedNodes.forEach((n) => { if (n.nodeType === 1 && (n.matches("[data-sonner-toast]") || n.querySelector("[data-sonner-toast]"))) window.__toasts++; }))).observe(document.body, { childList: true, subtree: true })');
+    $page->click('Terms')->wait(1);
+    $page->assertScript('location.pathname', '/terms');
+    $page->script('history.back()');
+    $page->wait(1);
+
+    $page->assertScript('location.pathname', '/dashboard')
+        ->assertScript('window.__toasts', 0);
+});
+
+it('moves focus to the heading and announces the page after an Inertia navigation, also across layouts', function (): void {
+    $this->actingAs(User::factory()->create());
+
+    $page = visit('/dashboard')->resize(1280, 800);
+
+    $page->click('Terms')->wait(1);
+    $page->assertScript('document.activeElement === document.querySelector("#main h1")')
+        ->assertScript('document.querySelector("[data-test=route-announcer]").textContent.trim().startsWith("Terms of service")');
+});

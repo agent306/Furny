@@ -10,8 +10,8 @@ const toast = vi.hoisted(() => ({
     info: vi.fn(),
     warning: vi.fn(),
 }));
-const navigate = vi.hoisted(() => ({
-    handler: null as null | ((event: unknown) => void),
+const events = vi.hoisted(() => ({
+    handlers: {} as Record<string, (event: unknown) => void>,
     stop: vi.fn(),
 }));
 
@@ -37,10 +37,10 @@ vi.mock('@inertiajs/vue3', async (importOriginal) => {
         ...(await importOriginal<typeof import('@inertiajs/vue3')>()),
         usePage: () => testPage,
         router: {
-            on: (_event: string, handler: (event: unknown) => void) => {
-                navigate.handler = handler;
+            on: (event: string, handler: (event: unknown) => void) => {
+                events.handlers[event] = handler;
 
-                return navigate.stop;
+                return events.stop;
             },
         },
     };
@@ -51,6 +51,7 @@ import ConfirmHost from '@/components/common/ConfirmHost.vue';
 import OfflineBanner from '@/components/common/OfflineBanner.vue';
 import { DENSITY_KEY } from '@/composables/useControlSize';
 import type { Density } from '@/composables/useControlSize';
+import { resetRouteFocus } from '@/composables/useRouteFocus';
 import { page, resetPage } from '@/test/inertiaPage';
 import {
     DESKTOP,
@@ -76,8 +77,9 @@ beforeEach(() => {
     for (const fn of Object.values(toast)) {
         fn.mockClear();
     }
-    navigate.handler = null;
-    navigate.stop.mockClear();
+    events.handlers = {};
+    events.stop.mockClear();
+    resetRouteFocus();
     resetViewport();
 });
 
@@ -86,9 +88,13 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
+function announceFlash(flash: object): void {
+    events.handlers.flash?.({ detail: { flash } });
+}
+
 describe('AppShell flash bridge (15 §10.3)', () => {
-    it('toasts the flash of a visit once and not again on a re-render of the same visit', async () => {
-        page.props = { flash: { success: 'Project saved.' } };
+    it('toasts the flash of the first load once, and not again on a re-render', async () => {
+        page.flash = { success: 'Project saved.' };
         mountShell();
         await nextTick();
 
@@ -97,18 +103,25 @@ describe('AppShell flash bridge (15 §10.3)', () => {
             duration: 4000,
         });
 
-        // A partial reload / unrelated prop change keeps the same flash object.
+        // Inertia announces the same flash object it already put on the page.
+        announceFlash(page.flash);
         page.props = { ...page.props, unreadNotifications: 3 };
-        await nextTick();
-        page.props.unreadNotifications = 4;
         await nextTick();
 
         expect(toast.success).toHaveBeenCalledTimes(1);
     });
 
+    it('toasts the flash of each later response when Inertia announces it', () => {
+        mountShell();
+
+        announceFlash({ success: 'Saved.' });
+        announceFlash({ success: 'Saved.' });
+
+        expect(toast.success).toHaveBeenCalledTimes(2);
+    });
+
     it('does not repeat the visit when the shell is remounted for the same page', async () => {
-        const flash = { error: 'Something failed.' };
-        page.props = { flash };
+        page.flash = { error: 'Something failed.' };
         const first = mountShell();
         await nextTick();
         first.unmount();
@@ -119,21 +132,26 @@ describe('AppShell flash bridge (15 §10.3)', () => {
         expect(toast.error).toHaveBeenCalledTimes(1);
     });
 
-    it('toasts again for a new visit, even with the same text', async () => {
-        page.props = { flash: { success: 'Saved.' } };
+    it('shows nothing on a Back navigation: the history keeps no flash', () => {
         mountShell();
-        await nextTick();
 
-        page.props = { flash: { success: 'Saved.' } };
-        await nextTick();
+        // The page restored from history has an empty flash; Inertia fires no flash event for it.
+        page.flash = {};
+        events.handlers.navigate?.({
+            detail: {
+                page: { component: 'Customer/Dashboard', url: '/dashboard' },
+                type: 'history',
+            },
+        });
 
-        expect(toast.success).toHaveBeenCalledTimes(2);
+        expect(toast.success).not.toHaveBeenCalled();
+        expect(toast.error).not.toHaveBeenCalled();
     });
 
-    it('shows warnings and errors with their own durations', async () => {
-        page.props = { flash: { warning: 'Heads up.', error: 'Failed.' } };
+    it('shows warnings and errors with their own durations', () => {
         mountShell();
-        await nextTick();
+
+        announceFlash({ warning: 'Heads up.', error: 'Failed.' });
 
         expect(toast.warning).toHaveBeenCalledWith('Heads up.', {
             duration: 6000,
@@ -141,12 +159,12 @@ describe('AppShell flash bridge (15 §10.3)', () => {
         expect(toast.error).toHaveBeenCalledWith('Failed.', { duration: 8000 });
     });
 
-    it('renders flash as text only: no markup reaches the DOM or a toast', async () => {
+    it('renders flash as text only: no markup reaches the DOM or a toast', () => {
         const hostile =
             '<img src="x" onerror="window.__pwned = 1"><script>window.__pwned = 2</script>';
-        page.props = { flash: { error: hostile } };
         const wrapper = mountShell();
-        await nextTick();
+
+        announceFlash({ error: hostile });
 
         expect(toast.error.mock.calls[0]?.[0]).toBe(hostile);
         expect(wrapper.find('img').exists()).toBe(false);
@@ -168,6 +186,12 @@ describe('AppShell flash bridge (15 §10.3)', () => {
                 /v-html|innerHTML|insertAdjacentHTML/,
             );
         }
+    });
+
+    it('stops listening to the flash and navigate events when the shell unmounts', () => {
+        mountShell().unmount();
+
+        expect(events.stop).toHaveBeenCalledTimes(2);
     });
 });
 
@@ -300,7 +324,9 @@ describe('AppShell focus after navigation (15 §14 item 4)', () => {
         url: string,
         type: 'initial' | 'visit' | 'history' = 'visit',
     ): void {
-        navigate.handler?.({ detail: { page: { component, url }, type } });
+        events.handlers.navigate?.({
+            detail: { page: { component, url }, type },
+        });
     }
 
     it('moves focus to the main heading and announces the title when the page changes', async () => {
@@ -331,6 +357,89 @@ describe('AppShell focus after navigation (15 §14 item 4)', () => {
                 .get('[data-test="route-announcer"]')
                 .attributes('aria-live'),
         ).toBe('polite');
+    });
+
+    it('still moves focus and announces the title when the navigation swaps the layout', async () => {
+        // login -> dashboard: the old shell is unmounted, a new one mounts on the new page.
+        page.component = 'Auth/Login';
+        page.url = '/login';
+        const login = mountShell(
+            'customer',
+            '<main id="main"><h1>Log in</h1></main>',
+        );
+
+        login.unmount();
+        page.component = 'Customer/Dashboard';
+        page.url = '/dashboard';
+        const dashboard = mountShell(
+            'customer',
+            '<main id="main"><h1>Hello</h1></main>',
+        );
+
+        document.title = 'Dashboard · Furny';
+        navigateTo('Customer/Dashboard', '/dashboard');
+        await flushPromises();
+
+        expect(document.activeElement).toBe(dashboard.get('h1').element);
+
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        expect(dashboard.get('[data-test="route-announcer"]').text()).toBe(
+            'Dashboard · Furny',
+        );
+    });
+
+    it('re-announces the same title on consecutive navigations', async () => {
+        page.component = 'A';
+        page.url = '/a';
+        const wrapper = mountShell(
+            'customer',
+            '<main id="main"><h1>Page</h1></main>',
+        );
+        const region = () =>
+            wrapper.get('[data-test="route-announcer"]').text();
+
+        document.title = 'Same · Furny';
+        navigateTo('B', '/b');
+        await flushPromises();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        expect(region()).toBe('Same · Furny');
+
+        navigateTo('C', '/c');
+        await flushPromises();
+
+        // Emptied first, so the identical text is a change again.
+        expect(region()).toBe('');
+
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        expect(region()).toBe('Same · Furny');
+    });
+
+    it('clears the pending announcement timer when the shell unmounts', async () => {
+        vi.useFakeTimers();
+
+        try {
+            page.component = 'A';
+            page.url = '/a';
+            const wrapper = mountShell(
+                'customer',
+                '<main id="main"><h1>Page</h1></main>',
+            );
+
+            navigateTo('B', '/b');
+            await nextTick();
+            await nextTick();
+
+            expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+            wrapper.unmount();
+
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('falls back to #main when the page has no h1', async () => {
@@ -374,13 +483,5 @@ describe('AppShell focus after navigation (15 §14 item 4)', () => {
         await flushPromises();
 
         expect(document.activeElement).toBe(wrapper.get('h1').element);
-    });
-
-    it('stops listening when the shell unmounts', () => {
-        const wrapper = mountShell();
-
-        wrapper.unmount();
-
-        expect(navigate.stop).toHaveBeenCalledTimes(1);
     });
 });

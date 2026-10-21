@@ -50,6 +50,8 @@
     "common.nav.dashboard": "Dashboard",
     "common.nav.home": "Home",
     "common.offline.banner": "You're offline. Changes will be sent when you reconnect.",
+    "common.pagination.first": "First",
+    "common.pagination.last": "Last",
     "common.pagination.next": "Next",
     "common.pagination.previous": "Previous",
     "common.photo_n": "Photo {n}",

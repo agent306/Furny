@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { usePage } from '@inertiajs/vue3';
-import { computed, provide, watch } from 'vue';
+import { router, usePage } from '@inertiajs/vue3';
+import { computed, onMounted, onScopeDispose, provide } from 'vue';
 import ConfirmHost from '@/components/common/ConfirmHost.vue';
 import OfflineBanner from '@/components/common/OfflineBanner.vue';
 import { Toaster } from '@/components/ui/sonner';
@@ -17,9 +17,18 @@ import { flashBridge } from '@/lib/flashToast';
 // that exists once per page: density, the toaster and the flash bridge, the
 // skip link, the offline banner, the global confirm dialog, tooltips, the
 // theme and the focus/announcement after navigation.
-const props = defineProps<{
-    variant: 'customer' | 'admin';
-}>();
+const props = withDefaults(
+    defineProps<{
+        variant: 'customer' | 'admin';
+        /**
+         * The offline banner above the slot. A full-viewport layout (the editor)
+         * turns it off and renders its own inside its box, so going offline
+         * does not push the page and scroll it.
+         */
+        offlineBanner?: boolean;
+    }>(),
+    { offlineBanner: true },
+);
 
 const { t } = useI18n();
 const page = usePage();
@@ -35,13 +44,16 @@ const density = computed<Density>(() =>
 
 provide(DENSITY_KEY, density);
 
-// Flash messages are plain text for a toast, never HTML. Once per visit: the
-// bridge remembers each response's flash object, so a re-render, a partial
-// reload or a remounted shell does not repeat it.
-watch(
-    () => page.props.flash,
-    (flash) => flashBridge.show(flash),
-    { immediate: true },
+// Flash messages are plain text for a toast, never HTML. They come from the
+// native flash of the page (`Inertia::flash`), which Inertia announces once per
+// response with the `flash` event and the history never stores, so Back does
+// not replay it. The page's own flash is read once the shell has mounted, for
+// a shell that mounts with the page (a toast made before the Toaster exists is
+// lost); the bridge remembers each flash object, so the two sources and a
+// remounted shell show it once.
+onMounted(() => flashBridge.show(page.flash));
+onScopeDispose(
+    router.on('flash', (event) => flashBridge.show(event.detail.flash)),
 );
 
 const announcement = useRouteFocus(() => ({
@@ -58,7 +70,7 @@ const announcement = useRouteFocus(() => ({
             data-test="skip-link"
             >{{ t('common.a11y.skip_to_content') }}</a
         >
-        <OfflineBanner />
+        <OfflineBanner v-if="offlineBanner" />
         <slot />
         <div
             class="sr-only"

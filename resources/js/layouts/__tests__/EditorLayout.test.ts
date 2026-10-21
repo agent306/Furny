@@ -1,7 +1,8 @@
-import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { readdirSync, readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { vi } from 'vitest';
-import { nextTick } from 'vue';
+import { h, nextTick, Teleport } from 'vue';
 
 vi.mock('@inertiajs/vue3', async (importOriginal) => {
     const { page: testPage } = await import('@/test/inertiaPage');
@@ -13,6 +14,9 @@ vi.mock('@inertiajs/vue3', async (importOriginal) => {
     };
 });
 
+import AppShell from '@/components/app/AppShell.vue';
+import ConfirmHost from '@/components/common/ConfirmHost.vue';
+import { focusMainHeading } from '@/composables/useRouteFocus';
 import { INSPECTOR_WIDTH_KEY } from '@/composables/useInspectorWidth';
 import EditorLayout from '@/layouts/EditorLayout.vue';
 import { resetPage } from '@/test/inertiaPage';
@@ -276,5 +280,142 @@ describe('EditorLayout inspector width (15 §7.3)', () => {
 
         get.mockRestore();
         set.mockRestore();
+    });
+});
+
+describe('EditorLayout is a persistent layout (15 §7)', () => {
+    beforeEach(() => setViewport(DESKTOP));
+
+    // What Inertia renders for an editor page: the layout around the page component.
+    // A functional component: the page needs no state of its own here.
+    const Page = () => [
+        h('p', { 'data-test': 'page' }, 'plan editor'),
+        h(
+            Teleport,
+            { to: '#toolrail', defer: true },
+            h('button', { 'data-test': 'tool' }, 'wall'),
+        ),
+        h(
+            Teleport,
+            { to: '#inspector', defer: true },
+            h('p', { 'data-test': 'props' }, 'properties'),
+        ),
+        h(
+            Teleport,
+            { to: '#topbar-end', defer: true },
+            h('button', { 'data-test': 'action' }, 'Done'),
+        ),
+    ];
+
+    function editorPage(layoutProps: Record<string, unknown> = {}) {
+        return mount(EditorLayout, {
+            props: { title: 'Living room', backHref: '/plans', ...layoutProps },
+            slots: { default: () => h(Page) },
+            attachTo: document.body,
+        });
+    }
+
+    it('mounts exactly one AppShell, ConfirmHost and Toaster around an editor page', () => {
+        const wrapper = editorPage();
+
+        expect(wrapper.findAllComponents(AppShell)).toHaveLength(1);
+        expect(wrapper.findAllComponents(ConfirmHost)).toHaveLength(1);
+        expect(wrapper.findAll('[data-test="skip-link"]')).toHaveLength(1);
+        expect(wrapper.findAll('main#main')).toHaveLength(1);
+    });
+
+    it('renders the page into #canvas and lets it fill the other regions with a deferred Teleport', async () => {
+        const wrapper = editorPage();
+
+        await flushPromises();
+
+        expect(wrapper.get('#canvas [data-test="page"]').text()).toBe(
+            'plan editor',
+        );
+        expect(wrapper.get('#toolrail [data-test="tool"]').text()).toBe('wall');
+        expect(wrapper.get('#inspector [data-test="props"]').text()).toBe(
+            'properties',
+        );
+        expect(wrapper.get('#topbar-end [data-test="action"]').text()).toBe(
+            'Done',
+        );
+    });
+
+    it('takes its props and handlers from the layout props, as a page sets them', async () => {
+        const onSaveStatusClick = vi.fn();
+        const wrapper = editorPage({
+            saveStatus: 'invalid',
+            saveStatusCount: 2,
+            readOnly: true,
+            onSaveStatusClick,
+        });
+
+        await wrapper.get('[data-status="invalid"]').trigger('click');
+
+        expect(onSaveStatusClick).toHaveBeenCalledTimes(1);
+        expect(wrapper.find('[data-test="read-only"]').exists()).toBe(true);
+    });
+
+    it('no page wraps itself in the layout (source guard)', () => {
+        const pages = (
+            readdirSync('resources/js/pages', { recursive: true }) as string[]
+        ).filter((file) => file.endsWith('.vue'));
+
+        expect(pages.length).toBeGreaterThan(5);
+
+        for (const file of pages) {
+            expect(
+                readFileSync(`resources/js/pages/${file}`, 'utf8'),
+                file,
+            ).not.toContain('EditorLayout');
+        }
+    });
+
+    it('moves route focus to the title h1 in the top bar', () => {
+        const wrapper = editorPage();
+
+        expect(focusMainHeading()).toBe(true);
+        expect(document.activeElement).toBe(wrapper.get('h1').element);
+        expect(wrapper.get('h1').attributes('tabindex')).toBe('-1');
+    });
+});
+
+describe('EditorLayout save status and offline banner', () => {
+    it('keeps the save status in a polite live region even as a button', async () => {
+        const wrapper = mountEditor({
+            saveStatus: 'invalid',
+            saveStatusCount: 2,
+        });
+        const region = wrapper.get('#topbar [aria-live="polite"]');
+
+        expect(region.attributes('role')).toBe('status');
+        expect(region.get('button[data-status="invalid"]').text()).toBe(
+            'Fix 2 problems to save',
+        );
+
+        await wrapper.setProps({ saveStatus: 'saving' });
+
+        expect(wrapper.get('#topbar [aria-live="polite"]').text()).toBe(
+            'Saving…',
+        );
+    });
+
+    it('shows the offline banner once, inside the full-viewport box, never above it', async () => {
+        const online = vi
+            .spyOn(navigator, 'onLine', 'get')
+            .mockReturnValue(false);
+        const wrapper = mountEditor();
+
+        window.dispatchEvent(new Event('offline'));
+        await nextTick();
+
+        const banners = wrapper.findAll('[data-test="offline-banner"]');
+        const box = wrapper.get('#topbar').element.parentElement;
+
+        expect(banners).toHaveLength(1);
+        expect(box?.className).toContain('h-dvh');
+        expect(box?.contains(banners[0]?.element ?? null)).toBe(true);
+        expect(banners[0]?.classes()).toContain('shrink-0');
+        online.mockRestore();
     });
 });

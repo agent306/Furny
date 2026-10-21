@@ -6,6 +6,7 @@ import AppShell from '@/components/app/AppShell.vue';
 import AppSidebar from '@/components/app/AppSidebar.vue';
 import { Button } from '@/components/ui/button';
 import { SidebarProvider } from '@/components/ui/sidebar';
+import { SIDEBAR_COOKIE_NAME } from '@/components/ui/sidebar/utils';
 import { useI18n } from '@/composables/useI18n';
 import { ICONS } from '@/lib/icons';
 import type { BreadcrumbItem } from '@/types';
@@ -23,6 +24,13 @@ withDefaults(
 
 const { t } = useI18n();
 const page = usePage();
+
+// Read when the layout mounts, not when the module loads: the layout remounts
+// after visits to pages with another layout, and the cookie is then newer than
+// the provider's own load-time default.
+const sidebarOpen = !document.cookie
+    .split('; ')
+    .includes(`${SIDEBAR_COOKIE_NAME}=false`);
 // Health banners (11 §4) can be dismissed for the rest of the visit.
 const dismissed = ref<string[]>([]);
 const banners = computed(() =>
@@ -34,7 +42,7 @@ const banners = computed(() =>
 
 <template>
     <AppShell variant="admin">
-        <SidebarProvider>
+        <SidebarProvider :default-open="sidebarOpen">
             <AppSidebar />
             <div class="flex min-w-0 flex-1 flex-col">
                 <AppHeader variant="admin" :breadcrumbs="breadcrumbs" />

@@ -35,7 +35,6 @@ export type TestPageProps = {
         email?: string;
         workingHours?: string;
     };
-    flash?: Partial<FlashMessages> & { id?: string };
     unreadNotifications?: number;
     staffCounters?: { submitted: number; toCall: number } | null;
     healthBanners?: HealthBanner[];
@@ -43,12 +42,15 @@ export type TestPageProps = {
 
 export const page = reactive<{
     props: TestPageProps;
+    /** The native top-level flash of the page, not a prop. */
+    flash: FlashMessages & { id?: string };
     component: string;
     url: string;
-}>({ props: {}, component: 'Test', url: '/' });
+}>({ props: {}, flash: {}, component: 'Test', url: '/' });
 
 export function resetPage(props: TestPageProps = {}): void {
     page.props = props;
+    page.flash = {};
     page.component = 'Test';
     page.url = '/';
 }

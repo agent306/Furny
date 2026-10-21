@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { readdirSync, readFileSync } from 'node:fs';
+import { parse } from 'vue/compiler-sfc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h, provide } from 'vue';
 import { Breadcrumb, BreadcrumbEllipsis } from '@/components/ui/breadcrumb';
@@ -132,26 +133,68 @@ describe('vendored labels use t()', () => {
 });
 
 // A source guard so the next vendored component cannot bring bare English back.
+// It parses each template (not line by line), so multi-line elements and text
+// nodes are seen. Flagged: a literal string in a naming attribute, and any
+// text node with words that is not an interpolation.
 const UI_ROOT = 'resources/js/components/ui';
-const BARE_LABELS = [
-    /\saria-label="[A-Za-z]/,
-    /\stitle="[A-Za-z]/,
-    /class="sr-only">\s*[A-Za-z]/,
-    /<(?:SheetTitle|SheetDescription|DialogTitle|DialogDescription)>\s*[A-Za-z]/,
-];
+const NAMING_ATTRIBUTES = new Set([
+    'aria-label',
+    'aria-description',
+    'aria-roledescription',
+    'title',
+    'alt',
+    'placeholder',
+    'label',
+]);
+const WORDS = /[A-Za-z]{2,}/;
+const ELEMENT = 1;
+const TEXT = 2;
+const ATTRIBUTE = 6;
+
+type Node = {
+    type: number;
+    tag?: string;
+    content?: string;
+    props?: { type: number; name: string; value?: { content: string } }[];
+    children?: Node[];
+    loc: { start: { line: number } };
+};
 
 function bareLabels(files: Record<string, string>): string[] {
-    return Object.entries(files).flatMap(([file, source]) =>
-        source
-            .split('\n')
-            .map((line, index) => ({ line, number: index + 1 }))
-            .filter(({ line }) => BARE_LABELS.some((pattern) => pattern.test(line)))
-            .map(({ line, number }) => `${file}:${number}: ${line.trim()}`),
-    );
+    const found: string[] = [];
+
+    function walk(file: string, node: Node): void {
+        if (node.type === ELEMENT) {
+            for (const prop of node.props ?? []) {
+                const value = prop.value?.content ?? '';
+
+                if (prop.type === ATTRIBUTE && NAMING_ATTRIBUTES.has(prop.name) && WORDS.test(value)) {
+                    found.push(`${file}:${prop.name}="${value}"`);
+                }
+            }
+        } else if (node.type === TEXT && WORDS.test(node.content ?? '')) {
+            found.push(`${file}:${node.loc.start.line}: text "${(node.content ?? '').trim()}"`);
+        }
+
+        for (const child of node.children ?? []) {
+            walk(file, child);
+        }
+    }
+
+    for (const [file, source] of Object.entries(files)) {
+        const { descriptor } = parse(source, { filename: file });
+        const ast = descriptor.template?.ast as Node | undefined;
+
+        for (const child of ast?.children ?? []) {
+            walk(file, child);
+        }
+    }
+
+    return found;
 }
 
 describe('vendored ui components', () => {
-    it('contain no bare English label in a template', () => {
+    it('contain no bare English label or text in a template', () => {
         const files = Object.fromEntries(
             (readdirSync(UI_ROOT, { recursive: true }) as string[])
                 .filter((file) => file.endsWith('.vue'))
@@ -162,14 +205,21 @@ describe('vendored ui components', () => {
         expect(bareLabels(files)).toEqual([]);
     });
 
-    it('the guard is not vacuous', () => {
-        expect(
-            bareLabels({
-                'A.vue': '<span class="sr-only">Close</span>',
-                'B.vue': '<nav aria-label="breadcrumb">',
-                'C.vue': '<SheetTitle>Sidebar</SheetTitle>',
-                'D.vue': '<span class="sr-only">{{ t("a11y.more") }}</span>',
-            }),
-        ).toHaveLength(3);
+    it('the guard is not vacuous: it sees multi-line and nested bare text', () => {
+        const offenders = bareLabels({
+            'A.vue': '<template><span class="sr-only">Close</span></template>',
+            'B.vue': '<template><nav\n  aria-label="breadcrumb"\n  :class="x"\n/></template>',
+            'C.vue': '<template><SheetTitle>Sidebar</SheetTitle></template>',
+            'D.vue': '<template><span class="sr-only">\n  More pages\n</span></template>',
+            'E.vue': '<template><div><p><b>Deep text</b></p></div></template>',
+            'F.vue': '<template><span class="hidden sm:block">First</span></template>',
+        });
+        const clean = bareLabels({
+            'G.vue': '<template><span class="sr-only">{{ t("a11y.more") }}</span><nav :aria-label="t(\'a\')" /></template>',
+            'H.vue': '<template><span aria-hidden="true">…</span><slot /></template>',
+        });
+
+        expect(offenders).toHaveLength(6);
+        expect(clean).toEqual([]);
     });
 });

@@ -20,6 +20,8 @@ const props = defineProps<{
     onClick?: () => void;
 }>();
 
+// The root is an always-present live region, so a status change is announced
+// whether or not the status is a button (15 §14 item 5).
 const { t } = useI18n();
 const { formatRelative } = useFormat();
 // Re-read every 30 s so "2 min ago" does not go stale while the editor idles.
@@ -60,29 +62,34 @@ const destructive = computed(() =>
 </script>
 
 <template>
-    <component
-        :is="onClick ? 'button' : 'span'"
-        :type="onClick ? 'button' : undefined"
-        :role="onClick ? undefined : 'status'"
-        :aria-live="onClick ? undefined : 'polite'"
-        :data-status="status"
-        :class="
-            cn(
-                'inline-flex min-h-6 items-center gap-1.5 rounded-md px-2 text-xs',
-                destructive
-                    ? 'bg-danger-subtle text-danger-subtle-foreground'
-                    : 'text-muted-foreground',
-                onClick &&
-                    'min-h-11 hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none lg:min-h-8',
-            )
-        "
-        @click="onClick?.()"
+    <span
+        role="status"
+        aria-live="polite"
+        data-test="save-status-region"
+        class="inline-flex"
     >
         <component
-            :is="ICONS[ICON[status]]"
-            :class="cn('size-3.5', status === 'saving' && 'animate-spin')"
-            aria-hidden="true"
-        />
-        <span>{{ label }}</span>
-    </component>
+            :is="onClick ? 'button' : 'span'"
+            :type="onClick ? 'button' : undefined"
+            :data-status="status"
+            :class="
+                cn(
+                    'inline-flex min-h-6 items-center gap-1.5 rounded-md px-2 text-xs',
+                    destructive
+                        ? 'bg-danger-subtle text-danger-subtle-foreground'
+                        : 'text-muted-foreground',
+                    onClick &&
+                        'min-h-11 hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none lg:min-h-8',
+                )
+            "
+            @click="onClick?.()"
+        >
+            <component
+                :is="ICONS[ICON[status]]"
+                :class="cn('size-3.5', status === 'saving' && 'animate-spin')"
+                aria-hidden="true"
+            />
+            <span>{{ label }}</span>
+        </component>
+    </span>
 </template>

@@ -13,6 +13,8 @@ import {
 import {
     Pagination,
     PaginationContent,
+    PaginationFirst,
+    PaginationLast,
     PaginationNext,
     PaginationPrevious,
 } from '@/components/ui/pagination';
@@ -154,8 +156,10 @@ describe('pagination labels use t()', () => {
                 render: () =>
                     h(Pagination, { total: 50, itemsPerPage: 10, page: 2 }, () =>
                         h(PaginationContent, null, () => [
+                            h(PaginationFirst),
                             h(PaginationPrevious),
                             h(PaginationNext),
+                            h(PaginationLast),
                         ]),
                     ),
             }),
@@ -167,6 +171,8 @@ describe('pagination labels use t()', () => {
             createI18n({
                 locale: 'xx',
                 messages: {
+                    'common.pagination.first': 'Erste',
+                    'common.pagination.last': 'Letzte',
                     'common.pagination.previous': 'Zurueck',
                     'common.pagination.next': 'Weiter',
                 },
@@ -179,6 +185,13 @@ describe('pagination labels use t()', () => {
         expect(next.text()).toBe('Weiter');
         // The text is hidden below sm, so the button needs its own name.
         expect(previous.attributes('aria-label')).toBe('Zurueck');
+        const first = wrapper.get('[data-slot="pagination-first"]');
+        const last = wrapper.get('[data-slot="pagination-last"]');
+
+        expect(first.text()).toBe('Erste');
+        expect(last.text()).toBe('Letzte');
+        expect(first.attributes('aria-label')).toBe('Erste');
+        expect(last.attributes('aria-label')).toBe('Letzte');
         expect(next.attributes('aria-label')).toBe('Weiter');
     });
 

@@ -67,31 +67,49 @@ describe('SaveStatusIndicator (15 §9.31)', () => {
         expect(many.text()).toBe('Fix 3 problems to save');
     });
 
-    it('is a polite status region without a click handler', () => {
+    it('is always inside one polite status region, a plain span without a click handler', () => {
         const wrapper = mount(SaveStatusIndicator, {
             props: { status: 'saving' },
         });
+        const region = wrapper.get('[data-test="save-status-region"]');
+        const inner = region.get('[data-status]');
 
-        expect(wrapper.element.tagName).toBe('SPAN');
-        expect(wrapper.attributes('role')).toBe('status');
-        expect(wrapper.attributes('aria-live')).toBe('polite');
-        expect(wrapper.find('svg').attributes('aria-hidden')).toBe('true');
-        expect(wrapper.find('svg').classes()).toContain('animate-spin');
+        expect(wrapper.element).toBe(region.element);
+        expect(region.attributes('role')).toBe('status');
+        expect(region.attributes('aria-live')).toBe('polite');
+        expect(inner.element.tagName).toBe('SPAN');
+        expect(inner.find('svg').attributes('aria-hidden')).toBe('true');
+        expect(inner.find('svg').classes()).toContain('animate-spin');
     });
 
-    it('is a button with a destructive tone when it has a click handler', async () => {
+    it('is a button with a destructive tone inside the same live region when it has a click handler', async () => {
         const onClick = vi.fn();
         const wrapper = mount(SaveStatusIndicator, {
             props: { status: 'invalid', count: 2, onClick },
         });
+        const button = wrapper.get('[data-status="invalid"]');
 
-        expect(wrapper.element.tagName).toBe('BUTTON');
-        expect(wrapper.attributes('type')).toBe('button');
-        expect(wrapper.classes()).toContain('bg-danger-subtle');
-        expect(wrapper.classes()).toContain('min-h-11');
+        expect(wrapper.attributes('aria-live')).toBe('polite');
+        expect(wrapper.attributes('role')).toBe('status');
+        expect(button.element.parentElement).toBe(wrapper.element);
+        expect(button.element.tagName).toBe('BUTTON');
+        expect(button.attributes('type')).toBe('button');
+        expect(button.classes()).toContain('bg-danger-subtle');
+        expect(button.classes()).toContain('min-h-11');
+        expect(button.attributes('aria-live')).toBeUndefined();
 
-        await wrapper.trigger('click');
+        await button.trigger('click');
 
         expect(onClick).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-renders the text inside the live region when the status changes', async () => {
+        const wrapper = mount(SaveStatusIndicator, {
+            props: { status: 'saving' },
+        });
+
+        await wrapper.setProps({ status: 'saved' });
+
+        expect(wrapper.get('[aria-live="polite"]').text()).toBe('Saved');
     });
 });

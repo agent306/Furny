@@ -49,9 +49,13 @@ describe('flash bridge (15 §10.3)', () => {
     it('skips null, empty and non-string messages', () => {
         const bridge = createFlashBridge();
 
-        expect(bridge.show({ success: null, error: '', info: undefined })).toBe(
-            0,
-        );
+        expect(
+            bridge.show({
+                success: null as unknown as string,
+                error: '',
+                info: undefined,
+            }),
+        ).toBe(0);
         expect(bridge.show(null)).toBe(0);
         expect(bridge.show(undefined)).toBe(0);
         expect(

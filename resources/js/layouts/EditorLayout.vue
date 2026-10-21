@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
 import AppShell from '@/components/app/AppShell.vue';
+import OfflineBanner from '@/components/common/OfflineBanner.vue';
 import SaveStatusIndicator from '@/components/common/SaveStatusIndicator.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,13 +22,26 @@ import { useI18n } from '@/composables/useI18n';
 import { ICONS } from '@/lib/icons';
 import type { SaveStatus } from '@/types/ui';
 
-// 15 §7.3: a full-viewport shell with regions and slots only; the plan editor,
-// import review, furniture builder and proposal builder fill them (05/07).
-// Pages wrap their content in it (it is not a persistent layout, its slots
-// could not be filled otherwise). No page scroll, no app header.
+// 15 §7.3: a full-viewport shell with regions only; the plan editor, import
+// review, furniture builder and proposal builder fill them (05/07). Like every
+// layout it is persistent (`resolveLayout` picks it for the editor pages), so
+// there is one AppShell, Toaster and ConfirmHost and pages never wrap
+// themselves in it.
+//
+// - The page is the default slot and renders into `#canvas`.
+// - `title`, `backHref`, `readOnly`, `saveStatus`, `saveStatusCount`,
+//   `savedAt` and `inspectorOpen` are layout props: a page sets them with
+//   `defineOptions({ layout: { ... } })` and updates them with
+//   `setLayoutProps()`. The handlers are props too (`onSaveStatusClick`,
+//   `onUpdate:inspectorOpen`).
+// - The other regions are mount points a page fills with
+//   `<Teleport defer to="#toolrail">` (also `#topbar-start`, `#topbar-center`,
+//   `#topbar-end`, `#banner`, `#inspector`, `#statusbar`). `defer` is needed:
+//   the page mounts in the same patch that creates the regions. The named
+//   slots remain for direct use.
 //
 //   desktop  toolrail + canvas + resizable inspector
-//   tablet   toolrail + canvas; the inspector is a right Sheet (`v-model:inspector-open`)
+//   tablet   toolrail + canvas; the inspector is a right Sheet (`inspector-open`)
 //   phone    view only: no toolrail, no inspector; back, title and the centre slot remain
 withDefaults(
     defineProps<{
@@ -91,8 +105,11 @@ function onResizeKey(event: KeyboardEvent): void {
 </script>
 
 <template>
-    <AppShell variant="customer">
+    <AppShell variant="customer" :offline-banner="false">
         <div class="flex h-dvh flex-col overflow-hidden bg-background">
+            <!-- Inside the box: going offline must not push the editor out of the viewport. -->
+            <OfflineBanner class="shrink-0" />
+
             <header
                 id="topbar"
                 class="flex h-12 shrink-0 items-center gap-2 border-b px-2"
@@ -116,6 +133,7 @@ function onResizeKey(event: KeyboardEvent): void {
                         </Link>
                     </Button>
                     <h1
+                        data-main-heading
                         tabindex="-1"
                         class="truncate text-sm font-semibold outline-none"
                     >

@@ -33,6 +33,8 @@ return [
     ],
 
     'pagination' => [
+        'first' => 'First',
+        'last' => 'Last',
         'next' => 'Next',
         'previous' => 'Previous',
     ],

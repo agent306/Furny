@@ -274,3 +274,55 @@ describe('AdminLayout regions', () => {
         );
     });
 });
+
+describe('AdminLayout sidebar cookie round trip (15 §7.2)', () => {
+    const state = (wrapper: ReturnType<typeof mountLayout>) =>
+        wrapper.get('[data-slot="sidebar"]').attributes('data-state');
+
+    it('starts expanded without a cookie and after sidebar_state=true', () => {
+        expect(state(mountLayout())).toBe('expanded');
+
+        document.cookie = 'sidebar_state=true; path=/';
+
+        expect(state(mountLayout())).toBe('expanded');
+    });
+
+    it('starts collapsed when sidebar_state=false', () => {
+        document.cookie = 'sidebar_state=false; path=/';
+
+        expect(state(mountLayout())).toBe('collapsed');
+    });
+
+    it('writes the cookie on toggle and the next mount reads it back', async () => {
+        const first = mountLayout();
+
+        await first.get('[data-slot="sidebar-trigger"]').trigger('click');
+
+        expect(state(first)).toBe('collapsed');
+        expect(document.cookie).toContain('sidebar_state=false');
+
+        first.unmount();
+
+        expect(state(mountLayout())).toBe('collapsed');
+    });
+
+    it('toggles with Ctrl+B and writes the cookie each way', async () => {
+        const wrapper = mountLayout();
+
+        window.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'b', ctrlKey: true }),
+        );
+        await nextTick();
+
+        expect(state(wrapper)).toBe('collapsed');
+        expect(document.cookie).toContain('sidebar_state=false');
+
+        window.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'b', ctrlKey: true }),
+        );
+        await nextTick();
+
+        expect(state(wrapper)).toBe('expanded');
+        expect(document.cookie).toContain('sidebar_state=true');
+    });
+});
