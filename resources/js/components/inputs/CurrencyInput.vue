@@ -1,23 +1,30 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId, watch } from 'vue';
+import { computed, useId, watch } from 'vue';
 import InputError from '@/components/common/InputError.vue';
 import { Input } from '@/components/ui/input';
 import { useControlSize } from '@/composables/useControlSize';
+import { useDecimalField } from '@/composables/useDecimalField';
 import { useFormat, useFormatContext } from '@/composables/useFormat';
 import { useI18n } from '@/composables/useI18n';
 import { inputAttrs, rootAttrs } from '@/lib/fieldAttrs';
-import { currencyFractionDigits, parseMajorToMinor } from '@/lib/format';
+import {
+    currencyFractionDigits,
+    parseMajorToMinor,
+    stripCurrencyTokens,
+} from '@/lib/format';
+import type { NumberSeparators } from '@/lib/format';
 
 // 15 §9.22. The model is integer minor units. Text is parsed with lib/format's
 // `parseMajorToMinor` (string and BigInt arithmetic: no float rounding, and
 // more fraction digits than the currency has is an error, not a rounding), so
 // 0-, 2- and 3-decimal currencies all work. That parser owns the accepted
-// grammar: `.` decimals and `,` grouping (western or lakh).
+// grammar (western or lakh grouping), in the business locale's decimal and
+// group separators (`1.234,56` in de-DE, `1 234,56` in fr-FR; the other
+// locale's spelling is an error). A pasted currency symbol or ISO code
+// (`₹ 12,345.67`, `INR 12,345.67`) is stripped first.
 //
-// While typing, every parseable value is emitted at once (a Save button never
-// waits for blur) and an unparseable one emits `null`, but errors appear only
-// on blur or Enter. Outside changes to `modelValue` re-format the text unless
-// the field has focus.
+// The typing lifecycle (live emit, errors on blur or Enter, no re-draw while
+// focused, Enter leaves the text alone) is `useDecimalField`.
 defineOptions({ inheritAttrs: false });
 
 const props = withDefaults(
@@ -49,23 +56,20 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const size = useControlSize();
 const context = useFormatContext();
-const { currencySymbol, formatMoney, formatMoneyAmount, minorToMajorString } =
-    useFormat();
+const {
+    currencySymbol,
+    currencyTokens,
+    formatMoney,
+    formatMoneyAmount,
+    minorToMajorString,
+} = useFormat();
 const errorId = useId();
 
 const code = computed(() => props.currency ?? context().currency);
 const digits = computed(() => currencyFractionDigits(code.value));
 const symbol = computed(() => currencySymbol(code.value));
 
-function display(minor: number | null): string {
-    return minor === null ? '' : formatMoneyAmount(minor, code.value);
-}
-
-const text = ref(display(props.modelValue));
-const focused = ref(false);
-const error = ref<string | null>(null);
-
-type Evaluation = { minor: number | null; error: string | null };
+type Reading = { value: number | null; error: string | null };
 
 function rangeError(minor: number): string | null {
     const { min, max } = props;
@@ -96,84 +100,40 @@ function rangeError(minor: number): string | null {
     );
 }
 
-function evaluate(value: string): Evaluation {
-    if (value.trim() === '') {
-        return { minor: null, error: null };
+// Pasted text may carry the currency: `₹ 12,345.67`, `INR 12,345.67`.
+function read(value: string, separators: NumberSeparators): Reading {
+    const bare = stripCurrencyTokens(value, currencyTokens(code.value));
+
+    if (bare.trim() === '') {
+        return { value: null, error: null };
     }
 
-    const minor = parseMajorToMinor(value, digits.value);
+    const minor = parseMajorToMinor(bare, digits.value, separators);
 
     if (minor === null || (minor < 0 && !props.allowNegative)) {
-        return { minor: null, error: t('money.errors.invalid') };
+        return { value: null, error: t('money.errors.invalid') };
     }
 
     const outOfRange = rangeError(minor);
 
     return outOfRange === null
-        ? { minor, error: null }
-        : { minor: null, error: outOfRange };
+        ? { value: minor, error: null }
+        : { value: null, error: outOfRange };
 }
 
-function onInput(value: string | number): void {
-    text.value = String(value);
-
-    const result = evaluate(text.value);
-
-    // An error is only ever *cleared* mid-edit; it is raised on blur / Enter.
-    if (result.error === null) {
-        error.value = null;
-    }
-
-    if (result.minor !== props.modelValue) {
-        emit('update:modelValue', result.minor);
-    }
-}
-
-function finish(): void {
-    const result = evaluate(text.value);
-
-    error.value = result.error;
-    emit('update:modelValue', result.minor);
-
-    if (result.error === null) {
-        text.value = display(result.minor);
-    }
-}
-
-function onFocus(event: FocusEvent): void {
-    focused.value = true;
-
-    const input = event.target as HTMLInputElement;
-
-    // Edit without grouping separators: `12345.67`, not `12,345.67`.
-    if (error.value === null && props.modelValue !== null) {
-        text.value = minorToMajorString(props.modelValue, code.value);
-    }
-
-    void nextTick(() => input.select());
-}
-
-function onBlur(): void {
-    focused.value = false;
-    finish();
-}
-
-watch(
-    () => props.modelValue,
-    (value) => {
-        if (!focused.value) {
-            text.value = display(value);
-            error.value = null;
-        }
-    },
-);
+const { text, error, onInput, onFocus, onBlur, onEnter, refresh } =
+    useDecimalField({
+        model: () => props.modelValue,
+        read,
+        show: (minor) =>
+            minor === null ? '' : formatMoneyAmount(minor, code.value),
+        edit: (minor, { decimal }) =>
+            minorToMajorString(minor, code.value).replace('.', decimal),
+        emit: (minor) => emit('update:modelValue', minor),
+    });
 
 // A currency change re-draws the same amount in the new currency's shape.
-watch(code, () => {
-    if (!focused.value) {
-        text.value = display(props.modelValue);
-    }
-});
+watch(code, refresh);
 
 const message = computed(() => error.value ?? undefined);
 </script>
@@ -203,7 +163,7 @@ const message = computed(() => error.value ?? undefined);
                 @update:model-value="onInput"
                 @focus="onFocus"
                 @blur="onBlur"
-                @keydown.enter="finish"
+                @keydown.enter="onEnter"
             />
         </div>
         <InputError :id="errorId" :message="message" />

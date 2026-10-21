@@ -178,12 +178,90 @@ export function minorToMajorString(minor: number, currency: string): string {
     return `${sign}${padded.slice(0, -digits)}.${padded.slice(-digits)}`;
 }
 
+export type NumberSeparators = {
+    /** Between the integer and fraction digits (`.` or `,`). */
+    decimal: string;
+    /** Between thousands (`,`, `.`, NBSP, narrow NBSP, `’`). */
+    group: string;
+};
+
+const DEFAULT_SEPARATORS: NumberSeparators = { decimal: '.', group: ',' };
+const separatorCache = new Map<string, NumberSeparators>();
+
+/**
+ * The decimal and group separators `Intl` uses for `locale` (`de-DE`: `,` and
+ * `.`; `fr-FR`: `,` and U+202F). A locale `Intl` rejects gets `.` and `,`.
+ */
+export function numberSeparators(locale: string): NumberSeparators {
+    const cached = separatorCache.get(locale);
+
+    if (cached) {
+        return cached;
+    }
+
+    let separators = DEFAULT_SEPARATORS;
+
+    try {
+        const parts = numberFormat(locale, {
+            useGrouping: true,
+        }).formatToParts(12345.6);
+        const part = (type: string): string | undefined =>
+            parts.find((candidate) => candidate.type === type)?.value;
+
+        separators = {
+            decimal: part('decimal') ?? DEFAULT_SEPARATORS.decimal,
+            group: part('group') ?? DEFAULT_SEPARATORS.group,
+        };
+    } catch {
+        // Keep the defaults.
+    }
+
+    separatorCache.set(locale, separators);
+
+    return separators;
+}
+
+const escapeRegExp = (text: string): string =>
+    text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // Integer part with grouping separators: western (1,234,567) or lakh
-// (12,34,567); the only thousands separator is `,` and the only decimal
-// separator is `.` (en-IN, the one locale that ships).
-const GROUPED_WESTERN = /^[1-9]\d{0,2}(?:,\d{3})+$/;
-const GROUPED_LAKH = /^[1-9]\d?(?:,\d{2})*,\d{3}$/;
-const DECIMAL_TEXT = /^([\d,]*)(?:\.(\d*))?$/;
+// (12,34,567), with the locale's group and decimal characters.
+type NumberGrammar = {
+    western: RegExp;
+    lakh: RegExp;
+    decimalText: RegExp;
+};
+
+const grammars = new Map<string, NumberGrammar>();
+
+function grammarFor({ decimal, group }: NumberSeparators): NumberGrammar {
+    const id = `${decimal}\u0000${group}`;
+    let grammar = grammars.get(id);
+
+    if (grammar === undefined) {
+        const g = escapeRegExp(group);
+        const d = escapeRegExp(decimal);
+
+        grammar = {
+            western: new RegExp(`^[1-9]\\d{0,2}(?:${g}\\d{3})+$`),
+            lakh: new RegExp(`^[1-9]\\d?(?:${g}\\d{2})*${g}\\d{3}$`),
+            decimalText: new RegExp(`^([\\d${g}]*)(?:${d}(\\d*))?$`),
+        };
+        grammars.set(id, grammar);
+    }
+
+    return grammar;
+}
+
+// Typing a plain space, NBSP or narrow NBSP is the same as the locale's
+// space-like group; the keyboard apostrophe stands for `’`.
+function normaliseGroup(text: string, group: string): string {
+    if (/^\s$/.test(group)) {
+        return text.replace(/[ \u00a0\u202f]/g, group);
+    }
+
+    return group === '\u2019' ? text.replaceAll("'", group) : text;
+}
 
 /**
  * Parses typed major-unit text into integer minor units using string and
@@ -193,16 +271,22 @@ const DECIMAL_TEXT = /^([\d,]*)(?:\.(\d*))?$/;
  *   rounded; `'12.50'` with 0 digits too),
  * - broken grouping, several decimal points, letters, currency symbols,
  *   non-ASCII digits, inner whitespace, an empty string, a lone sign or dot,
+ * - the other locale's spelling (`'1,234.56'` under `de-DE` separators),
  * - results beyond `Number.MAX_SAFE_INTEGER`.
  *
  * Accepts surrounding whitespace, western or lakh grouping
  * (`'1,23,456.78'`), `'.5'`, `'5.'` and one leading `+`, `-` or `−` (U+2212).
  * 08 §1 fixes no parsing rules, so signs are accepted here and callers that
  * forbid negatives (`CurrencyInput`'s `allowNegative`) check the result.
+ *
+ * `separators` default to `.` decimal and `,` group; pass
+ * `numberSeparators(locale)` for the business locale. A space-like group
+ * (`fr-FR`) also accepts a plain space or NBSP.
  */
 export function parseMajorToMinor(
     text: string,
     fractionDigits: number,
+    separators: NumberSeparators = DEFAULT_SEPARATORS,
 ): number | null {
     if (!Number.isInteger(fractionDigits) || fractionDigits < 0) {
         throw new RangeError(
@@ -210,7 +294,8 @@ export function parseMajorToMinor(
         );
     }
 
-    let rest = text.trim();
+    const { western, lakh, decimalText } = grammarFor(separators);
+    let rest = normaliseGroup(text.trim(), separators.group);
     let negative = false;
 
     if (/^[-−]/.test(rest)) {
@@ -220,7 +305,7 @@ export function parseMajorToMinor(
         rest = rest.slice(1);
     }
 
-    const match = DECIMAL_TEXT.exec(rest);
+    const match = decimalText.exec(rest);
 
     if (match === null) {
         return null;
@@ -234,9 +319,9 @@ export function parseMajorToMinor(
     }
 
     if (
-        grouped.includes(',') &&
-        !GROUPED_WESTERN.test(grouped) &&
-        !GROUPED_LAKH.test(grouped)
+        grouped.includes(separators.group) &&
+        !western.test(grouped) &&
+        !lakh.test(grouped)
     ) {
         return null;
     }
@@ -245,7 +330,7 @@ export function parseMajorToMinor(
         return null;
     }
 
-    const integer = grouped.replaceAll(',', '') || '0';
+    const integer = grouped.replaceAll(separators.group, '') || '0';
     const minor = BigInt(integer + fraction.padEnd(fractionDigits, '0'));
 
     if (minor > BigInt(Number.MAX_SAFE_INTEGER)) {
@@ -290,6 +375,39 @@ function parseTemporal(value: string): Temporal | null {
     const date = new Date(HAS_OFFSET.test(iso) ? iso : `${iso}Z`);
 
     return Number.isNaN(date.getTime()) ? null : { kind: 'instant', date };
+}
+
+/**
+ * Removes one leading or trailing currency token (`₹`, `INR`; any case) and the
+ * space, NBSP or narrow NBSP around it, keeping a sign that comes first:
+ * `'-₹ 5'` → `'-5'`, `'12,345.67 INR'` → `'12,345.67'`. Text with no token, or
+ * with a token on both ends, is returned trimmed, so the number parser still
+ * rejects it.
+ */
+export function stripCurrencyTokens(
+    text: string,
+    tokens: readonly string[],
+): string {
+    let rest = text.trim();
+    const sign = /^[-−+]/.exec(rest)?.[0] ?? '';
+
+    rest = rest.slice(sign.length).trim();
+
+    const lower = rest.toLowerCase();
+
+    for (const token of tokens.map((candidate) => candidate.toLowerCase())) {
+        if (lower.startsWith(token)) {
+            rest = rest.slice(token.length).trim();
+            break;
+        }
+
+        if (lower.endsWith(token)) {
+            rest = rest.slice(0, rest.length - token.length).trim();
+            break;
+        }
+    }
+
+    return `${sign}${rest}`;
 }
 
 export type Formatters = ReturnType<typeof createFormat>;
@@ -368,6 +486,35 @@ export function createFormat(source: FormatContext | (() => FormatContext)) {
     /** `₹`, `$`, `BHD`: the currency symbol of `formatMoney`. */
     function currencySymbol(currency?: string): string {
         return moneyParts(0, currency).symbol;
+    }
+
+    /**
+     * What a user may paste around an amount for `currency`: its symbol
+     * (`US$`), narrow symbol (`$`) and ISO code (`USD`), longest first.
+     */
+    function currencyTokens(currency?: string): string[] {
+        const { locale, currency: businessCurrency } = read();
+        const code = currency ?? businessCurrency;
+        const narrow = cached(
+            caches.number,
+            `${locale}|narrow|${code}`,
+            () =>
+                new Intl.NumberFormat(locale, {
+                    style: 'currency',
+                    currency: code,
+                    currencyDisplay: 'narrowSymbol',
+                }),
+        );
+        const symbols = [
+            currencySymbol(code),
+            narrow.formatToParts(0).find((part) => part.type === 'currency')
+                ?.value ?? '',
+            code,
+        ];
+
+        return [...new Set(symbols.filter((token) => token !== ''))].sort(
+            (a, b) => b.length - a.length,
+        );
     }
 
     function formatNumber(
@@ -560,6 +707,7 @@ export function createFormat(source: FormatContext | (() => FormatContext)) {
         formatMoney,
         formatMoneyAmount,
         currencySymbol,
+        currencyTokens,
         minorToMajorString,
         parseMajorToMinor,
         formatNumber,
@@ -588,6 +736,7 @@ export const {
     formatMoney,
     formatMoneyAmount,
     currencySymbol,
+    currencyTokens,
     formatNumber,
     formatPercent,
     formatBps,

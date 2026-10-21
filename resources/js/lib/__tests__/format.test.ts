@@ -3,6 +3,7 @@ import {
     createFormat,
     currencyFractionDigits,
     currencySymbol,
+    currencyTokens,
     formatMoneyAmount,
     formatBps,
     formatDate,
@@ -15,6 +16,7 @@ import {
     formatRelative,
     formatTime,
     minorToMajorString,
+    numberSeparators,
     parseMajorToMinor,
     setFormatContext,
     todayInBusinessTz,
@@ -592,5 +594,104 @@ describe('formatMoneyAmount, currencySymbol and currencyFractionDigits (input su
         expect(format.formatMoney(1234567).replace(/\s/g, ' ')).toBe(
             '12.345,67 €',
         );
+    });
+});
+
+describe('numberSeparators', () => {
+    it.each([
+        ['en-IN', '.', ','],
+        ['en-US', '.', ','],
+        ['de-DE', ',', '.'],
+        ['fr-FR', ',', '\u202f'],
+        ['ru-RU', ',', '\u00a0'],
+        ['de-CH', '.', '\u2019'],
+    ])('%s: decimal %j, group %j', (locale, decimal, group) => {
+        expect(numberSeparators(locale)).toEqual({ decimal, group });
+    });
+
+    it('falls back to . and , for a locale Intl rejects', () => {
+        expect(numberSeparators('not a locale')).toEqual({
+            decimal: '.',
+            group: ',',
+        });
+    });
+});
+
+describe('parseMajorToMinor with locale separators', () => {
+    const de = numberSeparators('de-DE');
+    const fr = numberSeparators('fr-FR');
+
+    it('de-DE: . groups and , is the decimal', () => {
+        expect(parseMajorToMinor('1.234,56', 2, de)).toBe(123456);
+        expect(parseMajorToMinor('1.234.567,5', 2, de)).toBe(123456750);
+        expect(parseMajorToMinor('1234,5', 2, de)).toBe(123450);
+        expect(parseMajorToMinor(',5', 2, de)).toBe(50);
+        expect(parseMajorToMinor('1.234', 2, de)).toBe(123400);
+    });
+
+    it('de-DE rejects the other locale’s spelling instead of guessing', () => {
+        expect(parseMajorToMinor('1,234.56', 2, de)).toBeNull();
+        expect(parseMajorToMinor('1,234', 2, de)).toBeNull();
+        expect(parseMajorToMinor('12.34', 2, de)).toBeNull();
+        expect(parseMajorToMinor('1.23', 2, de)).toBeNull();
+        expect(parseMajorToMinor('1,2,3', 2, de)).toBeNull();
+    });
+
+    it('de-DE keeps lakh grouping valid, and the fraction limit', () => {
+        expect(parseMajorToMinor('1.23.456,78', 2, de)).toBe(12345678);
+        expect(parseMajorToMinor('1,005', 2, de)).toBeNull();
+    });
+
+    it('fr-FR: a space, NBSP or narrow NBSP groups', () => {
+        expect(parseMajorToMinor('1\u202f234,56', 2, fr)).toBe(123456);
+        expect(parseMajorToMinor('1\u00a0234,56', 2, fr)).toBe(123456);
+        expect(parseMajorToMinor('1 234,56', 2, fr)).toBe(123456);
+        expect(parseMajorToMinor('1 234 567', 2, fr)).toBe(123456700);
+        expect(parseMajorToMinor('  1 234,56  ', 2, fr)).toBe(123456);
+    });
+
+    it('fr-FR rejects broken spacing and the . decimal', () => {
+        expect(parseMajorToMinor('12 34,56', 2, fr)).toBeNull();
+        expect(parseMajorToMinor('1 234.56', 2, fr)).toBeNull();
+        expect(parseMajorToMinor('1  234', 2, fr)).toBeNull();
+    });
+
+    it('de-CH: an apostrophe typed on the keyboard groups', () => {
+        const ch = numberSeparators('de-CH');
+
+        expect(parseMajorToMinor('1\u2019234.50', 2, ch)).toBe(123450);
+        expect(parseMajorToMinor("1'234.50", 2, ch)).toBe(123450);
+    });
+
+    it('the default stays . and ,', () => {
+        expect(parseMajorToMinor('1,234.56', 2)).toBe(123456);
+        expect(parseMajorToMinor('1.234,56', 2)).toBeNull();
+        expect(parseMajorToMinor('1 234.56', 2)).toBeNull();
+        expect(
+            parseMajorToMinor('1,23,456.78', 2, { decimal: '.', group: ',' }),
+        ).toBe(12345678);
+    });
+
+    it('signs, zero digits and the safe-integer cap still apply', () => {
+        expect(parseMajorToMinor('-1.234,5', 2, de)).toBe(-123450);
+        expect(parseMajorToMinor('1.500', 0, de)).toBe(1500);
+        expect(parseMajorToMinor('12,5', 0, de)).toBeNull();
+        expect(parseMajorToMinor('90.071.992.547.409,92', 2, de)).toBeNull();
+    });
+});
+
+describe('currencyTokens', () => {
+    it('lists the symbol, narrow symbol and ISO code, longest first', () => {
+        expect(currencyTokens()).toEqual(['INR', '₹']);
+
+        const format = createFormat({
+            locale: 'en-IN',
+            currency: 'INR',
+            timeZone: 'UTC',
+            businessTimeZone: 'UTC',
+        });
+
+        expect(format.currencyTokens('USD')).toEqual(['USD', '$']);
+        expect(format.currencyTokens('JPY')).toEqual(['JP¥', 'JPY', '¥']);
     });
 });

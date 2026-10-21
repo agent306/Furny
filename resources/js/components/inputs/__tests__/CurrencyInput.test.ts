@@ -81,13 +81,27 @@ describe('CurrencyInput (INR, en-IN)', () => {
         expect(wrapper.get('input').element.value).toBe('1,23,45,678.90');
     });
 
-    it('Enter finishes like blur', async () => {
+    it('Enter commits but leaves the text alone while focused; blur then groups it', async () => {
+        const wrapper = mountInput();
+        const input = wrapper.get('input');
+
+        await type(wrapper, '1234.5', 'enter');
+
+        expect(lastEmitted(wrapper)).toBe(123450);
+        expect(input.element.value).toBe('1234.5');
+
+        await input.trigger('blur');
+
+        expect(input.element.value).toBe('1,234.50');
+    });
+
+    it('Enter shows an error for bad text, without touching it', async () => {
         const wrapper = mountInput();
 
-        await type(wrapper, '99.5', 'enter');
+        await type(wrapper, 'abc', 'enter');
 
-        expect(lastEmitted(wrapper)).toBe(9950);
-        expect(wrapper.get('input').element.value).toBe('99.50');
+        expect(wrapper.text()).toContain('Enter an amount');
+        expect(wrapper.get('input').element.value).toBe('abc');
     });
 
     it('emits live while typing, before blur', async () => {
@@ -224,6 +238,141 @@ describe('CurrencyInput (INR, en-IN)', () => {
         await type(wrapper, '90071992547409.92');
 
         expect(lastEmitted(wrapper)).toBeNull();
+    });
+
+    describe('pasted currency symbols and codes', () => {
+        it.each([
+            '₹ 12,345.67',
+            '₹12,345.67',
+            '12,345.67 ₹',
+            '12,345.67₹',
+            'INR 12,345.67',
+            'INR12,345.67',
+            '12,345.67 INR',
+            'inr 12,345.67',
+            '₹\u00a012,345.67',
+            '\u00a0₹ 12,345.67\u202f',
+            '  ₹   12,345.67  ',
+        ])('%j is 1234567', async (text) => {
+            const wrapper = mountInput();
+
+            await type(wrapper, text);
+
+            expect(lastEmitted(wrapper)).toBe(1234567);
+            expect(wrapper.get('input').element.value).toBe('12,345.67');
+            expect(
+                wrapper.get('input').attributes('aria-invalid'),
+            ).toBeUndefined();
+        });
+
+        it('keeps a sign in front of the symbol', async () => {
+            const wrapper = mountInput({ allowNegative: true });
+
+            await type(wrapper, '-₹ 5');
+            expect(lastEmitted(wrapper)).toBe(-500);
+
+            await type(wrapper, '₹ -5');
+            expect(lastEmitted(wrapper)).toBe(-500);
+        });
+
+        it('only the configured currency is recognised', async () => {
+            const wrapper = mountInput();
+
+            await type(wrapper, 'USD 5');
+            expect(lastEmitted(wrapper)).toBeNull();
+
+            await type(wrapper, '€5');
+            expect(lastEmitted(wrapper)).toBeNull();
+
+            await type(wrapper, '₹₹5');
+            expect(lastEmitted(wrapper)).toBeNull();
+
+            await type(wrapper, '₹ 5 ₹');
+            expect(lastEmitted(wrapper)).toBeNull();
+
+            await type(wrapper, '₹');
+            expect(lastEmitted(wrapper)).toBeNull();
+        });
+
+        it('follows the currency prop', async () => {
+            const wrapper = mountInput({ currency: 'USD' });
+
+            await type(wrapper, 'USD 5');
+            expect(lastEmitted(wrapper)).toBe(500);
+
+            await type(wrapper, '$5.25');
+            expect(lastEmitted(wrapper)).toBe(525);
+        });
+    });
+
+    describe('business locale separators', () => {
+        it('de-DE: . groups and , is the decimal', async () => {
+            resetPage({ business: { locale: 'de-DE', currency: 'EUR' } });
+
+            const wrapper = mountInput();
+            const input = wrapper.get('input');
+
+            expect(wrapper.get('[data-testid="currency-symbol"]').text()).toBe(
+                '€',
+            );
+
+            await type(wrapper, '1.234,56');
+            expect(lastEmitted(wrapper)).toBe(123456);
+            expect(input.element.value).toBe('1.234,56');
+
+            await wrapper.setProps({ modelValue: 123456 });
+            await input.trigger('focus');
+            expect(input.element.value).toBe('1234,56');
+            await input.trigger('blur');
+
+            await type(wrapper, '1,234.56');
+            expect(lastEmitted(wrapper)).toBeNull();
+            expect(wrapper.text()).toContain('Enter an amount');
+
+            await type(wrapper, '€ 1.234,56');
+            expect(lastEmitted(wrapper)).toBe(123456);
+
+            await type(wrapper, '1.234,56\u00a0€');
+            expect(lastEmitted(wrapper)).toBe(123456);
+        });
+
+        it('fr-FR: a space, NBSP or narrow NBSP groups', async () => {
+            resetPage({ business: { locale: 'fr-FR', currency: 'EUR' } });
+
+            const wrapper = mountInput({ modelValue: 123456 });
+
+            expect(wrapper.get('input').element.value).toBe('1\u202f234,56');
+
+            for (const text of [
+                '1 234,56',
+                '1\u00a0234,56',
+                '1\u202f234,56',
+                '1 234,56 €',
+            ]) {
+                await type(wrapper, text);
+                expect(lastEmitted(wrapper), text).toBe(123456);
+            }
+        });
+
+        it('en-IN keeps lakh grouping', async () => {
+            const wrapper = mountInput();
+
+            await type(wrapper, '₹ 1,23,456.78');
+
+            expect(lastEmitted(wrapper)).toBe(12345678);
+            expect(wrapper.get('input').element.value).toBe('1,23,456.78');
+        });
+
+        it('a locale change re-draws the field', async () => {
+            const wrapper = mountInput({ modelValue: 123456 });
+
+            expect(wrapper.get('input').element.value).toBe('1,234.56');
+
+            resetPage({ business: { locale: 'de-DE', currency: 'INR' } });
+            await wrapper.vm.$nextTick();
+
+            expect(wrapper.get('input').element.value).toBe('1.234,56');
+        });
     });
 
     describe('min and max (minor units)', () => {

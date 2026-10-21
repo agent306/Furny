@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId, watch } from 'vue';
+import { computed, useId } from 'vue';
 import InputError from '@/components/common/InputError.vue';
 import { Input } from '@/components/ui/input';
 import { useControlSize } from '@/composables/useControlSize';
+import { useDecimalField } from '@/composables/useDecimalField';
+import type { DecimalReading } from '@/composables/useDecimalField';
 import { useFormat } from '@/composables/useFormat';
 import { useI18n } from '@/composables/useI18n';
 import { inputAttrs, rootAttrs } from '@/lib/fieldAttrs';
 import { parseMajorToMinor } from '@/lib/format';
+import type { NumberSeparators } from '@/lib/format';
 
 // 15 §9.23. The model is basis points (1% = 100). Text is read as a decimal
 // with `decimals` places by lib/format's string parser, so `4.35` is exactly
@@ -44,8 +47,11 @@ const errorId = useId();
 // bps per unit of the last shown place: 1 (2 decimals), 10 or 100.
 const unit = computed(() => 10 ** (2 - props.decimals));
 
-/** `1250` → `12.50` at 2 decimals; rounds half up when the value is finer. */
-function display(bps: number | null): string {
+/**
+ * `1250` → `12.50` at 2 decimals (the locale's decimal separator); rounds half
+ * up when the value is finer than `decimals`.
+ */
+function display(bps: number | null, { decimal }: NumberSeparators): string {
     if (bps === null) {
         return '';
     }
@@ -55,16 +61,12 @@ function display(bps: number | null): string {
     const whole =
         props.decimals === 0 ? padded : padded.slice(0, -props.decimals);
     const fraction =
-        props.decimals === 0 ? '' : `.${padded.slice(-props.decimals)}`;
+        props.decimals === 0
+            ? ''
+            : `${decimal}${padded.slice(-props.decimals)}`;
 
     return `${bps < 0 && scaled !== 0 ? '-' : ''}${whole}${fraction}`;
 }
-
-const text = ref(display(props.modelValue));
-const focused = ref(false);
-const error = ref<string | null>(null);
-
-type Evaluation = { bps: number | null; error: string | null };
 
 function rangeError(bps: number): string | null {
     const { min, max } = props;
@@ -87,74 +89,33 @@ function rangeError(bps: number): string | null {
     return t('money.errors.too_small', params);
 }
 
-function evaluate(value: string): Evaluation {
-    const cleaned = value.replace(/%\s*$/, '').trim();
+function read(value: string, separators: NumberSeparators): DecimalReading {
+    const cleaned = value.replace(/\s*%\s*$/, '').trim();
 
     if (cleaned === '') {
-        return { bps: null, error: null };
+        return { value: null, error: null };
     }
 
-    const scaled = parseMajorToMinor(cleaned, props.decimals);
+    const scaled = parseMajorToMinor(cleaned, props.decimals, separators);
     const bps = scaled === null ? null : scaled * unit.value;
 
     if (bps === null || !Number.isSafeInteger(bps)) {
-        return { bps: null, error: t('money.errors.invalid_percent') };
+        return { value: null, error: t('money.errors.invalid_percent') };
     }
 
     const outOfRange = rangeError(bps);
 
     return outOfRange === null
-        ? { bps, error: null }
-        : { bps: null, error: outOfRange };
+        ? { value: bps, error: null }
+        : { value: null, error: outOfRange };
 }
 
-function onInput(value: string | number): void {
-    text.value = String(value);
-
-    const result = evaluate(text.value);
-
-    if (result.error === null) {
-        error.value = null;
-    }
-
-    if (result.bps !== props.modelValue) {
-        emit('update:modelValue', result.bps);
-    }
-}
-
-function finish(): void {
-    const result = evaluate(text.value);
-
-    error.value = result.error;
-    emit('update:modelValue', result.bps);
-
-    if (result.error === null) {
-        text.value = display(result.bps);
-    }
-}
-
-function onFocus(event: FocusEvent): void {
-    focused.value = true;
-
-    const input = event.target as HTMLInputElement;
-
-    void nextTick(() => input.select());
-}
-
-function onBlur(): void {
-    focused.value = false;
-    finish();
-}
-
-watch(
-    () => props.modelValue,
-    (value) => {
-        if (!focused.value) {
-            text.value = display(value);
-            error.value = null;
-        }
-    },
-);
+const { text, error, onInput, onFocus, onBlur, onEnter } = useDecimalField({
+    model: () => props.modelValue,
+    read,
+    show: display,
+    emit: (bps) => emit('update:modelValue', bps),
+});
 
 const message = computed(() => error.value ?? undefined);
 </script>
@@ -175,7 +136,7 @@ const message = computed(() => error.value ?? undefined);
                 @update:model-value="onInput"
                 @focus="onFocus"
                 @blur="onBlur"
-                @keydown.enter="finish"
+                @keydown.enter="onEnter"
             />
             <span
                 data-testid="percent-suffix"

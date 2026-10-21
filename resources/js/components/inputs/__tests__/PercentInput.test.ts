@@ -94,6 +94,51 @@ describe('PercentInput', () => {
         expect(lastEmitted(wrapper)).toBe(750);
     });
 
+    describe('business locale separators', () => {
+        it('de-DE: , is the decimal', async () => {
+            resetPage({ business: { locale: 'de-DE', currency: 'EUR' } });
+
+            const wrapper = mountInput({ modelValue: 1250 });
+            const input = wrapper.get('input');
+
+            expect(input.element.value).toBe('12,50');
+
+            await type(wrapper, '7,5');
+            expect(lastEmitted(wrapper)).toBe(750);
+            expect(input.element.value).toBe('7,50');
+
+            await type(wrapper, '7.5');
+            expect(lastEmitted(wrapper)).toBeNull();
+            expect(wrapper.text()).toContain('Enter a percentage');
+        });
+
+        it('fr-FR: reads 12,5 %', async () => {
+            resetPage({ business: { locale: 'fr-FR', currency: 'EUR' } });
+
+            const wrapper = mountInput();
+
+            await type(wrapper, '12,5 %');
+
+            expect(lastEmitted(wrapper)).toBe(1250);
+        });
+
+        it('Enter commits without re-drawing the text; blur does', async () => {
+            const wrapper = mountInput();
+            const input = wrapper.get('input');
+
+            await input.trigger('focus');
+            await input.setValue('7.5');
+            await input.trigger('keydown', { key: 'Enter' });
+
+            expect(lastEmitted(wrapper)).toBe(750);
+            expect(input.element.value).toBe('7.5');
+
+            await input.trigger('blur');
+
+            expect(input.element.value).toBe('7.50');
+        });
+    });
+
     describe('decimals', () => {
         it('defaults to 2', () => {
             expect(
