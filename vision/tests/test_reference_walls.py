@@ -74,6 +74,40 @@ def test_traced_truth_recall_and_precision(chains: dict[str, ChainResult], stem:
     assert m.precision >= precision, m
 
 
+def test_hdb_truth_closes_into_the_rooms() -> None:
+    """The corrected HDB truth (Task 16c) is a closed wall graph: its centre lines bound the 10 room-like
+    spaces (3 bedrooms, 3 toilets, the store, living with the open kitchen, the balcony and the 600 recess)
+    plus the bay above toilet 3, and every changed wall carries the convention's kinds."""
+    import json
+
+    from shapely.geometry import LineString, Point
+    from shapely.ops import polygonize, unary_union
+
+    from tests.support.reference import REFERENCE_DIR
+
+    raw = json.loads((REFERENCE_DIR / "hdb-3room.drawing-walls.json").read_text())
+    nodes = raw["nodes"]
+    faces = list(polygonize(unary_union([LineString([nodes[w["a"]], nodes[w["b"]]]) for w in raw["walls"]])))
+    rooms = {  # a point inside each space, source px
+        "toilet 1": (358, 272),
+        "toilet 2": (707, 271),
+        "toilet 3": (1048, 269),
+        "bedroom 1": (522, 337),
+        "bedroom 2": (844, 344),
+        "bedroom 3": (980, 612),
+        "store": (334, 422),
+        "living / kitchen": (443, 588),
+        "balcony": (670, 861),
+        "600 recess": (860, 865),
+        "bay": (1027, 147),
+    }
+    for name, p in rooms.items():
+        assert sum(f.contains(Point(p)) for f in faces) == 1, name
+    assert len(faces) == len(rooms)
+    assert "convention" in raw["method"]
+    assert {w["kind"] for w in raw["walls"]} == {"exterior", "interior", "half", "black", "jog"}
+
+
 @pytest.mark.xfail(
     strict=True,
     reason="Task 16b blocker: the P2 fixtures are simplified recreations of the drawings (walls up to ~1 m "
