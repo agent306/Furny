@@ -85,19 +85,33 @@ def annotation_region(region: Rect, w: int, h: int) -> Rect:
 
 
 def detect_plan_region(
-    thick: np.ndarray, ink: np.ndarray, ctx: PipelineContext, *, bold: np.ndarray | None = None
+    thick: np.ndarray,
+    ink: np.ndarray,
+    ctx: PipelineContext,
+    *,
+    bold: np.ndarray | None = None,
+    strips: np.ndarray | None = None,
+    attached: np.ndarray | None = None,
 ) -> Rect:
-    """Bounding box of the main plan's wall pixels, grown by 6 % and clipped.
+    """Bounding box of the main plan's walls, grown by 6 % and clipped.
 
-    Wall pixels are `thick` together with `bold`, the bold wall strokes (`binarize.bold_strokes`; ruling
-    R4: a plan drawn with bold outline strokes and a few solid columns is found by the extent of its
-    outline, not by one column). They are closed with a `0.02 * long_edge` square; the closed components
-    whose bounding boxes lie within `0.05 * long_edge` of each other form one drawing, transitively (a plan
-    whose walls are cut into pieces by its window and door gaps stays one drawing). The main plan is the
-    drawing with the most wall pixels. Another drawing holding >= 30 % as many (a key-plan inset, a strip of
-    site context) is excluded with the warning `plan_region_ambiguous {components}` (the main plan plus
-    every such drawing). With no wall pixels at all the region is the whole image and nothing is warned
-    (the validator reports `no_walls_detected`).
+    Candidates are drawings of solid wall strokes (`thick` with `bold`, the bold wall strokes of
+    `binarize.bold_strokes`; ruling R4: a plan drawn with bold outline strokes and a few solid columns is
+    found by the extent of its outline, not by one column) and drawings of double-line wall strips
+    (`strips`, `binarize.strip_structures`; Task 16c). Each kind is closed with a `0.02 * long_edge`
+    square; closed components whose bounding boxes lie within `0.05 * long_edge` of each other form one
+    drawing, transitively (a plan whose walls are cut into pieces by its window and door gaps stays one
+    drawing). Strips touching a solid drawing (`attached`) count toward it, inside its extent. The main
+    plan is the drawing with the most **wall mass** (Task 16c fix round 3): its wall pixels, solid strokes
+    and the strips between double lines alike, i.e. its walls' centre-line length weighted by their drawn
+    thickness. A rule or a title-block frame is one stroke narrower than a wall: it does not outweigh a
+    plan of either kind (by length alone, the reviewer's 4200 px frame outweighed a 3900 px filled plan).
+    A strip drawing whose box holds a solid drawing of at least 30 % of its mass is that plan's annotation
+    (stacked dimension chains with their extension lines around a solid plan) and no candidate. Another
+    drawing
+    holding >= 30 % as much (a key-plan inset, a strip of site context) is excluded with the warning
+    `plan_region_ambiguous {components}` (the main plan plus every such drawing). With no wall pixels at
+    all the region is the whole image and nothing is warned (the validator reports `no_walls_detected`).
 
     Components are also one drawing when the same `ink` component (closed with a `0.005 * long_edge`
     square) touches both: window frames, door leaves and railings join the wall pieces of one plan across
@@ -107,29 +121,67 @@ def detect_plan_region(
     if bold is not None:
         thick = cv2.bitwise_or(thick, bold)
     h, w = thick.shape[:2]
-    long_edge = max(h, w)
-    if not thick.any():
+    if strips is None:
+        strips = np.zeros_like(thick)
+    if not thick.any() and not strips.any():
         return Rect(0, 0, w, h)
+    solid = _drawings(thick, attached, ink, ctx)
+    # A strip drawing around a solid one of comparable mass is that plan's annotation (stacked dimension
+    # chains and their extension lines), not a plan of its own.
+    drawings = [
+        *solid,
+        *(
+            (box, mass)
+            for box, mass in _drawings(strips, None, ink, ctx)
+            if not any(m >= SIBLING_MIN_SHARE * mass and _inside(b, box) for b, m in solid)
+        ),
+    ]
+    mass = np.array([m for _, m in drawings], np.float64)
+    main = int(np.argmax(mass))
+    rivals = int((mass >= SIBLING_MIN_SHARE * mass[main]).sum()) - 1
+    if rivals:
+        ctx.warn("plan_region_ambiguous", {"components": rivals + 1})
+    union = drawings[main][0]
+    return union.expand(round(EXPAND_FRAC * union.long_side)).clip(w, h)
+
+
+def _inside(inner: Rect, outer: Rect) -> bool:
+    return (
+        inner.x >= outer.x
+        and inner.y >= outer.y
+        and inner.x + inner.w <= outer.x + outer.w
+        and inner.y + inner.h <= outer.y + outer.h
+    )
+
+
+def _drawings(
+    walls: np.ndarray, extra: np.ndarray | None, ink: np.ndarray, ctx: PipelineContext
+) -> list[tuple[Rect, float]]:
+    """The drawings of ``walls`` (closed components grouped by proximity and shared ink): the bounding box
+    of each one's wall pixels and its wall mass (its wall pixels, plus the ``extra`` pixels lying on its
+    closed components)."""
+    if not walls.any():
+        return []
+    long_edge = max(walls.shape[:2])
     k = odd(round(CLOSE_FRAC * long_edge))
-    closed = cv2.morphologyEx(thick, cv2.MORPH_CLOSE, np.ones((k, k), np.uint8))
+    closed = cv2.morphologyEx(walls, cv2.MORPH_CLOSE, np.ones((k, k), np.uint8))
     n, labels, stats, _ = cv2.connectedComponentsWithStats(closed, connectivity=8)
-    counts = np.bincount(labels[thick > 0].astype(np.intp), minlength=n)
+    lab: np.ndarray = labels.astype(np.int32, copy=False)
+    counts: np.ndarray = np.bincount(lab[walls > 0], minlength=n)
+    mass = counts if extra is None else np.add(counts, np.bincount(lab[extra > 0], minlength=n))
     comps = np.flatnonzero(counts[1:] > 0) + 1
     if comps.size > MAX_COMPONENTS:  # bound the grouping: the smallest ones cannot be the plan
-        comps = comps[np.argsort(-counts[comps], kind="stable")[:MAX_COMPONENTS]]
+        comps = comps[np.argsort(-mass[comps], kind="stable")[:MAX_COMPONENTS]]
     x, y = stats[comps, cv2.CC_STAT_LEFT], stats[comps, cv2.CC_STAT_TOP]
     boxes = np.stack(
         [x, y, x + stats[comps, cv2.CC_STAT_WIDTH], y + stats[comps, cv2.CC_STAT_HEIGHT]], axis=1
-    )
-    links = _ink_links(labels, comps, thick, ink)
-    group = _groups(boxes.astype(np.int64), NEAR_FRAC * long_edge, links, ctx.check_deadline)
-    pixels = np.bincount(group, weights=counts[comps], minlength=len(comps))
-    main = int(np.argmax(pixels))
-    rivals = int((pixels >= SIBLING_MIN_SHARE * pixels[main]).sum()) - 1
-    if rivals:
-        ctx.warn("plan_region_ambiguous", {"components": rivals + 1})
-    mine = boxes[group == main]
-    x0, y0 = int(mine[:, 0].min()), int(mine[:, 1].min())
-    x1, y1 = int(mine[:, 2].max()), int(mine[:, 3].max())
-    union = Rect(x0, y0, x1 - x0, y1 - y0)
-    return union.expand(round(EXPAND_FRAC * union.long_side)).clip(w, h)
+    ).astype(np.int64)  # a square's closing stays inside its pixels' bounding box
+    links = _ink_links(labels, comps, walls, ink)
+    group = _groups(boxes, NEAR_FRAC * long_edge, links, ctx.check_deadline)
+    out = []
+    for g in np.unique(group).tolist():
+        mine = boxes[group == g]
+        x0, y0 = int(mine[:, 0].min()), int(mine[:, 1].min())
+        x1, y1 = int(mine[:, 2].max()), int(mine[:, 3].max())
+        out.append((Rect(x0, y0, x1 - x0, y1 - y0), float(mass[comps[group == g]].sum())))
+    return out

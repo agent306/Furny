@@ -534,9 +534,8 @@ IRREGULAR_ROWS = [26, 44, 30, 38, 22, 46, 34, 28, 41, 25, 36, 47, 29, 33, 43, 24
 @pytest.mark.parametrize("case", ["title-block", "schedule"])
 def test_tables_with_uneven_rows_do_not_become_the_plan_region(style: str, case: str) -> None:
     """Fix round 2 (re-review, Important 2): a title-block table and a 2-column schedule with uneven rows
-    (22-47 px, so no periodic grid) at the sheet's right. Beside a solid plan, strips count only when they
-    touch its walls; beside a double-line plan (no solid drawing) the largest structure that is no table
-    counts, and these tables' strips fill their boxes."""
+    (22-47 px, so no periodic grid) at the sheet's right. Their strips fill their boxes, so they are no
+    strip candidates for the region at all."""
     base = _small_plan(style)
     img = base.copy()
     if case == "title-block":
@@ -567,8 +566,8 @@ def test_a_double_line_plan_wins_over_a_table_with_text() -> None:
 @pytest.mark.parametrize("column", [False, True])
 def test_regular_double_line_plans_hold_the_region(rooms: int, column: bool) -> None:
     """The re-review's regular plans: n x n equal rooms in double lines (equal pitch, but no table: the
-    strips are thin walls around wide rooms), with or without a solid 40 px column (too small to be a
-    solid wall drawing). The region is the whole plan."""
+    strips are thin walls around wide rooms), with or without a solid 40 px column (a drawing of its own,
+    with far less wall mass). The region is the whole plan."""
     x0, y0, w, h = 300, 300, 1500, 1200
     walls = []
     for i in range(rooms + 1):
@@ -578,3 +577,63 @@ def test_regular_double_line_plans_hold_the_region(rooms: int, column: bool) -> 
         walls.append(SWall((x0 + 40, y0 + 40), (x0 + 40, y0 + 120), 40))
     r = preprocess(page_of(render_plan((2400, 1800), walls)), make_ctx()).region
     assert r.x < x0 and r.y < y0 and r.x + r.w > x0 + w and r.y + r.h > y0 + h
+
+
+def _plan_walls(style: str, t: int = 14) -> list[SWall]:
+    pts = [(200, 300), (1100, 300), (1100, 1000), (200, 1000)]
+    walls = [SWall(pts[i], pts[(i + 1) % 4], t, style) for i in range(4)]  # type: ignore[arg-type]
+    return [*walls, SWall((650, 300), (650, 1000), t, style)]  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("style", ["filled", "double"])
+@pytest.mark.parametrize("case", ["rule", "title-block frame"])
+def test_a_bold_rule_or_frame_does_not_take_the_region(style: str, case: str) -> None:
+    """Fix round 3 (re-review 2, R2-1): an 800 px bold rule, or a bold title-block frame, at the sheet's
+    right. Every drawing is a candidate on its own (solid strokes, double-line strip structures) and the
+    one with the most wall mass is the plan: a single 6 px stroke weighs less than a plan's walls. Round 2
+    switched a double-line plan's strips off for any solid stroke on the page and took the stroke."""
+    base = _small_plan(style)
+    img = base.copy()
+    if case == "rule":
+        cv2.line(img, (1500, 1200), (2300, 1200), (0, 0, 0), 6)
+    else:
+        cv2.rectangle(img, (1700, 100), (2300, 1600), (0, 0, 0), 6)
+    alone = preprocess(page_of(base), make_ctx()).region
+    assert preprocess(page_of(img), make_ctx()).region == alone
+    assert alone.x + alone.w < 1250
+
+
+@pytest.mark.parametrize("style", ["filled", "double"])
+def test_a_frame_around_the_plan_keeps_the_plan_in_the_region(style: str) -> None:
+    """A bold frame drawn around the plan (a title-block border close around the drawing): the region
+    still holds the whole plan."""
+    img = _small_plan(style)
+    cv2.rectangle(img, (100, 200), (1250, 1100), (0, 0, 0), 6)
+    r = preprocess(page_of(img), make_ctx()).region
+    assert r.x < 200 and r.y < 300 and r.x + r.w > 1100 and r.y + r.h > 1000
+
+
+@pytest.mark.parametrize("t", [14, 24])
+@pytest.mark.parametrize("fill", ["stipple", "poche"])
+def test_filled_double_line_walls_hold_the_region(t: int, fill: str) -> None:
+    """Fix round 3 (re-review 2, R2-2): concrete stipple (2 px dots on ~4 % of the wall interior, clear of
+    the faces) or a 45-degree poché hatch inside double-line walls. Stipple is inside the strips, never in
+    a table cell, so the plan is no table: the region holds the whole plan (round 2 lost most of it)."""
+    walls = _plan_walls("double", t)
+    base = render_plan((2400, 1700), walls)
+    inside = np.zeros(base.shape[:2], np.uint8)
+    for w in walls:
+        cv2.line(inside, w.a, w.b, 255, max(1, t - 6))
+    img = base.copy()
+    if fill == "stipple":
+        ys, xs = np.nonzero(inside)
+        pick = np.random.default_rng(0).choice(len(ys), size=len(ys) // 25, replace=False)
+        for y, x in zip(ys[pick], xs[pick], strict=True):
+            img[y : y + 2, x : x + 2] = 0
+    else:
+        for k in range(-2400, 2400, 7):
+            cv2.line(img, (k, 1700), (k + 1700, 0), (0, 0, 0), 1)
+        img[inside == 0] = base[inside == 0]
+    alone = preprocess(page_of(base), make_ctx()).region
+    assert preprocess(page_of(img), make_ctx()).region == alone
+    assert alone.x < 200 and alone.x + alone.w > 1100
