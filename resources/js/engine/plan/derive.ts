@@ -8,8 +8,8 @@
  * very `Vec2` objects of its `WallEnd`s, `leftFace`, ...), so consumers must
  * treat all returned points as read-only.
  *
- * Room detection (04 §4) arrives in a later task: until then `rooms` is empty
- * and `leftRoomKey`, `rightRoomKey` and `exteriorSide` are `null`.
+ * Rooms (04 §4) are detected from the wall centre lines and the union of the
+ * wall outlines, then associated with the document's `RoomMeta` anchors.
  */
 import { difference, union } from '../geometry/clip';
 import {
@@ -30,6 +30,7 @@ import {
     type Vec2,
 } from '../geometry/vec2';
 import type { Opening, PlanDocument, Wall } from './schema';
+import { analyzeRooms, associateRoomMetas } from './rooms';
 import type { DeriveIssue } from './types';
 import {
     buildWallGraph,
@@ -39,7 +40,7 @@ import {
     type WallInfo,
 } from './walls';
 
-/** A room found by room detection (04 §4.5); filled by a later task. */
+/** A room found by room detection (04 §4.5). */
 export interface DerivedRoom {
     faceKey: string;
     /** Net polygon (CW). */
@@ -77,7 +78,7 @@ export interface DerivedWall {
     kind: Wall['kind'];
     endA: WallEnd;
     endB: WallEnd;
-    /** faceKey of the room on the +n side; `null` until room detection runs. */
+    /** faceKey of the room on the +n side; `null` when there is none. */
     leftRoomKey: string | null;
     rightRoomKey: string | null;
     exteriorSide: 'left' | 'right' | null;
@@ -406,15 +407,38 @@ export function derivePlanGeometry(doc: PlanDocument): DerivedPlan {
                   ),
               );
 
+    const analysis = analyzeRooms(g, wallsUnion, walls);
+    const associated = associateRoomMetas(analysis.rooms, doc);
+    issues.push(...associated.issues);
+    const rooms = associated.rooms;
+    const roomIndexByMetaId: Record<string, number> = {};
+    const roomIndexByFaceKey: Record<string, number> = {};
+    rooms.forEach((room, i) => {
+        roomIndexByFaceKey[room.faceKey] = i;
+        if (room.metaId !== null) roomIndexByMetaId[room.metaId] = i;
+    });
+    for (const [wallId, sides] of analysis.wallSides) {
+        const w = walls[wallId];
+        if (!w) continue;
+        w.leftRoomKey = sides.left;
+        w.rightRoomKey = sides.right;
+        w.exteriorSide =
+            sides.left === null && sides.right !== null
+                ? 'left'
+                : sides.right === null && sides.left !== null
+                  ? 'right'
+                  : null;
+    }
+
     return {
         walls,
-        rooms: [],
+        rooms,
         openings,
         nodes,
         nodeCaps,
         wallsUnion,
-        roomIndexByMetaId: {},
-        roomIndexByFaceKey: {},
+        roomIndexByMetaId,
+        roomIndexByFaceKey,
         bbox,
         exteriorOutline,
         issues,

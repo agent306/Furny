@@ -188,6 +188,14 @@ export type {
     WallInfo,
 } from './plan/walls';
 export { derivePlanGeometry } from './plan/derive';
+export {
+    analyzeRooms,
+    associateRoomMetas,
+    computeRoomNet,
+    detectRooms,
+    faceKeyFor,
+} from './plan/rooms';
+export type { RoomAnalysis, RoomNet, WallRoomSides } from './plan/rooms';
 export type {
     DerivedOpening,
     DerivedPlan,
