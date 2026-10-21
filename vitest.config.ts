@@ -20,7 +20,23 @@ export default defineConfig({
         coverage: {
             provider: 'v8',
             include: ['resources/js/**', 'engine-cli/src/**'],
+            exclude: [
+                '**/testing/**',
+                '**/__tests__/**',
+                '**/__perf__/**',
+                '**/*.bench.ts',
+                '**/*.d.ts',
+                // Generated code (Wayfinder, typescript:transform, i18n:export) and the kit.
+                'resources/js/{actions,routes,wayfinder}/**',
+                'resources/js/lang/generated/**',
+                'resources/js/components/ui/**',
+            ],
             reportsDirectory: 'build/coverage/js',
+            // 04 §10 / 16: the engine only; editor, lib and composables are owned by P4/P5.
+            thresholds: {
+                'resources/js/engine/**': { lines: 90, branches: 85 },
+                'resources/js/engine/{units,geometry,plan}/**': { lines: 90 },
+            },
         },
         projects: [
             {
@@ -28,6 +44,8 @@ export default defineConfig({
                 test: {
                     name: 'engine',
                     environment: 'node',
+                    // v8 coverage slows the heaviest equivalence tests ~3x; they take ~1 s plain.
+                    testTimeout: 20_000,
                     include: ENGINE_TESTS,
                     exclude: ['**/node_modules/**', '**/__perf__/**'],
                     // 16 §10: yarn bench:check runs these and asserts bench-thresholds.json.
