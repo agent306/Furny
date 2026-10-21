@@ -1428,6 +1428,18 @@ def test_stacked_vertical_chains_keep_their_labels_on_either_side(gap: int, righ
 # --- tick accuracy (Task 14b fix round 1, review M1) ------------------------------------------------------
 
 
+def test_slash_of_a_chain_is_no_tick_of_an_extension_line_crossing_it() -> None:
+    """A dimension line crossing a chain at one of the chain's slashes does not keep that slash as its own
+    tick; the chain keeps it, and a slashed crossing where the other line has no tick stays (controls)."""
+    chain = (seg("C", (0, 100), (600, 100)), [(0.0, True), (200.0, True), (400.0, True), (600.0, True)])
+    across = (seg("X", (200, 60), (200, 300)), [(40.0, True), (240.0, True)])  # crosses at the chain's 200
+    beside = (seg("Y", (300, 60), (300, 300)), [(40.0, True), (240.0, True)])  # crosses between the slashes
+    kept = dict((line.id, ticks) for line, ticks in dimmod._drop_crossings([chain, across, beside]))
+    assert kept["X"] == [(240.0, True)]
+    assert kept["C"] == chain[1]
+    assert kept["Y"] == beside[1]
+
+
 def test_door_jamb_pair_is_no_tick_of_a_slash_ticked_line() -> None:
     """Two bare strokes 6 px apart (a door jamb's faces) crossing a slash-ticked line are no ticks."""
     for phase in PHASES:
